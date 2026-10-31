@@ -445,13 +445,29 @@ describe("paused state → keeper_runtime_config (the channel off-host readers s
   })
 })
 
-test("a hung Supabase cannot hold a refusing boot open: the PATCH is bounded by a timeout", async () => {
+// A REAL hung Supabase: a local server that accepts the PATCH and never answers, reached through a
+// `supabaseFetch` shaped like executor.js's (global fetch on `${base}/rest/v1/${path}`). The open
+// socket is what keeps the event loop alive while the keeper waits — exactly as on the host. (A fake
+// promise that only settles on `abort` holds NO handle: AbortSignal.timeout()'s timer is unref'd, so
+// on Node 20/22 the runner saw a drained loop and cancelled this test and every one after it.)
+// The test-level timeout only turns a regression (no bound on the PATCH) into a failure, not a hang;
+// the server is torn down in t.after() so it also closes when that timeout fires mid-await.
+test("a hung Supabase cannot hold a refusing boot open: the PATCH is bounded by a timeout", { timeout: 10_000 }, async (t) => {
+  const seen = []
+  const srv = createServer((req) => seen.push(`${req.method} ${req.url}`)) // never responds
+  t.after(() => {
+    srv.closeAllConnections()
+    return new Promise((r) => srv.close(r))
+  })
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r))
+  const base = `http://127.0.0.1:${srv.address().port}`
+  const supabaseFetch = (path, options = {}) => fetch(`${base}/rest/v1/${path}`, options)
   const t0 = Date.now()
-  const hung = (_path, opts) => new Promise((_resolve, reject) => opts.signal.addEventListener("abort", () => reject(opts.signal.reason)))
-  const r = await publishPausedState({ supabaseFetch: hung, chainId: 8453, paused: "rpc-auth", nowIso: "2026-10-30T15:00:00.000Z", timeoutMs: 50 })
+  const r = await publishPausedState({ supabaseFetch, chainId: 8453, paused: "rpc-auth", nowIso: "2026-10-30T15:00:00.000Z", timeoutMs: 50 })
   assert.equal(r.ok, false)
-  assert.match(r.reason, /^threw: /)
+  assert.match(r.reason, /^threw: .*timeout/i)
   assert.ok(Date.now() - t0 < 2_000)
+  assert.deepEqual(seen, ["PATCH /rest/v1/keeper_runtime_config?chain_id=eq.8453&paused=is.null&select=chain_id"])
 })
 
 test("metrics: teraswap_executor_paused{reason=\"rpc-auth\"} + consecutive auth errors", () => {

@@ -44,3 +44,19 @@ Auditor-note: keeper + monitor/CI code — owner opens the PR as DRAFT. Compare:
 - Edge: Telegram parse_mode HTML rejects a message whose error Details is an HTML page — that alert was lost; Degraded +
   monitor alerts now `esc()`. Kept: chain-verify's own stricter `redactUrls`. Guard covers executor `*.js` only.
 - Owner: apply migration `20261031120000_keeper_runtime_config_paused.sql` — until then the report says UNKNOWN (⚠️).
+
+## Feedback — CI fix: keeper suite "fail 0 / cancelled 6" (PR #636)
+- Cause: `rpc-auth.test.mjs` "a hung Supabase…" faked the hung PATCH with a promise that settled only on `abort`.
+  It held no handle, and `AbortSignal.timeout()`'s timer is unref'd, so on CI's Node 20.20.2 / 22.23.4 the runner saw
+  a drained loop ("Promise resolution is still pending but the event loop has already resolved") and cancelled that
+  test plus the 5 after it in the file (metrics, 3 wiring anchors, the real `executor.js` boot). Node 25.6.1 (local)
+  does not cancel: evidence 5's "805/805" above was measured on the wrong Node. Runtime unaffected: the keeper's
+  `supabaseFetch` is a real `fetch`, whose socket keeps the loop alive until the 5 s abort.
+- Fix (test only, no runtime change, no assertion removed): a real local server that accepts the PATCH and never
+  answers, reached by an executor-shaped `supabaseFetch`; now also asserts the PATCH arrived and the reason names
+  the timeout. Test `timeout: 10_000` + `t.after` teardown: a regression fails in 10 s instead of hanging the job.
+- Evidence: before, local Node 20.20.2 = CI (799 pass, 6 cancelled, exit 1). After, keeper `node --test` as CI:
+  Node 20.20.2 + `npm ci --ignore-scripts` 5/5 runs 805/805; Node 22.23.4 + `npm ci` 5/5 runs 805/805; 0 cancelled.
+  Mutation (drop `AbortSignal.timeout` from `publishPausedState`) → the test fails in 10 s. vitest 396 files/6291 ·
+  lint 93 (file is ESLint-ignored) · tsc 0.
+- Test gap: run keeper tests on CI's Node (20 and 22), not the host default.
