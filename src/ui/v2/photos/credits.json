@@ -1,5 +1,5 @@
 {
-  "note": "Photo credits for src/ui/v2/photos/. Source: Round 4 pack credits.json (trimmed to the photos the v2 shell ships; arch-light and the unused highway photo are not included). Pexels License: free for commercial use, attribution not required — the pack still prints the credit line on every screen.",
+  "note": "Photo credits for src/ui/v2/photos/. Source: Round 4 pack credits.json (trimmed to the photos the v2 shell ships; arch-light and the unused highway photo are not included). Pexels License: free for commercial use, attribution not required — the pack still prints the credit line on every screen. Round 7: the shell's tabs no longer use these raw photos (see narrative[]); they stay on disk, unreferenced by any tab. `trails` (light-trails 30180436) is REJECTED by the owner (26 Oct) — it is kept only because the landing hero raster still paints it until the round-7 hero replaces it.",
   "photos": [
     {
       "id": "zakim",
@@ -9,11 +9,7 @@
       "pexelsId": "17102595",
       "pexelsUrl": "https://www.pexels.com/photo/leonard-p-zakim-bunker-hill-memorial-bridge-in-boston-17102595/",
       "title": "Leonard P. Zakim Bunker Hill Memorial Bridge in Boston",
-      "tabs": [
-        "swap",
-        "limit",
-        "sltp"
-      ],
+      "tabs": [],
       "files": [
         {
           "file": "pexels-17102595-phil-evenden-zakim-bridge-night-1920.avif",
@@ -49,9 +45,7 @@
       "pexelsId": "32397093",
       "pexelsUrl": "https://www.pexels.com/photo/urban-underpass-at-night-with-concrete-structure-32397093/",
       "title": "Urban underpass at night with concrete structure",
-      "tabs": [
-        "dca"
-      ],
+      "tabs": [],
       "files": [
         {
           "file": "pexels-32397093-willbone-gallery-underpass-night-1920.avif",
@@ -87,11 +81,7 @@
       "pexelsId": "35632241",
       "pexelsUrl": "https://www.pexels.com/photo/35632241/",
       "title": null,
-      "tabs": [
-        "portfolio",
-        "orders",
-        "history"
-      ],
+      "tabs": [],
       "files": [
         {
           "file": "pexels-35632241-peter-dyllong-arch-night-1920.avif",
@@ -127,9 +117,7 @@
       "pexelsId": "30180436",
       "pexelsUrl": "https://www.pexels.com/photo/30180436/",
       "title": null,
-      "tabs": [
-        "analytics"
-      ],
+      "tabs": [],
       "files": [
         {
           "file": "pexels-30180436-yakup-gokdeniz-light-trails-1920.avif",
@@ -154,6 +142,263 @@
           "width": 1080,
           "height": 782,
           "bytes": 98424
+        }
+      ],
+      "status": "rejected"
+    }
+  ],
+  "narrativeNote": "Round-6 scroll narrative (MOTION-SPEC §2): graded derivatives of existing tab photos, recipe steps 1-3 baked in (grayscale, contrast, brightness, duotone, 65% BG shade); the constant veil is a CSS layer. Source: round6/landing/img/bg-*. Width is the long edge (1920 landscape for desktop, 1080 portrait for mobile). Round 7 (owner addition, 26 Oct preview review): the app shell's per-tab photos use this same baked set — zakim, archnight and overpass are added (tab = the shell tab that shows it). archnight and overpass are the pack's round7 files, byte for byte; zakim is the pack's round7 `bg-zakim` zip (landing/img, prep7_zakim.py), byte for byte (it first shipped baked locally, before the pack had the files; README in narrative/).",
+  "narrative": [
+    {
+      "id": "highway",
+      "photographer": "Oleksiy Yeshtokyn",
+      "license": "Pexels License",
+      "commercialUse": true,
+      "pexelsId": "31514221",
+      "pexelsUrl": "https://www.pexels.com/photo/31514221/",
+      "section": "security",
+      "files": [
+        {
+          "file": "narrative/bg-highway-1920.avif",
+          "width": 1920,
+          "bytes": 34097
+        },
+        {
+          "file": "narrative/bg-highway-1920.webp",
+          "width": 1920,
+          "bytes": 34612
+        },
+        {
+          "file": "narrative/bg-highway-1080.avif",
+          "width": 1080,
+          "bytes": 22617
+        },
+        {
+          "file": "narrative/bg-highway-1080.webp",
+          "width": 1080,
+          "bytes": 24996
+        }
+      ],
+      "tab": "limit"
+    },
+    {
+      "id": "footbridge",
+      "photographer": "Erik Mclean",
+      "license": "Pexels License",
+      "commercialUse": true,
+      "pexelsId": "8936918",
+      "pexelsUrl": "https://www.pexels.com/photo/8936918/",
+      "section": "experience",
+      "files": [
+        {
+          "file": "narrative/bg-footbridge-1920.avif",
+          "width": 1920,
+          "bytes": 22241
+        },
+        {
+          "file": "narrative/bg-footbridge-1920.webp",
+          "width": 1920,
+          "bytes": 22514
+        },
+        {
+          "file": "narrative/bg-footbridge-1080.avif",
+          "width": 1080,
+          "bytes": 21430
+        },
+        {
+          "file": "narrative/bg-footbridge-1080.webp",
+          "width": 1080,
+          "bytes": 21300
+        }
+      ],
+      "tab": "history"
+    },
+    {
+      "id": "tunnel",
+      "photographer": "Владимир Николаевич",
+      "license": "Pexels License",
+      "commercialUse": true,
+      "pexelsId": "9221575",
+      "pexelsUrl": "https://www.pexels.com/photo/9221575/",
+      "section": "features",
+      "files": [
+        {
+          "file": "narrative/bg-tunnel-1920.avif",
+          "width": 1920,
+          "bytes": 30031
+        },
+        {
+          "file": "narrative/bg-tunnel-1920.webp",
+          "width": 1920,
+          "bytes": 32898
+        },
+        {
+          "file": "narrative/bg-tunnel-1080.avif",
+          "width": 1080,
+          "bytes": 26821
+        },
+        {
+          "file": "narrative/bg-tunnel-1080.webp",
+          "width": 1080,
+          "bytes": 30084
+        }
+      ],
+      "tab": "portfolio"
+    },
+    {
+      "id": "archlight",
+      "photographer": "wal_ 172619",
+      "license": "Pexels License",
+      "commercialUse": true,
+      "pexelsId": "36192529",
+      "pexelsUrl": "https://www.pexels.com/photo/36192529/",
+      "section": "roadmap",
+      "files": [
+        {
+          "file": "narrative/bg-archlight-1920.avif",
+          "width": 1920,
+          "bytes": 27580
+        },
+        {
+          "file": "narrative/bg-archlight-1920.webp",
+          "width": 1920,
+          "bytes": 26346
+        },
+        {
+          "file": "narrative/bg-archlight-1080.avif",
+          "width": 1080,
+          "bytes": 30811
+        },
+        {
+          "file": "narrative/bg-archlight-1080.webp",
+          "width": 1080,
+          "bytes": 28628
+        }
+      ],
+      "tab": "sltp"
+    },
+    {
+      "id": "underpass",
+      "photographer": "Willbone Gallery",
+      "license": "Pexels License",
+      "commercialUse": true,
+      "pexelsId": "32397093",
+      "pexelsUrl": "https://www.pexels.com/photo/32397093/",
+      "section": "docs",
+      "files": [
+        {
+          "file": "narrative/bg-underpass-1920.avif",
+          "width": 1920,
+          "bytes": 50389
+        },
+        {
+          "file": "narrative/bg-underpass-1920.webp",
+          "width": 1920,
+          "bytes": 48808
+        },
+        {
+          "file": "narrative/bg-underpass-1080.avif",
+          "width": 1080,
+          "bytes": 50720
+        },
+        {
+          "file": "narrative/bg-underpass-1080.webp",
+          "width": 1080,
+          "bytes": 50542
+        }
+      ],
+      "tab": "dca"
+    },
+    {
+      "id": "zakim",
+      "photographer": "Phil Evenden",
+      "license": "Pexels License",
+      "commercialUse": true,
+      "pexelsId": "17102595",
+      "pexelsUrl": "https://www.pexels.com/photo/leonard-p-zakim-bunker-hill-memorial-bridge-in-boston-17102595/",
+      "tab": "swap",
+      "files": [
+        {
+          "file": "narrative/bg-zakim-1920.avif",
+          "width": 1920,
+          "bytes": 47819
+        },
+        {
+          "file": "narrative/bg-zakim-1920.webp",
+          "width": 1920,
+          "bytes": 59334
+        },
+        {
+          "file": "narrative/bg-zakim-1080.avif",
+          "width": 1080,
+          "bytes": 51831
+        },
+        {
+          "file": "narrative/bg-zakim-1080.webp",
+          "width": 1080,
+          "bytes": 61190
+        }
+      ]
+    },
+    {
+      "id": "archnight",
+      "photographer": "Peter Dyllong",
+      "license": "Pexels License",
+      "commercialUse": true,
+      "pexelsId": "35632241",
+      "pexelsUrl": "https://www.pexels.com/photo/35632241/",
+      "tab": "orders",
+      "files": [
+        {
+          "file": "narrative/bg-archnight-1920.avif",
+          "width": 1920,
+          "bytes": 11001
+        },
+        {
+          "file": "narrative/bg-archnight-1920.webp",
+          "width": 1920,
+          "bytes": 13400
+        },
+        {
+          "file": "narrative/bg-archnight-1080.avif",
+          "width": 1080,
+          "bytes": 11989
+        },
+        {
+          "file": "narrative/bg-archnight-1080.webp",
+          "width": 1080,
+          "bytes": 15068
+        }
+      ]
+    },
+    {
+      "id": "overpass",
+      "photographer": "MAG Photography",
+      "license": "Pexels License",
+      "commercialUse": true,
+      "pexelsId": "37644721",
+      "pexelsUrl": "https://www.pexels.com/photo/37644721/",
+      "tab": "analytics",
+      "files": [
+        {
+          "file": "narrative/bg-overpass-1920.avif",
+          "width": 1920,
+          "bytes": 34659
+        },
+        {
+          "file": "narrative/bg-overpass-1920.webp",
+          "width": 1920,
+          "bytes": 35010
+        },
+        {
+          "file": "narrative/bg-overpass-1080.avif",
+          "width": 1080,
+          "bytes": 26037
+        },
+        {
+          "file": "narrative/bg-overpass-1080.webp",
+          "width": 1080,
+          "bytes": 27434
         }
       ]
     }

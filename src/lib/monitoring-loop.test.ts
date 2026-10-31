@@ -81,6 +81,13 @@ vi.mock('./health-check', () => ({
   runHealthCheck: vi.fn(async () => ({ ok: true, latencyMs: 50 })),
 }))
 
+// ── Mock rpc-health (no network; probe cadence/outcomes are tested in rpc-health.test.ts) ──
+
+vi.mock('./rpc-health', () => ({
+  shouldRunRpcProbe: vi.fn(async () => false),
+  probeAllServerRpcs: vi.fn(async () => []),
+}))
+
 // ── Mock monitored-endpoints ───────────────────────────
 
 vi.mock('./monitored-endpoints', () => ({
@@ -903,5 +910,71 @@ describe('on-chain scan & circuit breaker integration', () => {
       const result = await runMonitoringTick()
       expect(result.keeperHealth).toEqual([])
     })
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════
+// fix/monitor-self-source-alerts — silent alerting is loud
+// ═══════════════════════════════════════════════════════════════
+
+describe('runMonitoringTick — alert delivery sanity (once per run)', () => {
+  const CHANNEL_ENV = [
+    'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'DISCORD_WEBHOOK_URL', 'RESEND_API_KEY', 'ALERT_EMAIL_TO',
+  ] as const
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.unstubAllEnvs()
+    kvStore.clear()
+    kvSets.clear()
+    beginTick()
+    mockShouldRunQuorum.mockResolvedValue(false)
+    // An earlier test in this file can leave kv.set rejecting; restore the NX-aware store behaviour.
+    mockKvSet.mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+      if (opts?.nx && kvStore.has(key)) return null
+      kvStore.set(key, value)
+      return 'OK'
+    })
+    for (const name of CHANNEL_ENV) vi.stubEnv(name, '')
+  })
+
+  const alertLines = (spy: { mock: { calls: unknown[][] } }) =>
+    spy.mock.calls.filter((c: unknown[]) => String(c[0]).startsWith('[ALERT] no delivery channel configured'))
+
+  it('no channel configured: exactly ONE loud line per run, naming env vars (not values), and alertsConfigured=false', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const r1 = await runMonitoringTick()
+    expect(alertLines(err)).toHaveLength(1)
+    expect(String(alertLines(err)[0][0])).toContain('DISCORD_WEBHOOK_URL')
+    expect(String(alertLines(err)[0][0])).toContain('RESEND_API_KEY')
+    expect(r1.alertsConfigured).toBe(false)
+
+    kvStore.delete('teraswap:monitor:tick-lock') // let the next run acquire the lock
+    const r2 = await runMonitoringTick()
+    expect(r2.skipped).toBeUndefined()
+    expect(alertLines(err)).toHaveLength(2) // one per run, not one per alert/channel
+    err.mockRestore()
+  })
+
+  it('a lock-skipped tick does not log the line again', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    kvStore.set('teraswap:monitor:tick-lock', Date.now().toString()) // another tick holds the lock
+    const skipped = await runMonitoringTick()
+    expect(skipped.skipped).toBe(true)
+    expect(alertLines(err)).toHaveLength(0)
+    err.mockRestore()
+  })
+
+  it.each([
+    [{ TELEGRAM_BOT_TOKEN: 't', TELEGRAM_CHAT_ID: 'c' }],
+    [{ DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/1/x' }],
+    [{ RESEND_API_KEY: 'k', ALERT_EMAIL_TO: 'a@b.test' }],
+  ])('any one configured channel silences the line (%o)', async (env) => {
+    for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v)
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const r = await runMonitoringTick()
+    expect(alertLines(err)).toHaveLength(0)
+    expect(r.alertsConfigured).toBe(true)
+    err.mockRestore()
   })
 })

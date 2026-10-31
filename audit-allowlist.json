@@ -26,6 +26,15 @@
       "added": "2026-10-23",
       "expires": "2026-11-22",
       "reason": "Two transitive 3.x copies under @coinbase/cdp-sdk (^3.25.76) and @reown/appkit-wallet (3.22.4, exact) have no patched 3.x release; moving them to zod 4 is a breaking major for those packages. Reachability: both validate wallet/SDK messages with fixed-shape schemas, not attacker-sized collections; the root app copy is 4.6.6. Re-check weekly for a 3.x patch or upstream bumps of cdp-sdk/appkit; delete on first fix."
+    },
+    {
+      "id": "GHSA-mrwp-f3q8-3g9p",
+      "package": "follow-redirects",
+      "vulnerableRange": ">=1.16.0 <=1.16.1",
+      "fixedIn": "1.16.2",
+      "added": "2026-10-31",
+      "expires": "2026-11-01",
+      "reason": "Patched 1.16.2 was published 2026-10-25T21:32Z, so it is under .npmrc min-release-age=7 until 2026-11-01T21:32Z and cannot be installed yet. Single path: wagmi > @wagmi/connectors > @base-org/account > @coinbase/cdp-sdk > axios@1.20.0; currently forced to 1.16.1 by an existing exact overrides pin. Reachability: not assessed beyond the dependency path (CVSS 5.9, confidentiality only; custom credentials may follow a cross-origin redirect). Re-check after 2026-11-01T21:32Z: bump the overrides pin to 1.16.2 and delete this entry."
     }
   ]
 }

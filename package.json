@@ -34,17 +34,17 @@
     "test:e2e:mobile": "playwright test --config playwright.mobile.config.ts"
   },
   "dependencies": {
-    "@capacitor/android": "8.5.2",
+    "@capacitor/android": "8.5.3",
     "@capacitor/browser": "8.0.5",
     "@capacitor/cli": "8.5.3",
     "@capacitor/core": "8.5.3",
     "@capacitor/ios": "8.5.3",
     "@capacitor/splash-screen": "8.0.2",
-    "@capacitor/status-bar": "8.0.3",
+    "@capacitor/status-bar": "8.0.4",
     "@rainbow-me/rainbowkit": "2.2.10",
     "@sentry/nextjs": "10.76.2",
     "@supabase/supabase-js": "2.118.0",
-    "@tanstack/react-query": "5.50.1",
+    "@tanstack/react-query": "5.104.5",
     "@upstash/redis": "1.39.0",
     "@vercel/analytics": "2.0.1",
     "framer-motion": "12.36.0",
@@ -107,7 +107,7 @@
     "vite": "8.1.6",
     "sharp": "0.35.5",
     "browserslist": "4.28.7",
-    "decode-uri-component": "0.5.0",
+    "decode-uri-component": "0.5.1",
     "follow-redirects": "1.16.1",
     "zod@^4": "4.6.6"
   }

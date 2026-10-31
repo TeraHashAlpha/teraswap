@@ -7,9 +7,11 @@ import { useQuoteChainId } from '@/hooks/useChainId'
 import { getChainConfig } from '@/lib/chains/registry'
 import { SUPPORT_EMAIL } from '@/lib/constants'
 import { fmtInt } from '@/lib/format'
+import { BLOCK_POLL_MS } from '@/lib/rpc-polling'
+import { PhotoCredit } from '../photos/PhotoCredit'
 
-// Mainnet block time is ~12 s; polling faster only reissues eth_blockNumber calls (same value and rationale as v1).
-export const V2_FOOTER_BLOCK_POLL_MS = 12_000
+// [feat/frontend-rpc-diet] Same 60 s as v1 (one shared constant): the block line is informational — see src/lib/rpc-polling.ts.
+export const V2_FOOTER_BLOCK_POLL_MS = BLOCK_POLL_MS
 
 /** The one neutral risk line, verbatim (v1 `FOOTER_RISK_LINE`; a test pins both to this literal). */
 export const V2_RISK_LINE = 'Smart contracts have not been externally audited. Use at your own risk.'
@@ -34,9 +36,11 @@ const SEP = (
 /**
  * [ADR-025] Full footer (pack 01): every v1 footer item — Docs, GitHub, X, Fee, No infinite approvals, chain · block
  * with explorer link, Privacy, Terms, Contact, ©, TeraHelps — plus the risk line. The block is the SELECTED chain's
- * (wallet chain when connected, dropdown pick when not), polled like v1 (paused in hidden tabs).
+ * (wallet chain when connected, dropdown pick when not), polled like v1 (paused in hidden tabs). `photos` puts their credit
+ * inside this container (left), away from the floating ? / ♫; `mobilePhotos` adds the photographers that only show at
+ * ≤ 600 px (the landing's narrative photos), as one extra line.
  */
-export function Footer() {
+export function Footer({ photos, mobilePhotos }: { photos?: readonly { photographer: string }[]; mobilePhotos?: readonly { photographer: string }[] }) {
   const chainId = useQuoteChainId()
   const chain = footerChain(chainId)
   const { data: blockNumber } = useBlockNumber({
@@ -46,7 +50,7 @@ export function Footer() {
 
   return (
     <footer data-ts-footer="" className="box-border min-h-[var(--photo-footer-band)] px-4 pb-20 pt-3 sm:px-8 sm:pb-3">
-      <div className="border-t border-v2-border pt-3">
+      <div className="ts-v2-rule-t pt-3">
         <p className="text-xs text-v2-muted">{V2_RISK_LINE}</p>
         <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0 font-v2-mono text-[11px] uppercase tracking-[0.5px] text-v2-muted">
           <Link href="/docs" className={LINK}>
@@ -101,6 +105,7 @@ export function Footer() {
             TeraHelps
           </a>
         </div>
+        {photos?.length ? <PhotoCredit photos={photos} mobilePhotos={mobilePhotos} /> : null}
       </div>
     </footer>
   )

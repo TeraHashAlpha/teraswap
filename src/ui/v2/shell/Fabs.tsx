@@ -1,14 +1,16 @@
 'use client'
 
 import { useCallback, useState, type MouseEvent } from 'react'
+import { MusicSpeaker } from '../icons/MusicSpeaker'
 import { HelpDrawer } from './HelpDrawer'
 import { useBackgroundMusic } from './music'
 
 const FAB =
-  'fixed bottom-[calc(var(--photo-footer-band)+12px)] z-50 flex h-11 w-11 items-center justify-center rounded-full border border-v2-border bg-v2-surface text-v2-cream ' +
+  // Round 7 D3 item 12: a 1 px hairline ring, no fill (the photo shows through).
+  'fixed bottom-3 sm:bottom-[calc(var(--photo-footer-band)+12px)] z-50 flex h-11 w-11 items-center justify-center rounded-full border border-[color:var(--hairline-ring)] bg-transparent text-v2-cream ' +
   'hover:border-v2-cream focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v2-teal'
 
-/** ♫ bottom-left (♫ ↔ ✕). Toggles ONLY the background music — the same `toggleBackgroundMusic()` v1 calls. */
+/** ♫ bottom-left (speaker ↔ muted speaker). Toggles ONLY the background music — the same `toggleBackgroundMusic()` v1 calls. */
 export function MusicToggle() {
   const { on, toggle } = useBackgroundMusic()
   // stopPropagation keeps this click from reaching the document-level "first interaction" listener of v1's root
@@ -27,7 +29,7 @@ export function MusicToggle() {
       aria-pressed={on}
       title={on ? 'Turn music off' : 'Turn music on'}
     >
-      <span aria-hidden="true">{on ? '♫' : '✕'}</span>
+      <MusicSpeaker on={on} />
     </button>
   )
 }

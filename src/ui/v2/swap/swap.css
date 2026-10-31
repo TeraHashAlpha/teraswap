@@ -1,0 +1,78 @@
+/* [ADR-025] Swap tab layout (round7 20 / 21a / 21b / m02). Unboxed: typography on the photo, one hairline per block, every row
+   on the block's own left and right rules (round 8 §1). Colours and hairlines are tokens (tokens.css) — nothing literal here. */
+.ts-swap {
+  display: grid; gap: 0 48px; width: 100%; max-width: 1060px; margin: 0 auto;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "card" "quote" "cta";
+}
+.ts-swap-card { grid-area: card; min-width: 0; }
+.ts-swap-quote { grid-area: quote; min-width: 0; padding-top: 16px; margin-top: 8px; }
+.ts-swap-cta { grid-area: cta; min-width: 0; padding-top: 20px; padding-bottom: 8px; }
+
+@media (min-width: 960px) {
+  .ts-swap {
+    grid-template-columns: minmax(0, 440px) minmax(0, 420px); justify-content: center; align-items: start;
+    grid-template-areas: "card quote" "cta quote";
+  }
+  .ts-swap-quote { margin-top: 0; padding-top: 16px; }
+}
+
+/* An amount field: the input/number on the left, the token text button on the right, one underline across both. */
+.ts-swap-field { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--hairline-ring); }
+.ts-swap-field:focus-within { border-bottom-color: var(--cream); box-shadow: 0 1px 0 var(--cream); }
+.ts-swap-field .ts-v2-input, .ts-swap-field .ts-v2-input:focus-visible, .ts-swap-field .ts-v2-input:hover { flex: 1 1 auto; min-width: 0; border: 0; padding: 8px 0; }
+.ts-swap-out { flex: 1 1 auto; min-width: 0; display: block; line-height: 32px; padding: 8px 0; }
+.ts-swap-token { flex: none; }
+
+/* Quote rows: label left, value right, hairline between blocks. */
+.ts-swap-rows { display: flex; flex-direction: column; }
+.ts-swap-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 32px; font-size: 14px; }
+.ts-swap-val { text-align: right; min-width: 0; }
+.ts-swap-route { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
+.ts-rule-t { border-top: 1px solid var(--hairline); padding-top: 8px; }
+.ts-rule-l { border-left: 1px solid var(--hairline); }
+
+/* Compare disclosure: the rows sit indented under ONE hairline. */
+.ts-swap-compare-list { margin: 0 0 0 4px; padding: 0 0 0 16px; list-style: none; }
+.ts-swap-compare-list[hidden] { display: none; }
+.ts-swap-chev { transition: transform var(--t-base) var(--ease-out); }
+.ts-swap-chev.is-open { transform: rotate(180deg); }
+
+/* The (i) glyph: a 44 px hit area around a small mark. */
+.ts-swap-tipbtn { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; margin: -14px -12px; line-height: 1; font-size: 14px; }
+
+/* Liquidity-source check: a square 14 px mark (no radius — the one filled shape here is the CTA, this is a state glyph). */
+.ts-swap-check { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; flex: none; font-size: 10px; line-height: 1; box-shadow: inset 0 0 0 1px var(--hairline-ring); }
+.ts-swap-check.is-on { background: var(--cream); color: var(--bg); box-shadow: none; }
+
+.ts-swap-skeleton { display: flex; flex-direction: column; gap: 18px; padding-top: 24px; }
+.ts-swap-skeleton-row { display: flex; justify-content: space-between; }
+
+@media (max-width: 600px) {
+  .ts-swap-row { font-size: 15px; }
+}
+
+/* v1's DigitRoller (reused unchanged for the receive amount) is styled with v1 Tailwind utilities that the v2 stylesheet does not
+   carry, so its columns are given their layout here, by the markup it already exposes (data-testid="digit-column"):
+   a 1ch clipped column, a hidden width spacer, and the 0-9 stack absolutely positioned inside it. */
+.ts-swap-out [data-testid='digit-column'] { position: relative; display: inline-block; width: 1ch; overflow-y: clip; text-align: center; vertical-align: baseline; }
+.ts-swap-out [data-testid='digit-column'] > span[aria-hidden]:first-child { visibility: hidden; }
+.ts-swap-out [data-testid='digit-column'] > span:last-child { position: absolute; left: 0; right: 0; top: 0; display: block; }
+.ts-swap-out [data-testid='digit-column'] > span:last-child > span { display: flex; align-items: center; justify-content: center; }
+
+/* ── B5: the Execution column (round7 28a/28b/28c) ── */
+.ts-exec { padding-top: 4px; }
+.ts-exec-steps { list-style: none; margin: 16px 0 0; padding: 0; position: relative; }
+.ts-exec-step { position: relative; display: flex; align-items: center; gap: 14px; min-height: 46px; font-size: 15px; }
+/* the connector runs from node to node, one hairline per step in the colour of the step above it */
+.ts-exec-step:not(:last-child)::after { content: ''; position: absolute; left: 10px; top: 33px; width: 1px; height: 26px; background: var(--hairline-ring); }
+.ts-exec-step[data-step='done']:not(:last-child)::after { background: var(--green); }
+.ts-exec-node { flex: none; width: 21px; height: 21px; border-radius: 9999px; border: 1px solid var(--hairline-ring); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1; }
+.ts-exec-node[data-node='done'] { border-color: var(--green); color: var(--green); }
+.ts-exec-node[data-node='failed'] { border-color: var(--red); color: var(--red); }
+.ts-exec-node[data-node='active'] { border-color: var(--cream); box-shadow: inset 0 0 0 5px var(--cream); }
+/* Motion is decoration: the active node breathes only when the visitor has not asked for less. */
+@media (prefers-reduced-motion: no-preference) {
+  .ts-exec-node[data-node='active'] { animation: ts-exec-pulse 1.6s ease-in-out infinite; }
+}
+@keyframes ts-exec-pulse { 0%, 100% { box-shadow: inset 0 0 0 5px var(--cream), 0 0 0 0 transparent; } 50% { box-shadow: inset 0 0 0 5px var(--cream), 0 0 0 4px rgba(234, 223, 182, 0.18); } }

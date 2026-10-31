@@ -1,0 +1,16 @@
+desktop/base LCP ms [364,352,348,348,348,348,348] median 348 | image bytes median 361844 min 361844 max 542163
+desktop/branch LCP ms [348,348,348,344,344,352,348] median 348 | image bytes median 210350 min 210350 max 210350
+mobile/base LCP ms [336,336,332,340,332,340,336] median 336 | image bytes median 198141 min 198141 max 198141
+mobile/branch LCP ms [340,332,332,332,336,340,344] median 336 | image bytes median 155598 min 155598 max 155598
+-- desktop/base
+   180319 /_next/static/media/pexels-30180436-yakup-gokdeniz-light-trails-1920.2l2rsor01muzo.avif
+   181525 /_next/static/media/pexels-35632241-peter-dyllong-arch-night-1920.3oczc739eus43.avif
+-- desktop/branch
+   180319 /_next/static/media/pexels-30180436-yakup-gokdeniz-light-trails-1920.2l2rsor01muzo.avif
+   30031 /_next/static/media/bg-tunnel-1920.11l3lgix6q2oy.avif
+-- mobile/base
+   128777 /_next/static/media/pexels-30180436-yakup-gokdeniz-light-trails-1080.00ps76pyzv3by.avif
+   69364 /_next/static/media/pexels-35632241-peter-dyllong-arch-night-1080.1dvowbi5206bk.avif
+-- mobile/branch
+   128777 /_next/static/media/pexels-30180436-yakup-gokdeniz-light-trails-1080.00ps76pyzv3by.avif
+   26821 /_next/static/media/bg-tunnel-1080.3445-3wntv-re.avif

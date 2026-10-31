@@ -73,21 +73,49 @@ describe('§4 radius, fonts, motion', () => {
 
   it('font stacks end with the §4 stack (README.md:91-92) and lead with the next/font variable', () => {
     expect(VARS['--font-display']).toBe('var(--font-barlow),"Barlow Condensed",sans-serif')
-    expect(VARS['--font-sans']).toBe('var(--font-inter),Inter,sans-serif')
+    // Round 7 D1: body = IBM Plex Sans. `--font-sans` stays as the alias the Tailwind `v2-sans` family reads.
+    expect(VARS['--font-body']).toBe('var(--font-plex-sans),"IBM Plex Sans",system-ui,sans-serif')
+    expect(VARS['--font-sans']).toBe('var(--font-body)')
     expect(VARS['--font-mono']).toBe('var(--font-plex-mono),"IBM Plex Mono",monospace')
     expect(VARS['--font-hand']).toBe('Caveat,cursive')
   })
 
-  it('motion tokens are exactly the pack-stated values (ARCHITECT_BRIEF.md:24); no invented easing', () => {
+  it('Round 7 no-box tokens: hairline ladder, square CTA, the six landing.css scrims', () => {
+    // literals copied from round7 landing/landing/landing.css (not imported from tokens.css)
+    expect(VARS['--hairline']).toBe('rgba(234,223,182,.16)')
+    expect(VARS['--hairline-rule']).toBe('rgba(234,223,182,.35)')
+    expect(VARS['--hairline-ring']).toBe('rgba(234,223,182,.47)')
+    expect(VARS['--hairline-underline']).toBe('rgba(234,223,182,.6)')
+    expect(VARS['--radius-cta']).toBe('0px')
+    expect(VARS['--scrim-left']).toBe('linear-gradient(90deg,rgba(11,13,15,.8) 0%,rgba(11,13,15,.6) 45%,rgba(11,13,15,.3) 75%,rgba(11,13,15,.3) 100%)')
+    expect(VARS['--scrim-left-race']).toBe('linear-gradient(90deg,rgba(11,13,15,.8) 0%,rgba(11,13,15,.6) 40%,rgba(11,13,15,.2) 65%,rgba(11,13,15,.2) 100%)')
+    expect(VARS['--scrim-left-features']).toBe('linear-gradient(90deg,rgba(11,13,15,.82) 0%,rgba(11,13,15,.62) 38%,rgba(11,13,15,.25) 70%,rgba(11,13,15,.25) 100%)')
+    expect(VARS['--scrim-down']).toBe('linear-gradient(180deg,rgba(11,13,15,.55),rgba(11,13,15,.45))')
+    expect(VARS['--scrim-down-features']).toBe('linear-gradient(180deg,rgba(11,13,15,.5),rgba(11,13,15,.42))')
+  })
+
+  it('motion tokens are the pack values (ARCHITECT_BRIEF.md:24) plus the §4 "Motion language" table (MOTION-SPEC, round 6)', () => {
     expect(VARS['--t-toast']).toBe('160ms')
     expect(VARS['--t-shimmer']).toBe('1.2s')
-    expect(CSS).not.toMatch(/--ease-|cubic-bezier/)
+    expect(VARS['--ease-out']).toBe('cubic-bezier(0.2,0.8,0.2,1)')
+    expect(VARS['--ease-inout']).toBe('cubic-bezier(0.65,0,0.35,1)')
+    expect(VARS['--t-fast']).toBe('120ms')
+    expect(VARS['--t-base']).toBe('160ms')
+    expect(VARS['--t-slow']).toBe('180ms')
+    expect(VARS['--t-underline']).toBe('600ms')
+  })
+
+  it('landing photo tokens: 900 ms cross-fade + 1600 ms scale (owner decision, 26 Oct review — supersedes MOTION-SPEC §3 "180 ms")', () => {
+    expect(VARS['--t-photo']).toBe('900ms')
+    expect(VARS['--t-photo-scale']).toBe('1600ms')
+    expect(VARS['--t-slow']).toBe('180ms') // untouched: still the pack value for everything that is not the photo stack
   })
 
   it('prefers-reduced-motion zeroes the v2 motion tokens and kills transitions + animations', () => {
     const rm = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*)\n\}/.exec(CSS)?.[1] ?? ''
     expect(rm).toMatch(/--t-toast:0ms/)
     expect(rm).toMatch(/--t-shimmer:0s/)
+    for (const t of ['--t-fast', '--t-base', '--t-slow', '--t-underline', '--t-photo', '--t-photo-scale']) expect(rm).toContain(`${t}:0ms`)
     expect(rm).toMatch(/animation:\s*none\s*!important/)
     expect(rm).toMatch(/transition:\s*none\s*!important/)
   })

@@ -1,0 +1,28 @@
+/* [ADR-025] DCA tab layout (round7 31 / 32 / m04). Unboxed like Swap: typography on the photo, one hairline per block. The amount field,
+   token text button, rows and notices reuse swap.css (`.ts-swap-field`, `.ts-swap-token`, `.ts-swap-row`, `.ts-swap-val`); only the grid is DCA's. */
+.ts-dca {
+  display: grid; gap: 0 48px; width: 100%; max-width: 1060px; margin: 0 auto;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "tabs" "form" "summary";
+}
+.ts-dca-tabs { grid-area: tabs; min-width: 0; border-bottom: 1px solid var(--hairline-ring); margin-bottom: 16px; }
+.ts-dca-form { grid-area: form; min-width: 0; }
+.ts-dca-summary { grid-area: summary; min-width: 0; padding-top: 20px; }
+.ts-dca-wide { grid-column: 1 / -1; min-width: 0; }
+
+@media (min-width: 960px) {
+  .ts-dca {
+    grid-template-columns: minmax(0, 440px) minmax(0, 420px); justify-content: center; align-items: start;
+    grid-template-areas: "tabs tabs" "form summary";
+  }
+  .ts-dca-summary { padding-top: 0; }
+}
+
+/* A choice row (buys / interval / expiry): mono chips that wrap, 44 px hit areas from the Chip primitive. */
+.ts-dca-chips { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.ts-dca-chips--buys { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; }
+.ts-dca-chips--buys .ts-v2-chip { justify-content: center; padding-inline: 0; }
+
+/* Orders list: hairline rows, no card. */
+.ts-dca-row { border-top: 1px solid var(--hairline); padding: 12px 0; }
+.ts-dca-row:first-child { border-top: 0; }

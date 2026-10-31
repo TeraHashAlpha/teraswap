@@ -1,0 +1,8 @@
+Playwright (Chromium headless shell 1243), 1440x900, next start of this branch. Security -> Experience crossing; the layer
+animations are paused and seeked to t, so the frames are exact. Computed values per layer:
+t=0     highway(out) opacity 1.00 scale 1.0000 | footbridge(in) opacity 0.00 scale 1.0400
+t=450   highway(out) opacity 0.50 scale 1.0242 | footbridge(in) opacity 0.50 scale 1.0077
+t=900   highway(out) opacity 0.00 scale 1.0289 | footbridge(in) opacity 1.00 scale 1.0015
+t=1600  highway(out) opacity 0.00 scale 1.0300 | footbridge(in) opacity 1.00 scale 1.0000
+layer animations at the switch: highway opacity 900ms, highway transform 1600ms, footbridge opacity 900ms, footbridge transform 1600ms
+reduced motion (emulated): .ts-v2-nar absent, 0 layer animations, --t-photo 0s, --t-photo-scale 0s

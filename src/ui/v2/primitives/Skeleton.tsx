@@ -7,8 +7,8 @@ export interface SkeletonProps extends HTMLAttributes<HTMLDivElement> {
   height?: number | string
 }
 
-/** Placeholder block (surface-2 + 1.2s cream shimmer; static under reduced motion). Decorative. */
+/** Placeholder bar (hairline cream + 1.2s sweep; static under reduced motion). Decorative. Unboxed: square, no border (Round 7). */
 export function Skeleton({ width, height, className, style, ...rest }: SkeletonProps) {
   const size: CSSProperties = { width, height }
-  return <div aria-hidden="true" className={cx('ts-v2-skeleton rounded-v2-control', className)} style={{ ...size, ...style }} {...rest} />
+  return <div aria-hidden="true" className={cx('ts-v2-skeleton', className)} style={{ ...size, ...style }} {...rest} />
 }

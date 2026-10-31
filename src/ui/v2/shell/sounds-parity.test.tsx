@@ -37,7 +37,9 @@ vi.mock('@rainbow-me/rainbowkit', async () => {
   }
 })
 vi.mock('next/navigation', () => ({ usePathname: () => '/swap', useRouter: () => ({ push: vi.fn() }) }))
-vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars' }))
+// B3: these tests are about the shell, not the Swap card (its own tests mock the hooks it reads): the Swap tab pane is a placeholder here.
+vi.mock('../swap/SwapCard', () => ({ SwapCard: () => <section data-tab-pane="swap" aria-busy="true" /> }))
+vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars', v2BodyFontFamily: 'body-font' }))
 
 type Event = { op: 'play' | 'pause'; src: string; volume: number; loop: boolean }
 let log: Event[] = []
@@ -75,6 +77,9 @@ async function freshPage() {
   const { AppShell } = await import('./AppShell')
   return { sounds, AppShell }
 }
+
+/** Which speaker the ♫ button shows (round-6 icons replaced the ♫ / ✕ glyphs). */
+const icon = (btn: HTMLElement) => btn.querySelector('svg[data-music-icon]')?.getAttribute('data-music-icon')
 
 const TOUCH: Event = { op: 'play', src: '/sounds/touch.mp3', volume: 0.5, loop: false }
 const MUSIC_ON: Event = { op: 'play', src: '/sounds/background.mp3', volume: 0.08, loop: true }
@@ -147,10 +152,10 @@ describe('sound parity — shell vs v1 (real sounds.ts, mocked audio)', () => {
     act(() => void document.dispatchEvent(new MouseEvent('click', { bubbles: true }))) // music running
     log.length = 0
     const off = screen.getByRole('button', { name: 'Turn music off' })
-    expect(off.textContent).toBe('♫')
+    expect(icon(off)).toBe('on')
     fireEvent.click(off)
     const on = screen.getByRole('button', { name: 'Turn music on' })
-    expect(on.textContent).toBe('✕')
+    expect(icon(on)).toBe('off')
     fireEvent.click(on)
     expect(log).toEqual(expected)
   })
@@ -189,7 +194,7 @@ describe('sound parity — shell vs v1 (real sounds.ts, mocked audio)', () => {
     first.unmount()
     log.length = 0
     render(<AppShell />)
-    expect(screen.getByRole('button', { name: 'Turn music on' }).textContent).toBe('✕')
+    expect(icon(screen.getByRole('button', { name: 'Turn music on' }))).toBe('off')
     act(() => void document.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     expect(log.some((e) => e.op === 'play')).toBe(false)
   })

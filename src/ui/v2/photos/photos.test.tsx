@@ -10,7 +10,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import credits from './credits.json'
 import { PHOTO_TOKENS } from './photo-tokens'
 import { PhotoBackground } from './PhotoBackground'
-import { PHOTOS, TAB_PHOTO, photoForTab, urlOf } from './photos'
+import { NARRATIVE_PHOTOS } from './narrative'
+import { urlOf } from './photos'
+import { TAB_PHOTO, photoForTab } from './tab-photos'
 import { V2_TABS } from '../shell/tab-paths'
 
 afterEach(cleanup)
@@ -59,18 +61,64 @@ describe('credits.json', () => {
     const by = Object.fromEntries(credits.photos.map((p) => [p.id, p.photographer]))
     expect(by).toEqual({ zakim: 'Phil Evenden', underpass: 'Willbone Gallery', 'arch-night': 'Peter Dyllong', trails: 'Yakup Gökdeniz' })
   })
+
+  it('the baked set credits all eight tab photos (Pexels ids from the owner map); byte counts match the files', () => {
+    const byId = Object.fromEntries(credits.narrative.map((p) => [p.id, p]))
+    expect(Object.fromEntries(credits.narrative.filter((p) => 'tab' in p).map((p) => [(p as { tab: string }).tab, p.pexelsId]))).toEqual({
+      swap: '17102595', portfolio: '9221575', dca: '32397093', limit: '31514221', sltp: '36192529', orders: '35632241', history: '8936918', analytics: '37644721',
+    })
+    expect(byId.overpass.photographer).toBe('MAG Photography')
+    expect(byId.zakim.photographer).toBe('Phil Evenden')
+    expect(byId.archnight.photographer).toBe('Peter Dyllong')
+    for (const p of credits.narrative) {
+      expect(p.pexelsUrl).toMatch(/^https:\/\/www\.pexels\.com\/photo\//)
+      expect(p.files).toHaveLength(4)
+      for (const f of p.files) expect(f.bytes, f.file).toBe(statSync(join(__dirname, f.file)).size)
+    }
+  })
+
+  it('light-trails (Pexels 30180436) is marked rejected, with no tab', () => {
+    const trails = credits.photos.find((p) => p.pexelsId === '30180436') as { status?: string; tabs: string[] }
+    expect(trails.status).toBe('rejected')
+    for (const p of credits.photos) expect(p.tabs).toEqual([])
+    for (const p of credits.narrative) expect(p.pexelsId).not.toBe('30180436')
+  })
 })
 
-describe('tab → photo (pack round4 "Photo assignment")', () => {
-  it('Swap=Zakim · DCA=Underpass · Portfolio/Orders/History=Arch night · Analytics=Trails', () => {
-    expect(TAB_PHOTO).toMatchObject({ swap: 'zakim', dca: 'underpass', portfolio: 'arch-night', orders: 'arch-night', history: 'arch-night', analytics: 'trails' })
-    for (const t of V2_TABS) expect(PHOTOS[TAB_PHOTO[t.id]]).toBeDefined()
+describe('tab → photo (owner addition, round 7: the round-5 per-tab map on the baked bg-* set)', () => {
+  it('Swap=Zakim · Portfolio=tunnel · DCA=underpass · Limit=highway · SL/TP=arch-light · Orders=arch-night · History=footbridge · Analytics=MAG overpass', () => {
+    expect(TAB_PHOTO).toEqual({
+      swap: 'zakim', portfolio: 'tunnel', dca: 'underpass', limit: 'highway', sltp: 'archlight', orders: 'archnight', history: 'footbridge', analytics: 'overpass',
+    })
+    const pexels = (tab: keyof typeof TAB_PHOTO) => credits.narrative.find((p) => p.id === TAB_PHOTO[tab])!.pexelsId
+    expect(V2_TABS.map((t) => [t.id, pexels(t.id)])).toEqual(
+      expect.arrayContaining([['swap', '17102595'], ['portfolio', '9221575'], ['dca', '32397093'], ['limit', '31514221'], ['sltp', '36192529'], ['orders', '35632241'], ['history', '8936918'], ['analytics', '37644721']]),
+    )
+  })
+
+  it('eight tabs, eight DISTINCT photos, every one shipped from the baked set', () => {
+    expect(V2_TABS).toHaveLength(8)
+    expect(new Set(V2_TABS.map((t) => TAB_PHOTO[t.id])).size).toBe(8)
+    for (const t of V2_TABS) expect(NARRATIVE_PHOTOS[TAB_PHOTO[t.id]]).toBeDefined()
+  })
+
+  it('light-trails is rejected: no tab maps to it and the tab path never references it', () => {
+    expect(Object.values(TAB_PHOTO) as string[]).not.toContain('trails')
+    for (const t of V2_TABS) {
+      const p = photoForTab(t.id)
+      expect(JSON.stringify(p)).not.toMatch(/light-trails|30180436/)
+    }
+    for (const file of ['tab-photos.ts', 'narrative.ts']) {
+      expect(readFileSync(join(__dirname, file), 'utf8').replace(/^\s*(\/\/|\*|\/\*).*$/gm, '')).not.toMatch(/light-trails|30180436|'trails'/)
+    }
   })
 })
 
 describe('tokens (photo-tokens.ts ⇄ photo.css)', () => {
   it('veil 45%, 96 px footer band, plate 92% appear identically in the CSS', () => {
     expect(PHOTO_TOKENS.veil).toBe(0.45)
+    expect(CSS).toContain(`--photo-baked-veil: ${PHOTO_TOKENS.bakedVeil};`)
+    expect(PHOTO_TOKENS.bakedVeil).toBeCloseTo(45 / 255, 3) // = the landing's --nar-veil
     expect(PHOTO_TOKENS.footerBandPx).toBe(96)
     expect(CSS).toContain(`--photo-veil: ${PHOTO_TOKENS.veil};`)
     expect(CSS).toContain(`--photo-footer-band: ${PHOTO_TOKENS.footerBandPx}px;`)
@@ -86,20 +134,27 @@ describe('tokens (photo-tokens.ts ⇄ photo.css)', () => {
 })
 
 describe('<PhotoBackground>', () => {
-  it('one <picture>: AVIF 1080 (media) + AVIF 1920 sources, WebP <img>, decorative, with the credit line', () => {
+  it('a tab: one <picture> of the BAKED photo — AVIF portrait (≤ 600 px) + AVIF landscape + WebP portrait sources, WebP <img>, decorative; no CSS grade, tone or halftone layers', () => {
     const { container } = render(<PhotoBackground tab="swap" />)
     const sources = container.querySelectorAll('picture source')
     expect(Array.from(sources).map((s) => [s.getAttribute('type'), s.getAttribute('media')])).toEqual([
-      ['image/avif', '(max-width: 1080px)'],
+      ['image/avif', '(max-width: 600px)'],
       ['image/avif', null],
+      ['image/webp', '(max-width: 600px)'],
     ])
-    expect(sources[0].getAttribute('srcset')).toBe(urlOf(photoForTab('swap').avif.w1080))
-    expect(sources[1].getAttribute('srcset')).toBe(urlOf(photoForTab('swap').avif.w1920))
+    expect(sources[0].getAttribute('srcset')).toBe(photoForTab('swap').avif.w1080)
+    expect(sources[1].getAttribute('srcset')).toBe(photoForTab('swap').avif.w1920)
+    expect(sources[2].getAttribute('srcset')).toBe(photoForTab('swap').webp.w1080)
     const img = container.querySelector('picture img')!
     expect(img.getAttribute('alt')).toBe('')
-    expect(img.getAttribute('srcset') ?? '').toContain('.webp')
+    expect(img.getAttribute('src')).toBe(photoForTab('swap').webp.w1920)
+    expect(img.className).toContain('ts-v2-photo__img--baked')
+    expect(container.querySelector('.ts-v2-photo__baked-veil')).not.toBeNull()
+    for (const gone of ['.ts-v2-photo__tone', '.ts-v2-photo__dots', '.ts-v2-photo__veil']) expect(container.querySelector(gone), gone).toBeNull()
+    expect(urlOf(photoForTab('swap').webp.w1920)).toContain('bg-zakim')
     expect(container.querySelector('[data-photo="zakim"]')?.getAttribute('aria-hidden')).toBe('true')
-    expect(screen.getByText('Photo Phil Evenden / Pexels')).toBeTruthy()
+    // The credit line is the footer's (PhotoCredit), not this layer's.
+    expect(screen.queryByText(/Pexels/)).toBeNull()
   })
 
   it('above the fold → eager + fetchPriority high; otherwise lazy and not high', () => {
@@ -109,7 +164,6 @@ describe('<PhotoBackground>', () => {
     rerender(<PhotoBackground tab="dca" aboveFold={false} />)
     img = container.querySelector('picture img')!
     expect([img.getAttribute('loading'), img.getAttribute('fetchpriority')]).toEqual(['lazy', 'auto'])
-    expect(screen.getByText('Photo Willbone Gallery / Pexels')).toBeTruthy()
   })
 
   it('does not use next/image `priority` (its preload would fetch the WebP while AVIF browsers use the <source>)', () => {
@@ -121,6 +175,7 @@ describe('<PhotoBackground>', () => {
   it('renders only the photo of the active tab', () => {
     const { container } = render(<PhotoBackground tab="analytics" />)
     expect(container.querySelectorAll('[data-photo]')).toHaveLength(1)
-    expect(container.querySelector('[data-photo="trails"]')).not.toBeNull()
+    expect(container.querySelector('[data-photo="overpass"]')).not.toBeNull()
+    expect(container.querySelector('[data-photo="trails"]')).toBeNull()
   })
 })

@@ -2079,6 +2079,12 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   // this executor's own gas spend). Non-blocking + fail-safe.
   await endCycleObservability(obsCtx, publicClient, ownGasSpentWei)
 
+  // [fix/unpriced-ack-paths / ADR-024] ONE line per cycle — `chainlink=n defillama=n coingecko=n` — so
+  // a silently absent price source (the batched-CoinGecko HTTP 400 of 2026-10-26) shows in pm2 logs.
+  // A cycle that asked no DCA token logs nothing here.
+  const sourceLine = await quoteCtx.summaryLine()
+  if (sourceLine) log(`  ${sourceLine}`)
+
   log(`  Cycle done: ${executed} executed, ${skipped} skipped`)
   // [PERF-KEEPER-IDLE-BACKOFF] The count drives the loop's idle/active mode (main's runTick).
   return orders.length

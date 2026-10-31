@@ -1,0 +1,5 @@
+suite base(origin/main 5610beb): 352 files / 5575 passed   branch: 355 files / 5701 passed (+3 files, +126 tests)
+lint   base 0 errors / 93 warnings   branch 0 errors / 93 warnings   delta 0
+tsc    branch exit 0
+build  base exit 0 / branch exit 0 (placeholder WC project id, UI_V2_ENABLED=true both)
+routes base vs branch: identical (54)

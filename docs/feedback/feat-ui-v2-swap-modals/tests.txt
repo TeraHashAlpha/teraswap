@@ -1,0 +1,125 @@
+# parity — v1 modal vs v2 sheet, same props (compareContent: every visible v1 text node + href must be in v2)
+ ✓ src/ui/v2/modals/permit2-sheet.test.tsx > Permit2Sheet (25) > parity: every visible v1 string and the learn-more link are in the v2 sheet (0 missing)
+ ✓ src/ui/v2/modals/split-cow-sheet.test.tsx > SplitReviewSheet (27, left) > parity with v1 SplitReviewModal: 0 v1 strings missing
+ ✓ src/ui/v2/modals/split-cow-sheet.test.tsx > CowOrderReviewSheet (27, right) > parity with v1 CowOrderReviewModal: 0 v1 strings missing, including the explanation sentence
+ ✓ src/ui/v2/modals/slippage-sheet.test.tsx > SlippageSheet (22) > parity with v1: same notes, same preset/custom calls for the same inputs
+ ✓ src/ui/v2/modals/review-sheet.test.tsx > the calldata half is v1 TransactionPreview (parity on the same props) > 0 v1 strings missing: source, send/receive, enforced minimum, route, validation, selector, raw calldata, buttons
+ ✓ src/ui/v2/modals/review-sheet.test.tsx > the calldata half is v1 TransactionPreview (parity on the same props) > the enforced minimum (FeeCollector) wins and is badged; it is the frozen value, not the displayed floor
+ ✓ src/ui/v2/modals/review-sheet.test.tsx > the calldata half is v1 TransactionPreview (parity on the same props) > an undecodable calldata gets v1's warning and still lets the user read the raw bytes
+ ✓ src/ui/v2/modals/token-sheet.test.tsx > search (symbol, name, address) > parity: the same lists as v1 TokenSelector — browse and three searches
+
+# consent / 409
+ ✓ src/ui/v2/modals/split-cow-sheet.test.tsx > SplitReviewSheet (27, left) > the unpriced consent gates the split Confirm too (the split hook has its own 409); no consent → Confirm is plain
+ ✓ src/ui/v2/modals/review-sheet.test.tsx > tier line, consent, Confirm > priced / unknown: no consent, no notice, Confirm enabled → onConfirm({unpricedAck:false})
+ ✓ src/ui/v2/modals/review-sheet.test.tsx > tier line, consent, Confirm > single-source: v1's amber line (vendor named), no consent, Confirm enabled
+ ✓ src/ui/v2/modals/review-sheet.test.tsx > tier line, consent, Confirm > unpriced: the consent block carries v1's heading, checkbox label and body with the real {N} / {d} / {minOut}
+ ✓ src/ui/v2/modals/review-sheet.test.tsx > tier line, consent, Confirm > a single quote says what is true (v1 wording) and never "1 sources"
+ ✓ src/ui/v2/modals/review-sheet.test.tsx > tier line, consent, Confirm > the consent GATES Confirm: disabled until the box is ticked; ticked → onConfirm({unpricedAck:true}); untick → disabled again
+ ✓ src/ui/v2/modals/review-sheet.test.tsx > tier line, consent, Confirm > 409 unpriced_ack_required on a PRICED pair: the consent appears, unticked, and gates Confirm
+ ✓ src/ui/v2/modals/review-sheet.test.tsx > tier line, consent, Confirm > a 409 after an earlier tick voids the tick (a fresh question), and Confirm needs it again
+ ✓ src/ui/v2/modals/review-sheet.test.tsx > tier line, consent, Confirm > a 409 REOPENS a cancelled review (v1: requested || ackRequired)
+ ✓ src/ui/v2/modals/review-sheet.test.tsx > tier line, consent, Confirm > consentRequired: unpriced tier or a server ask; nothing else
+ ✓ src/ui/v2/modals/review-sheet.test.tsx > tier line, consent, Confirm > unpricedConsentValues ignores malformed / zero quotes when counting
+ ✓ src/ui/v2/swap/swap-card.test.tsx > 24 — tier notices (the quote panel, as v1 QuoteBreakdown) > unpriced → the one-line notice, and the CTA still reads Review swap (its click opens the consent in the review sheet — see 26)
+ ✓ src/ui/v2/swap/swap-card.test.tsx > 26 / 25 — the review and Permit2 sheets opened from the card (B4, display only) > unpriced tier: the consent sits in the sheet and gates Confirm; single-source shows the amber line only
+
+# route label + gas
+ ✓ src/ui/v2/modals/split-cow-sheet.test.tsx > SplitReviewSheet (27, left) > per-leg table: each leg shows its own amounts, the enforced minimum, router, recipient, validation; a skipped leg says so and is not counted
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: names, never addresses > a hop that is an address falls back to the source label
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: names, never addresses > a hop that merely CONTAINS an address (v1 let this through) falls back too
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: names, never addresses > names pass through verbatim, joined by " + "; an empty route is the source label
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: names, never addresses > no 0x ever reaches the Route text, whatever the hop
+ ✓ src/ui/v2/swap/quote-model.test.ts > numbers go through @/lib/format (README §3) > gas: USD first, ETH at 2 significant digits, never 0.0000
+ ✓ src/ui/v2/swap/quote-model.test.ts > numbers go through @/lib/format (README §3) > gas with no live estimate: the quote's own USD (v2: USD first whenever a price exists); units only when there is no price at all
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > fermi (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > metric-v1 (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > metric-propamm/uniswapv3 (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > pmm-1/uniswapv3 (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > hashflow-v3/uniswapv3 (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > uniswap-v4-stable-stable (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > fluid-dex-t1 (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > 0x1f98431c8ad98523631ae4a59f267346ea31f984 (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > 0xdeadbeefcafe (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > 0xabababababababababababababababababababababababababababababababab (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > Pool 0xabc (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) >  (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) >     (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > metric-v1 (velora) → Velora
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > fermi (sushiswap) → SushiSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > uniswapv3 (kyberswap) → Uniswap V3
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > uniswap-v3 (kyberswap) → Uniswap V3
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > Uniswap V3 (kyberswap) → Uniswap V3
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > UNISWAPV4 (kyberswap) → Uniswap V4
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > pancakeswapv3 (velora) → PancakeSwap V3
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > PancakeSwap V3 (velora) → PancakeSwap V3
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > curve (velora) → Curve
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > balancerv2 (velora) → Balancer
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > aerodrome-slipstream (velora) → Aerodrome Slipstream
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > Dexalot (velora) → Dexalot
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > a recorded KyberSwap route reads as names: unknown ids collapse into one "KyberSwap", named venues stay
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > whatever the hops, the text is only allow-listed names and the source label
+ ✓ src/ui/v2/swap/quote-model.test.ts > est. gas: USD first, ETH at 2 significant digits, never "~0" > live estimate: USD (ETH)
+ ✓ src/ui/v2/swap/quote-model.test.ts > est. gas: USD first, ETH at 2 significant digits, never "~0" > tiny USD keeps the < $0.01 floor, ETH stays 2 sf
+ ✓ src/ui/v2/swap/quote-model.test.ts > est. gas: USD first, ETH at 2 significant digits, never "~0" > KyberSwap on Ethereum: estimatedGas 0 + gasUsd, ETH from the oracle (the owner's ~0 ETH)
+ ✓ src/ui/v2/swap/quote-model.test.ts > est. gas: USD first, ETH at 2 significant digits, never "~0" > same, estimate fn absent
+ ✓ src/ui/v2/swap/quote-model.test.ts > est. gas: USD first, ETH at 2 significant digits, never "~0" > same, no ETH price → USD alone, not a guess
+ ✓ src/ui/v2/swap/quote-model.test.ts > est. gas: USD first, ETH at 2 significant digits, never "~0" > same, estimate returns null (no gas price yet)
+ ✓ src/ui/v2/swap/quote-model.test.ts > est. gas: USD first, ETH at 2 significant digits, never "~0" > units known, no price anywhere → v1's unit fallback
+ ✓ src/ui/v2/swap/quote-model.test.ts > est. gas: USD first, ETH at 2 significant digits, never "~0" > ETH known but no USD (no oracle price) → ETH, 2 sf
+ ✓ src/ui/v2/swap/quote-model.test.ts > est. gas: USD first, ETH at 2 significant digits, never "~0" > nothing known (0 units, no USD) → a dash, never ~0
+ ✓ src/ui/v2/swap/quote-model.test.ts > est. gas: USD first, ETH at 2 significant digits, never "~0" > 0 units, 0 USD, no estimate → a dash
+ ✓ src/ui/v2/swap/quote-model.test.ts > est. gas: USD first, ETH at 2 significant digits, never "~0" > NaN / negative USD is not a price
+ ✓ src/ui/v2/swap/quote-model.test.ts > est. gas: USD first, ETH at 2 significant digits, never "~0" > intent order (CoW): the solver pays
+ ✓ src/ui/v2/swap/quote-model.test.ts > est. gas: USD first, ETH at 2 significant digits, never "~0" > through buildQuoteView: a KyberSwap best quote on mainnet
+ ✓ src/ui/v2/modals/review-sheet.test.tsx > fields match the quote object > Send / Receive / Rate / Route / Max slippage / Min. output / Fee / Est. gas, recomputed from the fixture
+ ✓ src/ui/v2/modals/review-sheet.test.tsx > fields match the quote object > a CoW (intent) quote: Gasless chip and v1's "$0.00 (paid by solver)" gas line
+ ✓ src/ui/v2/modals/review-sheet.test.tsx > the calldata half is v1 TransactionPreview (parity on the same props) > 0 v1 strings missing: source, send/receive, enforced minimum, route, validation, selector, raw calldata, buttons
+
+# a11y (focus trap / Esc / restore focus / keyboard)
+ ✓ src/ui/v2/modals/sheet.test.tsx > Sheet > is a labelled, described aria-modal dialog on a solid surface with a top hairline only
+ ✓ src/ui/v2/modals/sheet.test.tsx > Sheet > moves focus into the sheet on open
+ ✓ src/ui/v2/modals/sheet.test.tsx > Sheet > Tab on the last control wraps to the first; Shift+Tab on the first wraps to the last
+ ✓ src/ui/v2/modals/sheet.test.tsx > Sheet > focus that has escaped the sheet is pulled back in on the next Tab
+ ✓ src/ui/v2/modals/sheet.test.tsx > Sheet > Esc closes the sheet and focus returns to the opener
+ ✓ src/ui/v2/modals/sheet.test.tsx > Sheet > Esc is handled once and does not reach a listener behind the sheet
+ ✓ src/ui/v2/modals/permit2-sheet.test.tsx > Permit2Sheet (25) > Continue to signature is the ONE solid CTA; Cancel is a text button and takes focus (the safe default)
+ ✓ src/ui/v2/modals/permit2-sheet.test.tsx > Permit2Sheet (25) > Continue → confirm; Cancel and Esc → cancel; nothing is remembered unless the box is ticked
+ ✓ src/ui/v2/modals/permit2-sheet.test.tsx > Permit2Sheet (25) > keyboard: Tab stays inside the sheet (focus trap)
+ ✓ src/ui/v2/modals/split-cow-sheet.test.tsx > SplitReviewSheet (27, left) > per-leg table: each leg shows its own amounts, the enforced minimum, router, recipient, validation; a skipped leg says so and is not counted
+ ✓ src/ui/v2/modals/split-cow-sheet.test.tsx > SplitReviewSheet (27, left) > Esc and Cancel cancel, and focus starts on Cancel
+ ✓ src/ui/v2/modals/split-cow-sheet.test.tsx > CowOrderReviewSheet (27, right) > Confirm & Sign Order is the one solid CTA (a stub: it calls onConfirm, B5 signs); Cancel / Esc cancel
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > fermi (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > metric-v1 (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > metric-propamm/uniswapv3 (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > pmm-1/uniswapv3 (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > hashflow-v3/uniswapv3 (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > uniswap-v4-stable-stable (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > fluid-dex-t1 (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > 0x1f98431c8ad98523631ae4a59f267346ea31f984 (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > 0xdeadbeefcafe (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > 0xabababababababababababababababababababababababababababababababab (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > Pool 0xabc (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) >  (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) >     (kyberswap) → KyberSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > metric-v1 (velora) → Velora
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > fermi (sushiswap) → SushiSwap
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > uniswapv3 (kyberswap) → Uniswap V3
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > uniswap-v3 (kyberswap) → Uniswap V3
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > Uniswap V3 (kyberswap) → Uniswap V3
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > UNISWAPV4 (kyberswap) → Uniswap V4
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > pancakeswapv3 (velora) → PancakeSwap V3
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > PancakeSwap V3 (velora) → PancakeSwap V3
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > curve (velora) → Curve
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > balancerv2 (velora) → Balancer
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > aerodrome-slipstream (velora) → Aerodrome Slipstream
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > Dexalot (velora) → Dexalot
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > a recorded KyberSwap route reads as names: unknown ids collapse into one "KyberSwap", named venues stay
+ ✓ src/ui/v2/swap/quote-model.test.ts > route: only known DEX names pass (table) > whatever the hops, the text is only allow-listed names and the source label
+ ✓ src/ui/v2/modals/review-sheet.test.tsx > chrome and keyboard > Confirm is the screen's ONE solid cream CTA; Cancel is a text button and holds the initial focus
+ ✓ src/ui/v2/modals/review-sheet.test.tsx > chrome and keyboard > Esc and Cancel cancel; the dimmed page cancels; Tab never leaves the sheet
+ ✓ src/ui/v2/swap/swap-card.test.tsx > 20 — quote > Max slippage ✎ opens the slippage sheet (B4); a preset changes the row and the Min. output, Esc restores focus
+ ✓ src/ui/v2/swap/swap-card.test.tsx > #604 — a stale quote never feeds the display > a quote for ANOTHER AMOUNT is "quoting": skeleton, CTA disabled — receive/rate/min never describe a different sell amount
+ ✓ src/ui/v2/swap/swap-card.test.tsx > 26 / 25 — the review and Permit2 sheets opened from the card (B4, display only) > Review swap opens the review sheet with the card's own numbers; Cancel closes it and returns focus to the CTA
+ ✓ src/ui/v2/modals/token-sheet.test.tsx > keyboard > ArrowDown from the search field enters the rows; arrows walk them; ArrowUp from the first returns to the field; Home / End jump
+ ✓ src/ui/v2/modals/token-sheet.test.tsx > keyboard > the focused row is a button: Enter / Space activate it (selects + closes)
+ ✓ src/ui/v2/modals/token-sheet.test.tsx > keyboard > Esc closes the sheet

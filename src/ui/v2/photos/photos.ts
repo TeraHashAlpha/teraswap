@@ -1,5 +1,4 @@
 import credits from './credits.json'
-import type { V2TabId } from '../shell/tab-paths'
 
 import zakim1080Avif from './pexels-17102595-phil-evenden-zakim-bridge-night-1080.avif'
 import zakim1080Webp from './pexels-17102595-phil-evenden-zakim-bridge-night-1080.webp'
@@ -49,18 +48,6 @@ export const PHOTOS: Record<PhotoId, ShellPhoto> = {
   trails: photo('trails', trails1080Avif, trails1920Avif, trails1080Webp, trails1920Webp),
 }
 
-/** Pack round4 README "Photo assignment": one photo per section. Limit / SL-TP (tabs are "Soon") take Swap's. */
-export const TAB_PHOTO: Record<V2TabId, PhotoId> = {
-  swap: 'zakim',
-  limit: 'zakim',
-  sltp: 'zakim',
-  dca: 'underpass',
-  portfolio: 'arch-night',
-  orders: 'arch-night',
-  history: 'arch-night',
-  analytics: 'trails',
-}
-
-export function photoForTab(tab: V2TabId): ShellPhoto {
-  return PHOTOS[TAB_PHOTO[tab]]
-}
+// Round 7: the per-tab map (`TAB_PHOTO`, `photoForTab`) moved to `tab-photos.ts` and now points at the baked `bg-*` set.
+// These four raw round-4 photos are no longer used by any tab; the landing hero still paints `trails` (rejected by the
+// owner for the tabs; the round-7 hero replaces it) and `urlOf` is shared with `narrative.ts`.
