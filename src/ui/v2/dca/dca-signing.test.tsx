@@ -81,7 +81,7 @@ import { findChainToken } from '@/lib/chains/tokens'
 import { getWrappedNative } from '@/lib/chains/registry'
 import { DEFAULT_MAX_SLIPPAGE_BPS, deriveSigningMinAmountOut } from '@/lib/order-engine'
 import { DcaCard } from './DcaCard'
-import { failureCopy, requiredTierFromError, signSteps } from './dca-model'
+import { failureCopy, reopenTierFromError, requiredTierFromError, signSteps } from './dca-model'
 
 const weth = () => findChainToken(getWrappedNative(BASE), BASE)!
 const WETH_BALANCE = { raw: 2_000_000_000_000_000_000n, formatted: '2.0' }
@@ -494,6 +494,59 @@ describe('409: the server names a stronger tier → the review reopens for it, t
     expect(requiredTierFromError('Signature rejected in wallet.')).toBeNull()
     expect(requiredTierFromError('this pair is "unpriced"')).toBeNull()
     expect(requiredTierFromError(null)).toBeNull()
+  })
+})
+
+describe('A70 L-1 · a 409 that asks for an acknowledgement but does not parse reopens consent at the strictest tier', () => {
+  const UNPARSED = 'Acknowledgement required: tier could not be determined. Resubmit with a floorAck.'
+  const errorOutcome = (error: string): SignOutcome => ({ event: { type: 'order_error', orderId: 'o1', error }, posted: true })
+
+  it('pure: parsed → its tier · starts "Acknowledgement required" but unparsed → unpriced · everything else → null', () => {
+    expect(reopenTierFromError('Acknowledgement required: this pair is "offchain-price". Resubmit with floorAck.tier = "offchain-price".')).toBe('offchain-price')
+    expect(reopenTierFromError('Acknowledgement required: this pair is "unpriced". Resubmit with floorAck.tier = "unpriced".')).toBe('unpriced')
+    expect(reopenTierFromError(UNPARSED)).toBe('unpriced')
+    expect(reopenTierFromError('Acknowledgement required')).toBe('unpriced')
+    expect(reopenTierFromError('Acknowledgement required: this pair is "mystery". Resubmit')).toBe('unpriced')
+    for (const other of ['Order already exists (409)', 'Signature rejected in wallet.', 'acknowledgement required', 'Your acknowledgement required this', '', null, undefined]) {
+      expect(reopenTierFromError(other)).toBeNull()
+    }
+    expect(requiredTierFromError(UNPARSED)).toBeNull() // the strict parser is unchanged
+  })
+
+  it('offchain-price ack refused with an unparsed sentence: consent reopens at UNPRICED (unticked, focused), no failure sheet, no Retry; the next call carries a fresh unpriced ack — the refused one is never resent', async () => {
+    h.floor = offchainInfo()
+    let signs = 0
+    fake.sign = async () => (++signs === 1 ? errorOutcome(UNPARSED) : { event: { type: 'order_created', orderId: 'o1', orderHash: '0xhash' }, posted: true })
+    await v2ToSheet(true)
+    expect(config(0).floorAck?.tier).toBe('offchain-price')
+    fireEvent.click(screen.getByTestId('dca-sign-confirm'))
+    const consent = await screen.findByTestId('dca-consent')
+    expect(consent.getAttribute('data-tier')).toBe('unpriced')
+    expect(screen.queryByTestId('dca-sign-retry')).toBeNull()
+    expect(screen.queryByTestId('dca-sign-body')).toBeNull()
+    const box = screen.getByTestId('dca-consent-checkbox') as HTMLInputElement
+    expect(box.checked).toBe(false)
+    expect(screen.getByTestId('dca-review-create')).toHaveProperty('disabled', true)
+    fireEvent.click(box)
+    fireEvent.click(screen.getByTestId('dca-review-create'))
+    await screen.findByTestId('dca-sign-body')
+    expect(fake.seq.map((c) => c[0])).toEqual(['createOrder', 'confirmOrder', 'createOrder'])
+    expect(config(2).floorAck?.tier).toBe('unpriced')
+    expect(config(2).floorAck).not.toBe(config(0).floorAck)
+  })
+
+  it('a random 409 (not an acknowledgement) stays a plain failure with Retry; Retry then re-asks consent on a weaker tier — never resends the old ack', async () => {
+    h.floor = offchainInfo()
+    fake.sign = async () => errorOutcome('Order already exists (409)')
+    await v2ToSheet(true)
+    fireEvent.click(screen.getByTestId('dca-sign-confirm'))
+    const retry = await screen.findByTestId('dca-sign-retry')
+    expect(screen.getByTestId('dca-sign-error').textContent).toContain('Order already exists (409)')
+    expect(screen.queryByTestId('dca-consent')).toBeNull()
+    fireEvent.click(retry)
+    const box = (await screen.findByTestId('dca-consent-checkbox')) as HTMLInputElement
+    expect(box.checked).toBe(false)
+    expect(fake.seq.map((c) => c[0])).toEqual(['createOrder', 'confirmOrder'])
   })
 })
 

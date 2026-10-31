@@ -4,7 +4,7 @@ import { useCallback, useState } from 'react'
 import type { PendingOrderReview } from '@/hooks/useOrderEngine'
 import type { CreateOrderConfig, OrderEngineEvent } from '@/lib/order-engine'
 import { stopWaitingSound } from '@/lib/sounds'
-import { consentTier, reopenTier, requiredTierFromError, type WeakerTier } from './dca-model'
+import { consentTier, reopenTier, reopenTierFromError, type WeakerTier } from './dca-model'
 import type { PrepareFn, PreparedReview } from './use-dca-form'
 
 /** The slice of v1's `useOrderEngine()` the create path uses — the ONE instance the card holds, never a second hook. */
@@ -58,7 +58,7 @@ export function useDcaLifecycle(engine: DcaEngineSlice) {
         setArmed(false)
         setCreating(false)
       } else if (ev.type === 'order_error') {
-        const tier = requiredTierFromError(ev.error)
+        const tier = reopenTierFromError(ev.error)
         if (tier) {
           // the server re-classified: back to the review, consent for ITS tier (never a weaker one — reopenTier)
           setConflictTier(tier)
