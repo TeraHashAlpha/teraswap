@@ -33,7 +33,7 @@ largest v1 route delta: /swap +33 B = +0.0012 %
 /terms           chunks  25  names identical  bytes identical
 v1 routes: 10, distinct v1 client chunks compared: 43, byte-differing: 2
 chunks used by /v2 only (head): 7
-V1 DIFFERS
+BYTE-LEVEL: 2 chunks differ (/ and /swap share the lazy-import table) — see the module-level result below
 
 ## the one differing chunk on / and /swap = Turbopack's lazy-import loader table (+33 B): 2 of its 91 entries list re-partitioned chunks
 ##   375920 = v1 OrderDashboard (Orders tab, lazy) · 801313 = v1 DCAPanel (DCA tab, lazy); module-level (module-proof.py, chunk names normalised):
@@ -51,3 +51,19 @@ lazy group 801313: base 3 chunks / 17 modules · head 4 chunks / 21 modules · m
 ##   (hence the 'different code' = import-by-id instead of inlined copy + minifier renames). 0 v2-marked chunks/modules in any v1 route.
 ## OWNER 2026-10-31: this module-level proof is ACCEPTED as the B7 'v1 module-identical' check (byte identity would need v2 to
 ##   copy position-stats / usd / route-source / FloorTierBadge, i.e. compute its own P&L — rejected).
+
+## MODULE-LEVEL (v1-modules.py): per v1 route, every module it can load — first-load chunks + every lazy chunk reachable through
+##   the loader stubs, transitively — base vs head
+/               reachable chunks base 224 head 225 · modules base 1591 head 1595 · missing 0 · extra 4 (v2-marked 0) · v2-marked anywhere 0 · OK
+/_global-error  reachable chunks base   8 head   8 · modules base  159 head  159 · missing 0 · extra 0 (v2-marked 0) · v2-marked anywhere 0 · OK
+/_not-found     reachable chunks base 197 head 197 · modules base 1479 head 1479 · missing 0 · extra 0 (v2-marked 0) · v2-marked anywhere 0 · OK
+/admin          reachable chunks base 201 head 201 · modules base 1486 head 1486 · missing 0 · extra 0 (v2-marked 0) · v2-marked anywhere 0 · OK
+/analytics      reachable chunks base 211 head 211 · modules base 1512 head 1512 · missing 0 · extra 0 (v2-marked 0) · v2-marked anywhere 0 · OK
+/docs           reachable chunks base 211 head 211 · modules base 1510 head 1510 · missing 0 · extra 0 (v2-marked 0) · v2-marked anywhere 0 · OK
+/privacy        reachable chunks base 210 head 210 · modules base 1511 head 1511 · missing 0 · extra 0 (v2-marked 0) · v2-marked anywhere 0 · OK
+/status         reachable chunks base 198 head 198 · modules base 1486 head 1486 · missing 0 · extra 0 (v2-marked 0) · v2-marked anywhere 0 · OK
+/swap           reachable chunks base 223 head 224 · modules base 1588 head 1592 · missing 0 · extra 4 (v2-marked 0) · v2-marked anywhere 0 · OK
+/terms          reachable chunks base 210 head 210 · modules base 1511 head 1511 · missing 0 · extra 0 (v2-marked 0) · v2-marked anywhere 0 · OK
+V1 MODULE-IDENTICAL (module level): every module each v1 route can load in base is in head, and no v1 route can load v2 code
+## the 4 extra ids on / and /swap are 174005 position-stats, 352934 route-source, 722042 FloorTierBadge, 816740 order-engine/usd:
+##   v1 sources inlined into their importers in base, standalone in head because v2 now imports them too. 0 v1 source files changed.
