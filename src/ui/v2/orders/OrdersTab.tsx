@@ -225,7 +225,19 @@ export function OrdersTab() {
   const { address } = useAccount()
   // v1: the wallet's ACTIVE chain, for the per-order mismatch badge before the Cancel click.
   const connectedChainId = useChainId()
-  const { orders, activeOrders, cancelOrder, cancelAllOrders, removeOrder, pendingCancel, confirmCancel, clearPendingCancel, isLoading, readAuthDenied, requestOrdersReadAuth } = useOrderEngine()
+  const engine = useOrderEngine()
+  return <OrdersView address={address} connectedChainId={connectedChainId} engine={engine} />
+}
+
+/** The slice of v1's `useOrderEngine()` the Orders tab reads — the ONE instance `OrdersTab` holds. */
+export type OrdersEngine = Pick<
+  ReturnType<typeof useOrderEngine>,
+  'orders' | 'activeOrders' | 'cancelOrder' | 'cancelAllOrders' | 'removeOrder' | 'pendingCancel' | 'confirmCancel' | 'clearPendingCancel' | 'isLoading' | 'readAuthDenied' | 'requestOrdersReadAuth'
+>
+
+/** The tab's view over the engine slice (no hook of its own besides UI state): what `OrdersTab` renders. */
+export function OrdersView({ address, connectedChainId, engine }: { address: string | undefined; connectedChainId: number; engine: OrdersEngine }) {
+  const { orders, activeOrders, cancelOrder, cancelAllOrders, removeOrder, pendingCancel, confirmCancel, clearPendingCancel, isLoading, readAuthDenied, requestOrdersReadAuth } = engine
   const [filter, setFilter] = useState<OrderFilter>('active')
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const rootRef = useRef<HTMLElement>(null)

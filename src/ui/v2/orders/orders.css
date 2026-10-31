@@ -15,6 +15,8 @@
 .ts-orders-notice { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; padding-left: 14px; border-left: 2px solid var(--cream); }
 @media (max-width: 600px) {
   .ts-orders-detail { padding-left: 0; }
+  /* m07: three filters must fit 343 px — smaller mono, tighter tracking, no wrap */
+  .ts-orders-tabs > button { font-size: 11px; letter-spacing: 0.5px; white-space: nowrap; }
   .ts-orders-notice { flex-direction: column; align-items: flex-start; gap: 4px; }
 }
 

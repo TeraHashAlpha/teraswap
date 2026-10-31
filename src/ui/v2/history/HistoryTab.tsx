@@ -70,7 +70,11 @@ function HistoryRow({ r, now }: { r: SwapRecord; now: number }) {
  * move between the rows' tx links.
  */
 export function HistoryTab() {
-  const { address, isConnected, swaps, total, loading, error, fetchedAt, fetchHistory } = useWalletHistory()
+  return <HistoryView {...useWalletHistory()} />
+}
+
+/** The tab's view over v1's read (`useWalletHistory`): what `HistoryTab` renders. */
+export function HistoryView({ address, isConnected, swaps, total, loading, error, fetchedAt, fetchHistory }: ReturnType<typeof useWalletHistory>) {
 
   if (!isConnected) {
     return (
