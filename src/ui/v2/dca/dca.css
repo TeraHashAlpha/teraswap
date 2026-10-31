@@ -26,3 +26,29 @@
 /* Orders list: hairline rows, no card. */
 .ts-dca-row { border-top: 1px solid var(--hairline); padding: 12px 0; }
 .ts-dca-row:first-child { border-top: 0; }
+
+/* [B7] Positions (round7 35): an active position = ring | body on one hairline row, the fills strip and the actions under it. */
+.ts-dca-pos {
+  display: grid; gap: 16px 32px; align-items: start; padding: 20px 0;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "ring" "body" "fills" "actions";
+}
+.ts-dca-pos-ring { grid-area: ring; display: flex; justify-content: center; }
+.ts-dca-pos-body { grid-area: body; min-width: 0; }
+.ts-dca-pos-fills { grid-area: fills; min-width: 0; }
+.ts-dca-pos-actions { grid-area: actions; }
+@media (min-width: 720px) {
+  .ts-dca-pos { grid-template-columns: 124px minmax(0, 1fr); grid-template-areas: "ring body" "fills fills" "actions actions"; }
+  .ts-dca-pos-ring { justify-content: flex-start; }
+}
+.ts-dca-summary-block { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--hairline); }
+.ts-dca-fills { border-top: 1px solid var(--hairline); padding-top: 12px; }
+.ts-dca-fill { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--hairline); }
+.ts-dca-fill:first-child { border-top: 0; }
+/* decorative fills strip: one dot per planned buy, cream when filled */
+.ts-dca-dots { display: inline-flex; gap: 6px; }
+.ts-dca-dots > span { width: 7px; height: 7px; border-radius: 9999px; border: 1px solid var(--hairline-ring); }
+.ts-dca-dots > span[data-on] { background: var(--cream); border-color: var(--cream); }
+/* the fill bar: a 2 px hairline track, cream fill (no box) */
+.ts-dca-bar { height: 2px; background: var(--hairline); }
+.ts-dca-bar > span { display: block; height: 100%; background: var(--cream); transition: width var(--t-underline) var(--ease-out); }
