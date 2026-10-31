@@ -137,6 +137,7 @@ The executor itself does NOT push alerts. Alerting goes through the existing Ter
 | Gas-cap hit (no execution despite triggered order) | Supabase: `order_executions` row with `status='skipped'` and `reason` containing `gas` | Manual audit |
 | Execution failure streak | Repeated rows with `status='failed'` for the same order | Manual audit |
 | Process OOM / crash loop | PM2 logs, `pm2 status` | Host-level monitoring (out of scope here) |
+| RPC provider rejects the key (allowlist / invalid key / 401 / 403) | Keeper itself (`rpc-auth.js`, INC-2026-10-30-001) | Telegram `🔐 RPC AUTH REJECTED — Urgency: HIGH`: once at boot (rate-limited across pm2 restarts), or once after 3 consecutive rejections at runtime, then at most hourly; one `RPC auth recovered` when it clears. State: `/health` `paused: "rpc-auth"`, `/metrics` `teraswap_executor_paused{reason="rpc-auth"} 1`, heartbeat `alive but PAUSED`, Supabase `keeper_runtime_config.paused`. Fix: § 7 |
 
 **Where to look first:**
 - `pm2 status` and `pm2 logs teraswap-executor` for process health.
@@ -200,6 +201,55 @@ Rotating the executor wallet key is a 48 h timelocked operation on-chain plus an
 
 ---
 
+## 7. Changing an RPC key (new key, rotation, allowlist, or any restriction)
+
+**Why this exists:** in INC-2026-10-30-001 a domain allowlist went onto a key that the Base keeper's
+`RPC_URL` also used. Its consumers had been checked by grepping for the **key prefix**, which missed the
+keeper (the key sits inside a URL path in a host env file). Every keeper RPC call was refused for ~20 h.
+**Inventory by RPC hostname, never by key.** Do not paste key values into tickets, chats or this file.
+
+1. **Inventory every consumer by hostname** (e.g. `g.alchemy.com`). Print variable names and hosts only,
+   never the path or query:
+   - Keeper host, every env file of every keeper (`.env.executor` = Base, `.env.executor.arbitrum`, …),
+     plus any backup copy (INC-2026-09-08-001 found one under the home directory):
+     ```bash
+     cd contracts/order-engine/executor
+     # prints "file  VAR  scheme://host" — never the userinfo, path or query (where keys live)
+     grep -HE '^[A-Z0-9_]+="?[a-z]+://' .env.executor* \
+       | sed -E 's#^([^:]+):([A-Z0-9_]+)="?([a-z]+)://([^/?#@"]*@)?([^/?#"]+).*#\1  \2  \3://\5#' \
+       | grep '<provider-host>'
+     ```
+   - Vercel, **Production + Preview + Development**: Project → Settings → Environment Variables, search
+     for the hostname (or `vercel env pull` into a temp file OUTSIDE the repo, grep it the same way, then
+     delete it).
+   - Other secret stores holding an RPC URL (GitHub Actions secrets used by `daily-health-report`,
+     Cloudflare Worker secrets): list them by name and record which provider/key each one uses.
+   - Write the list down: one line per `consumer → variable → provider host`.
+2. **Separate.** One key per consumer (web client, web server `RPC_URL_<chainId>`, keeper Base, keeper
+   Arbitrum, CI). Never restrict a key that more than one consumer shares; create the new key first.
+3. **Restrict to fit the consumer.** A *domain/origin allowlist* is for browser keys only. The keeper is
+   a server process that sends no `Origin`, so a domain allowlist rejects it (`Unspecified origin not on
+   whitelist`). Keeper keys get an IP allowlist (the host's egress IP) or no allowlist.
+4. **Swap and verify the keeper host** — one process at a time:
+   ```bash
+   pm2 restart teraswap-keeper-arbitrum && pm2 logs teraswap-keeper-arbitrum --lines 50
+   pm2 restart teraswap-executor && pm2 logs teraswap-executor --lines 50
+   ```
+   - Pass: the `[chain-verify] eth_chainId = …` line, no `rpc: AUTH REJECTED`, and a first cycle
+     (`No active orders` / `Found N active order(s)`).
+   - Fail fast: `rpc: AUTH REJECTED chain=<id> source=RPC_URL — check provider allowlist/key` means
+     the boot refused. Go back to step 3.
+   - After a few minutes: `/health` → `"paused": null`; `/metrics` →
+     `teraswap_executor_paused{reason="rpc-auth"} 0`; Supabase → `keeper_runtime_config.paused IS NULL`.
+5. **Verify Vercel.** Redeploy if a variable changed (env changes apply to new deployments only). Then
+   watch the runtime logs for ~15 min for `403` / `401` / `whitelist` from RPC calls, and check that
+   `/api/health` answers 200.
+6. **Only then** restrict or revoke the old key. A key that ever appeared in a log, alert or chat is
+   revoked, not merely restricted: an Origin allowlist is a header check that any non-browser client
+   can satisfy.
+
+---
+
 ## References
 
 - ADR — order engine architecture (see `docs/ADR/`)
@@ -207,4 +257,5 @@ Rotating the executor wallet key is a 48 h timelocked operation on-chain plus an
 - `contracts/order-engine/executor/kms-signer.js` — KMS / Vault resolution logic
 - `contracts/order-engine/executor/ecosystem.config.cjs` — PM2 deployment config
 - [`executor-compromise.md`](./executor-compromise.md) — security incident runbook
+- [`INC-2026-10-30-001`](../../Audits/Incidents/INC-2026-10-30-001.md) — RPC key allowlisted under the keeper (origin of § 7)
 - [`KV-troubleshooting.md`](./KV-troubleshooting.md) — Upstash diagnostics (executor does not use KV directly, but shares the monitoring pipeline)
