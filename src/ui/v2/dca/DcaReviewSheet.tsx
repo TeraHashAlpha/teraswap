@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState, type Ref } from 'react'
 import { FLOOR_CONSENT_CHECKBOX, FLOOR_CONSENT_HEADING } from '@/components/dca/DcaFloorConsentDialog'
 import { affectedSymbols } from '@/components/dca/pair-floor-info'
-import type { CreateOrderConfig } from '@/lib/order-engine'
 import { Button } from '../primitives'
 import { Sheet } from '../modals/Sheet'
 import { Mark, ReviewRow } from '../modals/parts'
@@ -50,8 +49,10 @@ export function DcaConsentBlock({ tier, body, checked, onChange, checkboxRef }: 
 
 /**
  * [ADR-025] The DCA review (B6a): the schedule, the Protection line and cap, the server's tier line and — below `onchain-feed` — the
- * consent block that gates the CTA. Create DCA (B6b) hands the acknowledged draft to `onCreate` = v1's `createOrder` (the engine
- * FREEZES it for the EIP-712 review; nothing is signed or sent from here). `busy` holds the sheet while that call runs.
+ * consent block that gates the CTA. Create DCA (B6b) hands the TIER whose box is ticked (or undefined on the on-chain tier) to `onCreate`,
+ * which re-runs v1's whole create step and calls `createOrder` with the draft THAT builds (A70 M-1: the sheet holds no draft to send, and
+ * no acknowledgement outlives its press — the engine FREEZES the order for the EIP-712 review; nothing is signed or sent from here).
+ * `busy` holds the sheet while that runs.
  *
  * `conflictTier` is the `requiredTier` of a 409 from api/orders (the server re-classified and wants a stronger acknowledgement than the
  * one given): the consent REOPENS for that tier — the box is unticked and takes focus, the CTA disabled again — and never for a weaker one.
@@ -65,7 +66,7 @@ export function DcaReviewSheet({
   conflictTier?: string
   busy?: boolean
   switchNetwork?: { label: string; onSwitch: () => void }
-  onCreate: (draft: CreateOrderConfig) => void
+  onCreate: (ack: WeakerTier | undefined) => void
   onClose: () => void
 }) {
   const baseTier = consentTier(review.info)
@@ -88,7 +89,7 @@ export function DcaReviewSheet({
 
   function create() {
     if (busy) return
-    onCreate({ ...review.draft, ...(tier ? { floorAck: { tier, acknowledgedAt: new Date().toISOString() } } : {}) })
+    onCreate(tier ?? undefined)
   }
 
   return (

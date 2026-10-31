@@ -79,6 +79,7 @@ import DCAPanel from '@/components/DCAPanel'
 import type { CreateOrderConfig } from '@/lib/order-engine'
 import { findChainToken } from '@/lib/chains/tokens'
 import { getWrappedNative } from '@/lib/chains/registry'
+import { DEFAULT_MAX_SLIPPAGE_BPS, deriveSigningMinAmountOut } from '@/lib/order-engine'
 import { DcaCard } from './DcaCard'
 import { failureCopy, requiredTierFromError, signSteps } from './dca-model'
 
@@ -284,7 +285,7 @@ describe('signing → created', () => {
 })
 
 describe('failure', () => {
-  it('the wallet rejects: no POST, v1\'s text verbatim, v1\'s sounds (stop + cancel), Retry re-sends the identical config', async () => {
+  it('the wallet rejects: no POST, v1\'s text verbatim, v1\'s sounds (stop + cancel), Retry re-runs the create step and sends a FRESH config (equal in value, never the same object — A70 M-1)', async () => {
     fake.sign = async () => REJECTED
     await v2ToSheet(false)
     const dlg = dialog()
@@ -305,7 +306,8 @@ describe('failure', () => {
     fireEvent.click(retry)
     await screen.findByTestId('dca-sign-confirm')
     expect(fake.seq.map((c) => c[0])).toEqual(['createOrder', 'confirmOrder', 'createOrder'])
-    expect(fake.seq[2][1]).toBe(fake.seq[0][1]) // the very same object v1's handleCreate built
+    expect(fake.seq[2][1]).not.toBe(fake.seq[0][1]) // A70 M-1: built again by prepare(), not the draft the review opened on
+    expect(fake.seq[2][1]).toEqual(fake.seq[0][1]) // nothing moved: v1's handleCreate would build the same values
     expect(h.soundLog.at(-1)).toBe('startWaitingSound') // v1: Start pressed again → the loop starts again
     fireEvent.click(screen.getByTestId('dca-sign-confirm'))
     await screen.findByTestId('dca-sign-view-positions')
@@ -338,6 +340,118 @@ describe('failure', () => {
     expect(failureCopy('New DCA orders are temporarily paused while…')).toEqual({ title: 'DCA temporarily paused', description: 'Only new DCA orders are paused — your existing ones keep running.' })
     expect(failureCopy('boom')).toEqual({ title: 'DCA order failed', description: 'boom' })
     expect(failureCopy(null)).toEqual({ title: 'DCA order failed', description: 'Order could not be submitted.' })
+  })
+})
+
+// ── A70 M-1: Create and Retry re-run v1's whole create step ───────────────────
+
+const oracle = (chainlinkPrice: number | null, over: Record<string, unknown> = {}) => ({ ...h.oracle, chainlinkPrice, ...over })
+/** The floor v1's `handleCreate` derives for 0.5 WETH → USDC at the given Chainlink WETH price (USDC = 1): the same lib call, the same inputs. */
+const v1Floor = (priceIn: number) =>
+  deriveSigningMinAmountOut({
+    amountIn: 500_000_000_000_000_000n, srcDecimals: 18, dstDecimals: 6, maxSlippageBps: DEFAULT_MAX_SLIPPAGE_BPS,
+    chainlinkPriceIn: priceIn, chainlinkPriceOut: 1, defiLlamaPriceIn: null, defiLlamaPriceOut: null,
+  }).minAmountOut
+
+describe('A70 M-1 · Retry and Create build the draft afresh', () => {
+  it('Retry, a gate closed since the failure (depeg): v1 would stop before the wallet — no second createOrder, the sheets give way to the form and its banner', async () => {
+    fake.sign = async () => REJECTED
+    const view = await v2ToSheet(false)
+    fireEvent.click(screen.getByTestId('dca-sign-confirm'))
+    const retry = await screen.findByTestId('dca-sign-retry')
+    h.depeg = { mode: 'block', divergence: 12, symbol: 'WETH', message: 'WETH trades 12% off its exchange rate.' }
+    view.rerender(<DcaCard chainId={BASE} />)
+    fireEvent.click(retry)
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(fake.seq.map((c) => c[0])).toEqual(['createOrder', 'confirmOrder']) // no #2
+    expect(screen.getByTestId('dca-depeg-block').textContent).toContain('DCA blocked — WETH depeg.')
+    expect(h.soundLog.at(-1)).not.toBe('startWaitingSound') // nothing left running
+  })
+
+  it('Create, a gate closed since the review opened (oracle): nothing reaches the engine, the review closes onto the form\'s banner', async () => {
+    const view = await v2ToReview()
+    h.oracle = oracle(null, { oracleUnavailable: true, oracleIntegrityFailed: true, message: 'Chainlink answer failed integrity checks.' })
+    view.rerender(<DcaCard chainId={BASE} />)
+    // the draft key does not hold the price-FEED STATUS: the review may still be up — the press is what must stop
+    const create = screen.queryByTestId('dca-review-create')
+    if (create) fireEvent.click(create)
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(fake.seq).toEqual([])
+    expect(screen.getByTestId('dca-oracle-block')).toBeTruthy()
+  })
+
+  it('Create, the pair\'s tier moved since the review opened (on-chain → unpriced): no createOrder; the review asks for the consent, box unticked', async () => {
+    await v2ToReview()
+    expect(screen.queryByTestId('dca-consent')).toBeNull()
+    h.floor = unpricedInfo()
+    fireEvent.click(screen.getByTestId('dca-review-create'))
+    const consent = await screen.findByTestId('dca-consent')
+    expect(consent.getAttribute('data-tier')).toBe('unpriced')
+    expect((screen.getByTestId('dca-consent-checkbox') as HTMLInputElement).checked).toBe(false)
+    expect(screen.getByTestId('dca-review-create')).toHaveProperty('disabled', true)
+    expect(fake.seq).toEqual([])
+    fireEvent.click(screen.getByTestId('dca-consent-checkbox'))
+    fireEvent.click(screen.getByTestId('dca-review-create'))
+    await screen.findByTestId('dca-sign-body')
+    expect(config(0).floorAck?.tier).toBe('unpriced')
+  })
+
+  it('a price moves while the review is open: the review closes (the draft key holds the prices prepare() reads)', async () => {
+    const view = await v2ToReview()
+    h.oracle = oracle(2600)
+    view.rerender(<DcaCard chainId={BASE} />)
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(fake.seq).toEqual([])
+  })
+
+  it('a price moves while the order is FROZEN: the sign sheet stays (it prints the exact struct); only the review is price-keyed', async () => {
+    const view = await v2ToSheet(false)
+    h.oracle = oracle(2600)
+    view.rerender(<DcaCard chainId={BASE} />)
+    expect(screen.getByTestId('dca-sign-body').getAttribute('data-phase')).toBe('frozen')
+    expect(fake.seq.map((c) => c[0])).toEqual(['createOrder'])
+  })
+
+  it('Retry, the price moved: signs the NEW floor — bigint-equal to what v1\'s handleCreate derives for the same inputs (and to v1\'s own createOrder config)', async () => {
+    fake.sign = async () => REJECTED
+    const view = await v2ToSheet(false)
+    const oldFloor = BigInt(config(0).minAmountOut)
+    expect(oldFloor).toBe(v1Floor(2500))
+    fireEvent.click(screen.getByTestId('dca-sign-confirm'))
+    const retry = await screen.findByTestId('dca-sign-retry')
+    h.oracle = oracle(2600)
+    view.rerender(<DcaCard chainId={BASE} />)
+    fireEvent.click(retry)
+    await screen.findByTestId('dca-sign-confirm')
+    const v2Floor = BigInt(config(2).minAmountOut)
+    expect(v2Floor).toBe(v1Floor(2600))
+    expect(v2Floor).not.toBe(oldFloor)
+    expect(config(2).priceInUsd).toBe(2600) // the spend-leg price travels with it (v1: livePriceIn)
+    // …and v1's own panel, same mocked answers, hands createOrder the same floor
+    cleanup()
+    resetFake()
+    await v1ToModal(false)
+    expect(BigInt(config(0).minAmountOut)).toBe(v2Floor)
+  })
+
+  it('consent is asked again after a failure: Retry returns to the review with the box UNTICKED, no createOrder until it is ticked, and the new call carries a fresh acknowledgement', async () => {
+    h.floor = unpricedInfo()
+    fake.sign = async () => REJECTED
+    await v2ToSheet(true)
+    const firstAck = config(0).floorAck
+    expect(firstAck?.tier).toBe('unpriced')
+    fireEvent.click(screen.getByTestId('dca-sign-confirm'))
+    fireEvent.click(await screen.findByTestId('dca-sign-retry'))
+    const box = (await screen.findByTestId('dca-consent-checkbox')) as HTMLInputElement
+    expect(box.checked).toBe(false)
+    expect(screen.getByTestId('dca-review-create')).toHaveProperty('disabled', true)
+    expect(fake.seq.map((c) => c[0])).toEqual(['createOrder', 'confirmOrder']) // the old ack was NOT reused
+    fireEvent.click(box)
+    fireEvent.click(screen.getByTestId('dca-review-create'))
+    await screen.findByTestId('dca-sign-body')
+    expect(fake.seq.map((c) => c[0])).toEqual(['createOrder', 'confirmOrder', 'createOrder'])
+    expect(config(2).floorAck?.tier).toBe('unpriced')
+    expect(config(2).floorAck).not.toBe(firstAck)
   })
 })
 

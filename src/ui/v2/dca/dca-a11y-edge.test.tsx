@@ -79,7 +79,7 @@ import { getWrappedNative } from '@/lib/chains/registry'
 import { DcaCard } from './DcaCard'
 import { useDcaLifecycle, type DcaEngineSlice } from './use-dca-lifecycle'
 import { buildDcaDraft } from './dca-model'
-import type { PreparedReview } from './use-dca-form'
+import type { PrepareFn, PreparedReview } from './use-dca-form'
 
 const weth = () => findChainToken(getWrappedNative(BASE), BASE)!
 const WETH_BALANCE = { raw: 2_000_000_000_000_000_000n, formatted: '2.0' }
@@ -282,6 +282,7 @@ const draft = buildDcaDraft({
   amountIn: '500000000000000000', minAmountOut: '1200000000', maxSlippageBps: 300, expirySeconds: 2_592_000, router: '0x1111111111111111111111111111111111111111', priceInUsd: 2500, dcaInterval: 86_400, dcaTotal: 10,
 })
 const REVIEW: PreparedReview = { draft, info: { tier: 'onchain-feed', legs: { in: { registered: true, priced: true }, out: { registered: true, priced: true } }, registeredFeedCount: 2, effectiveCap: 250 }, symbols: [], minAmountOut: '1200000000' }
+const PREPARE_OK: PrepareFn = async () => ({ ok: true, review: REVIEW })
 const FROZEN = { order: {}, config: draft, computedHash: '0xab', chainId: BASE, account: '0xd44d00000000000000000000000000000000962d' } as unknown as PendingOrderReview
 
 function engineStub(over: Partial<DcaEngineSlice> = {}): DcaEngineSlice {
@@ -295,9 +296,9 @@ describe('use-dca-lifecycle: guards', () => {
     const { result } = renderHook(() => useDcaLifecycle(engine))
     act(() => { result.current.open(REVIEW) })
     let p1!: Promise<void>
-    act(() => { p1 = result.current.create(draft) })
+    act(() => { p1 = result.current.create(PREPARE_OK) })
     expect(result.current.phase).toBe('creating')
-    await act(async () => { await result.current.create(draft) }) // the second press: ignored
+    await act(async () => { await result.current.create(PREPARE_OK) }) // the second press: ignored
     expect(engine.createOrder).toHaveBeenCalledTimes(1)
     await act(async () => { gate.resolve(); await p1 })
   })
@@ -327,11 +328,11 @@ describe('use-dca-lifecycle: guards', () => {
     expect(result.current.outcome).toBeNull()
   })
 
-  it('an event that predates the press is not read as the outcome; only the one after it is', () => {
+  it('an event that predates the press is not read as the outcome; only the one after it is', async () => {
     let engine = engineStub({ latestEvent: { type: 'order_error', orderId: 'old', error: 'old failure' } })
     const { result, rerender } = renderHook(() => useDcaLifecycle(engine))
     act(() => { result.current.open(REVIEW) })
-    act(() => { void result.current.create(draft) })
+    await act(async () => { await result.current.create(PREPARE_OK) })
     engine = engineStub({ pendingOrder: FROZEN, latestEvent: engine.latestEvent })
     rerender()
     expect(result.current.phase).toBe('frozen')
