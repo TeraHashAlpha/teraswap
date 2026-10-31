@@ -113,3 +113,52 @@
 ## Verdict
 
 `VERDICT: 0C/0H → approved` — with 1M (M-1) and 2L (L-1, L-2) as follow-ups.
+
+---
+
+## A70b — re-check of the A70 fixes (2026-10-31)
+
+| Pass | Date | Commit audited | Suite | Result |
+|---|---|---|---|---|
+| A70b | 2026-10-31 | `fix/ui-v2-dca-audit-fixes` head `e17fd87`, which already contained origin/main `8c1683c` (no merge needed). Later merged unchanged as PR #633 (main `0a642a9`; `src/ui/v2/dca/**` identical to `e17fd87`) | 395 files / 6281 tests passed | 0C / 0H / 0M / 3L — **approved** |
+
+**How the pass ran:** read-only, in a fresh detached worktree at `e17fd87`, with `npm ci` and the full suite run once. The owner approved the result on 2026-10-31. Line numbers below are at `e17fd87`.
+
+**What changed:** 11 files, all under `src/ui/v2/dca/**` or `docs/feedback/`. No v1, `src/lib` or `src/hooks` file changed.
+
+### Prior findings
+
+| Prior | Status | Evidence | Proving test (`dca-signing.test.tsx`) |
+|---|---|---|---|
+| M-1 | closed | `use-dca-lifecycle.ts:98-136`: `run()` calls the form's `prepare()` again and hands `createOrder` the draft it just built (`:129`). Create (`:147-154`) and Retry (`:161-168`) both go through it, and the hook no longer stores a draft or an acknowledgement. `use-dca-form.ts:304-305` re-runs the gates. With an `ack` it skips the server tier request, as v1 does (`:350`, v1 `DCAPanel.tsx:890`), runs `deriveSigningMinAmountOut` again (`:355`) and builds a fresh `floorAck` (`:380`). `DcaReviewSheet.tsx:90-93` hands over only the ticked tier; `DcaCard.tsx:551,564` pass `form.prepare`. | `:357` a gate (depeg) closes before Retry → no second `createOrder`. `:415` the price moves 2500 → 2600, and Retry signs a `minAmountOut` equal (as bigint) to v1's derivation and to v1's own `createOrder` config. `:437` Retry returns to the review with the box unticked; the old acknowledgement is not reused. `:383` the tier moves before Create → consent reopens unticked, no `createOrder`. |
+| M-1, frozen order (owner-accepted design) | holds | The sign sheet shows the engine's `pendingOrder`, or the copy taken at the Sign press (`use-dca-lifecycle.ts:79,173`). The engine signs `p.order` exactly as frozen (`useOrderEngine.ts:753,795-798`). A price-only change never drops a frozen order (`use-dca-lifecycle.ts:212-213`). Any later Retry calls `prepare()` again. | `:407` a price change while frozen → the sign sheet stays, one `createOrder`. `:399` a price change closes the review. |
+| L-1 | closed | `dca-model.ts:227-232`: an error that starts `Acknowledgement required` but does not parse reopens consent at `unpriced`; any other error stays a plain failure. Wired at `use-dca-lifecycle.ts:61`. The start-of-string match is safe because the API client throws the raw `json.error` (`src/lib/order-engine/supabase.ts:152`) and the engine only truncates it at 120 characters (`useOrderEngine.ts:984`). The optional second half of the A70 fix, carrying `requiredTier` through the API client, is not in this branch and remains the library follow-up. | `:504` pure matrix. `:516` an unparsed sentence → `unpriced`, fresh acknowledgement, no Retry. `:538` any other 409 → plain failure, and Retry asks for consent again. |
+| L-2 | closed (the docs option, owner-accepted) | `docs/feedback/feat-ui-v2-dca.md:39` and `docs/feedback/feat-ui-v2-dca-signing.md:23` now list `Connect wallet` and `Switch to {chain}`. | n/a |
+
+### Regression sweep (A70 sections A, B and C)
+
+- **A — Order equality.** `buildDcaDraft` is unchanged (`dca-model.ts:87-105`). `floorAck` is now built inside `prepare()`, with v1's shape and position (`DCAPanel.tsx:903,990`). The two-phase flow (`createOrder`, then the sign sheet, then `confirmOrder`) is unchanged, and nonce, expiry, owner and typed data still come from v1's engine.
+- **B — Gates and consent.** `prepare()` runs the gates in v1's order (`DCAPanel.tsx:795-965`). The $250 cap ceiling, the consent copy and `reopenTier` are unchanged. The 409 parser is unchanged; L-1 only adds the fallback.
+- **C — Signing hygiene.** `sign` and `cancelSign` are unchanged. `setCreating(true)` runs before the first `await` (`use-dca-lifecycle.ts:101`), so a double press is still ignored. Retry produces a new frozen order and needs a new Sign press, so an API error never resubmits on its own.
+- **Scope:** nothing changed outside the three findings.
+
+### New findings
+
+**[S-1] L — `src/ui/v2/dca/dca-signing.test.tsx:371-377`**
+- **Issue:** the test "Create, a gate closed since the review opened (oracle)" never presses Create. Setting the oracle price to `null` also changes the price key, so the review closes (`DcaCard.tsx:466`) before the `if (create)` click.
+- **Failure path:** a regression that skipped the gates on Create would still pass. Only Retry's gate path (`:357`) is proven by a test.
+- **Fix:** flip a gate that is not part of any key (depeg `mode: 'block'`) while the review is open, assert the review is still open, then press Create unconditionally and assert that `createOrder` was never called.
+
+**[S-2] L — `src/ui/v2/dca/DcaCard.tsx:461-466`, `:416`**
+- **Issue:** a price change while the order is being created, is frozen, or is being signed is absorbed without closing anything: the key moves on and `reset` does nothing in those phases. A review that reopens afterwards (a 409 at `use-dca-lifecycle.ts:61`, or a tier change at `:119`) prints the floor of the old draft.
+- **Failure path:** the order freezes at 2500, the price moves to 2600 while the wallet prompt is open, and the server answers 409. The review now shows the floor derived at 2500. Create then calls `prepare()` again and freezes the 2600 floor, and the EIP-712 sheet shows the correct value, so the wrong floor is never signed.
+- **Fix:** store the `priceKey` on `PreparedReview`, and close or rebuild the review whenever it differs from `form.priceKey`.
+
+**[S-3] L — `src/ui/v2/dca/use-dca-lifecycle.ts:117`, `src/ui/v2/dca/use-dca-form.ts:349-350`**
+- **Issue:** with an acknowledgement, Create checks it against the tier cached when the pair was selected (`pairFloor`). v1 never consults that cached tier: it uses the acknowledged tier as it is (`DCAPanel.tsx:890`, `tier = ack`).
+- **Failure path:** the tier lookup at selection fails, so the cached tier is `unpriced` (any lookup failure classifies as `unpriced`). Review asks the server again and gets `offchain-price`. The user ticks the box and presses Create, and consent reopens at `unpriced` with the stricter copy and cap. It never asks for less than the server requires, but the feedback file's "v1 parity" claim for this path is not accurate.
+- **Fix:** with an acknowledgement, compute the required tier from the review the user actually ticked plus any 409 tier, or trust the acknowledgement as v1 does.
+
+### A70b verdict
+
+`VERDICT: 0C/0H → approved` — M-1, L-1 and L-2 closed; 3L (S-1, S-2, S-3) as follow-ups.
