@@ -9,7 +9,9 @@
  */
 
 import { createServer } from "http"
-import { sendTelegramAlert, sendTelegramHeartbeat } from "./alert.js"
+import { sendTelegramAlert, sendTelegramHeartbeat, esc } from "./alert.js"
+// [fix/executor-alert-masking-rpc-auth] "Last error:" is a viem message (RPC URL, key in the path).
+import { redactError } from "./redact.js"
 
 const ALERT_COOLDOWN_MS = 5 * 60 * 1000 // 5 minutes
 const CONSECUTIVE_ERROR_THRESHOLD = 3
@@ -57,7 +59,7 @@ export class ExecutorMonitor {
     if (this.consecutiveErrors >= CONSECUTIVE_ERROR_THRESHOLD) {
       this._sendCooldownAlert(
         "consecutive_errors",
-        `⚠️ ${this.consecutiveErrors} consecutive errors!\nLast error: ${this.stats.lastError?.message || "unknown"}`
+        `⚠️ ${this.consecutiveErrors} consecutive errors!\nLast error: ${esc(redactError(this.stats.lastError?.message || "unknown"))}`
       )
     }
 
@@ -113,7 +115,7 @@ export class ExecutorMonitor {
     if (this.consecutiveErrors >= CONSECUTIVE_ERROR_THRESHOLD) {
       this._sendCooldownAlert(
         "consecutive_errors",
-        `⚠️ ${this.consecutiveErrors} consecutive errors!\nLast error: ${error?.message || "unknown"}`
+        `⚠️ ${this.consecutiveErrors} consecutive errors!\nLast error: ${esc(error ? redactError(error) : "unknown")}`
       )
     }
   }
@@ -215,7 +217,7 @@ export class ExecutorMonitor {
         if (err.code === "EADDRINUSE") {
           console.warn(`[MONITOR] Metrics port ${port} already in use, metrics server disabled`)
         } else {
-          console.warn(`[MONITOR] Metrics server error: ${err.message}`)
+          console.warn(`[MONITOR] Metrics server error: ${redactError(err)}`)
         }
       })
 
@@ -223,7 +225,7 @@ export class ExecutorMonitor {
         console.log(`[MONITOR] Prometheus metrics at http://localhost:${port}/metrics`)
       })
     } catch (err) {
-      console.warn(`[MONITOR] Failed to start metrics server: ${err.message}`)
+      console.warn(`[MONITOR] Failed to start metrics server: ${redactError(err)}`)
     }
   }
 

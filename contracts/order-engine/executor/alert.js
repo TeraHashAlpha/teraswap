@@ -9,16 +9,22 @@
 
 import { hostname } from "os"
 import { scoreTier } from "./freeze-score.js"
+// [fix/executor-alert-masking-rpc-auth] INC-2026-10-30-001: an alertOps detail carried viem's
+// `URL: https://<provider>/v2/<key>` line to Telegram. Every free-text field is redacted here, and
+// sendTelegramAlert redacts the whole outgoing text as a last line of defence.
+import { redactError, redactUrl, ALERT_LINK_HOSTS } from "./redact.js"
 
 const HOST = hostname()
 
 /**
  * Minimal HTML escaping for values interpolated into a Telegram HTML body.
- * Telegram's HTML parse_mode only requires &, <, > to be escaped.
+ * Telegram's HTML parse_mode only requires &, <, > to be escaped. Exported for the other alert
+ * builders (event-watcher.js, monitor.js): an RPC error whose Details is an HTML page (a 403
+ * challenge) is invalid Telegram HTML, and Telegram rejects the whole message — the alert is lost.
  * @param {unknown} v
  * @returns {string}
  */
-function esc(v) {
+export function esc(v) {
   return String(v)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -67,14 +73,19 @@ export async function sendTelegramAlert(message) {
   }
 
   const now = new Date().toISOString()
-  const text = [
-    `🚨 <b>TeraSwap Executor Alert</b>`,
-    `Host: ${HOST}`,
-    `Time: ${now}`,
-    `Chain: ${chainId}`,
-    ``,
-    message,
-  ].join("\n")
+  // Last line of defence: whatever a caller put in `message`, no URL path/query/userinfo leaves the
+  // host — except a public tx link to one of the keeper's own block explorers (event-watcher.js).
+  const text = redactUrl(
+    [
+      `🚨 <b>TeraSwap Executor Alert</b>`,
+      `Host: ${HOST}`,
+      `Time: ${now}`,
+      `Chain: ${chainId}`,
+      ``,
+      message,
+    ].join("\n"),
+    { allowHosts: ALERT_LINK_HOSTS },
+  )
 
   try {
     const controller = new AbortController()
@@ -93,7 +104,7 @@ export async function sendTelegramAlert(message) {
 
     clearTimeout(timeout)
   } catch (err) {
-    console.error("[ALERT] Telegram send failed:", err.message)
+    console.error("[ALERT] Telegram send failed:", redactError(err)) // the bot token is in the URL path
   }
 }
 
@@ -300,7 +311,8 @@ export async function alertUnexplainedOutflow({ outflowEth, thresholdEth, wallet
 export async function alertOps({ kind, detail }, score) {
   const body = [
     `🛠️ <b>Ops issue: ${esc(kind)}</b>`,
-    `Detail: ${esc(detail)}`,
+    // Redacted BEFORE escaping and in the RETURNED body too — callers interpolate error text here.
+    `Detail: ${esc(redactUrl(detail))}`,
     ``,
     ...scoreLines(score),
   ].join("\n")

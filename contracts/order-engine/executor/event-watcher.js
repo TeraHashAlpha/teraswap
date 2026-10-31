@@ -17,7 +17,10 @@
  */
 
 import { parseAbiItem, formatEther, decodeEventLog } from "viem"
-import { sendTelegramAlert } from "./alert.js"
+import { sendTelegramAlert, esc } from "./alert.js"
+// [fix/executor-alert-masking-rpc-auth] Poll errors are viem errors whose message carries the RPC
+// URL (key in the path) — INC-2026-10-30-001 logged "Poll error (5/5)" for ~20 h.
+import { redactError } from "./redact.js"
 // [PERF-KEEPER-IDLE-BACKOFF] The poll follows the keeper's mode: POLL_INTERVAL_MS while it has
 // active orders, IDLE_POLL_INTERVAL_MS while it has none (executor.js pushes the mode via setIdle).
 import { POLL_INTERVAL_MS, IDLE_POLL_INTERVAL_MS } from "./idle-backoff.js"
@@ -286,11 +289,11 @@ export function startEventWatcher(publicClient, contracts, monitor = null) {
       backoffMs = INITIAL_BACKOFF_MS
     } catch (err) {
       consecutiveFailures++
-      console.error(`[EVENT-WATCHER] Poll error (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): ${err.message}`)
+      console.error(`[EVENT-WATCHER] Poll error (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): ${redactError(err)}`)
 
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
         await sendTelegramAlert(
-          `\u26A0\uFE0F <b>Event Watcher Degraded</b>\n${MAX_CONSECUTIVE_FAILURES} consecutive RPC failures.\nLast error: ${err.message}`
+          `\u26A0\uFE0F <b>Event Watcher Degraded</b>\n${MAX_CONSECUTIVE_FAILURES} consecutive RPC failures.\nLast error: ${esc(redactError(err))}`
         )
         consecutiveFailures = 0
         backoffMs = INITIAL_BACKOFF_MS

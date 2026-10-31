@@ -16,6 +16,7 @@
 // event (the authoritative confirmed values), never fabricated.
 
 import { decodeEventLog } from "viem"
+import { redactError } from "./redact.js"
 
 // OrderExecuted(bytes32 indexed orderHash, address indexed owner,
 //               OrderType indexed orderType, address tokenIn, address tokenOut,
@@ -198,7 +199,8 @@ export async function recordExecutionRow(supabaseFetch, row) {
       body: JSON.stringify(row),
     })
   } catch (err) {
-    return { recorded: false, error: err instanceof Error ? err.message : String(err) }
+    // Redacted: executor.js prints this verbatim. [fix/executor-alert-masking-rpc-auth]
+    return { recorded: false, error: redactError(err) }
   }
   if (!res || !res.ok) {
     let detail = ""

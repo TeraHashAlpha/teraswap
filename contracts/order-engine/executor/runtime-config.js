@@ -18,6 +18,7 @@
  */
 
 import { readFileSync } from "node:fs"
+import { redactError } from "./redact.js"
 
 export const RUNTIME_CONFIG_TABLE = "keeper_runtime_config"
 
@@ -99,7 +100,7 @@ export async function publishRuntimeConfig({ supabaseFetch, row, log = () => {} 
     log(`  WARNING: ${RUNTIME_CONFIG_TABLE} publish failed (non-fatal): ${reason}`)
     return { ok: false, status, reason, missingTable }
   } catch (err) {
-    const msg = String(err?.message ?? err).slice(0, 160)
+    const msg = redactError(err, { max: 160 }) // [fix/executor-alert-masking-rpc-auth]
     log(`  WARNING: ${RUNTIME_CONFIG_TABLE} publish threw (non-fatal): ${msg}`)
     return { ok: false, status: null, reason: `threw: ${msg}`, missingTable: false }
   }

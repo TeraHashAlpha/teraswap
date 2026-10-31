@@ -134,6 +134,10 @@ import {
   alertUnexplainedOutflow,
   alertOps,
 } from "./alert.js"
+// [fix/executor-alert-masking-rpc-auth] INC-2026-10-30-001: every error that reaches a log line or
+// an alert goes through redactError (viem puts the keyed RPC URL in err.message). Pinned for every
+// console.* / log() call in this directory by redact.test.mjs's source guard.
+import { redactError, redactUrl } from "./redact.js"
 // [chore/dca-resilience] Transient-vs-permanent failure classification + retry
 // decision + reason-bearing orders patches (pure, unit-tested in
 // retry-policy.test.mjs). Replaces the old blunt MAX_RETRIES=3 → 'failed' (no
@@ -858,7 +862,7 @@ async function readFreezeFlag() {
     if (!row) return { frozen: false }
     return { frozen: row.frozen === true, reason: row.reason || null }
   } catch (err) {
-    log(`  WARNING: freeze read error (${err.message}) -- treating as NOT frozen`)
+    log(`  WARNING: freeze read error (${redactError(err)}) -- treating as NOT frozen`)
     return { frozen: false }
   }
 }
@@ -893,7 +897,7 @@ async function readEthUsd(publicClient) {
     const usd = Number(answer) / 1e8
     return Number.isFinite(usd) && usd > 0 ? usd : null
   } catch (err) {
-    log(`  WARNING: ETH/USD feed read failed (${err.message?.slice(0, 80)}) -- skipping low-gas signal`)
+    log(`  WARNING: ETH/USD feed read failed (${redactError(err, { max: 80 })}) -- skipping low-gas signal`)
     return null
   }
 }
@@ -962,7 +966,7 @@ async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecim
     // fail-open ⇒ execute).
     return { data: data.tx.data, toAmount: data.toAmount ?? null }
   } catch (err) {
-    console.error("  fetchSwapRoute error:", err.message)
+    console.error("  fetchSwapRoute error:", redactError(err))
     return null
   }
 }
@@ -1142,9 +1146,10 @@ async function beginCycleObservability(publicClient, walletAddress, monitor) {
   } catch (err) {
     // Could not read chain state ⇒ flag RPC down for the score; keep going.
     rpcDown = true
-    log(`  WARNING: balance read failed (${err.message?.slice(0, 80)}) -- rpcDown=true`)
+    log(`  WARNING: balance read failed (${redactError(err, { max: 80 })}) -- rpcDown=true`)
     try {
-      await alertOps({ kind: "rpc", detail: `balance read failed: ${err.message}` }, scoreFromContext(ctx))
+      // INC-2026-10-30-001: THIS line posted the full keyed RPC URL to Telegram (err.message).
+      await alertOps({ kind: "rpc", detail: `balance read failed: ${redactError(err)}` }, scoreFromContext(ctx))
     } catch { /* never throw */ }
   }
 
@@ -1469,7 +1474,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
           log(`  Chainlink price from ${orderStruct.priceFeed.slice(0,10)}...: ${answer.toString()} (=$${Number(answer) / 1e8})`)
           log(`  Target: ${orderStruct.targetPrice.toString()} (=$${Number(orderStruct.targetPrice) / 1e8}), Condition: ${orderStruct.condition === 0 ? 'ABOVE' : 'BELOW'}`)
         } catch (e) {
-          log(`  Could not read Chainlink price: ${e.message?.slice(0, 80)}`)
+          log(`  Could not read Chainlink price: ${redactError(e, { max: 80 })}`)
         }
       }
 
@@ -2009,12 +2014,12 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
           }
         }
       } catch { /* never let diagnostics mask the original error */ }
-      console.error(`  Order ${dbOrder.id.slice(0, 8)}... error:`, err.message)
+      console.error(`  Order ${dbOrder.id.slice(0, 8)}... error:`, redactError(err))
       errors++
       // [DCA-OBS] Execution threw (RPC/revert/timeout) — bump the failure signal.
       consecutiveExecFailures++
       stats.totalErrors++
-      stats.lastError = { orderId: dbOrder.id, message: err.message, at: new Date().toISOString() }
+      stats.lastError = { orderId: dbOrder.id, message: redactError(err), at: new Date().toISOString() }
 
       // ── [SPRINT-P1B / ADR-014 (a)] Pinned-route revert is NOT an order failure ──────────
       // Under option (a) the route is fixed at signing, so a thin/dislocated pool at trigger
@@ -2239,7 +2244,8 @@ async function main() {
       log,
     })
   } catch (err) {
-    console.error(err.message)
+    // chain-verify already redacts its refusals (stricter redactUrls); redactError is idempotent on them.
+    console.error(redactError(err))
     // Name the RPC by HOST only — an RPC_URL routinely carries the provider API key in its path,
     // and a boot-refusal log is exactly the text an operator pastes into a ticket.
     let rpcHost = "unparseable RPC_URL"
@@ -2271,7 +2277,7 @@ async function main() {
       log,
     })
   } catch (err) {
-    console.error(err.message)
+    console.error(redactError(err))
     console.error(
       `   Refusing to boot: this process's signer ${account.address} is not an executor the configured ` +
         `contract accepts on CHAIN_ID=${CHAIN_ID}. Check KMS_KEY_ID / KMS_REGION name the key whitelisted for ` +
@@ -2300,7 +2306,8 @@ async function main() {
       chain,
       transport: http(FLASHBOTS_RPC),
     })
-    log(`Flashbots Protect RPC enabled: ${FLASHBOTS_RPC.slice(0, 40)}...`)
+    // Host only: a 40-char prefix of a keyed relay URL is a partial key. [fix/executor-alert-masking-rpc-auth]
+    log(`Flashbots Protect RPC enabled: ${redactUrl(FLASHBOTS_RPC)}`)
   }
 
   const balance = await publicClient.getBalance({ address: account.address })
@@ -2350,7 +2357,7 @@ async function main() {
     if (!runtimeRow.ok) log(`  WARNING: keeper_runtime_config row not built (non-fatal): ${runtimeRow.reason}`)
     await publishRuntimeConfig({ supabaseFetch, row: runtimeRow.row, log })
   } catch (err) {
-    log(`  WARNING: keeper_runtime_config publish error (non-fatal): ${err?.message?.slice(0, 120)}`)
+    log(`  WARNING: keeper_runtime_config publish error (non-fatal): ${redactError(err, { max: 120 })}`)
   }
 
   // Start health check server
@@ -2406,7 +2413,7 @@ async function main() {
     try {
       await runTick()
     } catch (err) {
-      console.error("Cycle error:", err.message)
+      console.error("Cycle error:", redactError(err))
       if (monitor) monitor.onCycleError(err)
     }
   }, POLL_INTERVAL_MS)
@@ -2426,6 +2433,8 @@ process.on("SIGTERM", () => {
 })
 
 main().catch((err) => {
-  console.error("Fatal error:", err)
+  // The raw error object printed viem's message — URL and key included. Keep the stack frames
+  // (redactUrl leaves file:// alone), lose the endpoint path. [fix/executor-alert-masking-rpc-auth]
+  console.error("Fatal error:", redactUrl(err?.stack || redactError(err)))
   process.exit(1)
 })
