@@ -140,6 +140,8 @@ jobs:
           if [ -z "${MONITOR_SECRET:-}" ]; then
             echo "code=NOSECRET" >> "$GITHUB_OUTPUT"
             echo "alerts=UNKNOWN" >> "$GITHUB_OUTPUT"
+            echo "keepers_status=UNKNOWN" >> "$GITHUB_OUTPUT"
+            echo "keepers=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
@@ -154,6 +156,18 @@ jobs:
             "$SITE_URL/api/monitor/alerts" || echo "")
           alerts=$(node -e 'try{const r=JSON.parse(process.argv[1]);process.stdout.write(r.status==="OK"?"OK":r.status==="NOT CONFIGURED"?"NOT_CONFIGURED":"UNKNOWN")}catch{process.stdout.write("UNKNOWN")}' "$alerts_body")
           echo "alerts=$alerts" >> "$GITHUB_OUTPUT"
+
+          # [fix/executor-alert-masking-rpc-auth] INC-2026-10-30-001 — the keepers' self-reported paused
+          # state (keeper_runtime_config.paused via /api/monitor/keepers): OK | PAUSED | UNKNOWN, plus
+          # one "chainId=state" token per chain (state: ok | unreadable | paused:<reason>@<since>).
+          # Every character is whitelisted before it reaches $GITHUB_OUTPUT (no newline injection).
+          keepers_body=$(curl -s --max-time 15 \
+            -H "Authorization: Bearer ${MONITOR_SECRET}" \
+            "$SITE_URL/api/monitor/keepers" || echo "")
+          keepers_status=$(node -e 'try{const r=JSON.parse(process.argv[1]);process.stdout.write(["OK","PAUSED","UNKNOWN"].includes(r.status)?r.status:"UNKNOWN")}catch{process.stdout.write("UNKNOWN")}' "$keepers_body")
+          keepers=$(node -e 'const s=(v)=>String(v??"").replace(/[^A-Za-z0-9:._-]/g,"");try{const r=JSON.parse(process.argv[1]);process.stdout.write((r.chains||[]).map((c)=>`${s(c.chainId)}=${c.paused?`paused:${s(c.paused)}@${s(c.pausedSince)||"unknown"}`:c.readable?"ok":"unreadable"}`).join(" "))}catch{process.stdout.write("")}' "$keepers_body")
+          echo "keepers_status=$keepers_status" >> "$GITHUB_OUTPUT"
+          echo "keepers=$keepers" >> "$GITHUB_OUTPUT"
 
       - name: Check keeper gas balance (per chain)
         id: gas
@@ -253,6 +267,8 @@ jobs:
           SSL_DAYS: ${{ steps.site.outputs.ssl_days }}
           MONITOR_CODE: ${{ steps.monitor.outputs.code }}
           ALERTS_STATUS: ${{ steps.monitor.outputs.alerts }}
+          KEEPERS_STATUS: ${{ steps.monitor.outputs.keepers_status }}
+          KEEPERS: ${{ steps.monitor.outputs.keepers }}
           GAS_CHAINS: ${{ steps.gas.outputs.chains }}
           GIT_COUNT: ${{ steps.git.outputs.count }}
         run: |
@@ -352,6 +368,29 @@ jobs:
             bump(1)
           }
 
+          // [fix/executor-alert-masking-rpc-auth] INC-2026-10-30-001 — a keeper that reports itself
+          // paused (e.g. `rpc-auth`: its RPC provider rejects its key) executes NOTHING while its
+          // process looks alive. KEEPERS = "chainId=state" tokens from the monitor step. Computed
+          // BEFORE `overall` so a pause is in the headline.
+          const keeperStateLines = []
+          const keeperTokens = (e.KEEPERS || '').split(' ').filter(Boolean).map((t) => t.split('='))
+          const pausedTokens = keeperTokens.filter(([, st]) => (st || '').startsWith('paused:'))
+          if (e.KEEPERS_STATUS === 'PAUSED' || pausedTokens.length) {
+            for (const [chainId, st] of pausedTokens) {
+              const [reason, since] = st.slice('paused:'.length).split('@')
+              const name = CHAIN_NAMES[chainId] || `chain ${chainId}`
+              keeperStateLines.push(`| Keeper state (${name}) | ❌ | **PAUSED: ${reason}** since ${since} — the keeper cannot execute any order |`)
+              requiresAttention.push(`The ${name} keeper reports **paused: ${reason}** since ${since}${reason === 'rpc-auth' ? ' — its RPC provider rejects its key/allowlist; follow docs/Runbooks/EXECUTOR-OPERATIONS.md § 7' : ''}.`)
+            }
+            bump(2)
+          } else if (e.KEEPERS_STATUS === 'OK') {
+            keeperStateLines.push(`| Keeper state (keeper_runtime_config) | ✅ | no keeper reports a pause (${keeperTokens.map(([c, st]) => `${c}: ${st}`).join(', ') || 'no chains'}) |`)
+          } else {
+            keeperStateLines.push('| Keeper state (keeper_runtime_config) | ⚠️ | UNKNOWN — /api/monitor/keepers could not be read (MONITOR_SECRET unset, endpoint not deployed yet, or migration 20261031120000_keeper_runtime_config_paused.sql not applied) |')
+            requiresAttention.push('Keeper state: UNKNOWN — /api/monitor/keepers could not be read, so a paused keeper (INC-2026-10-30-001) would go unreported.')
+            bump(1)
+          }
+
           const overall = severity === 2 ? '🔴 CRITICAL' : severity === 1 ? '🟡 WARNING' : '🟢 OK'
 
           // Every ⚠️/❌ table row gets a corresponding bullet here — a WARNING/CRITICAL report
@@ -391,6 +430,7 @@ jobs:
           lines.push(`| Monitor (/api/monitor) | ${monitorLine} |`)
           lines.push(alertsRow)
           lines.push(...gasLines) // [Auditor M2 / PR #497] one row per monitored/not-monitored chain
+          lines.push(...keeperStateLines) // [fix/executor-alert-masking-rpc-auth] INC-2026-10-30-001
           lines.push(`| Git Activity (origin/main) | ℹ️ | ${e.GIT_COUNT} commits in the last 24h |`, '')
           lines.push('## Actions Taken')
           lines.push('None — this workflow only reads (curl + a read-only eth_getBalance RPC call); it never writes to any endpoint.', '')

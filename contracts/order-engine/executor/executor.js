@@ -133,7 +133,17 @@ import {
   alertLowGas,
   alertUnexplainedOutflow,
   alertOps,
+  alertRpcAuth,
 } from "./alert.js"
+// [fix/executor-alert-masking-rpc-auth] INC-2026-10-30-001: every error that reaches a log line or
+// an alert goes through redactError (viem puts the keyed RPC URL in err.message). Pinned for every
+// console.* / log() call in this directory by redact.test.mjs's source guard.
+import { redactError, redactUrl } from "./redact.js"
+// [fix/executor-alert-masking-rpc-auth] RPC auth/allowlist rejection = FATAL-OPS, not transient:
+// boot says `rpc: AUTH REJECTED …` and alerts (rate-limited across pm2 restarts); at runtime 3
+// consecutive auth errors ⇒ ONE high-urgency alert + `paused: rpc-auth` on /health, /metrics and
+// keeper_runtime_config. Reporting only — no gate, no change to what a cycle executes.
+import { classifyRpcError, createRpcAuthMonitor, createBootAlertGate, RPC_AUTH, PAUSED_RPC_AUTH } from "./rpc-auth.js"
 // [chore/dca-resilience] Transient-vs-permanent failure classification + retry
 // decision + reason-bearing orders patches (pure, unit-tested in
 // retry-policy.test.mjs). Replaces the old blunt MAX_RETRIES=3 → 'failed' (no
@@ -194,7 +204,7 @@ import {
 import { createCycleQuoteContext } from "./price-sources.js"
 // [ADR-024 scope addition 2026-10-11] Boot-time publish of the effective (ceiling-clamped) no-price
 // fill cap to keeper_runtime_config — logged, never fatal, tolerates the table not existing yet.
-import { buildRuntimeConfigRow, publishRuntimeConfig, readKeeperVersion } from "./runtime-config.js"
+import { buildRuntimeConfigRow, publishRuntimeConfig, readKeeperVersion, publishPausedState } from "./runtime-config.js"
 // [CHORE-KEEPER-HARDENING / P5a] A configured-but-unwired VAULT_ADDR must NOT
 // count as a managed signer (else it suppresses the plaintext-key FATAL).
 import { resolveSignerKind, vaultCountsAsManagedSigner } from "./signer-guard.js"
@@ -350,6 +360,9 @@ const seenDcaOrderIds = new Set()
 let consecutiveExecFailures = 0
 let rpcDown = false
 let freezeAlertedState = null
+// [fix/executor-alert-masking-rpc-auth] The process's RPC-auth monitor (rpc-auth.js), created in
+// main() once the boot gates pass; null before that (callers then keep today's handling).
+let rpcAuthMonitor = null
 // [PERF-KEEPER-IDLE-BACKOFF] The last IDLE cycle's observability context, held until the next
 // successful cycle-start balance read closes its outflow window (see endCycleObservability).
 const idleBalanceCarry = createIdleBalanceCarry()
@@ -858,7 +871,7 @@ async function readFreezeFlag() {
     if (!row) return { frozen: false }
     return { frozen: row.frozen === true, reason: row.reason || null }
   } catch (err) {
-    log(`  WARNING: freeze read error (${err.message}) -- treating as NOT frozen`)
+    log(`  WARNING: freeze read error (${redactError(err)}) -- treating as NOT frozen`)
     return { frozen: false }
   }
 }
@@ -893,7 +906,7 @@ async function readEthUsd(publicClient) {
     const usd = Number(answer) / 1e8
     return Number.isFinite(usd) && usd > 0 ? usd : null
   } catch (err) {
-    log(`  WARNING: ETH/USD feed read failed (${err.message?.slice(0, 80)}) -- skipping low-gas signal`)
+    log(`  WARNING: ETH/USD feed read failed (${redactError(err, { max: 80 })}) -- skipping low-gas signal`)
     return null
   }
 }
@@ -962,7 +975,7 @@ async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecim
     // fail-open ⇒ execute).
     return { data: data.tx.data, toAmount: data.toAmount ?? null }
   } catch (err) {
-    console.error("  fetchSwapRoute error:", err.message)
+    console.error("  fetchSwapRoute error:", redactError(err))
     return null
   }
 }
@@ -1132,6 +1145,7 @@ async function beginCycleObservability(publicClient, walletAddress, monitor) {
     ctx.cycleStartBalanceWei = await publicClient.getBalance({ address: walletAddress })
     ctx.walletBalanceEth = Number(formatEther(ctx.cycleStartBalanceWei))
     rpcDown = false
+    if (rpcAuthMonitor) await rpcAuthMonitor.onRpcSuccess("balance-read") // never throws
     // [PERF-KEEPER-IDLE-BACKOFF] The previous cycle was IDLE and skipped its end read (nothing was
     // sent, so THIS read is its end read): close its outflow window now — same math, ownGas = 0.
     // Taken only after a SUCCESSFUL read, so a failed one leaves the window for the next cycle.
@@ -1142,10 +1156,20 @@ async function beginCycleObservability(publicClient, walletAddress, monitor) {
   } catch (err) {
     // Could not read chain state ⇒ flag RPC down for the score; keep going.
     rpcDown = true
-    log(`  WARNING: balance read failed (${err.message?.slice(0, 80)}) -- rpcDown=true`)
+    // [fix/executor-alert-masking-rpc-auth] An auth/allowlist rejection is the monitor's: counted,
+    // and alerted ONCE (rate-limited) at the threshold. Only a transient failure keeps today's
+    // per-cycle "rpc" alert — during INC-2026-10-30-001 that alert fired every cycle for ~20 h.
+    let verdict = null
     try {
-      await alertOps({ kind: "rpc", detail: `balance read failed: ${err.message}` }, scoreFromContext(ctx))
+      verdict = rpcAuthMonitor ? await rpcAuthMonitor.onRpcError("balance-read", err) : null
     } catch { /* never throw */ }
+    log(`  WARNING: balance read failed (${redactError(err, { max: 80 })}) -- rpcDown=true${verdict?.kind === RPC_AUTH ? ` [rpc auth rejected: ${verdict.signal}]` : ""}`)
+    if (verdict?.kind !== RPC_AUTH) {
+      try {
+        // INC-2026-10-30-001: THIS line posted the full keyed RPC URL to Telegram (err.message).
+        await alertOps({ kind: "rpc", detail: `balance read failed: ${redactError(err)}` }, scoreFromContext(ctx))
+      } catch { /* never throw */ }
+    }
   }
 
   // Freeze flag (fail-open). Alert ONCE per state transition (frozen<->unfrozen).
@@ -1469,7 +1493,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
           log(`  Chainlink price from ${orderStruct.priceFeed.slice(0,10)}...: ${answer.toString()} (=$${Number(answer) / 1e8})`)
           log(`  Target: ${orderStruct.targetPrice.toString()} (=$${Number(orderStruct.targetPrice) / 1e8}), Condition: ${orderStruct.condition === 0 ? 'ABOVE' : 'BELOW'}`)
         } catch (e) {
-          log(`  Could not read Chainlink price: ${e.message?.slice(0, 80)}`)
+          log(`  Could not read Chainlink price: ${redactError(e, { max: 80 })}`)
         }
       }
 
@@ -2009,12 +2033,12 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
           }
         }
       } catch { /* never let diagnostics mask the original error */ }
-      console.error(`  Order ${dbOrder.id.slice(0, 8)}... error:`, err.message)
+      console.error(`  Order ${dbOrder.id.slice(0, 8)}... error:`, redactError(err))
       errors++
       // [DCA-OBS] Execution threw (RPC/revert/timeout) — bump the failure signal.
       consecutiveExecFailures++
       stats.totalErrors++
-      stats.lastError = { orderId: dbOrder.id, message: err.message, at: new Date().toISOString() }
+      stats.lastError = { orderId: dbOrder.id, message: redactError(err), at: new Date().toISOString() }
 
       // ── [SPRINT-P1B / ADR-014 (a)] Pinned-route revert is NOT an order failure ──────────
       // Under option (a) the route is fixed at signing, so a thin/dislocated pool at trigger
@@ -2101,6 +2125,9 @@ const stats = {
   lastCycleAt: null,
   lastExecutionAt: null,
   lastError: null,
+  // [fix/executor-alert-masking-rpc-auth] null | "rpc-auth" — and the monitor's state behind it.
+  paused: null,
+  rpcAuth: null,
 }
 
 // ---- Health check HTTP server ------------------------------------------
@@ -2129,6 +2156,10 @@ function startHealthServer() {
       res.end(JSON.stringify({
         status: "ok",
         chainId: CHAIN_ID,
+        // [fix/executor-alert-masking-rpc-auth] "ok" = the process answers; `paused` says whether it
+        // can WORK. Additive: `status` keeps its meaning for any existing reader.
+        paused: stats.paused,
+        rpcAuth: stats.rpcAuth,
         uptime: Math.floor((Date.now() - new Date(stats.startedAt).getTime()) / 1000),
         stats: {
           totalCycles: stats.totalCycles,
@@ -2157,6 +2188,47 @@ function startHealthServer() {
       log(`Health check port ${HEALTH_PORT} in use -- skipping`)
     }
   })
+}
+
+// ---- Boot: RPC auth rejection ------------------------------------------
+
+/**
+ * [fix/executor-alert-masking-rpc-auth] Called on every path that is about to refuse the boot. If
+ * the cause is an RPC auth/allowlist rejection (chain-verify tags its refusal; any other boot error
+ * is classified here) print THE line, record `paused: rpc-auth` on keeper_runtime_config, and send
+ * the high-urgency alert — rate-limited across pm2 restarts (rpc-auth.js createBootAlertGate). The
+ * boot still exits non-zero afterwards: this only makes the refusal impossible to misread.
+ * Never throws.
+ * @returns {Promise<boolean>} whether the refusal was an auth rejection
+ */
+async function reportBootRpcAuth(err) {
+  try {
+    const signal =
+      err?.name === "ChainVerificationError"
+        ? (err.rpcAuth ? err.rpcAuthSignal : null)
+        : (() => {
+            const v = classifyRpcError(err)
+            return v.kind === RPC_AUTH ? v.signal : null
+          })()
+    if (!signal) return false
+    console.error(`rpc: AUTH REJECTED chain=${CHAIN_ID} source=RPC_URL — check provider allowlist/key`)
+    console.error(`   signal: ${signal} — runbook: docs/Runbooks/EXECUTOR-OPERATIONS.md § Changing an RPC key`)
+    const nowIso = new Date().toISOString()
+    try {
+      await publishPausedState({ supabaseFetch, chainId: CHAIN_ID, paused: PAUSED_RPC_AUTH, nowIso, log })
+    } catch { /* reporting only */ }
+    const gate = createBootAlertGate({ chainId: CHAIN_ID }).check()
+    if (gate.send) {
+      await alertRpcAuth({ phase: "boot", chainId: CHAIN_ID, source: "RPC_URL", signal, since: nowIso, suppressed: gate.suppressed })
+    } else {
+      console.error(
+        `   (boot auth alert rate-limited: last sent ${gate.lastSentAt}; ${gate.suppressed} boot refusal(s) since — pm2 keeps restarting)`,
+      )
+    }
+    return true
+  } catch {
+    return false
+  }
 }
 
 // ---- Entrypoint --------------------------------------------------------
@@ -2239,7 +2311,8 @@ async function main() {
       log,
     })
   } catch (err) {
-    console.error(err.message)
+    // chain-verify already redacts its refusals (stricter redactUrls); redactError is idempotent on them.
+    console.error(redactError(err))
     // Name the RPC by HOST only — an RPC_URL routinely carries the provider API key in its path,
     // and a boot-refusal log is exactly the text an operator pastes into a ticket.
     let rpcHost = "unparseable RPC_URL"
@@ -2250,6 +2323,7 @@ async function main() {
       `   Refusing to boot: the keeper will not execute orders against an unverified chain/contract ` +
         `binding (CHAIN_ID=${CHAIN_ID}, RPC host=${rpcHost}).`,
     )
+    await reportBootRpcAuth(err) // [fix/executor-alert-masking-rpc-auth] same refusal, said loudly if it is auth
     process.exit(1)
   }
 
@@ -2271,12 +2345,13 @@ async function main() {
       log,
     })
   } catch (err) {
-    console.error(err.message)
+    console.error(redactError(err))
     console.error(
       `   Refusing to boot: this process's signer ${account.address} is not an executor the configured ` +
         `contract accepts on CHAIN_ID=${CHAIN_ID}. Check KMS_KEY_ID / KMS_REGION name the key whitelisted for ` +
         `THIS chain (docs/DEPLOYMENTS.md § Keeper registry), or execute the pending executor change on-chain.`,
     )
+    await reportBootRpcAuth(err)
     process.exit(1)
   }
 
@@ -2300,7 +2375,8 @@ async function main() {
       chain,
       transport: http(FLASHBOTS_RPC),
     })
-    log(`Flashbots Protect RPC enabled: ${FLASHBOTS_RPC.slice(0, 40)}...`)
+    // Host only: a 40-char prefix of a keyed relay URL is a partial key. [fix/executor-alert-masking-rpc-auth]
+    log(`Flashbots Protect RPC enabled: ${redactUrl(FLASHBOTS_RPC)}`)
   }
 
   const balance = await publicClient.getBalance({ address: account.address })
@@ -2349,9 +2425,27 @@ async function main() {
     const runtimeRow = buildRuntimeConfigRow({ chainId: CHAIN_ID, noPriceFillCapUsd: capResolution.value, keeperVersion: readKeeperVersion(), nowIso: new Date().toISOString() })
     if (!runtimeRow.ok) log(`  WARNING: keeper_runtime_config row not built (non-fatal): ${runtimeRow.reason}`)
     await publishRuntimeConfig({ supabaseFetch, row: runtimeRow.row, log })
+    // [fix/executor-alert-masking-rpc-auth] The gates above just proved the RPC answers: clear a
+    // `paused: rpc-auth` left by a previous process (only touches a row that IS paused).
+    await publishPausedState({ supabaseFetch, chainId: CHAIN_ID, paused: null, nowIso: new Date().toISOString(), log })
   } catch (err) {
-    log(`  WARNING: keeper_runtime_config publish error (non-fatal): ${err?.message?.slice(0, 120)}`)
+    log(`  WARNING: keeper_runtime_config publish error (non-fatal): ${redactError(err, { max: 120 })}`)
   }
+
+  // [fix/executor-alert-masking-rpc-auth] ONE monitor for every RPC outcome this process observes
+  // (event watcher, cycle-start balance read, a thrown cycle). Its state is mirrored to stats
+  // (/health, /metrics, heartbeat) and to keeper_runtime_config; its alerts are alertRpcAuth.
+  rpcAuthMonitor = createRpcAuthMonitor({
+    chainId: CHAIN_ID,
+    source: "RPC_URL",
+    alert: alertRpcAuth,
+    log,
+    onStateChange: async (s) => {
+      stats.paused = s.paused
+      stats.rpcAuth = s
+      await publishPausedState({ supabaseFetch, chainId: CHAIN_ID, paused: s.paused, nowIso: new Date().toISOString(), log })
+    },
+  })
 
   // Start health check server
   startHealthServer()
@@ -2376,7 +2470,7 @@ async function main() {
   if (V3_CONTRACT_ADDRESS) {
     watchedContracts.push({ address: V3_CONTRACT_ADDRESS, label: 'OrderExecutorV3' })
   }
-  const watcher = startEventWatcher(publicClient, watchedContracts, monitor)
+  const watcher = startEventWatcher(publicClient, watchedContracts, monitor, rpcAuthMonitor)
 
   // [PERF-KEEPER-IDLE-BACKOFF] Every POLL_INTERVAL_MS tick runs runTick. ACTIVE (the last cycle
   // found ≥1 order): the tick IS a full cycle — today's behaviour. IDLE (0 orders): the tick is a
@@ -2406,8 +2500,11 @@ async function main() {
     try {
       await runTick()
     } catch (err) {
-      console.error("Cycle error:", err.message)
-      if (monitor) monitor.onCycleError(err)
+      console.error("Cycle error:", redactError(err))
+      // [fix/executor-alert-masking-rpc-auth] An auth rejection is alerted once by rpcAuthMonitor;
+      // the monitor's 5-min "consecutive errors" alert keeps every other (transient) cycle error.
+      const verdict = rpcAuthMonitor ? await rpcAuthMonitor.onRpcError("cycle", err) : null
+      if (monitor && verdict?.kind !== RPC_AUTH) monitor.onCycleError(err)
     }
   }, POLL_INTERVAL_MS)
 
@@ -2425,7 +2522,11 @@ process.on("SIGTERM", () => {
   process.exit(0)
 })
 
-main().catch((err) => {
-  console.error("Fatal error:", err)
+main().catch(async (err) => {
+  // The raw error object printed viem's message — URL and key included. Keep the stack frames
+  // (redactUrl leaves file:// alone), lose the endpoint path. [fix/executor-alert-masking-rpc-auth]
+  console.error("Fatal error:", redactUrl(err?.stack || redactError(err)))
+  // e.g. the boot balance read after the gates: an auth rejection there is said as loudly.
+  await reportBootRpcAuth(err)
   process.exit(1)
 })

@@ -9,16 +9,22 @@
 
 import { hostname } from "os"
 import { scoreTier } from "./freeze-score.js"
+// [fix/executor-alert-masking-rpc-auth] INC-2026-10-30-001: an alertOps detail carried viem's
+// `URL: https://<provider>/v2/<key>` line to Telegram. Every free-text field is redacted here, and
+// sendTelegramAlert redacts the whole outgoing text as a last line of defence.
+import { redactError, redactUrl, ALERT_LINK_HOSTS } from "./redact.js"
 
 const HOST = hostname()
 
 /**
  * Minimal HTML escaping for values interpolated into a Telegram HTML body.
- * Telegram's HTML parse_mode only requires &, <, > to be escaped.
+ * Telegram's HTML parse_mode only requires &, <, > to be escaped. Exported for the other alert
+ * builders (event-watcher.js, monitor.js): an RPC error whose Details is an HTML page (a 403
+ * challenge) is invalid Telegram HTML, and Telegram rejects the whole message — the alert is lost.
  * @param {unknown} v
  * @returns {string}
  */
-function esc(v) {
+export function esc(v) {
   return String(v)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -67,14 +73,19 @@ export async function sendTelegramAlert(message) {
   }
 
   const now = new Date().toISOString()
-  const text = [
-    `🚨 <b>TeraSwap Executor Alert</b>`,
-    `Host: ${HOST}`,
-    `Time: ${now}`,
-    `Chain: ${chainId}`,
-    ``,
-    message,
-  ].join("\n")
+  // Last line of defence: whatever a caller put in `message`, no URL path/query/userinfo leaves the
+  // host — except a public tx link to one of the keeper's own block explorers (event-watcher.js).
+  const text = redactUrl(
+    [
+      `🚨 <b>TeraSwap Executor Alert</b>`,
+      `Host: ${HOST}`,
+      `Time: ${now}`,
+      `Chain: ${chainId}`,
+      ``,
+      message,
+    ].join("\n"),
+    { allowHosts: ALERT_LINK_HOSTS },
+  )
 
   try {
     const controller = new AbortController()
@@ -93,7 +104,7 @@ export async function sendTelegramAlert(message) {
 
     clearTimeout(timeout)
   } catch (err) {
-    console.error("[ALERT] Telegram send failed:", err.message)
+    console.error("[ALERT] Telegram send failed:", redactError(err)) // the bot token is in the URL path
   }
 }
 
@@ -103,7 +114,9 @@ export async function sendTelegramAlert(message) {
  */
 export async function sendTelegramHeartbeat(stats) {
   const msg = [
-    `✅ Executor alive`,
+    // [fix/executor-alert-masking-rpc-auth] INC-2026-10-30-001: "alive" arrived on schedule for the
+    // whole ~20 h the provider rejected every call. Alive is not the same as working.
+    stats.paused ? `⏸️ Executor alive but PAUSED: ${esc(stats.paused)} since ${esc(stats.rpcAuth?.pausedSince || "?")}` : `✅ Executor alive`,
     `Cycles: ${stats.totalCycles}`,
     `Executed: ${stats.totalExecuted}`,
     `Errors: ${stats.totalErrors}`,
@@ -292,6 +305,41 @@ export async function alertUnexplainedOutflow({ outflowEth, thresholdEth, wallet
 }
 
 /**
+ * [fix/executor-alert-masking-rpc-auth] Alert: the RPC provider REJECTS this keeper's credentials
+ * (rpc-auth.js — FATAL-OPS, never transient). Urgency is stated, not scored: no Freeze-urgency line,
+ * because freezing DCA does not fix a key — a human fixing the key/allowlist does. The second line is
+ * the same grep-able line the keeper logs.
+ * @param {{ phase: 'boot'|'runtime'|'recovered', chainId: number|string, source: string,
+ *   signal?: string|null, consecutive?: number, threshold?: number, origin?: string,
+ *   since?: string|null, suppressed?: number }} p
+ * @returns {Promise<string>} the HTML body that was sent
+ */
+export async function alertRpcAuth({ phase, chainId, source, signal, consecutive, threshold, origin, since, suppressed = 0 }) {
+  const suppressedLine = suppressed > 0 ? [`${esc(suppressed)} repeat(s) suppressed since the last alert`] : []
+  const body =
+    phase === "recovered"
+      ? [
+          `✅ <b>RPC auth recovered</b>`,
+          `chain=${esc(chainId)} source=${esc(source)} — paused: rpc-auth cleared (paused since ${esc(since || "?")})`,
+          ...suppressedLine,
+        ]
+      : [
+          `🔐 <b>RPC AUTH REJECTED</b> — Urgency: HIGH`,
+          `rpc: AUTH REJECTED chain=${esc(chainId)} source=${esc(source)} — check provider allowlist/key`,
+          `Signal: ${esc(signal || "?")}`,
+          phase === "boot"
+            ? `Phase: boot — chain-verify refused; the keeper is NOT running and will not start until the key/allowlist is fixed`
+            : `Phase: runtime — ${esc(consecutive)} consecutive auth errors (threshold ${esc(threshold)}), last from ${esc(origin)}`,
+          `State: paused: rpc-auth${since ? ` since ${esc(since)}` : ""} — every RPC call is refused; no order can execute`,
+          ...suppressedLine,
+          `Runbook: docs/Runbooks/EXECUTOR-OPERATIONS.md § Changing an RPC key`,
+        ]
+  const text = body.join("\n")
+  await sendTelegramAlert(text)
+  return text
+}
+
+/**
  * Alert: an operational issue (crash, RPC loss, failed exec, stale lock).
  * @param {{kind:'crash'|'rpc'|'failed-exec'|'stale-lock', detail:string}} p
  * @param {number} score — freeze-urgency score 0..20
@@ -300,7 +348,8 @@ export async function alertUnexplainedOutflow({ outflowEth, thresholdEth, wallet
 export async function alertOps({ kind, detail }, score) {
   const body = [
     `🛠️ <b>Ops issue: ${esc(kind)}</b>`,
-    `Detail: ${esc(detail)}`,
+    // Redacted BEFORE escaping and in the RETURNED body too — callers interpolate error text here.
+    `Detail: ${esc(redactUrl(detail))}`,
     ``,
     ...scoreLines(score),
   ].join("\n")
