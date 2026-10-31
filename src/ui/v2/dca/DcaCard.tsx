@@ -451,16 +451,21 @@ export function DcaCard({ chainId }: { chainId: number }) {
   useOrderNotifications(latestEvent)
 
   // B5's trade-key rule, owner: the draft changed under an open sheet → the review closes and anything the engine froze for it is
-  // dropped (`clearPendingOrder`, the engine's own reset). One key over everything `prepare()` reads into the draft.
+  // dropped (`clearPendingOrder`, the engine's own reset). Two keys over everything `prepare()` reads into the draft (A70 M-1): the
+  // structure (pair, amount, schedule, slippage) and the prices the floor is derived from. A price tick closes the review (it prints the
+  // old floor) but leaves a frozen order on screen — see `reset`.
   const draftKey = `${chainId}:${form.tokenIn?.address ?? ''}:${form.tokenOut?.address ?? ''}:${form.totalDisplay}:${form.parts}:${form.interval.seconds}:${form.expiry.seconds}:${form.maxSlippageBps}`
-  const prevDraftKey = useRef(draftKey)
+  const priceKey = form.priceKey
+  const prevKeys = useRef({ draftKey, priceKey })
   const reset = lc.reset
   useEffect(() => {
-    if (prevDraftKey.current === draftKey) return
-    prevDraftKey.current = draftKey
-    reset()
+    const prev = prevKeys.current
+    if (prev.draftKey === draftKey && prev.priceKey === priceKey) return
+    const structural = prev.draftKey !== draftKey
+    prevKeys.current = { draftKey, priceKey }
+    reset(structural ? undefined : { reviewOnly: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the draft alone: `reset` is a new function every render
-  }, [draftKey])
+  }, [draftKey, priceKey])
   // v1 latches `frozen` on the freeze-403 inside its event effect; the same latch, set while rendering the event in (no effect-set).
   const [seenEvent, setSeenEvent] = useState(latestEvent)
   if (latestEvent !== seenEvent) {
@@ -543,7 +548,7 @@ export function DcaCard({ chainId }: { chainId: number }) {
           conflictTier={lc.conflictTier}
           busy={lc.phase === 'creating'}
           switchNetwork={form.cta.kind === 'wrong-network' ? { label: form.cta.label, onSwitch: () => void switchChain({ chainId }) } : undefined}
-          onCreate={(draft) => void lc.create(draft)}
+          onCreate={(ack) => void lc.create(form.prepare, ack)}
           onClose={lc.closeReview}
         />
       )}
@@ -556,7 +561,7 @@ export function DcaCard({ chainId }: { chainId: number }) {
           // v1 clears the amount right after the freeze (DCAPanel.tsx:994 `setTotalDisplay('')`, before the modal is even answered);
           // v2 clears it when the sign sheet closes — the same end state, and the draft key above holds while the sheet is up.
           onCancel={() => { lc.cancelSign(); form.setTotalDisplay('') }}
-          onRetry={lc.retry}
+          onRetry={() => void lc.retry(form.prepare)}
           onViewPositions={() => { lc.done(); form.setTotalDisplay(''); setTab('positions') }}
           onDone={() => { lc.done(); form.setTotalDisplay('') }}
         />
