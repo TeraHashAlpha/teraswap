@@ -218,6 +218,19 @@ export function requiredTierFromError(error: string | null | undefined): WeakerT
   return m ? (m[1] as WeakerTier) : null
 }
 
+/**
+ * [A70 L-1] What the review reopens for after an `order_error`. The server's own 409 sentence names the tier (`requiredTierFromError`).
+ * A sentence that STARTS like that 409 ("Acknowledgement required…") but does not parse — the server's wording changed, the text was cut —
+ * is still the server saying a stronger acknowledgement is due, tier unknown: it reopens at `unpriced`, the strictest, never as a plain
+ * failure whose Retry would resend the weak ack that was just refused. Any other error returns null (a plain failure).
+ */
+const ACK_REQUIRED_PREFIX_RE = /^Acknowledgement required/
+export function reopenTierFromError(error: string | null | undefined): WeakerTier | null {
+  const tier = requiredTierFromError(error)
+  if (tier) return tier
+  return error && ACK_REQUIRED_PREFIX_RE.test(error) ? 'unpriced' : null
+}
+
 // ── the sign step (round7 34) ────────────────────────────────────────────────
 
 /** Where the frozen order is: on the EIP-712 review, with the wallet (sign + POST — v1 exposes no boundary between the two), placed, or failed. */
