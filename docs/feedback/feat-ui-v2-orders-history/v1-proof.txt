@@ -1,0 +1,51 @@
+# v1 proof — head cff1e68 (src identical to 2a98b0c: the last commit is a test file) vs base 0a642a9, both 'npx next build', same lockfile
+## git: v1 source files changed = 0 (diff origin/main...HEAD outside src/ui/v2 and docs: src/lib/order-engine/usd-scope-guard.test.ts — a test, not bundled)
+
+## per-route first-load client JS (route-bundle-stats.mjs)
+route table: head 14, base 14, identical=true
+/                head   2762393 (30 chunks) base   2762360 Δ      33 (+0.0012 %) v2-marked chunks: 0
+/_global-error   head    590295 ( 8 chunks) base    590295 Δ       0 (+0.0000 %) v2-marked chunks: 0
+/_not-found      head    599843 ( 9 chunks) base    599843 Δ       0 (+0.0000 %) v2-marked chunks: 0
+/admin           head    917146 (13 chunks) base    917146 Δ       0 (+0.0000 %) v2-marked chunks: 0
+/analytics       head   2297986 (25 chunks) base   2297986 Δ       0 (+0.0000 %) v2-marked chunks: 0
+/docs            head   2474091 (27 chunks) base   2474091 Δ       0 (+0.0000 %) v2-marked chunks: 0
+/privacy         head   2314263 (25 chunks) base   2314263 Δ       0 (+0.0000 %) v2-marked chunks: 0
+/status          head    618724 (10 chunks) base    618724 Δ       0 (+0.0000 %) v2-marked chunks: 0
+/swap            head   2748785 (30 chunks) base   2748752 Δ      33 (+0.0012 %) v2-marked chunks: 0
+/terms           head   2314261 (25 chunks) base   2314261 Δ       0 (+0.0000 %) v2-marked chunks: 0
+/v2              head   2952477 (32 chunks) base   2901581 Δ   50896 (v2 route)
+/v2/[tab]        head   2923361 (31 chunks) base   2872877 Δ   50484 (v2 route)
+/v2/_enable      head    609043 (10 chunks) base    609043 Δ       0 (v2 route)
+/v2/_kit         head    613905 (10 chunks) base    613905 Δ       0 (v2 route)
+v2-marked chunks in v1 routes: 0
+largest v1 route delta: /swap +33 B = +0.0012 %
+
+## per-route chunk names + bytes (v1-chunks.mjs)
+/                chunks  30  names DIFFER  bytes 1 DIFFER
+/_global-error   chunks   8  names identical  bytes identical
+/_not-found      chunks   9  names identical  bytes identical
+/admin           chunks  13  names identical  bytes identical
+/analytics       chunks  25  names identical  bytes identical
+/docs            chunks  27  names identical  bytes identical
+/privacy         chunks  25  names identical  bytes identical
+/status          chunks  10  names identical  bytes identical
+/swap            chunks  30  names DIFFER  bytes 1 DIFFER
+/terms           chunks  25  names identical  bytes identical
+v1 routes: 10, distinct v1 client chunks compared: 43, byte-differing: 2
+chunks used by /v2 only (head): 7
+V1 DIFFERS
+
+## the one differing chunk on / and /swap = Turbopack's lazy-import loader table (+33 B): 2 of its 91 entries list re-partitioned chunks
+##   375920 = v1 OrderDashboard (Orders tab, lazy) · 801313 = v1 DCAPanel (DCA tab, lazy); module-level (module-proof.py, chunk names normalised):
+lazy group 375920: base 2 chunks / 10 modules · head 2 chunks / 11 modules · module ids DIFFER · code differs in 2 module(s) ['352240', '268989']
+   base modules missing in head: [] · base modules with different code: ['352240', '268989']
+   extra in head 174005: 1299 chars, v2-marked=False: 'e=>{var t=e.i(644616);let r=new Set(["confirmed","success","executed"]);function a(e){let t=0n;for(let r of e)if(null!=r&&""!==r)try{t+=BigInt(St
+lazy group 801313: base 3 chunks / 17 modules · head 4 chunks / 21 modules · module ids DIFFER · code differs in 11 module(s) ['695226', '352240', '836861', '870594', '18182']
+   base modules missing in head: [] · base modules with different code: ['695226', '352240', '836861', '870594', '18182', '621257', '709276', '468295', '39494', '268989', '416100']
+   extra in head 174005: 1299 chars, v2-marked=False: 'e=>{var t=e.i(644616);let n=new Set(["confirmed","success","executed"]);function r(e){let t=0n;for(let n of e)if(null!=n&&""!==n)try{t+=BigInt(St
+   extra in head 352934: 507 chars, v2-marked=False: 'e=>{let t={"0x6a000f20005980200259b80c5102003040001068":"velora","0x2626664c2603336e57b271c5c0b26f421741e481":"uniswapv3","0x111111125421ca6dc452d
+   extra in head 722042: 587 chars, v2-marked=False: 'e=>{var t=e.i(843476);let n={"offchain-price":{label:"Off-chain check",title:"No on-chain price feed: each buy is protected only by our off-chain 
+   extra in head 816740: 4057 chars, v2-marked=False: 'e=>{var t=e.i(644616);let n={ETH:3500,WETH:3500,STETH:3500,WSTETH:4e3,CBETH:3600,RETH:3800,USDC:1,USDT:1,DAI:1,FRAX:1,LUSD:1,SUSD:1,CRVUSD:1,GHO:
+## reading: every base module is present in head (0 missing); the 4 extra ids are v1's own lib/dca/position-stats, route-source,
+##   FloorTierBadge and order-engine/usd — inlined into their importers in base, kept as shared modules now that v2 imports them too
+##   (hence the 'different code' = import-by-id instead of inlined copy + minifier renames). 0 v2-marked chunks/modules in any v1 route.
