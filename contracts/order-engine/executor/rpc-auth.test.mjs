@@ -279,7 +279,7 @@ describe("boot gate — one alert per cooldown across pm2 restarts", () => {
     assert.equal(unwritable.check().send, true)
   })
 
-  test("the default file lives in os.tmpdir(), per chain, and round-trips", () => {
+  test("an explicit file round-trips on the real filesystem (default location: rpc-auth-boot-gate.test.mjs)", () => {
     const dir = mkdtempSync(join(tmpdir(), "rpc-auth-gate-"))
     tempDirs.push(dir)
     const file = join(dir, "gate.json")
@@ -533,8 +533,8 @@ describe("the REAL executor.js boot against a provider that rejects the key", ()
       cwd,
       env: {
         PATH: process.env.PATH,
-        HOME: process.env.HOME,
-        TMPDIR: cwd, // the boot gate's state file lands here, not in the machine's /tmp
+        HOME: cwd, // the boot gate's state dir (~/.teraswap-keeper, A71 L-3) lands here, not in the real home
+        TMPDIR: cwd,
         RPC_URL: `http://127.0.0.1:${port}/v2/${KEY}`,
         CHAIN_ID: "11155111",
         ORDER_EXECUTOR_ADDRESS: ADDR,
@@ -586,7 +586,7 @@ describe("the REAL executor.js boot against a provider that rejects the key", ()
     assert.equal(JSON.parse(patch.body).paused, "rpc-auth")
     for (const out of [first.stdout, first.stderr]) assert.ok(!out.includes(KEY), `key leaked:\n${out}`)
 
-    const second = await boot(cwd) // pm2 restart, same host (same TMPDIR)
+    const second = await boot(cwd) // pm2 restart, same host (same keeper HOME)
     assert.equal(second.exitCode, 1)
     assert.ok(second.stderr.includes(AUTH_LINE))
     assert.equal(second.telegram.length, 0, "a restart inside the cooldown must not re-alert")

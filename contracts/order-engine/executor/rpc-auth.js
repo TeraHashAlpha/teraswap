@@ -38,15 +38,19 @@
  * BOOT (createBootAlertGate): chain-verify fails closed as before; executor.js prints
  * `rpc: AUTH REJECTED chain=<id> source=RPC_URL — check provider allowlist/key` and alerts. pm2
  * restarts a failed boot every 5 s up to 50 times, so the boot alert is rate-limited ACROSS processes
- * through a small state file in os.tmpdir() (per chain). If that file cannot be read or written the
- * alert is SENT — failing to rate-limit must never mean failing to alert.
+ * through a small state file (per chain). If that file cannot be read or written the alert is SENT —
+ * failing to rate-limit must never mean failing to alert. [A71 L-3] The file lives in the keeper's
+ * OWN state directory (~/.teraswap-keeper, mode 0700), never the shared, world-writable os.tmpdir()
+ * where another local user could plant it; a directory others can write is not trusted, and a
+ * lastSentAt in the future counts as "never sent" — so no planted or skewed file can mute the alert.
  *
- * Pure apart from the gate's file I/O (injectable); no env reads, no network.
+ * Pure apart from the gate's file I/O (injectable; its default directory comes from os.homedir()),
+ * no other env reads, no network.
  */
 
-import { readFileSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { homedir } from "node:os"
+import { dirname, join } from "node:path"
 import { redactUrl } from "./redact.js"
 
 export const RPC_AUTH = "auth"
@@ -216,6 +220,27 @@ export function createRpcAuthMonitor({
   return { onRpcError, onRpcSuccess, state }
 }
 
+/** [A71 L-3] The keeper user's own state directory (created 0700). Resolved per call: HOME may differ. */
+export function keeperStateDir() {
+  return join(homedir(), ".teraswap-keeper")
+}
+
+/** Default gate read: only from a directory this process owns and nobody else can write. */
+function readOwnedState(f) {
+  const d = statSync(dirname(f))
+  const uid = typeof process.getuid === "function" ? process.getuid() : null
+  if ((uid !== null && d.uid !== uid) || (d.mode & 0o022) !== 0) throw new Error("untrusted state directory")
+  return readFileSync(f, "utf-8")
+}
+
+/** Default gate write: create / tighten the directory to 0700, the file to 0600. */
+function writeOwnedState(f, s) {
+  const d = dirname(f)
+  mkdirSync(d, { recursive: true, mode: 0o700 })
+  chmodSync(d, 0o700) // an existing looser directory is tightened (throws if not ours ⇒ not persisted ⇒ louder)
+  writeFileSync(f, s, { mode: 0o600 })
+}
+
 /**
  * Cross-process rate limit for the BOOT auth alert (pm2 restarts a refused boot every few seconds).
  * @param {{ chainId: number|string, cooldownMs?: number, now?: () => number, file?: string,
@@ -226,9 +251,9 @@ export function createBootAlertGate({
   chainId,
   cooldownMs = RPC_AUTH_ALERT_COOLDOWN_MS,
   now = Date.now,
-  file = join(tmpdir(), `teraswap-keeper-rpc-auth-boot-${chainId}.json`),
-  read = (f) => readFileSync(f, "utf-8"),
-  write = (f, s) => writeFileSync(f, s, { mode: 0o600 }),
+  file = join(keeperStateDir(), `rpc-auth-boot-${chainId}.json`),
+  read = readOwnedState,
+  write = writeOwnedState,
 } = {}) {
   return {
     check() {
@@ -236,9 +261,11 @@ export function createBootAlertGate({
       let prev = null
       try {
         const parsed = JSON.parse(read(file))
-        if (parsed && Number.isFinite(parsed.lastSentAt)) prev = parsed
+        // [A71 L-3] a lastSentAt in the future (planted, or a clock that jumped back) is "never sent":
+        // it would otherwise suppress every boot alert until that moment.
+        if (parsed && Number.isFinite(parsed.lastSentAt) && parsed.lastSentAt <= t) prev = parsed
       } catch {
-        prev = null // missing / unreadable / corrupt ⇒ behave as "never sent"
+        prev = null // missing / unreadable / corrupt / untrusted ⇒ behave as "never sent"
       }
       const send = prev == null || t - prev.lastSentAt >= cooldownMs
       const suppressed = prev == null ? 0 : Number(prev.suppressed) || 0
