@@ -36,7 +36,12 @@ export const REDACTED = "/REDACTED"
 export const ALERT_LINK_HOSTS = Object.freeze(["etherscan.io", "sepolia.etherscan.io", "basescan.org", "arbiscan.io"])
 
 const TAIL = "[^\\s\"'<>(),]*"
-const SCHEME_URL = new RegExp(`\\b([a-z][a-z0-9+.-]{0,30})://(${TAIL})`, "gi")
+// [A71 L-4] A scheme starts wherever the previous character could not be part of one. `\b` missed
+// `rpc_https://host/v2/<key>`: `_` is a word character, so there was no boundary before `https`.
+const SCHEME_URL = new RegExp(`(?<![a-z0-9+.-])([a-z][a-z0-9+.-]{0,30})://(${TAIL})`, "gi")
+// [A71 L-4] JSON-escaped slashes (`https:\/\/host\/v2\/<key>`, also double-escaped) hid the URL from
+// every pattern below; they are normalised to `/` first.
+const ESCAPED_SLASH = /\\+\//g
 // Lookbehind: only at a token start, so neither pattern re-enters a URL pattern 1 already handled.
 const HOSTPORT_PATH = new RegExp(
   `(?<![\\w/:.@-])((?:\\[[0-9a-f:.]{2,45}\\]|[a-z0-9_.-]{1,255}):\\d{1,5})[/?#]${TAIL}`,
@@ -59,6 +64,7 @@ function hostOf(hostPort) {
 export function redactUrl(text, { allowHosts = [] } = {}) {
   const allow = new Set(allowHosts.map((h) => h.toLowerCase()))
   return String(text)
+    .replace(ESCAPED_SLASH, "/")
     .replace(SCHEME_URL, (match, scheme, rest) => {
       // A `file:///…` frame in a stack trace is a local path, not an endpoint — keep the frames.
       if (scheme.toLowerCase() === "file") return match
