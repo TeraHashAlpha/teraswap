@@ -11,8 +11,10 @@
  * WHAT COUNTS AS AUTH (classifyRpcError walks the error and its .cause chain, viem-shaped or not):
  *   - an HTTP 401 / 403 status (viem HttpRequestError — a non-JSON body: "Must be authenticated!",
  *     a provider/WAF 403 page);
- *   - the provider's own words, matched on REDACTED text (so a key or path can never match): "not on
- *     whitelist" (Alchemy allowlist), "must be authenticated", "invalid api key", "api key …
+ *   - [A71 L-2] ANY OTHER HTTP status (429, 5xx, a proxy page) is TRANSIENT, full stop: its body is
+ *     not matched, so a 503 page that says "unauthorized upstream" is not a rejected key;
+ *   - with NO HTTP status, the provider's own words, matched on REDACTED text (so a key or path can
+ *     never match): "not on whitelist" (Alchemy allowlist), "must be authenticated", "invalid api key", "api key …
  *     invalid/disabled/…", "invalid project id", "unauthorized". These matter because a 403 WITH a
  *     JSON-RPC body is re-thrown by viem as a generic -32600/-32000 RPC error and the HTTP status is
  *     gone — measured against viem 2.47.10, pinned in rpc-auth.test.mjs.
@@ -102,6 +104,8 @@ export function classifyRpcError(err) {
     const { statuses, names, text } = walk(err)
     const status = statuses.find((s) => AUTH_STATUS.has(s))
     if (status !== undefined) return { kind: RPC_AUTH, signal: `HTTP ${status}` }
+    // [A71 L-2] A real HTTP status that is not 401/403 decides it: transient, body never matched.
+    if (statuses.length > 0) return { kind: RPC_TRANSIENT, signal: null }
     if (names.includes("ContractFunctionRevertedError") || REVERT_TEXT.test(text)) return { kind: RPC_TRANSIENT, signal: null }
     for (const [label, re] of AUTH_TEXT) if (re.test(text)) return { kind: RPC_AUTH, signal: label }
   } catch {
