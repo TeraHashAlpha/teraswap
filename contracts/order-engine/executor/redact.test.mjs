@@ -215,12 +215,27 @@ describe("alerts built from a keyed viem error carry no key", () => {
 // A small tokenizer separates code from strings/comments, so a sink named in a comment or an error
 // word inside a string never counts; template `${…}` bodies are code.
 
-// Free calls (`log(`, not `foo.log(`) plus the monitor's method sink (`this._sendCooldownAlert(`).
+// Free calls (`log(`, not `foo.log(`) plus method sinks (`this._sendCooldownAlert(`, `x.alert(`).
+// [A71 L-5] Every console method (console.dir/table/trace too) and every alert builder — alertOps,
+// alertRpcAuth, alertLowGas, alertUnexplainedOutflow, alertNewDcaPosition, an injected `alert(`,
+// sendTelegramAlert / sendTelegramHeartbeat. A declaration (`function alertOps(`) is not a call.
 const SINK =
-  /(?:(?<![\w$.])(console\.(?:log|error|warn|info|debug)|log|alertOps|sendTelegramAlert)|(?<=\.)(_sendCooldownAlert))\s*\(/g
-const ERR_ID = String.raw`(?:err|e|error|[a-z]\w*Err|[a-z]\w*Error)`
-const RAW_TEXT = new RegExp(String.raw`\b${ERR_ID}\s*\??\.\s*(?:message|shortMessage|details|stack|cause|metaMessages)\b`)
-const BARE_ID = new RegExp(String.raw`(?:^|[,(])\s*${ERR_ID}\s*(?=[,)]|$)`)
+  /(?<!\bfunction\s+)(?:(?<![\w$.])(console\.\w+|log|alert\w*|sendTelegram\w*)|(?<=\.)(_sendCooldownAlert|alert\w*))\s*\(/g
+// The conventional error names; [A71 L-5] plus every identifier the file binds as a caught error
+// (`catch (x)`, `.catch((x) => …)`, `.catch(x => …)`, `.catch(function (x) …)`) — see errorIds().
+const ERR_ID_DEFAULT = String.raw`err|e|error|[a-z]\w*Err|[a-z]\w*Error`
+const errIdPattern = (names) => `(?:${[ERR_ID_DEFAULT, ...[...names].map((n) => n.replace(/\$/g, "\\$"))].join("|")})`
+const rawText = (id) => new RegExp(String.raw`(?<![\w$])${id}\s*\??\.\s*(?:message|shortMessage|details|stack|cause|metaMessages)\b`)
+// A bare error value as an argument, a `${x}`, a ternary branch or an object value / shorthand (`{ err }`).
+const bareId = (id) => new RegExp(String.raw`(?:^|[,({:?])\s*${id}\s*(?=[,)}:]|$)`)
+
+/** [A71 L-5] Identifiers bound to a caught error anywhere in `code` (strings/comments already blanked). */
+function errorIds(code) {
+  const names = new Set()
+  for (const m of code.matchAll(/\bcatch\s*\(\s*([A-Za-z_$][\w$]*)\s*\)/g)) names.add(m[1])
+  for (const m of code.matchAll(/\.catch\s*\(\s*(?:async\s+)?(?:function\b\s*[\w$]*\s*)?\(?\s*([A-Za-z_$][\w$]*)\s*\)?\s*(?:=>|\{)/g)) names.add(m[1])
+  return names
+}
 
 /** Per-char code view: strings + comments blanked, `${` → "(" and its closing `}` → ")". */
 function codeView(src) {
@@ -282,6 +297,9 @@ function maskRedactors(args) {
 /** @returns {Array<{line:number, sink:string, call:string}>} raw-error sinks in `src` */
 function findRawErrorSinks(src) {
   const code = codeView(src)
+  const id = errIdPattern(errorIds(code))
+  const RAW_TEXT = rawText(id)
+  const BARE_ID = bareId(id)
   const hits = []
   for (const m of code.matchAll(SINK)) {
     const open = m.index + m[0].length - 1
@@ -322,6 +340,39 @@ describe("source guard: no raw error text reaches a console/log/alert sink", () 
     ]
     for (const s of clean) assert.deepEqual(findRawErrorSinks(s), [], `false positive: ${s}`)
   })
+
+  // [A71 L-5] BEGIN — blind spots of the audited guard.
+  test("[A71 L-5] every console method, every caught-error name, the alert builders, `{ err }`", () => {
+    const flagged = [
+      "console.dir(err)",
+      "console.table([e.message])",
+      "console.trace(`boom ${error}`)",
+      'try { x() } catch (boom) { console.error("failed:", boom.message) }',
+      "p.catch((reason) => log(`x ${reason.message}`))",
+      "p.catch(async (why) => { console.warn(why) })",
+      "p.catch(oops => log(String(oops)))",
+      "p.catch(function (bad) { log(bad.stack) })",
+      'await alertRpcAuth({ phase: "boot", signal: err.message })',
+      "await alertLowGas({ detail: `${e.message}` }, s)",
+      "await alertUnexplainedOutflow({ outflowEth: 1, note: err.shortMessage }, s)",
+      "await alertNewDcaPosition({ wallet, reason: error.details })",
+      "await sendTelegramHeartbeat({ lastError: err })",
+      'await alertOps({ kind: "rpc", err }, s)',
+      "await alert({ ...base, detail: e.message })",
+      "this.lowGas.alert({ detail: err.message })",
+      'log(ok ? "fine" : err)',
+    ]
+    for (const s of flagged) assert.equal(findRawErrorSinks(s).length, 1, `not flagged: ${s}`)
+    const clean = [
+      "export async function alertOps({ kind, detail }, score) { return kind }",
+      "try { x() } catch (boom) { console.error(\"failed:\", redactError(boom)) }",
+      'await alertRpcAuth({ phase: "boot", signal })',
+      "p.catch(() => log(\"no binding\"))",
+      "console.dir({ paused, since })",
+    ]
+    for (const s of clean) assert.deepEqual(findRawErrorSinks(s), [], `false positive: ${s}`)
+  })
+  // [A71 L-5] END
 
   test("every executor *.js is clean", () => {
     const dir = process.env.REDACT_GUARD_DIR || dirname(fileURLToPath(import.meta.url))
