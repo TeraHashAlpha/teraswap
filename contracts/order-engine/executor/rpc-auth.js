@@ -21,12 +21,17 @@
  * Everything else (timeouts, 429, 5xx, ECONNREFUSED) stays TRANSIENT and keeps today's handling.
  *
  * RUNTIME (createRpcAuthMonitor): every RPC outcome the keeper already observes is reported to ONE
- * per-process monitor. RPC_AUTH_THRESHOLD consecutive auth errors (a success resets the streak; a
- * transient error neither counts nor resets) ⇒ state `paused: rpc-auth`, ONE high-urgency alert, a
- * reminder at most once per RPC_AUTH_ALERT_COOLDOWN_MS with the suppressed count, and ONE recovery
- * alert on the first success. The state is REPORTED (health, metrics, keeper_runtime_config); it is
- * not a new gate — with every RPC call refused nothing can execute anyway, and the keeper keeps
- * polling so it recovers by itself the moment the key works again.
+ * per-process monitor, labelled by origin/method ("event-watcher:getLogs", "balance-read", …).
+ * [A71 M-1] The streak is kept PER ORIGIN: a success resets only its own origin's streak, so a
+ * provider that refuses one method while another works (getBlockNumber ok, getLogs refused) still
+ * reaches the threshold; a transient error neither counts nor resets. RPC_AUTH_THRESHOLD consecutive
+ * auth errors from one origin ⇒ state `paused: rpc-auth`, ONE high-urgency alert, a reminder at most
+ * once per RPC_AUTH_ALERT_COOLDOWN_MS with the suppressed count, and ONE recovery alert once no origin
+ * is over the threshold any more. `muted` (returned by onRpcError) is true ONLY for an auth error
+ * while paused — the only case where a caller's own alert (Degraded / "Ops issue: rpc" /
+ * consecutive-errors) repeats one the monitor already sent. The state is REPORTED (health, metrics,
+ * keeper_runtime_config); it is not a new gate — with the provider refusing, nothing can execute
+ * anyway, and the keeper keeps polling so it recovers by itself the moment the key works again.
  *
  * BOOT (createBootAlertGate): chain-verify fails closed as before; executor.js prints
  * `rpc: AUTH REJECTED chain=<id> source=RPC_URL — check provider allowlist/key` and alerts. pm2
@@ -113,8 +118,10 @@ export function classifyRpcError(err) {
  * @param {(p: object) => Promise<unknown>} o.alert — alert.js alertRpcAuth in production
  * @param {(state: object) => Promise<unknown>|unknown} [o.onStateChange] — called on pause and on clear
  * @param {(msg: string) => void} [o.log]
- * @returns {{ onRpcError: (origin: string, err: unknown) => Promise<{kind: string, signal: string|null, alerted: boolean}>,
+ * @returns {{ onRpcError: (origin: string, err: unknown) => Promise<{kind: string, signal: string|null, alerted: boolean, muted: boolean}>,
  *   onRpcSuccess: (origin: string) => Promise<{recovered: boolean}>, state: () => object }}
+ *   origin = "<caller>[:<method>]" — one streak per distinct origin.
+ *   muted  = auth error AND paused: the caller's legacy alert for it is redundant. Never true otherwise.
  */
 export function createRpcAuthMonitor({
   chainId,
@@ -126,7 +133,7 @@ export function createRpcAuthMonitor({
   onStateChange = () => {},
   log = () => {},
 } = {}) {
-  let consecutive = 0
+  const streaks = new Map() // origin → consecutive auth errors from THAT origin (A71 M-1)
   let pausedSince = null
   let lastAlertAt = 0
   let suppressed = 0
@@ -134,10 +141,12 @@ export function createRpcAuthMonitor({
   let lastOrigin = null
 
   const iso = (ms) => (ms == null ? null : new Date(ms).toISOString())
+  const maxStreak = () => Math.max(0, ...streaks.values())
   const state = () => ({
     paused: pausedSince == null ? null : PAUSED_RPC_AUTH,
     pausedSince: iso(pausedSince),
-    consecutiveAuthErrors: consecutive,
+    consecutiveAuthErrors: maxStreak(),
+    authStreaks: Object.fromEntries(streaks),
     threshold,
     source,
     lastSignal,
@@ -153,11 +162,14 @@ export function createRpcAuthMonitor({
 
   async function onRpcError(origin, err) {
     const { kind, signal } = classifyRpcError(err)
-    if (kind !== RPC_AUTH) return { kind, signal, alerted: false }
-    consecutive += 1
+    if (kind !== RPC_AUTH) return { kind, signal, alerted: false, muted: false }
+    const key = String(origin)
+    const consecutive = (streaks.get(key) || 0) + 1
+    streaks.set(key, consecutive)
     lastSignal = signal
     lastOrigin = origin
-    if (consecutive < threshold) return { kind, signal, alerted: false }
+    // Not paused and this origin is below the threshold: counted only — the caller's own alert stays.
+    if (pausedSince == null && consecutive < threshold) return { kind, signal, alerted: false, muted: false }
 
     const t = now()
     const base = { chainId, source, signal, consecutive, threshold, origin }
@@ -169,22 +181,23 @@ export function createRpcAuthMonitor({
       log(`   paused: ${PAUSED_RPC_AUTH} after ${consecutive} consecutive auth errors (last: ${origin}, ${signal})`)
       await safely(() => onStateChange(state()))
       await safely(() => alert({ ...base, phase: "runtime", since: iso(pausedSince), suppressed: 0 }))
-      return { kind, signal, alerted: true }
+      return { kind, signal, alerted: true, muted: true }
     }
     if (t - lastAlertAt >= cooldownMs) {
       const n = suppressed
       lastAlertAt = t
       suppressed = 0
       await safely(() => alert({ ...base, phase: "runtime", since: iso(pausedSince), suppressed: n }))
-      return { kind, signal, alerted: true }
+      return { kind, signal, alerted: true, muted: true }
     }
     suppressed += 1
-    return { kind, signal, alerted: false }
+    return { kind, signal, alerted: false, muted: true }
   }
 
   async function onRpcSuccess(origin) {
-    consecutive = 0
+    streaks.delete(String(origin)) // only THIS origin's streak: another origin may still be refused
     if (pausedSince == null) return { recovered: false }
+    if (maxStreak() >= threshold) return { recovered: false } // still refused elsewhere: stay paused
     const since = iso(pausedSince)
     const n = suppressed
     pausedSince = null

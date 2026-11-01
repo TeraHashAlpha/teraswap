@@ -146,14 +146,16 @@ const AUTH_ERR = () => ERRORS["json403-whitelist"]
 const TRANSIENT_ERR = () => ERRORS["text503"]
 
 describe("runtime monitor — 3 consecutive auth errors ⇒ ONE alert + paused: rpc-auth", () => {
-  test("below the threshold: counted, no alert, not paused", async () => {
+  test("below the threshold: counted per origin, no alert, not paused", async () => {
     const h = harness()
     assert.equal(RPC_AUTH_THRESHOLD, 3)
-    await h.m.onRpcError("event-watcher", AUTH_ERR())
+    await h.m.onRpcError("event-watcher:getLogs", AUTH_ERR())
+    await h.m.onRpcError("event-watcher:getLogs", AUTH_ERR())
     await h.m.onRpcError("balance-read", AUTH_ERR())
     assert.equal(h.alerts.length, 0)
     assert.equal(h.m.state().paused, null)
-    assert.equal(h.m.state().consecutiveAuthErrors, 2)
+    assert.equal(h.m.state().consecutiveAuthErrors, 2, "the longest streak of any one origin")
+    assert.deepEqual(h.m.state().authStreaks, { "event-watcher:getLogs": 2, "balance-read": 1 })
   })
 
   test("at the threshold: the AUTH line, paused: rpc-auth, one runtime alert, one state change", async () => {
@@ -188,13 +190,16 @@ describe("runtime monitor — 3 consecutive auth errors ⇒ ONE alert + paused: 
     assert.equal(h.states.length, 1, "a reminder is not a state change")
   })
 
-  test("transient errors neither count nor reset; a success resets the streak", async () => {
+  test("transient errors neither count nor reset; a success resets ITS OWN origin's streak only (A71 M-1)", async () => {
     const h = harness()
     await h.m.onRpcError("a", AUTH_ERR())
     await h.m.onRpcError("a", TRANSIENT_ERR())
     await h.m.onRpcError("a", AUTH_ERR())
     assert.equal(h.m.state().consecutiveAuthErrors, 2)
     await h.m.onRpcSuccess("balance-read")
+    assert.equal(h.m.state().consecutiveAuthErrors, 2, "another origin's success is not evidence for 'a'")
+    await h.m.onRpcSuccess("a")
+    assert.equal(h.m.state().consecutiveAuthErrors, 0)
     await h.m.onRpcError("a", AUTH_ERR())
     await h.m.onRpcError("a", AUTH_ERR())
     assert.equal(h.alerts.length, 0)
@@ -489,7 +494,13 @@ describe("executor.js wiring (source anchors)", () => {
     assert.ok(src.includes('await rpcAuthMonitor.onRpcSuccess("balance-read")'))
     assert.ok(src.includes('await rpcAuthMonitor.onRpcError("balance-read", err)'))
     assert.ok(src.includes('await rpcAuthMonitor.onRpcError("cycle", err)'))
+    assert.ok(src.includes('await rpcAuthMonitor.onRpcSuccess("cycle")'), "a full cycle ends the cycle origin's streak (A71 M-1)")
     assert.ok(src.includes("startEventWatcher(publicClient, watchedContracts, monitor, rpcAuthMonitor)"))
+  })
+  test("[A71 M-1] the legacy 'Ops issue: rpc' and consecutive-errors alerts are muted ONLY while paused", () => {
+    assert.ok(src.includes("if (verdict?.muted !== true) {\n      try {\n        // INC-2026-10-30-001: THIS line posted"), "balance read")
+    assert.ok(src.includes("if (monitor && verdict?.muted !== true) monitor.onCycleError(err)"), "thrown cycle")
+    assert.equal(src.match(/verdict\?\.kind !== RPC_AUTH/g), null, "an auth KIND alone must never mute an alert")
   })
   test("/health exposes the state", () => {
     assert.ok(src.includes("paused: stats.paused,"))

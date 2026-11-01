@@ -1157,14 +1157,15 @@ async function beginCycleObservability(publicClient, walletAddress, monitor) {
     // Could not read chain state ⇒ flag RPC down for the score; keep going.
     rpcDown = true
     // [fix/executor-alert-masking-rpc-auth] An auth/allowlist rejection is the monitor's: counted,
-    // and alerted ONCE (rate-limited) at the threshold. Only a transient failure keeps today's
-    // per-cycle "rpc" alert — during INC-2026-10-30-001 that alert fired every cycle for ~20 h.
+    // and alerted ONCE (rate-limited) at the threshold — during INC-2026-10-30-001 the per-cycle "rpc"
+    // alert fired every cycle for ~20 h. [A71 M-1] It is muted ONLY while the monitor is paused; an
+    // auth error below the threshold (or any transient one) keeps today's per-cycle alert.
     let verdict = null
     try {
       verdict = rpcAuthMonitor ? await rpcAuthMonitor.onRpcError("balance-read", err) : null
     } catch { /* never throw */ }
     log(`  WARNING: balance read failed (${redactError(err, { max: 80 })}) -- rpcDown=true${verdict?.kind === RPC_AUTH ? ` [rpc auth rejected: ${verdict.signal}]` : ""}`)
-    if (verdict?.kind !== RPC_AUTH) {
+    if (verdict?.muted !== true) {
       try {
         // INC-2026-10-30-001: THIS line posted the full keyed RPC URL to Telegram (err.message).
         await alertOps({ kind: "rpc", detail: `balance read failed: ${redactError(err)}` }, scoreFromContext(ctx))
@@ -2488,6 +2489,9 @@ async function main() {
       log("  Active order(s) appeared while idle -- running the full cycle now")
     }
     const activeOrders = await executeCycle(publicClient, walletClient, null, flashbotsPublicClient, flashbotsWalletClient, monitor)
+    // [A71 M-1] A full cycle that did not throw ends the "cycle" origin's auth streak (a probe tick,
+    // which makes no RPC call, is not evidence and never gets here). Never throws (rpc-auth.js).
+    if (rpcAuthMonitor) await rpcAuthMonitor.onRpcSuccess("cycle")
     cadence.record(activeOrders)
     watcher.setIdle(cadence.isIdle())
     if (cadence.isIdle()) log(`  Idle: next RPC cycle in ${IDLE_POLL_INTERVAL_MS / 1000}s (Supabase probe every ${POLL_INTERVAL_MS / 1000}s)`)
@@ -2501,10 +2505,11 @@ async function main() {
       await runTick()
     } catch (err) {
       console.error("Cycle error:", redactError(err))
-      // [fix/executor-alert-masking-rpc-auth] An auth rejection is alerted once by rpcAuthMonitor;
-      // the monitor's 5-min "consecutive errors" alert keeps every other (transient) cycle error.
+      // [fix/executor-alert-masking-rpc-auth] An auth rejection is alerted once by rpcAuthMonitor.
+      // [A71 M-1] The monitor's 5-min "consecutive errors" alert is muted ONLY while it is paused;
+      // every other cycle error (transient, or auth below the threshold) still reaches it.
       const verdict = rpcAuthMonitor ? await rpcAuthMonitor.onRpcError("cycle", err) : null
-      if (monitor && verdict?.kind !== RPC_AUTH) monitor.onCycleError(err)
+      if (monitor && verdict?.muted !== true) monitor.onCycleError(err)
     }
   }, POLL_INTERVAL_MS)
 

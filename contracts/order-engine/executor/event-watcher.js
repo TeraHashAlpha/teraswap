@@ -206,10 +206,13 @@ export function startEventWatcher(publicClient, contracts, monitor = null, rpcAu
   async function poll() {
     if (stopped) return
 
+    // [A71 M-1] Which RPC method is in flight: the auth monitor keeps one streak per method, so a
+    // provider that answers getBlockNumber but refuses getLogs still reaches the threshold.
+    let rpcCall = "getBlockNumber"
     try {
       const currentBlock = await publicClient.getBlockNumber()
-      // The RPC answered: an auth streak (if any) is over. Never throws (rpc-auth.js).
-      if (rpcAuth) await rpcAuth.onRpcSuccess("event-watcher")
+      // This method answered: ITS auth streak (if any) is over. Never throws (rpc-auth.js).
+      if (rpcAuth) await rpcAuth.onRpcSuccess("event-watcher:getBlockNumber")
 
       // First poll: just record the block, don't replay history
       if (lastBlock === null) {
@@ -229,11 +232,14 @@ export function startEventWatcher(publicClient, contracts, monitor = null, rpcAu
       // the same per-contract buckets (by log.address, lower-cased — nodes return it lower-case,
       // env addresses may be checksummed) and processed contract-by-contract in `contracts` order,
       // exactly as the per-contract calls did. Pinned by event-watcher.test.mjs.
+      rpcCall = "getLogs"
       const unionLogs = await publicClient.getLogs({
         address: contracts.map((c) => c.address),
         fromBlock: lastBlock + 1n,
         toBlock: currentBlock,
       })
+      if (rpcAuth) await rpcAuth.onRpcSuccess("event-watcher:getLogs")
+      rpcCall = "poll"
       const logsByAddress = new Map(contracts.map((c) => [c.address.toLowerCase(), []]))
       for (const log of unionLogs) {
         const bucket = logsByAddress.get(String(log.address).toLowerCase())
@@ -296,22 +302,23 @@ export function startEventWatcher(publicClient, contracts, monitor = null, rpcAu
       backoffMs = INITIAL_BACKOFF_MS
     } catch (err) {
       consecutiveFailures++
-      let authOwned = false
+      let verdict = null
       if (rpcAuth) {
         try {
-          authOwned = (await rpcAuth.onRpcError("event-watcher", err)).kind === "auth"
+          verdict = await rpcAuth.onRpcError(`event-watcher:${rpcCall}`, err)
         } catch {
-          authOwned = false // a broken monitor must not silence the Degraded alert
+          verdict = null // a broken monitor must not silence the Degraded alert
         }
       }
       console.error(
-        `[EVENT-WATCHER] Poll error (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES})${authOwned ? " [rpc auth rejected]" : ""}: ${redactError(err)}`,
+        `[EVENT-WATCHER] Poll error (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES})${verdict?.kind === "auth" ? " [rpc auth rejected]" : ""}: ${redactError(err)}`,
       )
 
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        // An auth rejection is alerted ONCE by rpcAuth (rate-limited); repeating it here every 5 polls
-        // is exactly the "keeps logging, nobody acts" loop of INC-2026-10-30-001.
-        if (!authOwned) {
+        // [A71 M-1] Muted ONLY while the monitor is paused (it already sent the rate-limited auth
+        // alert); repeating it here every 5 polls is the "keeps logging, nobody acts" loop of
+        // INC-2026-10-30-001. An auth error below the threshold still gets today's Degraded alert.
+        if (verdict?.muted !== true) {
           await sendTelegramAlert(
             `\u26A0\uFE0F <b>Event Watcher Degraded</b>\n${MAX_CONSECUTIVE_FAILURES} consecutive RPC failures.\nLast error: ${esc(redactError(err))}`
           )
