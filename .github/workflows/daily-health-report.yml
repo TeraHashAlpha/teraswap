@@ -165,7 +165,7 @@ jobs:
             -H "Authorization: Bearer ${MONITOR_SECRET}" \
             "$SITE_URL/api/monitor/keepers" || echo "")
           keepers_status=$(node -e 'try{const r=JSON.parse(process.argv[1]);process.stdout.write(["OK","PAUSED","UNKNOWN"].includes(r.status)?r.status:"UNKNOWN")}catch{process.stdout.write("UNKNOWN")}' "$keepers_body")
-          keepers=$(node -e 'const s=(v)=>String(v??"").replace(/[^A-Za-z0-9:._-]/g,"");try{const r=JSON.parse(process.argv[1]);process.stdout.write((r.chains||[]).map((c)=>`${s(c.chainId)}=${c.paused?`paused:${s(c.paused)}@${s(c.pausedSince)||"unknown"}`:c.readable?"ok":"unreadable"}`).join(" "))}catch{process.stdout.write("")}' "$keepers_body")
+          keepers=$(node -e 'const s=(v)=>String(v??"").replace(/[^A-Za-z0-9:._-]/g,"");try{const r=JSON.parse(process.argv[1]);process.stdout.write((r.chains||[]).map((c)=>`${s(c.chainId)}=${c.paused?`paused:${s(c.paused)}@${s(c.pausedSince)||"unknown"}`:c.readable?"ok":c.active===false?"inactive":"unreadable"}`).join(" "))}catch{process.stdout.write("")}' "$keepers_body")
           echo "keepers_status=$keepers_status" >> "$GITHUB_OUTPUT"
           echo "keepers=$keepers" >> "$GITHUB_OUTPUT"
 
@@ -375,6 +375,9 @@ jobs:
           const keeperStateLines = []
           const keeperTokens = (e.KEEPERS || '').split(' ').filter(Boolean).map((t) => t.split('='))
           const pausedTokens = keeperTokens.filter(([, st]) => (st || '').startsWith('paused:'))
+          // [A71 M-2] "unreadable" = an ACTIVE chain whose state could not be read (inactive ones are
+          // "inactive"). It may be the paused one, so it is never reported as OK, whatever the status says.
+          const unreadableTokens = keeperTokens.filter(([, st]) => st === 'unreadable')
           if (e.KEEPERS_STATUS === 'PAUSED' || pausedTokens.length) {
             for (const [chainId, st] of pausedTokens) {
               const [reason, since] = st.slice('paused:'.length).split('@')
@@ -383,11 +386,15 @@ jobs:
               requiresAttention.push(`The ${name} keeper reports **paused: ${reason}** since ${since}${reason === 'rpc-auth' ? ' — its RPC provider rejects its key/allowlist; follow docs/Runbooks/EXECUTOR-OPERATIONS.md § 7' : ''}.`)
             }
             bump(2)
-          } else if (e.KEEPERS_STATUS === 'OK') {
+          } else if (e.KEEPERS_STATUS === 'OK' && unreadableTokens.length === 0) {
             keeperStateLines.push(`| Keeper state (keeper_runtime_config) | ✅ | no keeper reports a pause (${keeperTokens.map(([c, st]) => `${c}: ${st}`).join(', ') || 'no chains'}) |`)
           } else {
-            keeperStateLines.push('| Keeper state (keeper_runtime_config) | ⚠️ | UNKNOWN — /api/monitor/keepers could not be read (MONITOR_SECRET unset, endpoint not deployed yet, or migration 20261031120000_keeper_runtime_config_paused.sql not applied) |')
-            requiresAttention.push('Keeper state: UNKNOWN — /api/monitor/keepers could not be read, so a paused keeper (INC-2026-10-30-001) would go unreported.')
+            const unreadable = unreadableTokens.map(([c]) => `${CHAIN_NAMES[c] || `chain ${c}`} (${c})`).join(', ')
+            const why = unreadable
+              ? `the paused state of ${unreadable} could not be read (Supabase unreachable, or migration 20261031120000_keeper_runtime_config_paused.sql not applied)`
+              : '/api/monitor/keepers could not be read (MONITOR_SECRET unset, endpoint not deployed yet, or migration 20261031120000_keeper_runtime_config_paused.sql not applied)'
+            keeperStateLines.push(`| Keeper state (keeper_runtime_config) | ⚠️ | UNKNOWN — ${why} |`)
+            requiresAttention.push(`Keeper state: UNKNOWN — ${why}, so a paused keeper (INC-2026-10-30-001) would go unreported.`)
             bump(1)
           }
 

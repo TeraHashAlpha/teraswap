@@ -10,8 +10,8 @@
  * /api/monitor/alerts; constant-time compare). Read-only: one SELECT per chain, no writes.
  *
  * Response: { status: 'OK' | 'PAUSED' | 'UNKNOWN', chains: [{ chainId, active, readable, paused,
- * pausedSince }] } — UNKNOWN when no chain could be read (no Supabase, or the migration
- * 20261031120000_keeper_runtime_config_paused.sql is not applied yet).
+ * pausedSince }] } — UNKNOWN when any ACTIVE chain could not be read (no Supabase, or the migration
+ * 20261031120000_keeper_runtime_config_paused.sql is not applied yet) or none could; never OK then.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -30,6 +30,12 @@ export async function GET(req: NextRequest) {
   }
 
   const chains = await readAllKeeperPausedStates()
-  const status = chains.some((c) => c.paused) ? 'PAUSED' : chains.some((c) => c.readable) ? 'OK' : 'UNKNOWN'
+  // [A71 M-2] A partial read is never OK: an ACTIVE chain whose state could not be read may be the
+  // paused one. Inactive chains do not count (they execute nothing).
+  const status = chains.some((c) => c.paused)
+    ? 'PAUSED'
+    : chains.some((c) => c.active && !c.readable) || !chains.some((c) => c.readable)
+      ? 'UNKNOWN'
+      : 'OK'
   return NextResponse.json({ status, chains }, { headers: NO_STORE })
 }

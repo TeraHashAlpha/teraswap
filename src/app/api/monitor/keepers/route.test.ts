@@ -64,4 +64,24 @@ describe('GET /api/monitor/keepers', () => {
     mockReadAll.mockResolvedValueOnce([{ chainId: 8453, active: true, readable: false, paused: null, pausedSince: null }])
     expect((await (await callGET({ Authorization: `Bearer ${TEST_SECRET}` })).json()).status).toBe('UNKNOWN')
   })
+
+  it('[A71 M-2] one ACTIVE chain unreadable ⇒ UNKNOWN, never OK — even when another chain reads fine', async () => {
+    mockReadAll.mockResolvedValueOnce([
+      { chainId: 8453, active: true, readable: false, paused: null, pausedSince: null },
+      { chainId: 42161, active: true, readable: true, paused: null, pausedSince: null },
+    ])
+    expect((await (await callGET({ Authorization: `Bearer ${TEST_SECRET}` })).json()).status).toBe('UNKNOWN')
+    // an unreadable INACTIVE chain executes nothing: it does not downgrade an otherwise readable set
+    mockReadAll.mockResolvedValueOnce([
+      { chainId: 8453, active: true, readable: true, paused: null, pausedSince: null },
+      { chainId: 42161, active: false, readable: false, paused: null, pausedSince: null },
+    ])
+    expect((await (await callGET({ Authorization: `Bearer ${TEST_SECRET}` })).json()).status).toBe('OK')
+    // a pause still wins over an unreadable chain
+    mockReadAll.mockResolvedValueOnce([
+      { chainId: 8453, active: true, readable: true, paused: 'rpc-auth', pausedSince: SINCE },
+      { chainId: 42161, active: true, readable: false, paused: null, pausedSince: null },
+    ])
+    expect((await (await callGET({ Authorization: `Bearer ${TEST_SECRET}` })).json()).status).toBe('PAUSED')
+  })
 })
