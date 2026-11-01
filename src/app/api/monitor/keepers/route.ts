@@ -8,6 +8,8 @@
  *
  * Auth: `Authorization: Bearer <MONITOR_SECRET>` (same secret the workflow already sends to
  * /api/monitor/alerts; constant-time compare). Read-only: one SELECT per chain, no writes.
+ * [A71 L-1] Rate-limited per trusted client IP BEFORE the auth check, so guessing the secret or
+ * hammering the Supabase reads costs a 429, not a database round-trip per request.
  *
  * Response: { status: 'OK' | 'PAUSED' | 'UNKNOWN', chains: [{ chainId, active, readable, paused,
  * pausedSince }] } — UNKNOWN when any ACTIVE chain could not be read (no Supabase, or the migration
@@ -17,12 +19,23 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyBearerToken } from '@/lib/auth'
 import { readAllKeeperPausedStates } from '@/lib/keeper-health-monitor'
+import { checkRateLimit } from '@/lib/kv-rate-limiter'
+import { trustedClientIp } from '@/lib/trusted-ip'
 
 export const dynamic = 'force-dynamic'
 
 const NO_STORE = { 'Cache-Control': 'no-store' }
+/** The daily report calls this once a day; 30/min per IP leaves room for manual checks only.
+ *  (Not exported: a Next.js route file may only export route fields.) */
+const KEEPERS_RATE_LIMIT = { limit: 30, windowMs: 60_000 }
 
 export async function GET(req: NextRequest) {
+  const rate = await checkRateLimit(`monitor:${trustedClientIp(req)}`, KEEPERS_RATE_LIMIT.limit, KEEPERS_RATE_LIMIT.windowMs)
+  if (!rate.allowed) {
+    const retryAfter = Math.max(1, Math.ceil((rate.resetAt - Date.now()) / 1000))
+    return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429, headers: { ...NO_STORE, 'Retry-After': String(retryAfter) } })
+  }
+
   const secret = process.env.MONITOR_SECRET
   if (!secret) return NextResponse.json({ error: 'not configured' }, { status: 503, headers: NO_STORE })
   if (!verifyBearerToken(req.headers.get('authorization'), secret)) {

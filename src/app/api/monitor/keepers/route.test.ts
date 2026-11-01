@@ -9,6 +9,11 @@ const mockReadAll = vi.fn()
 vi.mock('@/lib/keeper-health-monitor', () => ({
   readAllKeeperPausedStates: () => mockReadAll(),
 }))
+// [A71 L-1] The route rate-limits first (pinned in route.rate-limit.test.ts); these tests are about
+// auth and status, so the limiter always allows here.
+vi.mock('@/lib/kv-rate-limiter', () => ({
+  checkRateLimit: async () => ({ allowed: true, remaining: 29, resetAt: Date.now() + 60_000 }),
+}))
 
 const TEST_SECRET = 'test-monitor-secret-keepers-123'
 const SINCE = '2026-10-30T15:00:00.000Z'
