@@ -211,13 +211,20 @@ keeper (the key sits inside a URL path in a host env file). Every keeper RPC cal
 1. **Inventory every consumer by hostname** (e.g. `g.alchemy.com`). Print variable names and hosts only,
    never the path or query:
    - Keeper host, every env file of every keeper (`.env.executor` = Base, `.env.executor.arbitrum`, …),
-     plus any backup copy (INC-2026-09-08-001 found one under the home directory):
+     plus any backup copy (INC-2026-09-08-001 found one under the home directory). Run both commands
+     (macOS and Linux `grep`/`sed`; pinned by `contracts/order-engine/executor/runbook-rpc-inventory.test.mjs`):
      ```bash
      cd contracts/order-engine/executor
-     # prints "file  VAR  scheme://host" — never the userinfo, path or query (where keys live)
-     grep -HE '^[A-Z0-9_]+="?[a-z]+://' .env.executor* \
-       | sed -E 's#^([^:]+):([A-Z0-9_]+)="?([a-z]+)://([^/?#@"]*@)?([^/?#"]+).*#\1  \2  \3://\5#' \
-       | grep '<provider-host>'
+     HOST='<provider-host>'
+     # (a) every assignment whose value is a URL — `VAR=…`, `VAR = …`, `export VAR=…`, indented, quoted
+     #     or not. Prints "file  VAR  scheme://host": never the userinfo, path or query (where keys live).
+     grep -HE "^[[:space:]]*(export[[:space:]]+)?[A-Za-z0-9_]+[[:space:]]*=[[:space:]]*[\"']?[A-Za-z][A-Za-z0-9+.-]*://" .env.executor* \
+       | sed -E "s|^([^:]+):[[:space:]]*(export[[:space:]]+)?([A-Za-z0-9_]+)[[:space:]]*=[[:space:]]*[\"']?([A-Za-z][A-Za-z0-9+.-]*)://([^/?#@\"' ]*@)?([^/?#\"' ]*).*|\1  \3  \4://\6|" \
+       | grep -F "$HOST"
+     # (b) every line that names the host in ANY shape (a URL list, a commented-out line, …).
+     #     Prints "file:line  VAR" only — a line (b) lists that (a) did not is a consumer (a) missed.
+     grep -HnF "$HOST" .env.executor* \
+       | sed -E "s|^([^:]+:[0-9]+):[[:space:]]*(export[[:space:]]+)?([A-Za-z0-9_]*).*|\1  \3|"
      ```
    - Vercel, **Production + Preview + Development**: Project → Settings → Environment Variables, search
      for the hostname (or `vercel env pull` into a temp file OUTSIDE the repo, grep it the same way, then
