@@ -60,3 +60,31 @@ Auditor-note: keeper + monitor/CI code — owner opens the PR as DRAFT. Compare:
   Mutation (drop `AbortSignal.timeout` from `publishPausedState`) → the test fails in 10 s. vitest 396 files/6291 ·
   lint 93 (file is ESLint-ignored) · tsc 0.
 - Test gap: run keeper tests on CI's Node (20 and 22), not the host default.
+
+## Feedback — Auditor A71 fixes (0C/0H/2M/6L, all fixed; one droppable commit per id)
+| id | commit | change | test (fails on 6d7e64d) |
+|---|---|---|---|
+| M-1 | bd4634c | auth streak per origin/method; `muted` = auth AND paused gates Degraded / "Ops issue: rpc" / onCycleError; full cycle reports `cycle` success | rpc-auth-partial.test.mjs: 50 alternating → alert + paused (monitor and real watcher); muted only while paused; 8 fail |
+| M-2 | 8fb9f2e | route: any active chain unreadable → UNKNOWN; report: ✅ only with no `unreadable` token, tokens mark inactive chains | route.test.ts + `__tests__/daily-health-report-keepers.test.ts` (runs the YAML's own scripts); 4 fail |
+| L-1 | 807acf4 | `checkRateLimit("monitor:<ip>", 30, 60s)` before auth → 429 | route.rate-limit.test.ts; 3/3 fail |
+| L-2 | 5951b06 | an HTTP status ≠ 401/403 ⇒ transient, body not matched | rpc-auth-status.test.mjs (real viem errors); 4 fail |
+| L-3 | 417e2ef | future lastSentAt = never sent; gate file in `~/.teraswap-keeper` (0700/0600), untrusted dir ignored | rpc-auth-boot-gate.test.mjs; 5/5 fail |
+| L-4 | 5937d18 | `\+/` → `/` first; scheme not preceded by `[a-z0-9+.-]` | redact-shapes.test.mjs; 9 fail |
+| L-5 | 030cfa3 | guard: `console.\w+`, catch-bound names, all alert builders, `{ err }` | new scanner test fails with 6d7e64d's scanner |
+| L-6 | ea9d0ee | §7 step 1: `^\s*(export )?VAR\s*=` (POSIX classes) + by-hostname pass | runbook-rpc-inventory.test.mjs runs the runbook block; fails |
+
+- Evidence: each commit reverts cleanly alone on ea9d0ee, and the keeper suite and the keepers vitest tests stay green
+  after each revert. Keeper `node --test` 832/832: Node 20.20.2 + `npm ci --ignore-scripts` 5/5, Node 22.23.4 +
+  `npm ci` 5/5, 0 cancelled. Stronger guard: branch 0 raw-error sinks; origin/main ebaf0be 20.
+- Edge (M-1): recovery waits until every refused origin answers once (after a full outage: the watcher's getLogs
+  plus the next full cycle's balance read). The `cycle` success report is reporting only; execution is unchanged.
+- Edge (L-2 residual): a JSON-RPC error carries no HTTP status in viem, so "unauthorized" in, e.g., a -32603 body still
+  counts as auth. There is no status to decide by.
+- Edge (L-3): the first boot after deploy ignores the old /tmp gate file, so at most one extra boot alert.
+- Gap (L-6): GNU grep/sed not run locally (none installed, Docker daemon off). The block is POSIX ERE only, and the
+  Ubuntu keeper CI jobs run the test.
+- Process: PR #636 was not a draft at the start of this session; converted back to draft as instructed.
+- Process: the first tsc run failed on two of the new test files (Next's ProcessEnv requires NODE_ENV; a
+  header-array type). Both fixes were folded into their own finding commits (M-2, L-1) before the first push.
+  The final tree differs from the verified 2d7d484 tree only in those 3 test lines. tsc 0 · lint 93 (= base) ·
+  vitest 398 files/6299.
