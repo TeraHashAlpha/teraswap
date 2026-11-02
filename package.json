@@ -70,7 +70,7 @@
     "cuer": "0.0.4",
     "esbuild": "0.28.2",
     "eslint": "9.39.5",
-    "eslint-config-next": "16.4.2",
+    "eslint-config-next": "16.4.3",
     "jsdom": "29.1.1",
     "postcss": "8.5.31",
     "tailwindcss": "3.4.19",
