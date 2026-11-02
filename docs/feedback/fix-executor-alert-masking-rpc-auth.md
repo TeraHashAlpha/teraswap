@@ -88,3 +88,17 @@ Auditor-note: keeper + monitor/CI code — owner opens the PR as DRAFT. Compare:
   header-array type). Both fixes were folded into their own finding commits (M-2, L-1) before the first push.
   The final tree differs from the verified 2d7d484 tree only in those 3 test lines. tsc 0 · lint 93 (= base) ·
   vitest 398 files/6299.
+
+## Feedback — CodeQL js/incomplete-sanitization at redact.test.mjs:227 (follow-up to A71b)
+
+- Cause: `errIdPattern` built a RegExp from caught-error names and escaped only `$` (`n.replace(/\$/g, "\\$")`).
+  Identifiers can only hold `[\w$]`, so it was functionally enough, but CodeQL (High, "Incomplete string escaping or
+  encoding") rightly wants the backslash and the other metacharacters handled too.
+- Fix: one `escapeRegExp` helper in the test file (single pass, backslash + `^$.*+?()[]{}|`). No shared keeper-side
+  helper exists (the two TS `escapeRegExp` copies live in frontend tests), so it stays local. Guard not weakened: the
+  scanner is unchanged, and a new test checks the escaper itself plus that a `$err` catch binding still flags.
+- Evidence: `scripts/codeql-local.sh` with `Security/CWE-116/IncompleteSanitization.ql` — control `82b0691`: 1 hit at
+  `redact.test.mjs:227`; fixed tree: 0. Keeper `node --test` 833/833 on Node 20.20.2 and 22.23.4, 0 cancelled.
+  vitest 398 files/6299, tsc clean, lint 93 warnings (= base).
+- Concern (not this PR): the default LogInjection query flags `src/lib/rpc-env.ts:91`, which comes from `main`
+  (24a59f6) and is outside this PR's diff. Left alone.

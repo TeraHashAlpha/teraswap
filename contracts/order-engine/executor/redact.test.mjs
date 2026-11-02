@@ -224,7 +224,10 @@ const SINK =
 // The conventional error names; [A71 L-5] plus every identifier the file binds as a caught error
 // (`catch (x)`, `.catch((x) => …)`, `.catch(x => …)`, `.catch(function (x) …)`) — see errorIds().
 const ERR_ID_DEFAULT = String.raw`err|e|error|[a-z]\w*Err|[a-z]\w*Error`
-const errIdPattern = (names) => `(?:${[ERR_ID_DEFAULT, ...[...names].map((n) => n.replace(/\$/g, "\\$"))].join("|")})`
+// [CodeQL js/incomplete-sanitization] A complete regex-literal escaper: ONE pass over the backslash AND every
+// other metacharacter (`\ ^ $ . * + ? ( ) [ ] { } |`), so no input can reintroduce an unescaped metacharacter.
+const escapeRegExp = (s) => s.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")
+const errIdPattern = (names) => `(?:${[ERR_ID_DEFAULT, ...[...names].map(escapeRegExp)].join("|")})`
 const rawText = (id) => new RegExp(String.raw`(?<![\w$])${id}\s*\??\.\s*(?:message|shortMessage|details|stack|cause|metaMessages)\b`)
 // A bare error value as an argument, a `${x}`, a ternary branch or an object value / shorthand (`{ err }`).
 const bareId = (id) => new RegExp(String.raw`(?:^|[,({:?])\s*${id}\s*(?=[,)}:]|$)`)
@@ -317,6 +320,14 @@ function findRawErrorSinks(src) {
 }
 
 describe("source guard: no raw error text reaches a console/log/alert sink", () => {
+  test("escapeRegExp neutralises the backslash and every metacharacter (a `$` caught-error name still flags)", () => {
+    const meta = "\\^$.*+?()[]{}|"
+    assert.equal(new RegExp(`^${escapeRegExp(meta)}$`).test(meta), true)
+    assert.equal(new RegExp(`^${escapeRegExp("a\\b")}$`).test("a\\b"), true)
+    assert.equal(new RegExp(`^${escapeRegExp("a.c")}$`).test("abc"), false)
+    assert.equal(findRawErrorSinks("try {} catch ($err) { console.error($err.message) }").length, 1)
+  })
+
   test("the scanner flags the shapes that leaked, and passes the redacted ones", () => {
     const flagged = [
       'console.error("[ALERT] Telegram send failed:", err.message)',
