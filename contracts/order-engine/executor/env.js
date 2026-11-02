@@ -28,6 +28,8 @@
 
 import { readFileSync } from "fs"
 import { resolve } from "path"
+// Side-effect-free (no env reads), so importing it here keeps this module first in the graph.
+import { redactError } from "./redact.js"
 
 // Exported for direct unit tests only (env-order.test.mjs) — no caller needs it.
 export function loadEnv(filePath) {
@@ -45,7 +47,7 @@ export function loadEnv(filePath) {
       }
     }
   } catch (err) {
-    console.warn(`WARNING: Could not load ${filePath}: ${err.message}`)
+    console.warn(`WARNING: Could not load ${filePath}: ${redactError(err)}`)
   }
 }
 
