@@ -3,7 +3,7 @@
 ## Checklist
 - [x] Worktree ~/ts-worktrees/ui-v2-portfolio off origin/main 19cced7 (#637), real `npm ci`, SSH-signed noreply committer
 - [x] Premises checked against v1; owner answered 4 questions (below) — answers supersede the /goal text
-- [x] C1 holdings + Active Approvals panel · [ ] C2 chain switching / links / no-poll · [ ] C3 mobile 375 + a11y
+- [x] C1 holdings + Active Approvals panel · [x] C2 chain switch / Swap link / no-poll (rpc-budget scenario p) · [ ] C3 mobile 375 + a11y
 - [ ] Verify (suite vs main, lint delta 0, tsc, build, v1 proof, rpc-budget, CodeQL full) · [ ] push + compare link
 
 ## Frames read (round7/app): desktop 44-portfolio-connected-approvals, 45a-portfolio-disconnected,
@@ -29,6 +29,9 @@
 - `ApprovalRecord` has no chainId: Revoke sends approve(spender,0) on whatever chain the wallet is on NOW, and the receipt link
   uses the active chain — same as v1. A record made on Base and revoked while on Ethereum hits the wrong chain. Needs a hook change.
 - v1 Swap button ignores the token (setSwapMode only); mirrored.
+- v1's hook polls the API (discovery + prices, 60 s setInterval) even while the BROWSER tab is hidden; RPC is 0 hidden
+  (measured, scenario p). Unmounted v2 tab = 0 API + 0 RPC (tested). A visibility gate needs a hook change → owner call.
+- Deviation: imports keyed chain:address (v1: address only) so an import on Base never marks the Ethereum row.
 
 ## Evidence
 (filled in the final commit: 1 frames+screenshots · 2 parity · 3 totals · 4 states matrix · 5 CodeQL+rpc-budget · 6 v1 proof/suite/lint/tsc/build/diff/link)

@@ -93,13 +93,15 @@ export function PortfolioTab() {
     try { return getChainConfig(activeChainId).name } catch { return 'this chain' }
   })()
 
-  // v1: tokens imported from this view rejoin the curated look (solid row, Swap, no address).
-  const [importedAddrs, setImportedAddrs] = useState<Set<string>>(new Set())
+  // v1: tokens imported from this view rejoin the curated look (solid row, Swap, no address). Keyed by chain AND address (v1 keys by address
+  // alone): the same address is a different token on another chain, so an import on Base must not turn the Ethereum row into "imported".
+  const [importedKeys, setImportedKeys] = useState<Set<string>>(new Set())
+  const importKey = (token: Token) => `${activeChainId}:${token.address.toLowerCase()}`
   const handleAdd = async (token: Token) => {
-    const lower = token.address.toLowerCase()
-    if (importedAddrs.has(lower)) return
+    const key = importKey(token)
+    if (importedKeys.has(key)) return
     const result = await importToken(token.address)
-    if (result) setImportedAddrs((prev) => new Set(prev).add(lower))
+    if (result) setImportedKeys((prev) => new Set(prev).add(key))
   }
   // v1: Swap → the Swap tab (`setSwapMode('instant')`; v1 does not carry the token over either).
   const handleSwap = useCallback((_token: Token) => router.push('/swap'), [router])
@@ -208,7 +210,7 @@ export function PortfolioTab() {
             <h3 className={`${CAPS} ts-pf-label text-v2-muted`}>Discovered in Wallet</h3>
             <ul role="list">
               {discovered.map((entry) => (
-                <HoldingRow key={entry.token.address} entry={entry} discovered imported={importedAddrs.has(entry.token.address.toLowerCase())} onAdd={handleAdd} onSwap={handleSwap} />
+                <HoldingRow key={entry.token.address} entry={entry} discovered imported={importedKeys.has(importKey(entry.token))} onAdd={handleAdd} onSwap={handleSwap} />
               ))}
             </ul>
           </section>
