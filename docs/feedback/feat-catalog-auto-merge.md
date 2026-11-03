@@ -2,8 +2,9 @@
 - [x] script+tests  [x] workflow  [x] runbook  [x] verify+push
 
 ## Premise deltas (owner answer supersedes; proceeded on the safe reading)
-- Protection requires 2 checks (`full-suite`, `keeper-suite`), not 33; ruleset adds none. OWNER: confirm
-  `full-suite` runs catalog-address-guard, or require it.
+- Protection requires 2 checks (`full-suite`, `keeper-suite`), not 33; ruleset adds none. ASKED → OWNER
+  ANSWER (2026-11-03): "I will add guard checks as required" — owner does it; no code change here. Prereq
+  before enabling "Allow auto-merge" (runbook).
 - PR author is the PAT owner (not a bot): C7 = PAT login + branch/run-id + 1 commit by github-actions[bot].
 - Flag is `admission.rule='single-source-volume'`. "Allow auto-merge" is OFF → nothing merges until enabled.
 - Open: up-to-date rule stalls PRs 2–3 of a week; GITHUB_TOKEN merge may skip post-merge push workflows.

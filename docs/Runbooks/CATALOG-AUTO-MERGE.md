@@ -22,7 +22,7 @@ Scoped exception to "the owner merges every PR manually": the weekly `token-cata
 3. Eligible ⇒ `gh pr merge --auto --squash --match-head-commit <sha>` with the job's `GITHUB_TOKEN`; GitHub then merges when the **required** checks pass. Not eligible ⇒ label `catalog-review` + one checklist comment (updated in place on re-runs). If GitHub refuses auto-merge the PR also takes the review path.
 
 ## Enable (owner, once)
-Settings → General → Pull Requests → tick **Allow auto-merge** (currently off, so nothing auto-merges until then). Required today by branch protection on `main`: `full-suite`, `keeper-suite` (up-to-date branch, signed commits); the ruleset adds no extra checks. The other ~31 checks a PR reports are not required — confirm `full-suite` covers `catalog-address-guard`, or add it as required.
+Settings → General → Pull Requests → tick **Allow auto-merge** (currently off, so nothing auto-merges until then). Required today by branch protection on `main`: `full-suite`, `keeper-suite` (up-to-date branch, signed commits); the ruleset adds no extra checks. The other ~31 checks a PR reports are not required. **Prerequisite (owner decision 2026-11-03):** the owner adds the guard checks (at least `catalog-address-guard`, `token-catalog-pipeline-guard`) as required in branch protection *before* enabling "Allow auto-merge" — otherwise auto-merge waits for only the 2 checks above. This branch does not change protection.
 
 ## Pause
 Settings → Secrets and variables → Actions → Variables → `CATALOG_AUTO_MERGE` = `off` (any other value or unset = active). Takes effect on the next run; the step is skipped and PRs stay plain. To cancel an already-armed PR: `gh pr merge <n> --disable-auto`.
