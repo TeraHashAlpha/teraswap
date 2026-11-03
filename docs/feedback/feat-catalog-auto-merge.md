@@ -18,7 +18,7 @@ Net adds, last 11 merged PRs (#548–#598): 2 2 4 4 4 5 9 9 10 23 51 → median 
 ## 2. Fixtures: 32/32 pass (all-pass, >=1 fail per C1–C9, hostile symbol, 4 CLI on temp git repo)
 `npx vitest run scripts/token-catalog/auto-merge-eligibility.test.ts` → Tests 32 passed (32)
 
-## 3. Workflow (actionlint clean) — `git diff origin/main...HEAD -- .github/workflows/token-catalog-refresh.yml`
+## 3. Workflow (actionlint clean) — full diff + required/reported check lists: `feat-catalog-auto-merge.evidence.md`
 -permissions: contents: write, pull-requests: write, issues: write      (workflow-wide, incl. `chains`)
 +permissions: contents: read                                            (workflow default)
 +refresh: permissions: contents: write (push, merge) · pull-requests: write · issues: write (alert)
