@@ -226,8 +226,9 @@ describe('Positions · v2 rows show v1\'s fields for the same order objects', ()
   it('an active row shows the next buy and the expiry; a history row does not', () => {
     const v2 = renderList([ACTIVE], [DONE])
     const [a, d] = Array.from(v2.container.querySelectorAll('[data-testid="dca-order-row"]'))
-    expect(within(a as HTMLElement).getByTestId('order-next-buy').textContent).toMatch(/Next buy in\s+\d{2,}:\d{2}:\d{2}|Buying now/)
-    expect(within(a as HTMLElement).getByTestId('order-expires').textContent).toMatch(/Expires in 2\dd/)
+    // B7: v1 MissionControlCard's ring centre (CountdownCenter) and OrbitStatRow's "Expires" fact (fmtExpiry `26d 0h`)
+    expect(within(a as HTMLElement).getByTestId('order-next-buy').textContent).toMatch(/^(Next buy in\d{2,}:\d{2}:\d{2}|Buying nowExecuting soon…)$/)
+    expect(within(a as HTMLElement).getByTestId('order-expires').textContent).toMatch(/^2\dd \d{1,2}h$/)
     expect(within(d as HTMLElement).queryByTestId('order-next-buy')).toBeNull()
   })
 

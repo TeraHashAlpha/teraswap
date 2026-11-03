@@ -269,3 +269,19 @@ describe('the cancel sheet is v1\'s OrderCancelReviewModal, word for word', () =
     }
   })
 })
+
+describe('B7 · focus after the cancel sheet (DCA Positions)', () => {
+  it('Keep → focus back on that Cancel; confirm → the position leaves the list and focus lands on the Positions tab, never <body>', async () => {
+    const { container } = await v2Positions()
+    const cancel = screen.getAllByTestId('order-cancel')[0]
+    cancel.focus()
+    fireEvent.click(cancel)
+    fireEvent.click(await screen.findByTestId('dca-cancel-keep'))
+    expect(document.activeElement).toBe(cancel)
+    fireEvent.click(cancel)
+    fireEvent.click(await screen.findByTestId('dca-cancel-confirm'))
+    await waitFor(() => expect(container.querySelector('[data-order-id="a1"]')?.getAttribute('data-status')).toBe('cancelled'))
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('tab', { name: /Positions/ })))
+    expect(document.activeElement).not.toBe(document.body)
+  })
+})
