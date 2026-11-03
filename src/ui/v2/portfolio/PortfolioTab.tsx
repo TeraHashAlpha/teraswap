@@ -1,11 +1,11 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAccount } from 'wagmi'
-import { useActiveApprovals } from '@/hooks/useActiveApprovals'
+import { useActiveApprovals, type ApprovalRecord } from '@/hooks/useActiveApprovals'
 import { useActiveChainId } from '@/hooks/useChainId'
-import { usePortfolio, type PortfolioToken } from '@/hooks/usePortfolio'
+import { usePortfolio, type PortfolioData, type PortfolioToken } from '@/hooks/usePortfolio'
 import { useTokenImport } from '@/hooks/useTokenImport'
 import { getChainConfig } from '@/lib/chains/registry'
 import { fmtUsd } from '@/lib/format'
@@ -77,34 +77,30 @@ function RefreshIcon({ spinning }: { spinning?: boolean }) {
   )
 }
 
-/**
- * [ADR-025 / B8] The Portfolio tab (round7 44 / 45a / 45b / m06) over v1's `usePortfolio()` — the SAME hook v1's PortfolioTab calls, unchanged:
- * the active chain's held tokens, the USD figures, the total, loading / error / availability. v1 is ONE chain at a time (the header's chain),
- * so is this tab: switching the chain re-runs the hook, and the tab never shows another chain's tokens. Every word is v1's. Nothing here signs
- * or sends except the user's own Revoke press (the Active Approvals panel, see `ApprovalsPanel`).
- */
-export function PortfolioTab() {
-  const { isConnected, address } = useAccount()
-  const { tokens, totalValueUsd, isLoading, isError, lastUpdated, refresh, isChainSupported } = usePortfolio()
-  const { importToken } = useTokenImport()
-  const activeChainId = useActiveChainId()
-  const router = useRouter()
-  const chainDisplayName = (() => {
-    try { return getChainConfig(activeChainId).name } catch { return 'this chain' }
-  })()
+export interface PortfolioViewProps {
+  isConnected: boolean
+  address: string | undefined
+  /** The active chain's registry name (v1: `getChainConfig(chainId).name`, "this chain" when unregistered). */
+  chainName: string
+  /** v1's `usePortfolio()` result, untouched. */
+  portfolio: PortfolioData
+  /** `chain:address` keys of tokens imported from this view (a discovered row with its key here rejoins the curated look). */
+  importedKeys: ReadonlySet<string>
+  importKey: (token: Token) => string
+  onAdd: (token: Token) => void
+  onSwap: (token: Token) => void
+  /** The approvals panel's rows (v1's actionable set + rows revoked in this view) and v1's badge count. */
+  approvalRows: readonly ApprovalRecord[]
+  approvalCount: number
+  onRevoked: (id: string) => void
+}
 
-  // v1: tokens imported from this view rejoin the curated look (solid row, Swap, no address). Keyed by chain AND address (v1 keys by address
-  // alone): the same address is a different token on another chain, so an import on Base must not turn the Ethereum row into "imported".
-  const [importedKeys, setImportedKeys] = useState<Set<string>>(new Set())
-  const importKey = (token: Token) => `${activeChainId}:${token.address.toLowerCase()}`
-  const handleAdd = async (token: Token) => {
-    const key = importKey(token)
-    if (importedKeys.has(key)) return
-    const result = await importToken(token.address)
-    if (result) setImportedKeys((prev) => new Set(prev).add(key))
-  }
-  // v1: Swap → the Swap tab (`setSwapMode('instant')`; v1 does not carry the token over either).
-  const handleSwap = useCallback((_token: Token) => router.push('/swap'), [router])
+/**
+ * [ADR-025 / B8] The Portfolio tab's content (round7 44 / 45a / 45b / m06) over v1's `usePortfolio()` data: the active chain's held tokens, the
+ * USD figures, the total, loading / error / availability. v1 is ONE chain at a time (the header's chain), so is this view. Every word is v1's.
+ */
+export function PortfolioView({ isConnected, address, chainName, portfolio, importedKeys, importKey, onAdd, onSwap, approvalRows: approvalList, approvalCount, onRevoked }: PortfolioViewProps) {
+  const { tokens, totalValueUsd, isLoading, isError, lastUpdated, refresh, isChainSupported } = portfolio
 
   // v1's once-a-second clock for "Last updated …"; idle without a timestamp.
   const [now, setNow] = useState<number>(() => Date.now())
@@ -116,17 +112,6 @@ export function PortfolioTab() {
 
   const { grouped, discovered } = useMemo(() => groupPortfolio(tokens), [tokens])
 
-  const { approvals, markRevoked } = useActiveApprovals()
-  const [revokedIds, setRevokedIds] = useState<ReadonlySet<string>>(new Set())
-  const onRevoked = useCallback((id: string) => {
-    markRevoked(id)
-    setRevokedIds((prev) => new Set(prev).add(id))
-  }, [markRevoked])
-  const approvalList = approvalRows(approvals, revokedIds)
-  const actionableCount = approvals.filter((a) => a.active && a.needsRevoke).length
-
-  const rootRef = useRef<HTMLElement>(null)
-
   if (!isConnected) {
     return (
       <section className="ts-pf" aria-label="Portfolio" data-testid="portfolio-disconnected">
@@ -135,13 +120,13 @@ export function PortfolioTab() {
     )
   }
 
-  const approvalsPanel = approvalList.length > 0 && <ApprovalsPanel rows={approvalList} count={actionableCount} address={address} onRevoked={onRevoked} />
+  const approvalsPanel = approvalList.length > 0 && <ApprovalsPanel rows={approvalList} count={approvalCount} address={address} onRevoked={onRevoked} />
 
   if (!isChainSupported) {
     return (
       <section className={`ts-pf${approvalsPanel ? ' ts-pf--aside' : ''}`} aria-label="Portfolio" data-testid="portfolio">
         <div className="ts-pf-main">
-          <p className="ts-pf-empty text-[15px] text-v2-muted" data-testid="portfolio-chain-unavailable">Portfolio isn&apos;t available on {chainDisplayName} yet.</p>
+          <p className="ts-pf-empty text-[15px] text-v2-muted" data-testid="portfolio-chain-unavailable">Portfolio isn&apos;t available on {chainName} yet.</p>
         </div>
         {approvalsPanel}
       </section>
@@ -151,8 +136,8 @@ export function PortfolioTab() {
   const initialLoad = isLoading && tokens.length === 0 && !isError
 
   return (
-    <section ref={rootRef} className={`ts-pf${approvalsPanel ? ' ts-pf--aside' : ''}`} aria-label="Portfolio" data-testid="portfolio" onKeyDown={rowNavKeyDown('[data-pf-action]')}>
-      <div className="ts-pf-main">
+    <section className={`ts-pf${approvalsPanel ? ' ts-pf--aside' : ''}`} aria-label="Portfolio" data-testid="portfolio" onKeyDown={rowNavKeyDown('[data-pf-action]')}>
+            <div className="ts-pf-main">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className={`${CAPS} text-v2-muted`}>Total value</div>
@@ -191,7 +176,7 @@ export function PortfolioTab() {
         )}
 
         {!isLoading && !isError && tokens.length === 0 && (
-          <p className="ts-pf-empty text-[15px] text-v2-muted" data-testid="portfolio-empty">No tokens found in this wallet on {chainDisplayName}.</p>
+          <p className="ts-pf-empty text-[15px] text-v2-muted" data-testid="portfolio-empty">No tokens found in this wallet on {chainName}.</p>
         )}
 
         {grouped.map(([category, entries]) => (
@@ -199,7 +184,7 @@ export function PortfolioTab() {
             <h3 className={`${CAPS} ts-pf-label text-v2-muted`}>{category}</h3>
             <ul role="list">
               {entries.map((entry) => (
-                <HoldingRow key={entry.token.address} entry={entry} discovered={false} imported={false} onAdd={handleAdd} onSwap={handleSwap} />
+                <HoldingRow key={entry.token.address} entry={entry} discovered={false} imported={false} onAdd={onAdd} onSwap={onSwap} />
               ))}
             </ul>
           </section>
@@ -210,7 +195,7 @@ export function PortfolioTab() {
             <h3 className={`${CAPS} ts-pf-label text-v2-muted`}>Discovered in Wallet</h3>
             <ul role="list">
               {discovered.map((entry) => (
-                <HoldingRow key={entry.token.address} entry={entry} discovered imported={importedKeys.has(importKey(entry.token))} onAdd={handleAdd} onSwap={handleSwap} />
+                <HoldingRow key={entry.token.address} entry={entry} discovered imported={importedKeys.has(importKey(entry.token))} onAdd={onAdd} onSwap={onSwap} />
               ))}
             </ul>
           </section>
@@ -218,5 +203,56 @@ export function PortfolioTab() {
       </div>
       {approvalsPanel}
     </section>
+  )
+}
+
+/**
+ * [ADR-025 / B8] The Portfolio tab: v1's `usePortfolio()` / `useTokenImport()` / `useActiveApprovals()`, unchanged, feeding `PortfolioView`.
+ * Nothing here signs or sends except the user's own Revoke press (the Active Approvals panel, see `ApprovalsPanel`).
+ */
+export function PortfolioTab() {
+  const { isConnected, address } = useAccount()
+  const portfolio = usePortfolio()
+  const { importToken } = useTokenImport()
+  const activeChainId = useActiveChainId()
+  const router = useRouter()
+  const chainName = (() => {
+    try { return getChainConfig(activeChainId).name } catch { return 'this chain' }
+  })()
+
+  // v1: tokens imported from this view rejoin the curated look (solid row, Swap, no address). Keyed by chain AND address (v1 keys by address
+  // alone): the same address is a different token on another chain, so an import on Base must not turn the Ethereum row into "imported".
+  const [importedKeys, setImportedKeys] = useState<Set<string>>(new Set())
+  const importKey = useCallback((token: Token) => `${activeChainId}:${token.address.toLowerCase()}`, [activeChainId])
+  const handleAdd = async (token: Token) => {
+    const key = importKey(token)
+    if (importedKeys.has(key)) return
+    const result = await importToken(token.address)
+    if (result) setImportedKeys((prev) => new Set(prev).add(key))
+  }
+  // v1: Swap → the Swap tab (`setSwapMode('instant')`; v1 does not carry the token over either).
+  const handleSwap = useCallback((_token: Token) => router.push('/swap'), [router])
+
+  const { approvals, markRevoked } = useActiveApprovals()
+  const [revokedIds, setRevokedIds] = useState<ReadonlySet<string>>(new Set())
+  const onRevoked = useCallback((id: string) => {
+    markRevoked(id)
+    setRevokedIds((prev) => new Set(prev).add(id))
+  }, [markRevoked])
+
+  return (
+    <PortfolioView
+      isConnected={isConnected}
+      address={address}
+      chainName={chainName}
+      portfolio={portfolio}
+      importedKeys={importedKeys}
+      importKey={importKey}
+      onAdd={handleAdd}
+      onSwap={handleSwap}
+      approvalRows={approvalRows(approvals, revokedIds)}
+      approvalCount={approvals.filter((a) => a.active && a.needsRevoke).length}
+      onRevoked={onRevoked}
+    />
   )
 }
