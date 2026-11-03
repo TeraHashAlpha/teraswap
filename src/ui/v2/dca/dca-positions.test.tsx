@@ -62,8 +62,9 @@ import { nextBuyAtMs } from '@/lib/order-engine'
 
 const fetchMock = vi.fn(async (url: string) => {
   const json = (body: unknown) => ({ ok: true, json: async () => body }) as Response
-  if (url.startsWith('/api/portfolio/prices')) return json({ prices: PRICES })
-  const m = /^\/api\/orders\/([^/]+)\/executions/.exec(url)
+  const { pathname } = new URL(url, 'http://localhost') // route on the parsed path, not on a prefix of the raw string
+  if (pathname === '/api/portfolio/prices') return json({ prices: PRICES })
+  const m = /^\/api\/orders\/([^/]+)\/executions/.exec(pathname)
   if (m) return json({ executions: FILLS[m[1]] ?? [], order: null })
   throw new Error(`unexpected fetch ${url}`)
 })
@@ -313,7 +314,7 @@ describe('B7 · P&L: v2 = v1 for the same fixture (number equality, the lib is t
   it('a loss: the same negative number, v1\'s calm cue (never red); no price → no P&L in either', async () => {
     const down = { ...PRICES }
     for (const k of Object.keys(down)) if (down[k] > 100) down[k] = 2000
-    fetchMock.mockImplementation(async (url: string) => ({ ok: true, json: async () => (url.startsWith('/api/portfolio/prices') ? { prices: down } : { executions: [] }) }) as Response)
+    fetchMock.mockImplementation(async (url: string) => ({ ok: true, json: async () => (new URL(url, 'http://localhost').pathname === '/api/portfolio/prices' ? { prices: down } : { executions: [] }) }) as Response)
     const v1 = await v1Values(A1, FILLS.a1)
     expect(v1.pnl.direction).toBe('down')
     h.pnl = []

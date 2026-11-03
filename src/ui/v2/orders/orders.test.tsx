@@ -52,10 +52,14 @@ import OrderDashboard from '@/components/OrderDashboard'
 import { OrdersTab } from './OrdersTab'
 import { amountInText, emptyText, receivedText, targetLabel, timeLeftText, v1AmountInText } from './orders-model'
 
+/** The explorer host an order on each chain must link to (asserted on the parsed URL's hostname). */
+const EXPLORER_HOST: Record<number, string> = { 1: 'etherscan.io', 8453: 'basescan.org', 42161: 'arbiscan.io' }
+
 const fetchMock = vi.fn(async (url: string) => {
   const json = (body: unknown) => ({ ok: true, json: async () => body }) as Response
-  if (url.startsWith('/api/portfolio/prices')) return json({ prices: PRICES })
-  const m = /^\/api\/orders\/([^/]+)\/executions/.exec(url)
+  const { pathname } = new URL(url, 'http://localhost') // route on the parsed path, not on a prefix of the raw string
+  if (pathname === '/api/portfolio/prices') return json({ prices: PRICES })
+  const m = /^\/api\/orders\/([^/]+)\/executions/.exec(pathname)
   if (m) return json({ executions: FILLS[m[1]] ?? [], order: ORDER_META[m[1]] ?? null })
   throw new Error(`unexpected fetch ${url}`)
 })
@@ -115,8 +119,11 @@ function remapV1(root: HTMLElement, orders: AutonomousOrder[]): HTMLElement {
     if (amount.has(t)) n.textContent = amount.get(t) as string
     else if (dates.has(t)) n.textContent = ''
   }
-  for (const a of Array.from(clone.querySelectorAll('a[href^="https://etherscan.io/tx/"]'))) {
-    const hash = (a.getAttribute('href') as string).slice('https://etherscan.io/tx/'.length)
+  for (const a of Array.from(clone.querySelectorAll('a[href]'))) {
+    // v1 links every tx to mainnet's explorer; pick those out by parsed host + path segment (the base only lets a relative href parse)
+    const u = new URL(a.getAttribute('href') as string, 'https://app.invalid')
+    const [, segment, hash] = u.pathname.split('/')
+    if (u.hostname !== 'etherscan.io' || segment !== 'tx' || !hash) continue
     const owner = orders.find((o) => o.txHash === hash || (FILLS[o.id] ?? []).some((f) => f.tx_hash === hash) || ORDER_META[o.id]?.tx_hash === hash)
     if (owner) a.setAttribute('href', explorerTxUrl(hash, owner.chainId ?? 1))
   }
@@ -177,14 +184,13 @@ describe('B7 · Orders: content parity v1 OrderDashboard ⊆ v2 (0 missing)', ()
     const received = receivedText(o)
     if (received) expect(row.textContent).toContain(received)
     for (const a of Array.from(row.querySelectorAll('a[href]'))) {
-      const href = a.getAttribute('href') as string
-      expect(href).not.toBe('') // every explorer link carries a target, on every chain
+      // parsed, never substring-matched: an empty or relative href throws here, so every link must be an absolute explorer URL
+      const u = new URL(a.getAttribute('href') as string)
+      expect(u.hostname).toBe(EXPLORER_HOST[o.chainId ?? 1])
       if (o.chainId !== 1) {
-        // an Arbitrum/Base order must never link to mainnet's explorer — host compared exactly on the parsed URL
-        // (the base only lets a relative href parse; it is not an explorer), plus the raw string for query/path leaks
-        const host = new URL(href, 'https://app.invalid').hostname
-        expect(host === 'etherscan.io' || host.endsWith('.etherscan.io')).toBe(false)
-        expect(href.includes('etherscan.io')).toBe(false)
+        // an Arbitrum/Base order must never link to mainnet's explorer
+        expect(u.hostname).not.toBe('etherscan.io')
+        expect(u.hostname.endsWith('.etherscan.io')).toBe(false)
       }
     }
   })

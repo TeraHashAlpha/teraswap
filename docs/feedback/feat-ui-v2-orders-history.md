@@ -74,3 +74,23 @@ your swaps and DCA fills will appear here`).
 - The task named a shared `escapeRegExp` at `src/ui/v2/test-utils/escape.ts`; that file does not exist on this branch (or
   main). `escapeRegExp` is currently re-declared locally in `narrative.test.tsx`, `shell.test.tsx` and
   `contracts/order-engine/executor/redact.test.mjs`. Worth extracting if a fourth caller appears; not done here (scope).
+
+## Feedback — CodeQL js/incomplete-url-substring-sanitization (PR #637, follow-up to befcb1c)
+
+### Edge case
+- The raw `href.includes('etherscan.io')` kept in befcb1c as a "query/path leak" backstop was itself flagged
+  (`orders.test.tsx:187`, High). Removed. Every explorer-link assertion in this branch's tests is now on a parsed URL:
+  `new URL(href).hostname` is `toBe` the order chain's explorer (`EXPLORER_HOST`: 1 etherscan.io / 8453 basescan.org /
+  42161 arbiscan.io) — stricter than before, since it also proves Base/Arbitrum rows reach *their own* explorer — and
+  non-mainnet rows additionally `not.toBe('etherscan.io')` and `.endsWith('.etherscan.io') === false`. A query-string
+  mention of the host no longer matters: the hostname is what a click navigates to.
+- Same sweep removed the other URL substring checks: the `a[href^="https://etherscan.io/tx/"]` selector + `.slice()` in the
+  v1-remap helper (now parsed host + path segment) and three `url.startsWith('/api/portfolio/prices')` fetch-mock routers in
+  `orders.test.tsx` / `dca-positions.test.tsx` (now `new URL(url, base).pathname === …`).
+- Proof: `scripts/codeql-local.sh codeql/javascript-queries:codeql-suites/javascript-security-extended.qls` (the suite
+  `codeql.yml` runs). Control on befcb1c: 20 alerts incl. `js/incomplete-url-substring-sanitization` at
+  `orders.test.tsx:187`; fixed tree: 19, 0 on any file this branch changed, and the only before→after delta is that one
+  alert (nothing new). The 19 left are in files this branch does not touch (main).
+
+### Test gap
+- The mutation check was done by hand (expected Base host set to `etherscan.io` → 3 failures), not committed.
