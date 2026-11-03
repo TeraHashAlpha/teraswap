@@ -16,6 +16,8 @@ export default defineConfig({
       '__tests__/**/*.test.tsx',
       // [CHORE-TOKEN-CATALOG-PIPELINE] build-time catalog pipeline logic is pure + unit-tested.
       'scripts/token-catalog/**/*.test.ts',
+      // [feat/dependabot-auto-merge] Dependabot auto-merge eligibility rules + workflow safety assertions.
+      'scripts/dependabot/**/*.test.ts',
       // [CHORE-GROK-DISPATCH] repo-hygiene scripts get the same coverage as source.
       // [CHORE-COLOR-CONTRAST-CHECK] CIEDE2000 + CVD tests live next to the checker.
       // [CHORE-PRODUCT-CLAIMS-TRUTH] hard-coded source-count / live-chain claims.
