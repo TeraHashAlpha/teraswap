@@ -176,7 +176,17 @@ describe('B7 · Orders: content parity v1 OrderDashboard ⊆ v2 (0 missing)', ()
     expect(row.textContent).toContain(`${amountInText(o)} ${o.tokenInSymbol}`)
     const received = receivedText(o)
     if (received) expect(row.textContent).toContain(received)
-    for (const a of Array.from(row.querySelectorAll('a[href]'))) expect(a.getAttribute('href')).not.toMatch(o.chainId === 1 ? /^$/ : /etherscan\.io/)
+    for (const a of Array.from(row.querySelectorAll('a[href]'))) {
+      const href = a.getAttribute('href') as string
+      expect(href).not.toBe('') // every explorer link carries a target, on every chain
+      if (o.chainId !== 1) {
+        // an Arbitrum/Base order must never link to mainnet's explorer — host compared exactly on the parsed URL
+        // (the base only lets a relative href parse; it is not an explorer), plus the raw string for query/path leaks
+        const host = new URL(href, 'https://app.invalid').hostname
+        expect(host === 'etherscan.io' || host.endsWith('.etherscan.io')).toBe(false)
+        expect(href.includes('etherscan.io')).toBe(false)
+      }
+    }
   })
 })
 

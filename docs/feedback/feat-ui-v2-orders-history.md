@@ -57,3 +57,20 @@ VIEW RECEIPT on an active position, `CANCEL ALL (1)`; 40 always-open rows, `Exec
 WALLET / GO TO SWAP buttons, `No swaps yet` / `Swaps and DCA fills appear here with tx links.` (v1: `No activity yet —
 your swaps and DCA fills will appear here`).
 **Not carried:** nothing — every string v1 shows on these tabs is in v2 (0 missing, 3 surfaces).
+
+## Feedback — CodeQL js/regex/missing-regexp-anchor (PR #637)
+
+### Edge case
+- `src/ui/v2/orders/orders.test.tsx:179` asserted `not.toMatch(/etherscan\.io/)` on explorer hrefs — an unanchored host
+  regex (CodeQL High). Replaced with a parsed-URL check: `new URL(href, base).hostname` compared exactly (and
+  `.etherscan.io` subdomains), plus a raw `includes('etherscan.io')` so a mainnet host in a query/path still fails —
+  nothing the old regex caught is let through. The mainnet branch's `/^$/` (href not empty) is now `not.toBe('')`, asserted
+  for every chain. No regex literal remains on that line, so no `escapeRegExp` was needed.
+- Proof: `scripts/codeql-local.sh codeql/javascript-queries:Security/CWE-020/MissingRegExpAnchor.ql` — control on the
+  unfixed tree 1 hit (`orders.test.tsx:179`, whole checkout scanned, so no other file on this branch has the pattern),
+  fixed tree 0.
+
+### Concern
+- The task named a shared `escapeRegExp` at `src/ui/v2/test-utils/escape.ts`; that file does not exist on this branch (or
+  main). `escapeRegExp` is currently re-declared locally in `narrative.test.tsx`, `shell.test.tsx` and
+  `contracts/order-engine/executor/redact.test.mjs`. Worth extracting if a fourth caller appears; not done here (scope).
