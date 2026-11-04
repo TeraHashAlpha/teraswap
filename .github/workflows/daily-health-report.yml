@@ -171,8 +171,10 @@ jobs:
           echo "keepers=$keepers" >> "$GITHUB_OUTPUT"
           # [ADR-026] orders the keeper could NOT attempt for OUR reasons (RPC auth/transport, paused,
           # Supabase or /api/swap down, keeper gas) in the last 24 h — never counted against the order.
-          # One "chainId=<n|unknown>" token per chain (unknown = null: migration not applied / unreadable).
-          keepers_infra=$(node -e 'const s=(v)=>String(v??"").replace(/[^A-Za-z0-9:._-]/g,"");try{const r=JSON.parse(process.argv[1]);process.stdout.write((r.chains||[]).map((c)=>`${s(c.chainId)}=${Number.isInteger(c.infraMissOrders24h)&&c.infraMissOrders24h>=0?String(c.infraMissOrders24h):"unknown"}`).join(" "))}catch{process.stdout.write("")}' "$keepers_body")
+          # [A73 S-4] One "chainId=<n|unknown|error>" token per chain: <n> when infraMissStatus is ok,
+          # unknown when the migration is not applied (status missing, or an older route without the
+          # field), error when the read failed (the report warns — an outage's orders would go unreported).
+          keepers_infra=$(node -e 'const s=(v)=>String(v??"").replace(/[^A-Za-z0-9:._-]/g,"");try{const r=JSON.parse(process.argv[1]);process.stdout.write((r.chains||[]).map((c)=>{const st=c.infraMissStatus;const n=c.infraMissOrders24h;const v=st==="ok"&&Number.isInteger(n)&&n>=0?String(n):st==null||st==="missing"?"unknown":"error";return `${s(c.chainId)}=${v}`}).join(" "))}catch{process.stdout.write("")}' "$keepers_body")
           echo "keepers_infra=$keepers_infra" >> "$GITHUB_OUTPUT"
 
       - name: Check keeper gas balance (per chain)
@@ -416,10 +418,17 @@ jobs:
             const chainName = (c) => CHAIN_NAMES[c] || `chain ${c}`
             const hit = infraTokens.filter(([, n]) => /^\d+$/.test(n || '') && Number(n) > 0)
             const unknown = infraTokens.filter(([, n]) => n === 'unknown')
+            // [A73 S-4] tri-state: "error" is a FAILED read (⚠️ — an outage's orders would go unreported);
+            // "unknown" is only the pending migration (ℹ️, quiet).
+            const failed = infraTokens.filter(([, n]) => n === 'error')
             const detail = infraTokens.map(([c, n]) => `${chainName(c)}: ${n}`).join(', ')
-            if (hit.length) {
-              infraMissLines.push(`| Orders with infra misses (24 h) | ⚠️ | ${detail} — misses caused by our infrastructure, NOT counted against the orders (ADR-026) |`)
-              requiresAttention.push(`${hit.map(([c, n]) => `${n} order(s) on ${chainName(c)}`).join(', ')} missed a cycle for an infrastructure reason in the last 24 h (ADR-026: not counted against them). Read the keeper log's "infra miss (<reason>)" lines; docs/Runbooks/EXECUTOR-OPERATIONS.md § 8.`)
+            if (hit.length || failed.length) {
+              const clauses = []
+              if (hit.length) clauses.push('misses caused by our infrastructure, NOT counted against the orders (ADR-026)')
+              if (failed.length) clauses.push(`the infra-miss count could not be read for ${failed.map(([c]) => chainName(c)).join(', ')} (Supabase query failed), so an outage's orders would go unreported`)
+              infraMissLines.push(`| Orders with infra misses (24 h) | ⚠️ | ${detail} — ${clauses.join('; ')} |`)
+              if (hit.length) requiresAttention.push(`${hit.map(([c, n]) => `${n} order(s) on ${chainName(c)}`).join(', ')} missed a cycle for an infrastructure reason in the last 24 h (ADR-026: not counted against them). Read the keeper log's "infra miss (<reason>)" lines; docs/Runbooks/EXECUTOR-OPERATIONS.md § 8.`)
+              if (failed.length) requiresAttention.push(`Orders with infra misses: the 24 h count could not be read for ${failed.map(([c]) => chainName(c)).join(', ')} (Supabase query failed) — check /api/monitor/keepers and the Supabase logs; until it reads, an outage's orders would go unreported.`)
               bump(1)
             } else if (unknown.length === infraTokens.length) {
               infraMissLines.push('| Orders with infra misses (24 h) | ℹ️ | unknown — migration 20261104120000_orders_infra_miss.sql not applied (or Supabase unreadable) |')

@@ -120,18 +120,26 @@ describe('[A71 M-2] daily-health-report: keeper state', () => {
 describe('[ADR-026] daily-health-report: orders with infra misses in the last 24 h', () => {
   const INFRA_ROW = '| Orders with infra misses (24 h) |'
 
-  it('the token builder maps infraMissOrders24h to "chainId=<n>" and a null to "unknown"; every character whitelisted', () => {
+  it('[A73 S-4] the token builder is tri-state: "chainId=<n>" when ok, "unknown" for a missing column, "error" for a failed read; every character whitelisted', () => {
     const body = {
       status: 'OK',
       chains: [
-        { chainId: 8453, active: true, readable: true, paused: null, pausedSince: null, infraMissOrders24h: 3 },
-        { chainId: 42161, active: false, readable: true, paused: null, pausedSince: null, infraMissOrders24h: null },
-        { chainId: 1, active: true, readable: true, paused: null, pausedSince: null, infraMissOrders24h: '7\nmalicious' },
+        { chainId: 8453, active: true, readable: true, paused: null, pausedSince: null, infraMissOrders24h: 3, infraMissStatus: 'ok' },
+        { chainId: 42161, active: false, readable: true, paused: null, pausedSince: null, infraMissOrders24h: null, infraMissStatus: 'missing' },
+        { chainId: 1, active: true, readable: true, paused: null, pausedSince: null, infraMissOrders24h: null, infraMissStatus: 'error' },
+        { chainId: 10, active: true, readable: true, paused: null, pausedSince: null, infraMissOrders24h: '7\nmalicious', infraMissStatus: 'ok' },
       ],
     }
-    expect(infraTokens(body)).toBe('8453=3 42161=unknown 1=unknown')
-    expect(infraTokens({ status: 'OK', chains: [{ chainId: 8453 }] })).toBe('8453=unknown') // an older route deploy without the field
+    expect(infraTokens(body)).toBe('8453=3 42161=unknown 1=error 10=error')
+    expect(infraTokens({ status: 'OK', chains: [{ chainId: 8453 }] })).toBe('8453=unknown') // an older route deploy without the fields
     expect(infraTokens('')).toBe('')
+  })
+
+  it('[A73 S-4] a failed read ⇒ ⚠️ row + WARNING + attention bullet (never the quiet ℹ️ of a pending migration)', () => {
+    const md = report('OK', '8453=ok 42161=inactive', '8453=error 42161=0')
+    expect(md).toContain(`${INFRA_ROW} ⚠️ | Base: error, Arbitrum One: 0 — the infra-miss count could not be read for Base (Supabase query failed), so an outage's orders would go unreported |`)
+    expect(md).toContain('🟡 WARNING')
+    expect(md).toContain('Orders with infra misses: the 24 h count could not be read for Base (Supabase query failed)')
   })
 
   it('a chain with infra misses ⇒ ⚠️ row + WARNING + an attention bullet that says the orders were NOT counted', () => {

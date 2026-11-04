@@ -231,12 +231,23 @@ export const INFRA_MISS_WINDOW_MS = 24 * 60 * 60 * 1000
 const MISSING_INFRA_MISS_COLUMN = /42703|PGRST204|last_infra_miss/i
 
 /**
- * Orders on `chainId` the keeper could NOT attempt for an infrastructure reason in the last 24 h.
- * `null` = unreadable (no Supabase, query error, migration not applied). Never throws.
+ * [A73 S-4] Tri-state read: `ok` (count is a number), `missing` (the migration is not applied —
+ * expected, documented, quiet: the report shows ℹ️), `error` (no Supabase client, a query error, a
+ * throw — the report shows ⚠️, since an outage's orders would otherwise go unreported).
  */
-export async function countInfraMissOrders24h(chainId: number, nowMs: number = Date.now()): Promise<number | null> {
+export type InfraMissStatus = 'ok' | 'missing' | 'error'
+export interface InfraMissCount {
+  count: number | null
+  status: InfraMissStatus
+}
+
+/**
+ * Orders on `chainId` the keeper could NOT attempt for an infrastructure reason in the last 24 h.
+ * Never throws; see InfraMissStatus for the three outcomes.
+ */
+export async function countInfraMissOrders24h(chainId: number, nowMs: number = Date.now()): Promise<InfraMissCount> {
   const supabase = getSupabase()
-  if (!supabase) return null
+  if (!supabase) return { count: null, status: 'error' }
   try {
     const since = new Date(nowMs - INFRA_MISS_WINDOW_MS).toISOString()
     const { count, error } = await supabase
@@ -246,21 +257,24 @@ export async function countInfraMissOrders24h(chainId: number, nowMs: number = D
       .gte('last_infra_miss_at', since)
     if (error) {
       const text = `${(error as { code?: string }).code ?? ''} ${(error as { message?: string }).message ?? ''}`
-      if (!MISSING_INFRA_MISS_COLUMN.test(text)) console.warn(`[KEEPER] infra-miss count failed (chain ${chainId}): ${text.trim()}`)
-      return null
+      if (MISSING_INFRA_MISS_COLUMN.test(text)) return { count: null, status: 'missing' }
+      console.warn(`[KEEPER] infra-miss count failed (chain ${chainId}): ${text.trim()}`)
+      return { count: null, status: 'error' }
     }
-    return typeof count === 'number' ? count : null
+    return typeof count === 'number' ? { count, status: 'ok' } : { count: null, status: 'error' }
   } catch {
-    return null
+    return { count: null, status: 'error' }
   }
 }
 
 /** Every chain in KEEPER_CHAINS — for GET /api/monitor/keepers (the daily report's read). */
-export async function readAllKeeperPausedStates(): Promise<Array<KeeperPausedState & { active: boolean; infraMissOrders24h: number | null }>> {
+export async function readAllKeeperPausedStates(): Promise<
+  Array<KeeperPausedState & { active: boolean; infraMissOrders24h: number | null; infraMissStatus: InfraMissStatus }>
+> {
   return Promise.all(
     KEEPER_CHAINS.map(async (c) => {
-      const [paused, infraMissOrders24h] = await Promise.all([readKeeperPausedState(c.chainId), countInfraMissOrders24h(c.chainId)])
-      return { ...paused, active: isChainActive(c.chainId), infraMissOrders24h }
+      const [paused, infra] = await Promise.all([readKeeperPausedState(c.chainId), countInfraMissOrders24h(c.chainId)])
+      return { ...paused, active: isChainActive(c.chainId), infraMissOrders24h: infra.count, infraMissStatus: infra.status }
     }),
   )
 }
