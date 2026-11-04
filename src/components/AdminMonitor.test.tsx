@@ -11,7 +11,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const useAnalyticsMock = vi.fn()
 vi.mock('@/hooks/useAnalytics', () => ({ useAnalytics: () => useAnalyticsMock() }))
 
+// Wagmi mock used ONLY by the wallet-switch test below, to prove AdminMonitor's trade-feed links
+// are inert to it — AdminMonitor itself never imports wagmi (confirmed: no useAccount/useChainId),
+// so this models the surrounding app's live wallet state, not AdminMonitor's own.
+let mockWalletChainId = 1
+vi.mock('wagmi', () => ({
+  useAccount: () => ({ chain: { id: mockWalletChainId } }),
+}))
+
 import { renderWithProviders, fireEvent, screen } from '@/test-utils/render'
+import { useAccount } from 'wagmi'
 import AdminMonitor from './AdminMonitor'
 import type { DashboardData, PeriodMetrics, TradeEvent } from '@/lib/analytics-types'
 
@@ -63,5 +72,31 @@ describe('AdminMonitor — [fix/tx-links-remaining] trade-feed tx link is chain-
     openActivityTab()
     const link = screen.getByText('↗').closest('a') as HTMLAnchorElement
     expect(new URL(link.href).hostname).toBe(EXPLORER_HOST[chainId])
+  })
+
+  it('a trade recorded on Base (8453); the wallet switches to Arbitrum (42161) AFTER → link stays on basescan.org', () => {
+    mockWalletChainId = 1
+    useAnalyticsMock.mockReturnValue({ dashboard: dashboard([trade(8453, '0xabc')]), loading: false, exportSnapshot: vi.fn(), refresh: vi.fn() })
+    function WalletAwareApp() {
+      const { chain } = useAccount()
+      return (
+        <>
+          <span data-testid="live-wallet-chain">{chain?.id}</span>
+          <AdminMonitor />
+        </>
+      )
+    }
+    const { rerender } = renderWithProviders(<WalletAwareApp />)
+    openActivityTab()
+    const link = screen.getByText('↗').closest('a') as HTMLAnchorElement
+    expect(new URL(link.href).hostname).toBe('basescan.org')
+
+    // Wallet switches chains; the surrounding app re-renders and DOES see it (live-wallet-chain
+    // below proves the switch reached the tree) — the already-recorded trade's link must not.
+    mockWalletChainId = 42161
+    rerender(<WalletAwareApp />)
+    expect(screen.getByTestId('live-wallet-chain').textContent).toBe('42161')
+    const linkAfterSwitch = screen.getByText('↗').closest('a') as HTMLAnchorElement
+    expect(new URL(linkAfterSwitch.href).hostname).toBe('basescan.org')
   })
 })
