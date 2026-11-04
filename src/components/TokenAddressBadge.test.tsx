@@ -20,12 +20,13 @@ import { isAddress } from 'viem'
 // chain (useQuoteChainId). Mock both so the verified vs imported branches are
 // deterministic without a wallet/provider — matching the repo's hoisted-mock style.
 let mockVerified = false
+let mockExplorerBase = 'https://etherscan.io'
 vi.mock('@/hooks/useChainId', () => ({
   useQuoteChainId: () => 1,
 }))
 vi.mock('@/lib/chains/tokens', () => ({
   isVerifiedToken: () => mockVerified,
-  explorerTokenUrl: (address: string) => `https://etherscan.io/token/${address}`,
+  explorerTokenUrl: (address: string) => `${mockExplorerBase}/token/${address}`,
 }))
 
 import TokenAddressBadge from './TokenAddressBadge'
@@ -35,6 +36,46 @@ const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' as `0x${string}`
 beforeEach(() => {
   cleanup()
   mockVerified = false
+  mockExplorerBase = 'https://etherscan.io'
+})
+
+describe('TokenAddressBadge — explorer anchor (CodeQL js/xss-through-dom)', () => {
+  const anchor = (c: HTMLElement) => c.querySelector('a[aria-label="View on block explorer"]')
+
+  it('renders the explorer link for a valid address, href unchanged', () => {
+    const { container } = render(<TokenAddressBadge address={USDC} />)
+    const a = anchor(container)
+    expect(a).not.toBeNull()
+    expect(a!.getAttribute('href')).toBe(`https://etherscan.io/token/${USDC}`)
+    expect(a!.getAttribute('rel')).toBe('noopener noreferrer')
+  })
+
+  it('renders no anchor for a malformed or hostile address (runtime, past the TS type)', () => {
+    for (const bad of [
+      'javascript:alert(1)',
+      '0x0000000000000000000000000000000000000000/../evil',
+      '0xdeadbeef',
+      '',
+    ]) {
+      const { container, unmount } = render(<TokenAddressBadge address={bad as `0x${string}`} />)
+      expect(anchor(container)).toBeNull()
+      unmount()
+    }
+  })
+
+  it('renders no anchor when the explorer base is not https: (javascript:, http:, garbage)', () => {
+    for (const base of ['javascript:alert(1)//', 'http://etherscan.io', 'not a url']) {
+      mockExplorerBase = base
+      const { container, unmount } = render(<TokenAddressBadge address={USDC} />)
+      expect(anchor(container)).toBeNull()
+      unmount()
+    }
+  })
+
+  it('renders no anchor when showExplorerLink is false', () => {
+    const { container } = render(<TokenAddressBadge address={USDC} showExplorerLink={false} />)
+    expect(anchor(container)).toBeNull()
+  })
 })
 
 describe('TokenAddressBadge — Etherscan href guard (CQL-10)', () => {

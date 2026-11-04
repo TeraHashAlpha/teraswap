@@ -112,7 +112,15 @@ async function rpcCall(rpc, method, params) {
 }
 
 const getChainId = (rpc) => rpcCall(rpc, 'eth_chainId', [])
-const getBlockNumber = (rpc) => rpcCall(rpc, 'eth_blockNumber', [])
+// The block number is the only RPC response that goes straight into the manifest file, so it is
+// schema-checked first: a safe integer, re-emitted as the same minimal lower-case hex quantity the
+// RPC returns. Anything else (garbage, injected text, an object) throws instead of being written.
+async function getBlockNumber(rpc) {
+  const raw = await rpcCall(rpc, 'eth_blockNumber', [])
+  const n = typeof raw === 'string' && /^0x[0-9a-fA-F]+$/.test(raw) ? Number(raw) : NaN
+  if (!Number.isSafeInteger(n)) throw new Error(`eth_blockNumber @ ${rpc}: not a block number`)
+  return '0x' + n.toString(16)
+}
 const getCode = (rpc, address) => rpcCall(rpc, 'eth_getCode', [address, 'latest'])
 const ethCall = (rpc, to, data) => rpcCall(rpc, 'eth_call', [{ to, data }, 'latest'])
 
