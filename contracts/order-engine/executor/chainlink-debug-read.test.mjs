@@ -19,6 +19,7 @@ import { test, describe } from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { getAddress, zeroAddress } from "viem"
+import { redactError } from "./redact.js"
 
 const src = readFileSync(new URL("./executor.js", import.meta.url), "utf-8")
 
@@ -36,10 +37,13 @@ function sliceBlock() {
 }
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
-const runBlock = new AsyncFunction(
-  "publicClient", "orderStruct", "PRICE_FEED_ABI", "log", "zeroAddress",
+// [fix/executor-alert-masking-rpc-auth] The block's failure line now goes through redactError
+// (executor.js imports it from ./redact.js), so the REAL helper is injected — not a stub.
+const block = new AsyncFunction(
+  "publicClient", "orderStruct", "PRICE_FEED_ABI", "log", "zeroAddress", "redactError",
   sliceBlock(),
 )
+const runBlock = (...args) => block(...args, redactError)
 
 // Identity only — the block must pass THIS object to readContract.
 const PRICE_FEED_ABI = [{ name: "latestRoundData", type: "function", stateMutability: "view", inputs: [], outputs: [] }]

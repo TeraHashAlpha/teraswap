@@ -1,0 +1,141 @@
+# [feat/dependabot-auto-merge] Auto-merge eligible Dependabot PRs — owner's scoped exception to
+# "owner merges every PR manually". A PR merges itself (GitHub native auto-merge, which still waits
+# for EVERY required check in branch protection; nothing is bypassed or admin-merged) only when
+# scripts/dependabot/auto-merge-eligibility.mjs says all rules hold:
+#   R1 dependabot[bot] author + commits      R4 deny-list; npm runtime/indirect deps → review
+#   R2 semver patch/minor only               R5 grouped PR: every package must qualify
+#   R3 root npm / github-actions only        R6 kill switch: repo variable DEPS_AUTO_MERGE=on
+# Anything else (while the switch is on) → label `deps-review` + a one-line reason comment.
+#
+# Safety model (pull_request_target runs with a write-capable token, so):
+#  - runs only for PRs whose author is dependabot[bot] (job-level `if`);
+#  - NEVER checks out or executes PR code: the only checkout is the BASE commit, sparse to the
+#    zero-dependency script directory; PR facts come from the GitHub API + fetch-metadata;
+#  - write scopes live only on the `act` job, which has no checkout and no third-party actions;
+#  - every PR-derived value reaches `run:` through env vars, never `${{ }}` interpolation.
+# Idempotent: re-runs (synchronize / @dependabot rebase) re-evaluate; the label and the single
+# marker comment are updated in place; a PR that stops qualifying has auto-merge disabled.
+#
+# Needs Settings → General → "Allow auto-merge" (else the step degrades to the review path with
+# an explanatory comment, never fails). Switch off: DEPS_AUTO_MERGE=off (or delete the variable).
+# Runbook: docs/Runbooks/DEPENDABOT-AUTO-MERGE.md.
+
+name: "Dependabot auto-merge"
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, synchronize]
+
+permissions: {}
+
+concurrency:
+  group: dependabot-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    # Kill switch is default OFF: nothing below runs (no labels, no comments) until the owner sets
+    # DEPS_AUTO_MERGE=on. R6 inside the script repeats the check (defence in depth, tested).
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && vars.DEPS_AUTO_MERGE == 'on'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      eligible: ${{ steps.verdict.outputs.eligible }}
+      reason: ${{ steps.verdict.outputs.reason }}
+    steps:
+      - name: Checkout BASE (trusted eligibility script only — never the PR head)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          sparse-checkout: scripts/dependabot
+
+      - name: Fetch Dependabot metadata
+        id: meta
+        # Fails (step failure, not job failure) when the author is not dependabot or its commits are
+        # unverified → the verdict step then sees no metadata and returns not-eligible (R1).
+        continue-on-error: true
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Evaluate eligibility
+        id: verdict
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          DEPS_JSON: ${{ steps.meta.outputs.updated-dependencies-json }}
+          AUTO_MERGE: ${{ vars.DEPS_AUTO_MERGE }}
+        run: |
+          set -euo pipefail
+          FACTS="$RUNNER_TEMP/facts.json"
+          FILES="$(gh api --paginate "repos/${REPO}/pulls/${PR_NUM}/files" --jq '.[].filename' | jq -R . | jq -s .)"
+          AUTHORS="$(gh api --paginate "repos/${REPO}/pulls/${PR_NUM}/commits" --jq '.[].author.login' | jq -R . | jq -s .)"
+          jq -n --arg author "$PR_AUTHOR" --argjson files "$FILES" --argjson authors "$AUTHORS" \
+            --arg deps "${DEPS_JSON:-[]}" \
+            '{prAuthor: $author, files: $files, commitAuthors: $authors, updatedDependencies: ($deps | fromjson? // [])}' > "$FACTS" \
+            || echo '{}' > "$FACTS"
+          # The script never exits non-zero with a verdict; a crash is already fail-closed inside it.
+          node scripts/dependabot/auto-merge-eligibility.mjs --input "$FACTS" --auto-merge "$AUTO_MERGE"
+
+  act:
+    needs: gate
+    if: needs.gate.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write # `gh pr merge --auto` (enablePullRequestAutoMerge) needs contents:write
+      pull-requests: write # label + comment, enable/disable auto-merge
+    steps:
+      - name: Arm auto-merge, or label for review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          ELIGIBLE: ${{ needs.gate.outputs.eligible }}
+          REASON: ${{ needs.gate.outputs.reason }}
+        run: |
+          set -euo pipefail
+          MARKER='<!-- dependabot-auto-merge -->'
+          # Charset-reduce the reason once more before it reaches a comment or a log command.
+          REASON="$(printf '%s' "$REASON" | tr -cd '[:alnum:] .,:;()/@_=+[]|-' | cut -c1-400)"
+
+          EXISTING="$(gh api "repos/${REPO}/issues/${PR_NUM}/comments" --paginate \
+            --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" | sed -n '1p')"
+          post_comment() { # $1 = one-line text; updates the single marker comment in place
+            printf '%s\n%s\n' "$MARKER" "$1" > "$RUNNER_TEMP/comment.md"
+            if [ -n "$EXISTING" ]; then
+              gh api -X PATCH "repos/${REPO}/issues/comments/${EXISTING}" -F body=@"$RUNNER_TEMP/comment.md" > /dev/null
+            else
+              gh api "repos/${REPO}/issues/${PR_NUM}/comments" -F body=@"$RUNNER_TEMP/comment.md" > /dev/null
+            fi
+          }
+
+          if [ "$ELIGIBLE" = "true" ]; then
+            # --match-head-commit: only merge the exact commit that was just evaluated.
+            if MERGE_ERR="$(gh pr merge "$PR_NUM" --repo "$REPO" --auto --squash --match-head-commit "$HEAD_SHA" 2>&1)"; then
+              echo "auto-merge enabled on #${PR_NUM} (squash; waits for every required check)"
+              gh pr edit "$PR_NUM" --repo "$REPO" --remove-label deps-review 2>/dev/null || true
+              [ -z "$EXISTING" ] || post_comment "Dependabot auto-merge: enabled (squash) — merges when every required check is green."
+              exit 0
+            fi
+            ERR_LINE="$(printf '%s' "${MERGE_ERR%%$'\n'*}" | tr -cd '[:alnum:] .,:;()/_-' | cut -c1-200)"
+            echo "::warning::#${PR_NUM} is eligible but enabling auto-merge failed — is Settings → General → 'Allow auto-merge' on? (${ERR_LINE})"
+            REASON="eligible, but GitHub refused to enable auto-merge (${ERR_LINE}) - merge by hand"
+          fi
+
+          # Review path. If auto-merge was armed on an earlier run and the PR no longer qualifies, disarm it.
+          if [ -n "$(gh pr view "$PR_NUM" --repo "$REPO" --json autoMergeRequest --jq '.autoMergeRequest // empty')" ]; then
+            gh pr merge "$PR_NUM" --repo "$REPO" --disable-auto || true
+          fi
+          gh label create deps-review --repo "$REPO" --color FBCA04 \
+            --description "Dependabot PR needs human review (auto-merge ineligible)" 2>/dev/null || true
+          gh pr edit "$PR_NUM" --repo "$REPO" --add-label deps-review
+          post_comment "Dependabot auto-merge: **review needed** — ${REASON}"

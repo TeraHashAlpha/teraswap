@@ -469,7 +469,8 @@ describe("executor.js wiring (source anchors) — the loop backs RPC off, not th
 
   test("the interval still fires every POLL_INTERVAL_MS (the probe cadence) and runs the tick, not executeCycle directly", () => {
     const main = sliceBetween(executorSource(), "async function main() {", "\n}\n")
-    assert.ok(main.includes("const watcher = startEventWatcher(publicClient, watchedContracts, monitor)"))
+    // [fix/executor-alert-masking-rpc-auth] + the RPC-auth monitor as the watcher's 4th argument.
+    assert.ok(main.includes("const watcher = startEventWatcher(publicClient, watchedContracts, monitor, rpcAuthMonitor)"))
     assert.ok(main.includes("const cadence = createIdleCadence()"))
     assert.ok(main.includes("await runTick()"), "boot runs the tick (ACTIVE ⇒ a full cycle)")
     const interval = sliceBetween(main, "setInterval(async () => {", "}, POLL_INTERVAL_MS)")

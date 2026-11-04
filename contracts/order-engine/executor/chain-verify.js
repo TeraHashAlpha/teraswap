@@ -54,6 +54,10 @@
  */
 
 import { keccak256, stringToHex } from "viem"
+// [fix/executor-alert-masking-rpc-auth] Classification ONLY: an RPC error that is an auth/allowlist
+// rejection is tagged on the refusal (rpcAuth / rpcAuthSignal) so executor.js can say so loudly. The
+// retry bound, every check and every refusal are unchanged — an auth error still refuses the boot.
+import { classifyRpcError, RPC_AUTH } from "./rpc-auth.js"
 
 // ── The identity read ────────────────────────────────────────────────────────────────────────
 // Minimal ABI: the auto-generated getter for `bytes32 public constant ORDER_TYPEHASH`.
@@ -120,14 +124,21 @@ export const DEFAULT_ATTEMPTS = 3
 export const DEFAULT_RETRY_DELAY_MS = 1_000
 export const DEFAULT_TIMEOUT_MS = 10_000
 
-/** Thrown for every refusal. `check` / `chainId` / `value` are for tests + structured logging. */
+/**
+ * Thrown for every refusal. `check` / `chainId` / `value` are for tests + structured logging.
+ * `rpcAuth` / `rpcAuthSignal`: the refusal was caused by an RPC error classified as an auth/allowlist
+ * rejection (rpc-auth.js) — false / null for every other refusal.
+ */
 export class ChainVerificationError extends Error {
-  constructor(message, { check, chainId, value = null } = {}) {
+  constructor(message, { check, chainId, value = null, rpcError } = {}) {
     super(message)
     this.name = "ChainVerificationError"
     this.check = check
     this.chainId = chainId
     this.value = value
+    const verdict = rpcError === undefined ? null : classifyRpcError(rpcError)
+    this.rpcAuth = verdict?.kind === RPC_AUTH
+    this.rpcAuthSignal = this.rpcAuth ? verdict.signal : null
   }
 }
 
@@ -371,7 +382,7 @@ export async function verifyChainBinding({
     throw new ChainVerificationError(
       `FATAL: could not read eth_chainId from the configured RPC while verifying CHAIN_ID=` +
         `${expectedChainId} after ${retry.attempts} attempt(s): ${errText(err)} — refusing to boot`,
-      { check: "chainId", chainId: expectedChainId, value: null },
+      { check: "chainId", chainId: expectedChainId, value: null, rpcError: err },
     )
   }
   const reportedChainId = normalizeChainId(rawChainId)
@@ -406,7 +417,7 @@ export async function verifyChainBinding({
       throw new ChainVerificationError(
         `FATAL: could not read eth_getCode for ${label} ${address} on chain ${expectedChainId} ` +
           `after ${retry.attempts} attempt(s): ${errText(err)} — refusing to boot`,
-        { check: "code", chainId: expectedChainId, value: address },
+        { check: "code", chainId: expectedChainId, value: address, rpcError: err },
       )
     }
     if (code === undefined || code === null || code === "0x" || code === "") {
@@ -447,7 +458,7 @@ export async function verifyChainBinding({
         `FATAL: could not read ORDER_TYPEHASH() from ${label} ${address} on chain ` +
           `${expectedChainId} after ${retry.attempts} attempt(s): ${errText(err)} — the address ` +
           `may not be a TeraSwapOrderExecutor at all. Refusing to boot.`,
-        { check: "identity", chainId: expectedChainId, value: address },
+        { check: "identity", chainId: expectedChainId, value: address, rpcError: err },
       )
     }
     if (typeof typehash !== "string" || !BYTES32.test(typehash)) {
@@ -555,7 +566,7 @@ export async function verifyExecutorWhitelist({
       throw new ChainVerificationError(
         `FATAL: could not read whitelistedExecutors(${signer}) from ${label} ${address} on chain ` +
           `${chainId} after ${retry.attempts} attempt(s): ${errText(err)} — refusing to boot`,
-        { check: "whitelist", chainId, value: address },
+        { check: "whitelist", chainId, value: address, rpcError: err },
       )
     }
     if (typeof answer !== "boolean") {
