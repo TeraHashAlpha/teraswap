@@ -86,6 +86,12 @@ CREATE TABLE IF NOT EXISTS orders (
   consecutive_failures INTEGER NOT NULL DEFAULT 0
     CONSTRAINT orders_consecutive_failures_nonneg CHECK (consecutive_failures >= 0),
   last_attempt_at TIMESTAMPTZ,
+  -- [ADR-026] Keeper INFRA-miss trail (fix/infra-failures-dont-burn-orders): when / why the keeper
+  -- last could NOT complete an attempt for a reason that is OURS (RPC auth/transport, paused,
+  -- Supabase or /api/swap down, keeper gas, receipt unreadable). Such a miss never advances
+  -- consecutive_failures; the trail is never reset. Migration 20261104120000_orders_infra_miss.sql.
+  last_infra_miss_at TIMESTAMPTZ,
+  last_infra_miss_reason TEXT,
 
   -- [FEAT-DCA-FLOOR-TIERS] DCA minimum-output tier the user consented to + when (nullable; NULL = no
   -- consent required). See supabase/migrations/20261011120000_orders_floor_tier_consent.sql.

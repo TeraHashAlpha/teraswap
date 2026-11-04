@@ -57,6 +57,36 @@ export const FAILURE_REASON = {
 // untouched call site can never silently stop counting.
 export const MISS_CAUSE = Object.freeze({ INFRA: "infra", ORDER: "order" })
 
+// Where an `infra` miss is recorded (orders row; migration
+// supabase/migrations/20261104120000_orders_infra_miss.sql, mirrored in contracts/order-engine/schema.sql,
+// applied MANUALLY by the owner). Additive and nullable: NULL = never missed for an infra reason.
+// NOT `orders.error` — the UI reads any non-null `error` as a failed order (DcaOrdersList.tsx).
+export const INFRA_MISS_COLUMNS = Object.freeze(["last_infra_miss_at", "last_infra_miss_reason"])
+
+/**
+ * The exact Supabase `orders` patch for an `infra` miss: the order stays ACTIVE, the count is NOT
+ * touched (consecutive_failures is deliberately absent), last_attempt_at records the attempt (owner
+ * ask) and the two infra columns record when/why for the 24 h visibility count.
+ * @param {string} nowIso
+ * @param {string} reason — classifyMissCause's label (short, secret-free)
+ */
+export function buildInfraMissPatch(nowIso, reason) {
+  return { status: "active", updated_at: nowIso, last_attempt_at: nowIso, last_infra_miss_at: nowIso, last_infra_miss_reason: String(reason) }
+}
+
+/** The same patch without the infra columns — the executor's re-send when PostgREST rejects them. Never mutates. */
+export function stripInfraMissColumns(patch) {
+  const out = { ...patch }
+  for (const col of INFRA_MISS_COLUMNS) delete out[col]
+  return out
+}
+
+/** Does a PostgREST error body name one of OUR infra columns (PGRST204 "Could not find the '…' column")? */
+export function isInfraMissColumnRejection(body) {
+  if (typeof body !== "string" || body.length === 0) return false
+  return INFRA_MISS_COLUMNS.some((col) => body.includes(col))
+}
+
 /** Error-chain metadata for the cause rules below. Never throws; cycle-safe; depth-bounded. */
 function collectErrorMeta(err) {
   const names = []
@@ -533,7 +563,7 @@ export function buildOrderActivePatch(nowIso, retryState) {
  *   maxFailures?: number,
  * }} p
  * @returns {{
- *   kind: 'expired'|'fail'|'retry',
+ *   kind: 'expired'|'fail'|'retry'|'infra', // [ADR-026] infra = ours: counted nowhere, order stays active
  *   patch: object,              // the Supabase orders patch to PATCH
  *   reason: string|null,        // terminal reason code (null on retry)
  *   alert: boolean,             // fire the one-shot #201 alert before failing
@@ -577,6 +607,28 @@ export function planFailureHandling({
 
   // 1b. [ADR-026] Tag the miss with its cause (infra vs order). Every plan below carries it.
   const miss = classifyMissCause({ err, swapReason, executorErrorName, noRoute, noRouteCause, minedRevert, txSent, paused })
+
+  // 1c. [ADR-026 §2] An `infra` miss is OURS: the ladder does not move. The order stays active, the
+  //     attempt is recorded (last_attempt_at + last_infra_miss_at/_reason) and the next healthy
+  //     cycle simply attempts again — the contract's dcaLastExecution + dcaInterval gate is what
+  //     decides whether a DCA chunk is due, so nothing here can double-fill or back-fill.
+  //     `failures` is the count the row ALREADY had (so the same-process cache mirrors the row);
+  //     with a count of 0 there is no backoff and the next healthy cycle retries at once.
+  if (miss.cause === MISS_CAUSE.INFRA) {
+    const persistedCount = readPersistedRetryState(dbOrder).count
+    const unchanged = Math.max(persistedCount, Math.max(0, Number(prevFailures) || 0))
+    return {
+      kind: "infra",
+      patch: buildInfraMissPatch(nowIso, miss.reason),
+      reason: null,
+      alert: false,
+      failures: unchanged,
+      clearRetries: false,
+      backoffMs: unchanged > 0 ? backoffMs(unchanged) : 0,
+      cause: miss.cause,
+      causeReason: miss.reason,
+    }
+  }
 
   // 2. Classify (no route this cycle is always transient). A floor revert is transient too — the
   //    floor may be merely tight — it only changes the NAME the cap failure gets (Task 3).

@@ -235,7 +235,9 @@ describe("acceptance 2 — a pinned-route revert still never walks the ladder to
     let t = T0
     for (let i = 0; i < 50; i++) k.pinnedRevert(r, (t += 60_000))
     k.restart()
-    const plan = k.miss(r, (t += 60_000), { err: new Error("HTTP request failed: 503 Service Unavailable") })
+    // [ADR-026] a 503 is an `infra` miss now (never counted) — a sent-and-reverted tx is the
+    // non-market ORDER miss that starts the ladder.
+    const plan = k.miss(r, (t += 60_000), { minedRevert: true })
     assert.equal(plan.kind, "retry")
     assert.equal(plan.failures, 1)
     assert.equal(r.status, "active")

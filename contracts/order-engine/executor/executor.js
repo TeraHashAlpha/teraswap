@@ -159,6 +159,8 @@ import {
   MAX_CYCLE_FAILURES,
   planFailureHandling,
   classifySwapApiMiss,
+  stripInfraMissColumns,
+  isInfraMissColumnRejection,
   readPersistedRetryState,
   isInBackoffWindow,
   resetRetryStateFields,
@@ -717,7 +719,13 @@ async function updateOrderStatus(orderId, status) {
 //   • a patch that CARRIED those columns is accepted → markPresent() (decision returns to the row)
 // Only a patch that actually carried the columns can clear the state — a status-only patch
 // succeeding proves nothing about the schema, and neither does the stripped re-send below.
+//
+// [ADR-026] The two infra-miss columns (last_infra_miss_at / last_infra_miss_reason, migration
+// 20261104120000_orders_infra_miss.sql, applied manually) get the SAME tolerance, independently: the
+// specific 400 naming one of them re-sends the patch without them (logged once per process) and
+// never touches `retryStateAvailability` — that sensor is about the retry-state columns only.
 const retryStateAvailability = createRetryStateAvailability()
+let infraMissColumnsWarned = false
 async function patchOrderRow(orderId, patch) {
   const send = (body) =>
     supabaseFetch(`orders?id=eq.${orderId}`, {
@@ -725,10 +733,28 @@ async function patchOrderRow(orderId, patch) {
       headers: { Prefer: "return=minimal" },
       body: JSON.stringify(body),
     })
-  const stripped = stripRetryStateColumns(patch)
-  const hadRetryState = Object.keys(stripped).length < Object.keys(patch).length
+  const carriesRetryState = (p) => Object.keys(stripRetryStateColumns(p)).length < Object.keys(p).length
+  const carriesInfraMiss = (p) => Object.keys(stripInfraMissColumns(p)).length < Object.keys(p).length
 
-  let res = await send(patch)
+  let current = patch
+  let res = await send(current)
+  let body = ""
+  if (!res.ok) {
+    try { body = await res.text() } catch { /* body is diagnostic only */ }
+    if (res.status === 400 && carriesInfraMiss(current) && isInfraMissColumnRejection(body)) {
+      if (!infraMissColumnsWarned) {
+        infraMissColumnsWarned = true
+        console.error(
+          `  Order ${orderId.slice(0, 8)}... infra-miss columns REJECTED (${res.status}: ${body.slice(0, 160)}) — ` +
+            `migration 20261104120000_orders_infra_miss.sql is NOT applied; the 24 h infra-miss count stays empty. Re-sending without them (logged once per process).`,
+        )
+      }
+      current = stripInfraMissColumns(current)
+      res = await send(current)
+      if (!res.ok) { try { body = await res.text() } catch { /* diagnostic only */ } }
+    }
+  }
+  const hadRetryState = carriesRetryState(current)
   if (res.ok) {
     // The migration is applied (possibly JUST applied, mid-process): the row can hold the count
     // again, so the decision must go back to reading it. This is what stops the fallback latching.
@@ -741,8 +767,7 @@ async function patchOrderRow(orderId, patch) {
     }
     return res
   }
-  let body = ""
-  try { body = await res.text() } catch { /* body is diagnostic only */ }
+  const stripped = stripRetryStateColumns(current)
   if (res.status === 400 && hadRetryState && /consecutive_failures|last_attempt_at/.test(body)) {
     console.error(
       `  Order ${orderId.slice(0, 8)}... retry-state columns REJECTED (${res.status}: ${body.slice(0, 160)}) — ` +
@@ -759,6 +784,14 @@ async function patchOrderRow(orderId, patch) {
     res = await send(stripped)
     if (res.ok) return res
     try { body = await res.text() } catch { /* diagnostic only */ }
+    // [ADR-026] Both migrations missing: PostgREST named last_attempt_at first (patch key order), so
+    // the infra columns are only rejected NOW — strip them too; the status transition must land.
+    if (res.status === 400 && carriesInfraMiss(stripped) && isInfraMissColumnRejection(body)) {
+      infraMissColumnsWarned = true
+      res = await send(stripInfraMissColumns(stripped))
+      if (res.ok) return res
+      try { body = await res.text() } catch { /* diagnostic only */ }
+    }
   }
   console.error(`  Order ${orderId.slice(0, 8)}... orders PATCH FAILED (${res.status}: ${body.slice(0, 160)}) — patch keys: ${Object.keys(patch).join(",")}`)
   return res
@@ -787,7 +820,9 @@ async function patchOrderRow(orderId, patch) {
 // the two states are unit-tested through that one function.
 // [ADR-026] The miss's EVIDENCE (noRouteCause / minedRevert / txSent / the paused state) reaches the
 // plan so every miss is tagged `infra` or `order` (retry-policy.js classifyMissCause); the log line
-// names the cause. The counter itself is unchanged here (commit 1 of fix/infra-failures-dont-burn-orders).
+// names the cause. Only an `order` miss advances consecutive_failures; an `infra` miss (kind
+// "infra") keeps the order active, writes last_attempt_at + last_infra_miss_at/_reason and leaves the
+// count untouched — the same-process cache mirrors that unchanged count.
 async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, executorErrorName = null, noRoute = false, noRouteCause = null, minedRevert = false, txSent = false } = {}, obsCtx = null) {
   const plan = planFailureHandling({
     dbOrder,
@@ -832,6 +867,10 @@ async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, 
 
   if (plan.kind === "expired") {
     log(`  Order ${dbOrder.id.slice(0, 8)}... expired — recording 'expired', not a route failure`)
+  } else if (plan.kind === "infra") {
+    // [ADR-026 §2] Ours, not the order's: the ladder did not move. Retried on the next healthy cycle
+    // (after the ladder's own backoff only if the order was already mid-ladder).
+    log(`  Order ${dbOrder.id.slice(0, 8)}... infra miss (${plan.causeReason}) — NOT counted (${plan.failures}/${MAX_CYCLE_FAILURES}); order left active, retried next healthy cycle`)
   } else if (plan.kind === "fail") {
     log(`  Order ${dbOrder.id.slice(0, 8)}... FAILED — reason=${plan.reason} cause=${plan.cause}:${plan.causeReason} (after ${plan.failures} attempt(s))`)
   } else {
@@ -1340,6 +1379,17 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   }
 
   log(`  Found ${orders.length} active order(s)`)
+
+  // [ADR-026 §3] While the provider rejects our credentials nothing can execute: attempt NOTHING —
+  // no lock, no tx, no retry count, no patch. The balance read above and the event watcher keep
+  // probing, so the pause clears by itself (rpc-auth.js onRpcSuccess) and the next cycle attempts
+  // again. Returning the order count keeps the idle cadence in ACTIVE mode (a full cycle every poll).
+  const pausedState = rpcAuthMonitor ? rpcAuthMonitor.state().paused : null
+  if (pausedState) {
+    log(`  PAUSED (${pausedState}): ${orders.length} active order(s) NOT attempted — no lock, no tx, no retry count (ADR-026)`)
+    await endCycleObservability(obsCtx, publicClient, ownGasSpentWei, { idle: true })
+    return orders.length
+  }
 
   // [ADR-024 / feat/keeper-price-quorum] ONE price-quote context per cycle: the off-chain sources
   // are fetched once for every active DCA token (one DefiLlama + one CoinGecko batch per 50
