@@ -15,6 +15,8 @@
 // the generic message masked the real cause (e.g. an expiry). This module
 // separates transient from permanent and surfaces the actual terminal reason.
 
+import { classifyRpcError, RPC_AUTH } from "./rpc-auth.js"
+
 // ─── Canonical terminal reason codes ──────────────────────────────────────
 // These exact snake_case strings are the shared contract with the UI: the
 // keeper writes them to orders.error and src/lib/order-engine/failed-reason.ts
@@ -33,6 +35,147 @@ export const FAILURE_REASON = {
   // order ef85438b: a signed floor ~1.59x above market, 516 reverts). The keeper stops trying
   // and records why; it NEVER cancels and never moves funds.
   MIN_OUTPUT_UNREACHABLE: "min_output_unreachable",
+}
+
+// ─── Miss CAUSE: infra vs order ───────────────────────────────────────────────────────────────
+// [fix/infra-failures-dont-burn-orders / ADR-026] Owner decision: a failure caused by OUR
+// infrastructure must not count against a user's order. Every miss is therefore tagged with WHY the
+// keeper did not fill it, and only an `order` miss advances the ladder (consecutive_failures →
+// MAX_CYCLE_FAILURES → 'failed'). INC-2026-10-30-001: a ~20 h RPC allowlist outage would have burnt
+// every active order's 8 misses and marked it 'failed' with no_route_after_retries — a lie.
+//
+//   infra — the keeper itself could not complete the attempt (no tx sent): RPC auth/allowlist
+//           (rpc-auth.js classifyRpcError, reused), RPC transport / timeout / 5xx / 429, the keeper
+//           paused, Supabase or /api/swap unreachable, the keeper wallet out of gas, a keeper config
+//           gap, or a SENT tx whose receipt could not be fetched (the chain decides; the next cycle
+//           re-reads it through canExecute).
+//   order — the ORDER is why it did not fill: a revert (mined or simulated) attributable to the
+//           order (slippage / minOut / floor, allowance, balance, nonce), expiry, or our API
+//           answered and there is no acceptable route for this pair.
+// Ambiguous: infra ONLY when no tx was sent; any sent-and-reverted tx is order. `order` needs
+// POSITIVE evidence; a miss with no evidence at all keeps today's counting (order:unknown) so an
+// untouched call site can never silently stop counting.
+export const MISS_CAUSE = Object.freeze({ INFRA: "infra", ORDER: "order" })
+
+/** Error-chain metadata for the cause rules below. Never throws; cycle-safe; depth-bounded. */
+function collectErrorMeta(err) {
+  const names = []
+  const statuses = []
+  const codes = []
+  const parts = []
+  const seen = new Set()
+  let e = err
+  for (let depth = 0; e != null && depth < 10; depth++) {
+    if (typeof e !== "object") {
+      parts.push(String(e))
+      break
+    }
+    if (seen.has(e)) break
+    seen.add(e)
+    if (typeof e.name === "string") names.push(e.name)
+    if (typeof e.status === "number") statuses.push(e.status)
+    if (typeof e.code === "string" || typeof e.code === "number") codes.push(String(e.code))
+    for (const k of ["shortMessage", "message", "details", "reason"]) if (typeof e[k] === "string") parts.push(e[k])
+    if (Array.isArray(e.metaMessages)) for (const m of e.metaMessages) if (typeof m === "string") parts.push(m)
+    e = e.cause
+  }
+  return { names, statuses, codes, text: parts.join(" \n ").toLowerCase() }
+}
+
+const REVERT_NAME = /Revert|ContractFunctionExecutionError|CallExecutionError|EstimateGasExecutionError/
+const REVERT_TEXT = /execution reverted|\breverted\b/
+// The KEEPER wallet cannot pay for gas (viem InsufficientFundsError / the node's words). Distinct
+// from the USER's ERC20 balance ("transfer amount exceeds balance"), which is a revert ⇒ order.
+const KEEPER_GAS_TEXT = /insufficient funds for (?:gas|transfer)|exceeds transaction sender account balance|exceeds the balance of the account/
+const TRANSPORT_NAME = /^(?:HttpRequestError|TimeoutError|WebSocketRequestError|SocketClosedError|RpcRequestError|InternalRpcError|LimitExceededRpcError|ResourceUnavailableRpcError|UnknownRpcError|TransactionReceiptNotFoundError|WaitForTransactionReceiptTimeoutError)$/
+const TRANSPORT_TEXT = /fetch failed|econnrefused|econnreset|etimedout|enotfound|eai_again|ehostunreach|epipe|socket hang up|network error|timed out|timeout|und_err_/
+const TRANSPORT_CODE = /^(?:ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|EPIPE|UND_ERR_|ERR_NETWORK)/
+
+/**
+ * Why /api/swap gave the keeper no route this cycle.
+ * @param {{ configMissing?: boolean, networkError?: boolean, status?: number|null, misroute?: boolean, missingData?: boolean }} [p]
+ * @returns {{ cause: 'infra'|'order', reason: string }}
+ *   infra: our API unreachable / 5xx / 429 (swap-api:<status|network>), the keeper's own config
+ *          (keeper-config), or the API answering with calldata for the WRONG router (swap-api:misroute);
+ *   order: the API answered and there is no acceptable route for this pair (no-route[:<4xx|no-tx-data>]).
+ */
+export function classifySwapApiMiss({ configMissing = false, networkError = false, status = null, misroute = false, missingData = false } = {}) {
+  if (configMissing) return { cause: MISS_CAUSE.INFRA, reason: "keeper-config" }
+  if (networkError) return { cause: MISS_CAUSE.INFRA, reason: "swap-api:network" }
+  if (misroute) return { cause: MISS_CAUSE.INFRA, reason: "swap-api:misroute" }
+  const st = Number(status)
+  if (Number.isFinite(st) && st > 0) {
+    if (st >= 500 || st === 429) return { cause: MISS_CAUSE.INFRA, reason: `swap-api:${st}` }
+    return { cause: MISS_CAUSE.ORDER, reason: `no-route:${st}` }
+  }
+  if (missingData) return { cause: MISS_CAUSE.ORDER, reason: "no-route:no-tx-data" }
+  return { cause: MISS_CAUSE.ORDER, reason: "no-route" }
+}
+
+/**
+ * The cause table (ADR-026 §2), as ONE pure function. Rules are applied top-down; the first that
+ * has positive evidence wins.
+ * @param {{
+ *   err?: unknown,                 // the thrown viem/RPC/fetch error, if any
+ *   swapReason?: string|null,      // decoded SwapFailed inner reason (revert-decode.js)
+ *   executorErrorName?: string|null, // decoded executor custom error (InsufficientOutput, …)
+ *   noRoute?: boolean,             // fetchSwapRoute gave nothing this cycle
+ *   noRouteCause?: { cause: string, reason: string }|null, // from classifySwapApiMiss
+ *   minedRevert?: boolean,         // the tx was SENT and its receipt says reverted
+ *   txSent?: boolean,              // a tx hash exists for this attempt (writeContract returned)
+ *   paused?: string|null,          // the keeper's paused state (rpc-auth.js), if any
+ * }} [p]
+ * @returns {{ cause: 'infra'|'order', reason: string }}
+ */
+export function classifyMissCause({
+  err = null,
+  swapReason = null,
+  executorErrorName = null,
+  noRoute = false,
+  noRouteCause = null,
+  minedRevert = false,
+  txSent = false,
+  paused = null,
+} = {}) {
+  const infra = (reason) => ({ cause: MISS_CAUSE.INFRA, reason })
+  const order = (reason) => ({ cause: MISS_CAUSE.ORDER, reason })
+  // 1. The keeper is paused: it must not be attempting at all (executor.js skips the loop); a miss
+  //    that still reaches here is ours.
+  if (paused) return infra(`paused:${paused}`)
+  // 2. Sent and reverted: the chain judged the order. Positive, final evidence.
+  if (minedRevert) return order("reverted")
+  // 3. No route this cycle: the swap-API miss carries its own verdict.
+  if (noRoute) {
+    if (noRouteCause && (noRouteCause.cause === MISS_CAUSE.INFRA || noRouteCause.cause === MISS_CAUSE.ORDER)) {
+      return { cause: noRouteCause.cause, reason: String(noRouteCause.reason || "no-route") }
+    }
+    return order("no-route")
+  }
+  // 4. RPC auth / allowlist — the same classification rpc-auth.js pauses the keeper on. A contract
+  //    revert whose text says "not on whitelist" is transient there (never auth) and falls through.
+  if (err != null && classifyRpcError(err).kind === RPC_AUTH) return infra("rpc-auth")
+  // 5. A tx was sent but its outcome could not be read (receipt timeout / RPC error after send).
+  //    The chain decides; the next cycle re-reads it through canExecute. Never counted.
+  if (txSent) return infra("receipt-unavailable")
+  const meta = err == null ? null : collectErrorMeta(err)
+  // 6. The KEEPER wallet is out of gas — ours, not the user's balance.
+  if (meta && (meta.names.includes("InsufficientFundsError") || KEEPER_GAS_TEXT.test(meta.text))) return infra("keeper-gas")
+  // 7. A permanent cause decoded from the revert (allowance / balance / nonce) — order, by code.
+  const permanent = classifyFailure({ err, swapReason })
+  if (permanent.terminal) return order(permanent.reason)
+  // 8. A decoded executor / router revert — order, named.
+  if (executorErrorName) return order(`revert:${executorErrorName}`)
+  if (swapReason) return order("revert:swap-failed")
+  if (meta && (meta.names.some((n) => REVERT_NAME.test(n)) || REVERT_TEXT.test(meta.text))) return order("revert")
+  // 9. The provider / network could not be reached or answered with an HTTP error.
+  if (meta && (meta.statuses.length > 0 || meta.names.some((n) => TRANSPORT_NAME.test(n)) || meta.codes.some((c) => TRANSPORT_CODE.test(c)) || TRANSPORT_TEXT.test(meta.text))) {
+    return infra("rpc-transport")
+  }
+  // 10. No evidence at all: keep today's counting (an untouched call site must not stop counting).
+  if (meta == null) return order("unknown")
+  // 11. Something threw before any tx was sent and nothing above recognised it: the keeper did not
+  //     complete the attempt — ours by the ambiguity rule.
+  return infra("unclassified")
 }
 
 // ─── Persisted retry state (orders.consecutive_failures / orders.last_attempt_at) ──────────
@@ -380,6 +523,10 @@ export function buildOrderActivePatch(nowIso, retryState) {
  *   swapReason?: string|null,   // decoded SwapFailed inner reason (if any)
  *   executorErrorName?: string|null, // decoded executor custom error (revert-decode.js), e.g. "InsufficientOutput"
  *   noRoute?: boolean,          // true ⇒ "no route this cycle" (always transient)
+ *   noRouteCause?: object|null, // [ADR-026] classifySwapApiMiss verdict for that no-route
+ *   minedRevert?: boolean,      // [ADR-026] the tx was SENT and its receipt says reverted
+ *   txSent?: boolean,           // [ADR-026] a tx hash exists for this attempt
+ *   paused?: string|null,       // [ADR-026] the keeper's paused state (rpc-auth.js)
  *   prevFailures?: number,      // OPTIONAL same-process count; max()'d with the row's persisted count
  *   nowSec: number,             // current unix seconds (for expiry compare)
  *   nowIso: string,             // current ISO timestamp (for the patch)
@@ -393,6 +540,8 @@ export function buildOrderActivePatch(nowIso, retryState) {
  *   failures: number,           // new consecutive-miss count
  *   clearRetries: boolean,      // true ⇒ drop this order from the retry Map
  *   backoffMs?: number,         // wait before the next retry (retry kind only)
+ *   cause: 'infra'|'order',     // [ADR-026] why the keeper did not fill (classifyMissCause)
+ *   causeReason: string,        // [ADR-026] short, secret-free label for that cause
  * }}
  */
 export function planFailureHandling({
@@ -401,6 +550,10 @@ export function planFailureHandling({
   swapReason = null,
   executorErrorName = null,
   noRoute = false,
+  noRouteCause = null,
+  minedRevert = false,
+  txSent = false,
+  paused = null,
   prevFailures = 0,
   nowSec,
   nowIso,
@@ -417,8 +570,13 @@ export function planFailureHandling({
       alert: false,
       failures: 0,
       clearRetries: true,
+      cause: MISS_CAUSE.ORDER,
+      causeReason: FAILURE_REASON.EXPIRED,
     }
   }
+
+  // 1b. [ADR-026] Tag the miss with its cause (infra vs order). Every plan below carries it.
+  const miss = classifyMissCause({ err, swapReason, executorErrorName, noRoute, noRouteCause, minedRevert, txSent, paused })
 
   // 2. Classify (no route this cycle is always transient). A floor revert is transient too — the
   //    floor may be merely tight — it only changes the NAME the cap failure gets (Task 3).
@@ -442,6 +600,8 @@ export function planFailureHandling({
       alert: decision.alert,
       failures,
       clearRetries: true,
+      cause: miss.cause,
+      causeReason: miss.reason,
     }
   }
 
@@ -453,5 +613,7 @@ export function planFailureHandling({
     failures,
     clearRetries: false,
     backoffMs: backoffMs(failures),
+    cause: miss.cause,
+    causeReason: miss.reason,
   }
 }

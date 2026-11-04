@@ -158,6 +158,7 @@ import { classifyRpcError, createRpcAuthMonitor, createBootAlertGate, RPC_AUTH, 
 import {
   MAX_CYCLE_FAILURES,
   planFailureHandling,
+  classifySwapApiMiss,
   readPersistedRetryState,
   isInBackoffWindow,
   resetRetryStateFields,
@@ -784,13 +785,20 @@ async function patchOrderRow(orderId, patch) {
 // columns ARE available it returns 0, and since planFailureHandling takes max(persisted, prev),
 // the decision provably follows the ROW — the Map cannot raise it. Do not inline this ternary:
 // the two states are unit-tested through that one function.
-async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, executorErrorName = null, noRoute = false } = {}, obsCtx = null) {
+// [ADR-026] The miss's EVIDENCE (noRouteCause / minedRevert / txSent / the paused state) reaches the
+// plan so every miss is tagged `infra` or `order` (retry-policy.js classifyMissCause); the log line
+// names the cause. The counter itself is unchanged here (commit 1 of fix/infra-failures-dont-burn-orders).
+async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, executorErrorName = null, noRoute = false, noRouteCause = null, minedRevert = false, txSent = false } = {}, obsCtx = null) {
   const plan = planFailureHandling({
     dbOrder,
     err,
     swapReason,
     executorErrorName,
     noRoute,
+    noRouteCause,
+    minedRevert,
+    txSent,
+    paused: rpcAuthMonitor ? rpcAuthMonitor.state().paused : null,
     prevFailures: prevFailuresForDecision({
       columnsAvailable: retryStateAvailability.isAvailable(),
       cached: orderRetries.get(dbOrder.id),
@@ -825,9 +833,9 @@ async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, 
   if (plan.kind === "expired") {
     log(`  Order ${dbOrder.id.slice(0, 8)}... expired — recording 'expired', not a route failure`)
   } else if (plan.kind === "fail") {
-    log(`  Order ${dbOrder.id.slice(0, 8)}... FAILED — reason=${plan.reason} (after ${plan.failures} attempt(s))`)
+    log(`  Order ${dbOrder.id.slice(0, 8)}... FAILED — reason=${plan.reason} cause=${plan.cause}:${plan.causeReason} (after ${plan.failures} attempt(s))`)
   } else {
-    log(`  Order ${dbOrder.id.slice(0, 8)}... transient miss ${plan.failures}/${MAX_CYCLE_FAILURES}, retry in ~${Math.round(plan.backoffMs / 1000)}s (left active)`)
+    log(`  Order ${dbOrder.id.slice(0, 8)}... transient miss ${plan.failures}/${MAX_CYCLE_FAILURES} cause=${plan.cause}:${plan.causeReason}, retry in ~${Math.round(plan.backoffMs / 1000)}s (left active)`)
   }
 }
 
@@ -921,15 +929,18 @@ async function readEthUsd(publicClient) {
 // 1inch router → SwapFailed). `amount` here is the per-chunk NET amount (after
 // the contract's 0.1% tokenIn fee — see computeNetChunkAmount at the call site).
 async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecimals, dstDecimals, router) {
+  // [ADR-026] Every "no route" return says WHY, as a classified miss ({ miss: { cause, reason } }):
+  // our API unreachable / 5xx / 429 / a keeper config gap is `infra` (never counted against the
+  // order); the API answering with no acceptable route for this pair is `order`.
   if (!API_URL) {
     log("  TERASWAP_API_URL not configured -- skipping swap route")
-    return null
+    return { miss: classifySwapApiMiss({ configMissing: true }) }
   }
 
   const source = sourceForRouter(router)
   if (!source) {
     console.error(`  Swap route: no /api/swap source maps to order.router ${router} -- skipping (would mis-route)`)
-    return null
+    return { miss: classifySwapApiMiss({ configMissing: true }) }
   }
 
   try {
@@ -949,13 +960,13 @@ async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecim
       // INVALID_SOURCE / priceGuard cause (chore/keeper-swap-payload-fix).
       const body = await res.text().catch(() => "")
       console.error(`  Swap API error: ${res.status} ${body.slice(0, 300)} (source=${source})`)
-      return null
+      return { miss: classifySwapApiMiss({ status: res.status }) }
     }
 
     const data = await res.json()
     if (!data.tx?.data) {
       console.error("  Swap route: missing tx data")
-      return null
+      return { miss: classifySwapApiMiss({ missingData: true }) }
     }
 
     // [chore/dca-router-chainaware] FUND-FLOW GUARD: the calldata MUST target the
@@ -965,7 +976,7 @@ async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecim
     const target = data.tx.to
     if (!target || !router || target.toLowerCase() !== router.toLowerCase()) {
       console.error(`  Swap route: tx.to ${target} != order.router ${router} (source=${source}) -- refusing to mis-route`)
-      return null
+      return { miss: classifySwapApiMiss({ misroute: true }) }
     }
 
     // [chore/dca-deviation-guard] Also surface the committed router's expected out
@@ -976,7 +987,7 @@ async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecim
     return { data: data.tx.data, toAmount: data.toAmount ?? null }
   } catch (err) {
     console.error("  fetchSwapRoute error:", redactError(err))
-    return null
+    return { miss: classifySwapApiMiss({ networkError: true }) }
   }
 }
 
@@ -1351,6 +1362,11 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   for (const dbOrder of orders) {
     if (executed >= MAX_BATCH) break
 
+    // [ADR-026] Set the moment writeContract returns a hash: the catch below needs to know whether
+    // a tx was SENT (receipt unavailable ⇒ infra) or the attempt died before any tx (simulated
+    // revert ⇒ order; RPC/transport ⇒ infra).
+    let sentTxHash = null
+
     try {
       // Check if expired (off-chain pre-filter). [chore/dca-resilience] An order
       // that expires mid-retry is recorded 'expired' (its own status) — never a
@@ -1583,12 +1599,13 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
           orderStruct.router,
         )
 
-        if (!swapData) {
+        if (!swapData || swapData.miss) {
           // [chore/dca-resilience] No route THIS cycle is transient: keep the order
           // active and retry a later cycle (backoff). Only after MAX_CYCLE_FAILURES
           // consecutive misses does this fail with no_route_after_retries (+alert).
+          // [ADR-026] The classified miss rides along: an unreachable /api/swap is OUR miss.
           log(`  Order ${dbOrder.id.slice(0, 8)}... -- no swap route this cycle`)
-          await handleExecutionFailure(dbOrder, { noRoute: true }, obsCtx)
+          await handleExecutionFailure(dbOrder, { noRoute: true, noRouteCause: swapData?.miss ?? null }, obsCtx)
           skipped++
           continue
         }
@@ -1904,6 +1921,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         maxPriorityFeePerGas: gasTier.maxPriorityFeePerGas,
       })
 
+      sentTxHash = txHash
       log(`  TX sent: ${txHash}`)
 
       // Wait for confirmation
@@ -2003,7 +2021,8 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         // cycle (backoff), capping at MAX_CYCLE_FAILURES so a persistently
         // reverting tx stops burning gas and fails with no_route_after_retries
         // (+alert) instead of re-sending forever.
-        await handleExecutionFailure(dbOrder, {}, obsCtx)
+        // [ADR-026] Sent and reverted: the chain judged the order ⇒ `order`, counted.
+        await handleExecutionFailure(dbOrder, { minedRevert: true }, obsCtx)
       }
     } catch (err) {
       // [chore/dca-swapfailed] If the revert is SwapFailed(bytes), unwrap the
@@ -2087,7 +2106,9 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       // [FIX-RETRY-CAP-RESTART] executorErrorName rides along: a DCA that trips the cap on the
       // executor's own InsufficientOutput (the incident's shape — DCA is excluded from the pinned
       // branch above by construction) is failed as min_output_unreachable, not no-route.
-      await handleExecutionFailure(dbOrder, { err, swapReason, executorErrorName }, obsCtx)
+      // [ADR-026] txSent tells the plan whether this is a receipt we could not read (infra) or an
+      // attempt that died before any tx (classified by what threw).
+      await handleExecutionFailure(dbOrder, { err, swapReason, executorErrorName, txSent: sentTxHash !== null }, obsCtx)
     }
   }
 

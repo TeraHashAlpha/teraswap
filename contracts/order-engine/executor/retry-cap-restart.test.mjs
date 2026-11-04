@@ -341,7 +341,8 @@ describe("executor.js wiring (source anchors) — the decision reads persisted s
   })
 
   test("the catch site forwards executorErrorName to handleExecutionFailure", () => {
-    assert.ok(executorSource().includes("await handleExecutionFailure(dbOrder, { err, swapReason, executorErrorName }, obsCtx)"))
+    // [ADR-026] the site also says whether a tx was sent (miss-cause.test.mjs pins that half).
+    assert.ok(executorSource().includes("await handleExecutionFailure(dbOrder, { err, swapReason, executorErrorName, txSent: sentTxHash !== null }, obsCtx)"))
   })
 
   test("the cycle's backoff gate falls back to the row when the cache is empty (i.e. after a restart)", () => {
