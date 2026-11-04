@@ -34,8 +34,9 @@ describe("classifyMissCause — the cause table (ADR-026 §2)", () => {
   })
 
   describe("infra — the keeper could not complete the attempt", () => {
-    test("keeper paused (rpc-auth) ⇒ infra, before anything else", () => {
+    test("keeper paused (rpc-auth) ⇒ infra, before anything that is not a mined revert", () => {
       assert.deepEqual(classifyMissCause({ paused: "rpc-auth", err: named("ContractFunctionRevertedError", "execution reverted") }), infra("paused:rpc-auth"))
+      assert.deepEqual(classifyMissCause({ paused: "rpc-auth", noRoute: true, noRouteCause: classifySwapApiMiss({ status: 422, code: "NO_ROUTE" }) }), infra("paused:rpc-auth"))
     })
     test("RPC auth/allowlist — reuses rpc-auth.js: HTTP 403, HTTP 401, and the provider's words with no status", () => {
       assert.deepEqual(classifyMissCause({ err: http(403, "Unspecified origin not on whitelist.") }), infra("rpc-auth"))
@@ -86,6 +87,9 @@ describe("classifyMissCause — the cause table (ADR-026 §2)", () => {
     test("a MINED revert (tx sent, receipt.status reverted) ⇒ order reverted — the sent-and-reverted rule", () => {
       assert.deepEqual(classifyMissCause({ minedRevert: true }), orderCause("reverted"))
       assert.deepEqual(classifyMissCause({ minedRevert: true, txSent: true, err: http(503, "x") }), orderCause("reverted"), "minedRevert is positive evidence; a stray error does not re-tag it")
+      // [A73 S-3] the chain's verdict beats the keeper's pause: a tx that reverted on-chain is the order's
+      // even if the monitor flipped to paused while the receipt was in flight
+      assert.deepEqual(classifyMissCause({ minedRevert: true, paused: "rpc-auth" }), orderCause("reverted"))
     })
     test("a simulated revert (estimateGas / canExecute) ⇒ order revert, named by the executor error or SwapFailed reason", () => {
       assert.deepEqual(classifyMissCause({ err: named("ContractFunctionRevertedError", 'The contract function "executeOrder" reverted.') }), orderCause("revert"))

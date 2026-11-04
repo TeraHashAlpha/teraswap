@@ -256,11 +256,13 @@ export function classifyMissCause({
 } = {}) {
   const infra = (reason) => ({ cause: MISS_CAUSE.INFRA, reason })
   const order = (reason) => ({ cause: MISS_CAUSE.ORDER, reason })
-  // 1. The keeper is paused: it must not be attempting at all (executor.js skips the loop); a miss
-  //    that still reaches here is ours.
-  if (paused) return infra(`paused:${paused}`)
-  // 2. Sent and reverted: the chain judged the order. Positive, final evidence.
+  // 1. Sent and reverted: the chain judged the order. Positive, final evidence — it beats the
+  //    keeper's own pause [A73 S-3]: a tx that reverted on-chain is the order's even if the monitor
+  //    flipped to paused while the receipt was in flight.
   if (minedRevert) return order("reverted")
+  // 2. The keeper is paused: it must not be attempting at all (executor.js skips the loop); any
+  //    other miss that still reaches here is ours.
+  if (paused) return infra(`paused:${paused}`)
   // 3. No route this cycle: the swap-API miss carries its own verdict.
   if (noRoute) {
     if (noRouteCause && (noRouteCause.cause === MISS_CAUSE.INFRA || noRouteCause.cause === MISS_CAUSE.ORDER)) {
