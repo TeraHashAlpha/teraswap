@@ -8,7 +8,7 @@ Base: origin/main `a5cd8fe`. Worktree `~/ts-worktrees/v1-maintenance`. No PR (ow
 - [x] C3 Portfolio hidden-tab polling
 - [x] C4 serialise saveOrders
 - [x] C5 shared escapeRegExp (test-utils)
-- [ ] Verify: suite vs main · lint delta · tsc · build · rpc-budget · CodeQL (full security-extended)
+- [x] Verify: suite vs main · lint delta · tsc · build · rpc-budget · CodeQL (full security-extended)
 
 ## 1. Items (change · file:line · test · fails-on-main)
 | # | Change | Where | Test | Fails on main |
@@ -29,3 +29,11 @@ Base: origin/main `a5cd8fe`. Worktree `~/ts-worktrees/v1-maintenance`. No PR (ow
 - C3: "its own API timer" is TWO timers (discovery + prices, both 60 s) — both paused. Initial fetch on mount is unchanged (also when mounted hidden). `useBalance`'s `refetchInterval: 30_000` is TanStack (already background-paused), untouched.
 - C2: premise partly false — v2 does NOT render through a shared classifier; `portfolio-model.ts` restated v1's mainnet-only set ("on every chain"). Fixed there too via the shared `isCuratedToken`, else v1/v2 would diverge on L2. "Catalog" = `getChainTokenList` (curated list, what `usePortfolio` already uses for metadata), not the full search catalog (long tail would hide real Add candidates).
 - C1: `LimitOrderPanel.tsx:1044`, `ConditionalOrderPanel.tsx:917`, `SwapBox.tsx:1193/1203`, `ToastProvider.tsx:182`, `AdminMonitor.tsx:837` still use `ETHERSCAN_TX` (mainnet-only). They are creation/toast/admin surfaces, not Orders/fill rows → left untouched (out of scope + read-scope); worth a follow-up if those panels can run on L2.
+
+## 3-5. Evidence
+3. **CodeQL** (`scripts/codeql-local.sh`, full `javascript-security-extended`): origin/main 13 alerts → head 13, identical set, 0 new, 0 in changed files.
+4. **Suite** vitest: main 411 files / 6572 tests → head 413 / 6601 (+2 files, +29 tests, 0 failed; includes `ui/v2/__tests__/rpc-budget` guards, green).
+   **Lint** eslint 93 warnings / 0 errors on both (delta 0) · **tsc** 0 errors · **`next build`** ok · keeper `redact.test.mjs` 23/23.
+5. **diff --stat** origin/main..HEAD: 23 files, +467 / −44, 5 code commits (all SSH-signed, noreply committer) + this feedback edit.
+   Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/v1-maintenance (no PR opened).
+   Not touched: swap/DCA execution, gates, signing, approvals, API routes; no new deps/secrets.
