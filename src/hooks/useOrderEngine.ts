@@ -241,6 +241,15 @@ function enqueueWrite(key: string, write: () => Promise<void>): Promise<void> {
   return next
 }
 
+/**
+ * Resolve once every queued/in-flight order write has settled (including writes enqueued while waiting).
+ * The queue is module-level, so a write started by one hook instance outlives its unmount; callers that must
+ * observe a settled store (tests between cases, a teardown) await this instead of racing the queue.
+ */
+export async function flushOrderWrites(): Promise<void> {
+  while (pendingWrites.size > 0) await Promise.allSettled([...pendingWrites.values()])
+}
+
 /** Encrypt + persist the order list under the v4 key. Exported for tests (write-ordering). */
 export async function saveOrders(orders: AutonomousOrder[]): Promise<void> {
   if (typeof window === 'undefined') return

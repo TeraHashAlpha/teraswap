@@ -27,7 +27,7 @@ vi.mock('@/lib/secure-storage', () => ({
   secureRemove: vi.fn(),
 }))
 
-import { saveOrders } from './useOrderEngine'
+import { saveOrders, flushOrderWrites } from './useOrderEngine'
 import type { AutonomousOrder } from '@/lib/order-engine/types'
 
 const KEY = 'teraswap_orders_v4'
@@ -94,5 +94,25 @@ describe('saveOrders — serialised per storage key [fix/v1-maintenance C4]', ()
     await p1
     expect(ids(h.stored.get(KEY))).toEqual(['A'])
     expect((h.stored.get(KEY) as Array<{ amount: string }>)[0].amount).toBe('1000000000000000000')
+  })
+
+  it('flushOrderWrites resolves only after every queued write has settled (including ones enqueued meanwhile)', async () => {
+    void saveOrders([order('A')]).catch(() => {})
+    void saveOrders([order('A'), order('B')]).catch(() => {})
+    let flushed = false
+    const f = flushOrderWrites().then(() => { flushed = true })
+    await flush()
+    expect(flushed).toBe(false)
+    h.pending.pop()!.settle(true) // first write
+    await flush()
+    expect(flushed).toBe(false) // second still pending
+    void saveOrders([order('A'), order('B'), order('C')]).catch(() => {}) // enqueued while flushing
+    h.pending.pop()!.settle(true) // second write
+    await flush()
+    expect(flushed).toBe(false) // third now pending
+    h.pending.pop()!.settle(true)
+    await f
+    expect(flushed).toBe(true)
+    expect(ids(h.stored.get(KEY))).toEqual(['A', 'B', 'C'])
   })
 })

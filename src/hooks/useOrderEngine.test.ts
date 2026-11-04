@@ -58,7 +58,7 @@ vi.mock('@/lib/order-engine', async () => {
 })
 
 import { renderHook, act, waitFor } from '@testing-library/react'
-import { useOrderEngine } from './useOrderEngine'
+import { useOrderEngine, flushOrderWrites } from './useOrderEngine'
 import {
   OrderType,
   PriceCondition,
@@ -155,8 +155,13 @@ beforeEach(() => {
   mockSubscribeToOrders.mockReturnValue(vi.fn())
 })
 
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers()
+  // [fix/v1-maintenance C4] saveOrders writes are queued module-wide. A case that returns right after its first
+  // write lands (e.g. "writes an encrypted payload") leaves later writes queued; with the SAME deterministic
+  // order in every case, one landing after the next case's localStorage.clear() looks like that case's own
+  // write. Settle the queue so no write outlives its case.
+  await flushOrderWrites()
 })
 
 describe('useOrderEngine — initial state', () => {
