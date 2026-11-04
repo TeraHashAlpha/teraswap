@@ -10,6 +10,22 @@ function truncateAddr(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`
 }
 
+/**
+ * Explorer URL for `address`, or `null` when it must not be linked (CQL-10 / CodeQL
+ * js/xss-through-dom). `address` can originate from search text or a third-party token list, and
+ * the `0x${string}` prop type is no runtime guarantee, so it is re-validated here and the href is
+ * built through `new URL` — only a well-formed https: URL ever reaches the anchor.
+ */
+function explorerHref(address: string, chainId: number): string | null {
+  if (!isAddress(address)) return null
+  try {
+    const url = new URL(explorerTokenUrl(address, chainId))
+    return url.protocol === 'https:' ? url.href : null
+  } catch {
+    return null
+  }
+}
+
 interface Props {
   address: `0x${string}`
   isNative?: boolean
@@ -63,6 +79,7 @@ export default function TokenAddressBadge({
   }
 
   const isMd = size === 'md'
+  const explorerUrl = showExplorerLink ? explorerHref(address, cid) : null
 
   return (
     <span className="inline-flex items-center gap-1">
@@ -119,9 +136,9 @@ export default function TokenAddressBadge({
       </button>
 
       {/* Explorer link — only rendered for runtime-valid addresses (CQL-10) */}
-      {showExplorerLink && isAddress(address) && (
+      {explorerUrl && (
         <a
-          href={explorerTokenUrl(address, cid)}
+          href={explorerUrl}
           target="_blank"
           rel="noopener noreferrer"
           onClick={(e) => e.stopPropagation()}
