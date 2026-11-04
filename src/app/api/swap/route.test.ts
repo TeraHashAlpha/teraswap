@@ -326,6 +326,8 @@ describe('POST /api/swap — V11 price guard: oracle deviation blocked [P127]', 
     const body = await res.json()
     expect(body.priceGuard).toBe(true)
     expect(body.blocked).toBe(true)
+    // [ADR-026 / A73 S-1] machine-readable for the keeper (a price-gate refusal is the ORDER's)
+    expect(body.code).toBe('PRICE_GUARD')
   })
 })
 
@@ -342,6 +344,44 @@ describe('POST /api/swap — V11b price guard: high-value oracle unavailable [P1
     const body = await res.json()
     expect(body.priceGuard).toBe(true)
     expect(body.blocked).toBe(true)
+    // [ADR-026 / A73 S-1] machine-readable for the keeper (OUR oracle is down ⇒ infra, not the order)
+    expect(body.code).toBe('ORACLE_UNAVAILABLE')
+  })
+})
+
+// [ADR-026 / A73 S-1] The adapter saying "no route / no pool / insufficient liquidity" is the PAIR,
+// not an outage: a 4xx with code NO_ROUTE so the keeper counts it as an `order` miss, while the
+// `error` text stays byte-identical to the 502 body it replaces — v1 (useSwap.ts) and v2 (the same
+// hook via use-swap-lifecycle.ts) both show `data.error`, so the user-facing copy does not change.
+describe('POST /api/swap — adapter no-route ⇒ 422 NO_ROUTE, same error text [ADR-026 S-1]', () => {
+  it.each([
+    'Uniswap V3: No route found for WETH→XYZ',
+    'Velora: no pool for this pair',
+    '1inch: insufficient liquidity for the requested amount',
+  ])('"%s" ⇒ 422 { code: NO_ROUTE, error: <the same sanitized message> }', async (msg) => {
+    mockFetchSwapFromSource.mockRejectedValueOnce(new Error(msg))
+    const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE }))
+    expect(res.status).toBe(422)
+    const body = await res.json()
+    expect(body.code).toBe('NO_ROUTE')
+    expect(body.error).toBe(msg) // exactly what the 502 path returned before: sanitizeUpstreamError(msg)
+    expect(body.priceGuard).toBeUndefined()
+  })
+  it('an upstream failure that is NOT a no-route (timeout / 5xx text) is still the generic 502 with no code', async () => {
+    mockFetchSwapFromSource.mockRejectedValueOnce(new Error('1inch API timeout'))
+    const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE }))
+    expect(res.status).toBe(502)
+    const body = await res.json()
+    expect(body.code).toBeUndefined()
+    expect(body.error).toContain('1inch API timeout')
+  })
+  it('a no-route message still gets its secrets redacted before it becomes the NO_ROUTE error text', async () => {
+    mockFetchSwapFromSource.mockRejectedValueOnce(new Error('velora: no route https://api.paraswap.io/prices?apiKey=SUPER_SECRET_KEY'))
+    const res = await POST(makeRequest({ source: 'velora', ...VALID_BASE }))
+    expect(res.status).toBe(422)
+    const body = await res.json()
+    expect(body.code).toBe('NO_ROUTE')
+    expect(body.error).not.toContain('SUPER_SECRET_KEY')
   })
 })
 

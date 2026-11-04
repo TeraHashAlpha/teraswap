@@ -49,6 +49,23 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout?: () =
 }
 
 // ── User-friendly error mapping ─────────────────────────
+
+/** The adapter's own words for "not enough liquidity for this size" (lower-cased input). */
+const isInsufficientLiquidityText = (lower: string): boolean => lower.includes('insufficient') && lower.includes('liquidity')
+/** The adapter's own words for "this pair has no route / pool" (lower-cased input). */
+const isNoRouteText = (lower: string): boolean => lower.includes('no route') || lower.includes('no pool')
+
+/**
+ * [ADR-026 / A73 S-1] Did the adapter say the PAIR cannot be routed (no route / no pool / insufficient
+ * liquidity)? Exactly the rules friendlyError maps to its liquidity / no-route copy — ONE predicate, so
+ * /api/swap's machine-readable `NO_ROUTE` (the keeper's "order, not outage" verdict) and the user's
+ * copy can never drift apart. Anything else (timeouts, 5xx, auth, rate limits) is NOT a no-route.
+ */
+export function isNoRouteError(msg: string): boolean {
+  const lower = String(msg ?? '').toLowerCase()
+  return isInsufficientLiquidityText(lower) || isNoRouteText(lower)
+}
+
 export function friendlyError(source: string, err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err)
   const lower = msg.toLowerCase()
@@ -64,9 +81,9 @@ export function friendlyError(source: string, err: unknown): string {
     return `${source}: Rate limited. Wait a moment and retry.`
   if (lower.includes('403') || lower.includes('forbidden'))
     return `${source}: Access denied — API key may be invalid.`
-  if (lower.includes('insufficient') && lower.includes('liquidity'))
+  if (isInsufficientLiquidityText(lower))
     return `${source}: Insufficient liquidity for this pair/amount.`
-  if (lower.includes('no route') || lower.includes('no pool'))
+  if (isNoRouteText(lower))
     return `${source}: No route found for this pair.`
 
   // Fallback: first 80 chars

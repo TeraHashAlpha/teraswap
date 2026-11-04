@@ -159,6 +159,8 @@ import {
   MAX_CYCLE_FAILURES,
   planFailureHandling,
   classifySwapApiMiss,
+  recordInfraMiss,
+  clearInfraMisses,
   stripInfraMissColumns,
   isInfraMissColumnRejection,
   readPersistedRetryState,
@@ -342,6 +344,10 @@ const EXPIRY_URGENCY_SECONDS = parseInt(process.env.GAS_EXPIRY_URGENCY_S || "720
 // restart. The pinned-route path below still writes here (backoff reuse) but
 // never persists a count, so it can never feed the ladder.
 const orderRetries = new Map()   // orderId -> { count, lastAttempt }  (backoff cache)
+// [ADR-026 / A73 S-1] orderId -> { streak, lastAttempt, reason, backoffMs }: consecutive INFRA misses
+// (never counted, never persisted). The cycle gate backs an order off at the ladder's cadence on this
+// streak so an outage does not re-attempt every order every tick; any order miss or fill clears it.
+const orderInfraMisses = new Map()
 // [SPRINT-P1B / ADR-014 (a)] orderId -> consecutive pinned-route reverts. Tracked separately from
 // orderRetries because a pinned-route revert must NEVER walk the failure ladder to 'failed' — the
 // order stays fillable until expiry. Cleared on any successful fill.
@@ -858,6 +864,9 @@ async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, 
   // Apply the Supabase patch (status [+ error] + updated_at + consecutive_failures/last_attempt_at).
   await patchOrderRow(dbOrder.id, plan.patch)
 
+  // [A73 S-1] An ORDER miss (retry / fail / expired) ends the run of consecutive infra misses.
+  if (plan.kind !== "infra") clearInfraMisses(orderInfraMisses, dbOrder.id)
+
   // Refresh the same-process backoff cache (the row already carries the authoritative count).
   if (plan.clearRetries) {
     orderRetries.delete(dbOrder.id)
@@ -868,10 +877,12 @@ async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, 
   if (plan.kind === "expired") {
     log(`  Order ${dbOrder.id.slice(0, 8)}... expired — recording 'expired', not a route failure`)
   } else if (plan.kind === "infra") {
-    // [ADR-026 §2] Ours, not the order's: the ladder did not move. Retried on the next healthy cycle
-    // (after the ladder's own backoff only if the order was already mid-ladder).
+    // [ADR-026 §2] Ours, not the order's: the ladder did not move. [A73 S-1] The in-memory infra
+    // streak spaces the next attempt at the ladder's cadence (counts nothing, cleared by any order
+    // miss or fill).
     stats.infraMisses++
-    log(`  Order ${dbOrder.id.slice(0, 8)}... infra miss (${plan.causeReason}) — NOT counted (${plan.failures}/${MAX_CYCLE_FAILURES}); order left active, retried next healthy cycle`)
+    const infra = recordInfraMiss(orderInfraMisses, dbOrder.id, { reason: plan.causeReason, nowMs: Date.now() })
+    log(`  Order ${dbOrder.id.slice(0, 8)}... infra miss (${plan.causeReason}) — NOT counted (${plan.failures}/${MAX_CYCLE_FAILURES}); order left active, infra streak ${infra.streak}, retry in ~${Math.round(infra.backoffMs / 1000)}s`)
   } else if (plan.kind === "fail") {
     log(`  Order ${dbOrder.id.slice(0, 8)}... FAILED — reason=${plan.reason} cause=${plan.cause}:${plan.causeReason} (after ${plan.failures} attempt(s))`)
   } else {
@@ -1000,7 +1011,15 @@ async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecim
       // INVALID_SOURCE / priceGuard cause (chore/keeper-swap-payload-fix).
       const body = await res.text().catch(() => "")
       console.error(`  Swap API error: ${res.status} ${body.slice(0, 300)} (source=${source})`)
-      return { miss: classifySwapApiMiss({ status: res.status }) }
+      // [A73 S-1] The body's `code` (NO_ROUTE / unpriced_ack_required / PRICE_GUARD / ORACLE_UNAVAILABLE /
+      // …) decides whose miss this is; the status is only the fallback for a body without one.
+      let code = null
+      try {
+        const parsed = JSON.parse(body)
+        code = parsed?.code
+        if (typeof code !== "string") code = null
+      } catch { /* not JSON (a platform page): status-only classification */ }
+      return { miss: classifySwapApiMiss({ status: res.status, code }) }
     }
 
     const data = await res.json()
@@ -1442,6 +1461,12 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       const retryState = orderRetries.get(dbOrder.id) || readPersistedRetryState(dbOrder)
       if (isInBackoffWindow({ count: retryState.count, lastAttempt: retryState.lastAttempt, nowMs: Date.now() })) {
         continue // Still in backoff window — retry a later cycle
+      }
+      // [ADR-026 / A73 S-1] …and the infra floor: consecutive infra misses back off at the ladder's
+      // cadence too (in-memory streak; counts nothing), so an outage never re-attempts every tick.
+      const infraState = orderInfraMisses.get(dbOrder.id)
+      if (infraState && isInBackoffWindow({ count: infraState.streak, lastAttempt: infraState.lastAttempt, nowMs: Date.now() })) {
+        continue // Still inside the infra-miss window — retry a later cycle
       }
 
       // Atomic lock
@@ -1996,6 +2021,8 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         // [chore/dca-resilience] ...and resets THIS order's transient-miss count,
         // so a later isolated miss starts fresh (consecutive, not cumulative).
         orderRetries.delete(dbOrder.id)
+        // [ADR-026 / A73 S-1] ...and the infra-miss streak (a fill proves the path works again).
+        clearInfraMisses(orderInfraMisses, dbOrder.id)
         // [SPRINT-P1B] A fill also clears the pinned-route revert streak (consecutive, not
         // cumulative) so the ops alert only fires on a genuinely stuck route.
         pinnedRouteReverts.delete(dbOrder.id)

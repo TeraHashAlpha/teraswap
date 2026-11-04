@@ -28,6 +28,9 @@ import {
   isInfraMissColumnRejection,
   buildInfraMissPatch,
   backoffMs,
+  recordInfraMiss,
+  clearInfraMisses,
+  RETRY_BACKOFF_MAX_MS,
 } from "./retry-policy.js"
 
 const CAP = 8
@@ -70,25 +73,35 @@ function row(over = {}) {
  */
 function keeperModel({ paused = () => null } = {}) {
   let cache = new Map()
+  let infra = new Map() // executor.js orderInfraMisses — the floor backoff for infra misses [A73 S-1]
   const chain = { lastExec: 0 } // dcaLastExecution[hash] — 0 until the first chunk
   const m = {
     restart() {
       cache = new Map()
+      infra = new Map()
     },
     inBackoff(r, nowMs) {
       const s = cache.get(r.id) || readPersistedRetryState(r)
-      return isInBackoffWindow({ count: s.count, lastAttempt: s.lastAttempt, nowMs })
+      if (isInBackoffWindow({ count: s.count, lastAttempt: s.lastAttempt, nowMs })) return true
+      const i = infra.get(r.id) // mirrors the executor's gate: the infra streak backs off at the ladder's cadence
+      return !!i && isInBackoffWindow({ count: i.streak, lastAttempt: i.lastAttempt, nowMs })
+    },
+    infraStreak(r) {
+      return infra.get(r.id)?.streak ?? 0
     },
     miss(r, nowMs, failure) {
       const plan = planFailureHandling({ dbOrder: r, ...failure, paused: paused(), nowSec: sec(nowMs), nowIso: iso(nowMs) })
       Object.assign(r, plan.patch)
       if (plan.clearRetries) cache.delete(r.id)
       else cache.set(r.id, { count: plan.failures, lastAttempt: nowMs })
+      if (plan.kind === "infra") recordInfraMiss(infra, r.id, { reason: plan.causeReason, nowMs })
+      else clearInfraMisses(infra, r.id)
       return plan
     },
     fill(r, nowMs) {
       chain.lastExec = sec(nowMs)
       cache.delete(r.id)
+      clearInfraMisses(infra, r.id)
       const n = r.dca_executed + 1
       Object.assign(r, { status: n >= r.dca_total ? "executed" : "active", dca_executed: n, dca_last_exec: iso(nowMs), updated_at: iso(nowMs), ...resetRetryStateFields() })
     },
@@ -163,16 +176,22 @@ describe("acceptance — auth outage 20 cycles: counter unchanged, order alive, 
     const r = row()
     const clock = { t: T0 }
     const outage = polls(k, r, clock, 20, "auth")
-    assert.equal(outage.filter((c) => c.attempted).length, 20, "every cycle attempted (count 0 ⇒ no backoff)")
-    assert.ok(outage.every((c) => c.plan.kind === "infra"))
+    // [A73 S-1] the floor backoff: attempts follow the ladder's cadence (30 s, 60 s, 120 s, 240 s, 480 s …),
+    // never every tick — 5 attempts in 20 polls (10 min), the ladder counter still untouched.
+    const attempts = outage.filter((c) => c.attempted)
+    assert.equal(attempts.length, 5, "ladder cadence, not every tick")
+    assert.ok(attempts.every((c) => c.plan.kind === "infra"))
+    assert.equal(k.infraStreak(r), 5)
     assert.equal(r.status, "active")
     assert.equal(r.consecutive_failures, 0, "20 misses, counter untouched")
     assert.equal(r.last_infra_miss_reason, "rpc-auth")
-    assert.equal(r.last_infra_miss_at, iso(clock.t - POLL))
-    assert.equal(r.last_attempt_at, iso(clock.t - POLL))
+    assert.equal(r.last_infra_miss_at, iso(T0 + 450_000), "the 5th attempt (0 + 30 + 60 + 120 + 240 s)")
+    assert.equal(r.last_attempt_at, iso(T0 + 450_000))
     assert.equal(r.error, undefined, "no reason code — the order did not fail")
+    clock.t = T0 + 450_000 + backoffMs(5) // the 5th miss's window elapses; the provider is back
     const healthy = polls(k, r, clock, 3, "healthy")
     assert.deepEqual(healthy.map((c) => c.executed === true || c.why), [true, "not-due", "not-due"], "resumes: exactly ONE chunk, then the contract gate holds")
+    assert.equal(k.infraStreak(r), 0, "a fill clears the infra streak")
     assert.equal(r.dca_executed, 1)
     assert.equal(r.consecutive_failures, 0)
   })
@@ -199,11 +218,13 @@ describe("acceptance — auth outage 20 cycles: counter unchanged, order alive, 
     assert.equal(r.dca_executed, 1)
     const outageCycles = Math.round((2.5 * INTERVAL_SEC * 1000) / POLL) // 300 polls
     const outage = polls(k, r, clock, outageCycles, "outage")
-    assert.equal(outage.filter((c) => c.attempted).length, outageCycles)
+    const attempted = outage.filter((c) => c.attempted).length
+    assert.ok(attempted >= 8 && attempted <= 12, `ladder cadence capped at ${RETRY_BACKOFF_MAX_MS / 60_000} min: ~10 attempts in 2.5 h, got ${attempted}`)
     assert.equal(r.consecutive_failures, 0)
     assert.equal(r.status, "active")
     assert.equal(r.last_infra_miss_reason, "rpc-transport")
     // recovery: 2 intervals were missed, but the schedule allows ONE chunk now (lastExec + interval ≤ now)…
+    while (k.inBackoff(r, clock.t)) clock.t += POLL // the last infra window (≤ 30 min) elapses
     const first = k.cycle(r, clock.t, "healthy")
     assert.equal(first.executed, true)
     assert.equal(r.dca_executed, 2)
@@ -299,6 +320,70 @@ describe("acceptance — order misses count exactly as before", () => {
     k.restart()
     assert.equal(k.inBackoff(r, T0 + 1), true, "the row carries last_attempt_at")
     assert.equal(k.inBackoff(r, T0 + backoffMs(3)), false)
+  })
+})
+
+// ─── [A73 S-1] The floor backoff: infra misses space out at the ladder's cadence, counting nothing ─
+
+describe("recordInfraMiss / clearInfraMisses — in-memory infra streak, ladder cadence, no counting", () => {
+  test("each infra miss raises the streak and the backoff follows backoffMs(streak), capped at the ladder's max", () => {
+    const map = new Map()
+    const seen = []
+    for (let i = 1; i <= 12; i++) seen.push(recordInfraMiss(map, "o-1", { reason: "rpc-transport", nowMs: T0 + i * 1000 }))
+    assert.deepEqual(seen.map((s) => s.streak), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+    assert.deepEqual(seen.map((s) => s.backoffMs), seen.map((_, i) => backoffMs(i + 1)))
+    assert.equal(seen[11].backoffMs, RETRY_BACKOFF_MAX_MS)
+    assert.equal(map.get("o-1").lastAttempt, T0 + 12_000)
+    assert.equal(map.get("o-1").reason, "rpc-transport")
+  })
+  test("the streak is per order and clearInfraMisses drops exactly that order", () => {
+    const map = new Map()
+    recordInfraMiss(map, "a", { reason: "rpc-auth", nowMs: T0 })
+    recordInfraMiss(map, "b", { reason: "rpc-auth", nowMs: T0 })
+    recordInfraMiss(map, "a", { reason: "rpc-auth", nowMs: T0 + 1 })
+    assert.equal(map.get("a").streak, 2)
+    assert.equal(map.get("b").streak, 1)
+    clearInfraMisses(map, "a")
+    assert.equal(map.has("a"), false)
+    assert.equal(map.get("b").streak, 1)
+    clearInfraMisses(map, "never-seen") // tolerant
+  })
+  test("an ORDER miss resets the infra streak (consecutive infra misses only), as does a fill", () => {
+    const k = keeperModel()
+    const r = row()
+    k.miss(r, T0, { err: OUTAGE() })
+    k.miss(r, T0 + 60_000, { err: OUTAGE() })
+    assert.equal(k.infraStreak(r), 2)
+    k.miss(r, T0 + 200_000, { minedRevert: true })
+    assert.equal(k.infraStreak(r), 0, "an order miss ends the infra streak")
+    assert.equal(r.consecutive_failures, 1)
+    k.miss(r, T0 + 300_000, { err: OUTAGE() })
+    assert.equal(k.infraStreak(r), 1)
+    k.fill(r, T0 + 400_000)
+    assert.equal(k.infraStreak(r), 0)
+  })
+  test("the gate honours the infra window: with count 0 the 2nd poll after an infra miss is skipped, the ladder window still applies on top", () => {
+    const k = keeperModel()
+    const r = row()
+    k.miss(r, T0, { err: OUTAGE() }) // streak 1 ⇒ 30 s
+    assert.equal(k.inBackoff(r, T0 + 1), true)
+    assert.equal(k.inBackoff(r, T0 + backoffMs(1)), false)
+    k.miss(r, T0 + backoffMs(1), { err: OUTAGE() }) // streak 2 ⇒ 60 s
+    assert.equal(k.inBackoff(r, T0 + backoffMs(1) + backoffMs(2) - 1), true)
+    assert.equal(k.inBackoff(r, T0 + backoffMs(1) + backoffMs(2)), false)
+    assert.equal(r.consecutive_failures, 0, "no counting")
+  })
+  test("executor.js wiring: the cycle gate reads orderInfraMisses next to orderRetries; handleExecutionFailure records / clears it", () => {
+    const src = executorSource()
+    assert.ok(src.includes("const orderInfraMisses = new Map()"))
+    const gate = sliceBetween(src, "const retryState = orderRetries.get(dbOrder.id) || readPersistedRetryState(dbOrder)", "// Atomic lock")
+    assert.ok(gate.includes("const infraState = orderInfraMisses.get(dbOrder.id)"))
+    assert.ok(gate.includes("isInBackoffWindow({ count: infraState.streak, lastAttempt: infraState.lastAttempt, nowMs: Date.now() })"))
+    const handler = sliceBetween(src, "async function handleExecutionFailure(", "\nasync function unlockStaleOrders")
+    assert.ok(handler.includes("recordInfraMiss(orderInfraMisses, dbOrder.id, { reason: plan.causeReason, nowMs: Date.now() })"))
+    assert.ok(handler.includes("clearInfraMisses(orderInfraMisses, dbOrder.id)"))
+    const fill = sliceBetween(src, "// [DCA-OBS] A successful execution clears the consecutive-failure signal.", "const now = new Date().toISOString()")
+    assert.ok(fill.includes("clearInfraMisses(orderInfraMisses, dbOrder.id)"), "a fill clears the infra streak too")
   })
 })
 

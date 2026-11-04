@@ -59,12 +59,16 @@ describe("classifyMissCause — the cause table (ADR-026 §2)", () => {
       assert.deepEqual(classifyMissCause({ txSent: true, err: named("WaitForTransactionReceiptTimeoutError", "Timed out while waiting for transaction") }), infra("receipt-unavailable"))
       assert.deepEqual(classifyMissCause({ txSent: true, err: http(502, "Bad Gateway") }), infra("receipt-unavailable"))
     })
-    test("no route because OUR swap API was unavailable (5xx / 429 / network / config) ⇒ infra", () => {
+    test("no route because OUR swap API was unavailable (5xx / 429 / network / config / oracle) ⇒ infra", () => {
       assert.deepEqual(classifyMissCause({ noRoute: true, noRouteCause: classifySwapApiMiss({ status: 503 }) }), infra("swap-api:503"))
       assert.deepEqual(classifyMissCause({ noRoute: true, noRouteCause: classifySwapApiMiss({ status: 429 }) }), infra("swap-api:429"))
       assert.deepEqual(classifyMissCause({ noRoute: true, noRouteCause: classifySwapApiMiss({ networkError: true }) }), infra("swap-api:network"))
       assert.deepEqual(classifyMissCause({ noRoute: true, noRouteCause: classifySwapApiMiss({ configMissing: true }) }), infra("keeper-config"))
       assert.deepEqual(classifyMissCause({ noRoute: true, noRouteCause: classifySwapApiMiss({ misroute: true }) }), infra("swap-api:misroute"))
+      // [A73 S-1] by CODE, not status: our oracle being down is ours; a payload/config 400 is ours
+      assert.deepEqual(classifyMissCause({ noRoute: true, noRouteCause: classifySwapApiMiss({ status: 422, code: "ORACLE_UNAVAILABLE" }) }), infra("swap-api:oracle-unavailable"))
+      assert.deepEqual(classifyMissCause({ noRoute: true, noRouteCause: classifySwapApiMiss({ status: 400, code: "INVALID_SOURCE" }) }), infra("keeper-config"))
+      assert.deepEqual(classifyMissCause({ noRoute: true, noRouteCause: classifySwapApiMiss({ status: 400 }) }), infra("keeper-config"))
     })
     test("an unknown thrown error with NO tx sent ⇒ infra unclassified (the keeper did not complete the attempt)", () => {
       assert.deepEqual(classifyMissCause({ err: new TypeError("Cannot read properties of undefined (reading 'x')") }), infra("unclassified"))
@@ -90,10 +94,11 @@ describe("classifyMissCause — the cause table (ADR-026 §2)", () => {
       assert.deepEqual(classifyMissCause({ err: new Error("ERC20: transfer amount exceeds balance") }), orderCause(FAILURE_REASON.INSUFFICIENT_BALANCE))
       assert.deepEqual(classifyMissCause({ swapReason: "InvalidNonce()" }), orderCause(FAILURE_REASON.NONCE_INVALID))
     })
-    test("our API answered and there is no acceptable route for this pair (4xx / 2xx without tx data) ⇒ order no-route", () => {
-      assert.deepEqual(classifyMissCause({ noRoute: true, noRouteCause: classifySwapApiMiss({ status: 422 }) }), orderCause("no-route:422"))
-      assert.deepEqual(classifyMissCause({ noRoute: true, noRouteCause: classifySwapApiMiss({ status: 400 }) }), orderCause("no-route:400"))
-      assert.deepEqual(classifyMissCause({ noRoute: true, noRouteCause: classifySwapApiMiss({ missingData: true }) }), orderCause("no-route:no-tx-data"))
+    test("our API answered with a CODE that names the order (NO_ROUTE / unpriced_ack_required / PRICE_GUARD) ⇒ order no-route", () => {
+      // [A73 S-1] by CODE, not status — a 422 is NO_ROUTE only when it says so
+      assert.deepEqual(classifyMissCause({ noRoute: true, noRouteCause: classifySwapApiMiss({ status: 422, code: "NO_ROUTE" }) }), orderCause("no-route"))
+      assert.deepEqual(classifyMissCause({ noRoute: true, noRouteCause: classifySwapApiMiss({ status: 409, code: "unpriced_ack_required" }) }), orderCause("no-route:unpriced-ack"))
+      assert.deepEqual(classifyMissCause({ noRoute: true, noRouteCause: classifySwapApiMiss({ status: 422, code: "PRICE_GUARD" }) }), orderCause("no-route:price-guard"))
     })
     test("noRoute with NO cause object keeps today's counting (order:no-route)", () => {
       assert.deepEqual(classifyMissCause({ noRoute: true }), orderCause("no-route"))
@@ -105,16 +110,31 @@ describe("classifyMissCause — the cause table (ADR-026 §2)", () => {
   })
 })
 
-describe("classifySwapApiMiss — HTTP status / network / config ⇒ cause", () => {
-  test("the table", () => {
+describe("classifySwapApiMiss — by response CODE first, status second [A73 S-1]", () => {
+  test("codes: NO_ROUTE / unpriced_ack_required / PRICE_GUARD name the order; ORACLE_UNAVAILABLE, config codes and our 0x throttle are ours", () => {
+    assert.deepEqual(classifySwapApiMiss({ status: 422, code: "NO_ROUTE" }), orderCause("no-route"))
+    assert.deepEqual(classifySwapApiMiss({ status: 200, code: "no_route" }), orderCause("no-route"), "case-insensitive; the status does not matter")
+    assert.deepEqual(classifySwapApiMiss({ status: 409, code: "unpriced_ack_required" }), orderCause("no-route:unpriced-ack"))
+    assert.deepEqual(classifySwapApiMiss({ status: 422, code: "PRICE_GUARD" }), orderCause("no-route:price-guard"))
+    assert.deepEqual(classifySwapApiMiss({ status: 422, code: "ORACLE_UNAVAILABLE" }), infra("swap-api:oracle-unavailable"))
+    for (const code of ["INVALID_SOURCE", "CHAIN_UNSUPPORTED", "CHAIN_COMING_SOON"]) assert.deepEqual(classifySwapApiMiss({ status: 400, code }), infra("keeper-config"), code)
+    assert.deepEqual(classifySwapApiMiss({ status: 429, code: "ZEROX_QUOTE_CAP_EXCEEDED" }), infra("swap-api:429"))
+    assert.deepEqual(classifySwapApiMiss({ status: 418, code: "SOMETHING_NEW" }), infra("swap-api:418"), "an unknown code is contract drift: ours, never the order")
+  })
+  test("no code: 429 / 5xx ⇒ infra swap-api:<status>; a payload/config 400 ⇒ keeper-config; any other 4xx ⇒ ours (no positive evidence)", () => {
     assert.deepEqual(classifySwapApiMiss({ status: 500 }), infra("swap-api:500"))
     assert.deepEqual(classifySwapApiMiss({ status: 504 }), infra("swap-api:504"))
     assert.deepEqual(classifySwapApiMiss({ status: 429 }), infra("swap-api:429"))
-    assert.deepEqual(classifySwapApiMiss({ status: 404 }), orderCause("no-route:404"))
+    assert.deepEqual(classifySwapApiMiss({ status: 400 }), infra("keeper-config"))
+    assert.deepEqual(classifySwapApiMiss({ status: 404 }), infra("swap-api:404"))
+    assert.deepEqual(classifySwapApiMiss({ status: 422 }), infra("swap-api:422"), "a 422 without a code is an older API deploy: not counted until it says NO_ROUTE")
+    assert.deepEqual(classifySwapApiMiss({ status: 502 }), infra("swap-api:502"), "today's no-route 502 (before the API deploy) is never counted")
+  })
+  test("network / config / misroute / a 2xx without tx data are ours; no evidence at all keeps today's counting", () => {
     assert.deepEqual(classifySwapApiMiss({ networkError: true }), infra("swap-api:network"))
     assert.deepEqual(classifySwapApiMiss({ configMissing: true }), infra("keeper-config"))
     assert.deepEqual(classifySwapApiMiss({ misroute: true }), infra("swap-api:misroute"))
-    assert.deepEqual(classifySwapApiMiss({ missingData: true }), orderCause("no-route:no-tx-data"))
+    assert.deepEqual(classifySwapApiMiss({ missingData: true }), infra("swap-api:no-tx-data"))
     assert.deepEqual(classifySwapApiMiss({}), orderCause("no-route"))
   })
 })
@@ -159,7 +179,8 @@ describe("executor.js wiring — every miss site passes its evidence to the plan
     const fn = sliceBetween(executorSource(), "async function fetchSwapRoute(", "\n// [chore/dca-deviation-guard] Best-of-N")
     assert.equal(/return null\b/.test(fn), false, "every failure return carries { miss: classifySwapApiMiss(…) }")
     assert.ok(fn.includes("miss: classifySwapApiMiss({ configMissing: true })"), "no API URL / no source for the router ⇒ keeper-config")
-    assert.ok(fn.includes("miss: classifySwapApiMiss({ status: res.status })"), "a non-2xx carries its status")
+    assert.ok(fn.includes("miss: classifySwapApiMiss({ status: res.status, code })"), "a non-2xx carries its status AND the body's code [A73 S-1]")
+    assert.ok(fn.includes("code = parsed?.code") || fn.includes("code = JSON.parse(body)?.code"), "the code is read from the JSON error body")
     assert.ok(fn.includes("miss: classifySwapApiMiss({ missingData: true })"))
     assert.ok(fn.includes("miss: classifySwapApiMiss({ misroute: true })"))
     assert.ok(fn.includes("miss: classifySwapApiMiss({ networkError: true })"), "a thrown fetch ⇒ swap-api:network")

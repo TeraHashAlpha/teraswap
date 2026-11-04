@@ -37,12 +37,12 @@ out of gas — none of which the user can fix, and none of which says anything a
    | RPC transport: HTTP 5xx / 429, viem timeout, socket / `fetch failed` (incl. Supabase thrown mid-attempt) | infra | `rpc-transport` |
    | keeper wallet cannot pay gas (viem `InsufficientFundsError`) | infra | `keeper-gas` |
    | tx SENT, receipt not readable (timeout / RPC error after send) | infra | `receipt-unavailable` |
-   | `/api/swap` 5xx / 429 / network / calldata for the wrong router / keeper config gap | infra | `swap-api:<n>`, `swap-api:network`, `swap-api:misroute`, `keeper-config` |
+   | `/api/swap` by its body CODE (A73 S-1): 5xx / 429 / network / `ORACLE_UNAVAILABLE` / calldata for the wrong router / a 2xx without tx data / a payload-config 400 or config code / an unknown code or un-coded 4xx | infra | `swap-api:<n>`, `swap-api:network`, `swap-api:oracle-unavailable`, `swap-api:misroute`, `swap-api:no-tx-data`, `keeper-config` |
    | anything else thrown before a tx was sent | infra | `unclassified` |
    | mined revert (`receipt.status = reverted`) | order | `reverted` |
    | simulated revert: executor error / `SwapFailed` / revert text | order | `revert[:<Name>\|swap-failed]` |
    | allowance / balance / nonce (permanent, as before) | order | the `FAILURE_REASON` code |
-   | `/api/swap` answered 4xx or with no tx data | order | `no-route[:<4xx>\|no-tx-data]` |
+   | `/api/swap` answered with a code that names the order: `NO_ROUTE` (the adapter said no route / no pool / insufficient liquidity — `adapters/shared.ts isNoRouteError`, the same rules as the user copy; a 422 with the same `error` text as the former 502), `unpriced_ack_required`, `PRICE_GUARD` | order | `no-route[:unpriced-ack\|price-guard]` |
    | expired | order | `expired` (own status, as before) |
    | a miss with no evidence at all | order | `unknown` (today's counting — an untouched call site can never silently stop counting) |
 
@@ -56,6 +56,12 @@ out of gas — none of which the user can fix, and none of which says anything a
    contract's `dcaLastExecution + dcaInterval` gate is the only thing that decides whether a chunk is
    due, so it can never execute twice for one interval nor back-fill more runs than the schedule
    allows — the keeper only ever asks `canExecute` and sends one `executeOrder` per attempt.
+
+2b. **Infra misses back off at the ladder's cadence, counting nothing** (A73 S-1): a per-order
+   in-memory streak of consecutive infra misses; the cycle gate waits `backoffMs(streak)` (30 s, 60 s,
+   … ≤ 30 min) on top of the ladder's window, so an outage never re-attempts every order every tick.
+   Any order miss or fill clears the streak; a restart drops it (the row's `last_attempt_at` + count
+   still apply).
 
 3. **While `paused: rpc-auth` the keeper attempts nothing**: no lock, no tx, no counter, no patch.
    The cycle still runs its balance read (the probe that clears the pause) and the event watcher

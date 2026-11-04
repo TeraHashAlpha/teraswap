@@ -121,25 +121,78 @@ const TRANSPORT_NAME = /^(?:HttpRequestError|TimeoutError|WebSocketRequestError|
 const TRANSPORT_TEXT = /fetch failed|econnrefused|econnreset|etimedout|enotfound|eai_again|ehostunreach|epipe|socket hang up|network error|timed out|timeout|und_err_/
 const TRANSPORT_CODE = /^(?:ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|EPIPE|UND_ERR_|ERR_NETWORK)/
 
+// [A73 S-1] /api/swap's error bodies carry a machine-readable `code` (src/app/api/swap/route.ts). The
+// keeper classifies by CODE first — an HTTP status alone says nothing about whose fault a miss is —
+// and only falls back to the status when the body has none (an older API deploy, a platform page).
+const SWAP_API_CODE_RULES = Object.freeze({
+  // the ORDER: our API answered and this pair / this order cannot be routed as it stands
+  no_route: { cause: MISS_CAUSE.ORDER, reason: "no-route" },
+  unpriced_ack_required: { cause: MISS_CAUSE.ORDER, reason: "no-route:unpriced-ack" },
+  price_guard: { cause: MISS_CAUSE.ORDER, reason: "no-route:price-guard" },
+  // OURS: the oracle behind the price guard is down; the keeper's payload / config; our own 0x throttle
+  oracle_unavailable: { cause: MISS_CAUSE.INFRA, reason: "swap-api:oracle-unavailable" },
+  invalid_source: { cause: MISS_CAUSE.INFRA, reason: "keeper-config" },
+  chain_unsupported: { cause: MISS_CAUSE.INFRA, reason: "keeper-config" },
+  chain_coming_soon: { cause: MISS_CAUSE.INFRA, reason: "keeper-config" },
+  zerox_quote_cap_exceeded: { cause: MISS_CAUSE.INFRA, reason: "swap-api:429" },
+})
+
 /**
- * Why /api/swap gave the keeper no route this cycle.
- * @param {{ configMissing?: boolean, networkError?: boolean, status?: number|null, misroute?: boolean, missingData?: boolean }} [p]
+ * Why /api/swap gave the keeper no route this cycle — by the body's CODE first, the status second.
+ * @param {{ configMissing?: boolean, networkError?: boolean, status?: number|null, code?: string|null, misroute?: boolean, missingData?: boolean }} [p]
  * @returns {{ cause: 'infra'|'order', reason: string }}
- *   infra: our API unreachable / 5xx / 429 (swap-api:<status|network>), the keeper's own config
- *          (keeper-config), or the API answering with calldata for the WRONG router (swap-api:misroute);
- *   order: the API answered and there is no acceptable route for this pair (no-route[:<4xx|no-tx-data>]).
+ *   order: NO_ROUTE (the adapter said no route / no pool / insufficient liquidity), unpriced_ack_required,
+ *          PRICE_GUARD — our API answered and named the order;
+ *   infra: everything else — unreachable / 5xx / 429 (swap-api:<status|network>), ORACLE_UNAVAILABLE,
+ *          a payload/config 400 or config code (keeper-config), calldata for the WRONG router
+ *          (swap-api:misroute), a 2xx without tx data (swap-api:no-tx-data), an unknown code or an
+ *          un-coded 4xx (contract drift: ours, never the order without positive evidence).
  */
-export function classifySwapApiMiss({ configMissing = false, networkError = false, status = null, misroute = false, missingData = false } = {}) {
+export function classifySwapApiMiss({ configMissing = false, networkError = false, status = null, code = null, misroute = false, missingData = false } = {}) {
   if (configMissing) return { cause: MISS_CAUSE.INFRA, reason: "keeper-config" }
   if (networkError) return { cause: MISS_CAUSE.INFRA, reason: "swap-api:network" }
   if (misroute) return { cause: MISS_CAUSE.INFRA, reason: "swap-api:misroute" }
+  if (missingData) return { cause: MISS_CAUSE.INFRA, reason: "swap-api:no-tx-data" }
   const st = Number(status)
-  if (Number.isFinite(st) && st > 0) {
-    if (st >= 500 || st === 429) return { cause: MISS_CAUSE.INFRA, reason: `swap-api:${st}` }
-    return { cause: MISS_CAUSE.ORDER, reason: `no-route:${st}` }
+  const hasStatus = Number.isFinite(st) && st > 0
+  if (typeof code === "string" && code.trim() !== "") {
+    const rule = SWAP_API_CODE_RULES[code.trim().toLowerCase()]
+    if (rule) return { ...rule }
+    return { cause: MISS_CAUSE.INFRA, reason: `swap-api:${hasStatus ? st : "unknown-code"}` }
   }
-  if (missingData) return { cause: MISS_CAUSE.ORDER, reason: "no-route:no-tx-data" }
+  if (hasStatus) {
+    if (st === 400) return { cause: MISS_CAUSE.INFRA, reason: "keeper-config" }
+    return { cause: MISS_CAUSE.INFRA, reason: `swap-api:${st}` }
+  }
   return { cause: MISS_CAUSE.ORDER, reason: "no-route" }
+}
+
+// ─── [A73 S-1] The floor backoff for infra misses ────────────────────────────────────────────
+// An infra miss counts nothing, but an order must not be re-attempted every tick for the whole
+// outage either (a lock + a few failing RPC calls per order per 30 s). The keeper keeps a per-order
+// IN-MEMORY streak of consecutive infra misses; the cycle gate backs off at the ladder's own cadence
+// — backoffMs(streak): 30 s, 60 s, … capped at RETRY_BACKOFF_MAX_MS — on top of the ladder's window.
+// Reset by any order miss or a fill (consecutive infra misses only); gone on restart (the row then
+// carries last_attempt_at + the ladder count, as before).
+
+/**
+ * Record one infra miss for `orderId` in `map` (executor.js orderInfraMisses). Never throws.
+ * @param {Map<string, object>} map
+ * @param {string} orderId
+ * @param {{ reason: string, nowMs: number }} p
+ * @returns {{ streak: number, lastAttempt: number, reason: string, backoffMs: number }}
+ */
+export function recordInfraMiss(map, orderId, { reason, nowMs }) {
+  const prev = map.get(orderId)
+  const streak = (prev ? prev.streak : 0) + 1
+  const entry = { streak, lastAttempt: nowMs, reason: String(reason), backoffMs: backoffMs(streak) }
+  map.set(orderId, entry)
+  return { ...entry }
+}
+
+/** Drop the streak: an order miss or a fill ended the run of infra misses. Tolerant of unknown ids. */
+export function clearInfraMisses(map, orderId) {
+  map.delete(orderId)
 }
 
 /**

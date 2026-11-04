@@ -6,7 +6,7 @@
  * chain's configured RPC and must NEVER return the mainnet RPC.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { toWeth, feeTierCacheKey, getCachedFeeTier, setCachedFeeTier, invalidateCachedFeeTier } from './shared'
+import { toWeth, feeTierCacheKey, getCachedFeeTier, setCachedFeeTier, invalidateCachedFeeTier, friendlyError, isNoRouteError } from './shared'
 import { NATIVE_ETH, WETH_ADDRESS } from '@/lib/constants'
 
 const BASE_WETH = '0x4200000000000000000000000000000000000006'
@@ -96,5 +96,23 @@ describe('fee-tier cache — chain-scoped key [SPRINT-9G G8]', () => {
     setCachedFeeTier(A, B, 500, 1)
     expect(getCachedFeeTier(A, B, 1)).toBe(500)
     expect(getCachedFeeTier(A, B, 8453)).toBeNull()
+  })
+})
+
+// [ADR-026 / A73 S-1] /api/swap answers NO_ROUTE (a 4xx with a code) when the adapter's words match
+// the SAME liquidity / no-route rules friendlyError maps — one predicate, so the keeper's "order, not
+// outage" verdict and the user's copy can never drift apart.
+describe('isNoRouteError — the adapter said the PAIR cannot be routed', () => {
+  it('matches exactly the inputs friendlyError maps to its liquidity / no-route copy', () => {
+    const noRoute = ['No route found', 'NO ROUTE for WETH/XYZ', 'no pool exists', 'Insufficient liquidity for amount', 'insufficient LIQUIDITY']
+    for (const m of noRoute) {
+      expect(isNoRouteError(m)).toBe(true)
+      expect(friendlyError('src', new Error(m))).toMatch(/No route found for this pair|Insufficient liquidity for this pair\/amount/)
+    }
+  })
+  it('never matches an outage, a rate limit, a timeout, an auth error or an unrelated message', () => {
+    for (const m of ['1inch API timeout', 'Request timed out', '429 rate limit', '403 forbidden', 'failed to fetch', 'insufficient funds for gas', 'Unknown error', '']) {
+      expect(isNoRouteError(m)).toBe(false)
+    }
   })
 })
