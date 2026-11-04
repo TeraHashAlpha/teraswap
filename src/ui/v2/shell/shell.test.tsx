@@ -90,6 +90,7 @@ import { resetMusicStateForTests } from './music'
 /** Which speaker the ♫ button shows (round-6 icons replaced the ♫ / ✕ glyphs). */
 const icon = (btn: HTMLElement) => btn.querySelector('svg[data-music-icon]')?.getAttribute('data-music-icon')
 import { V2_RISK_LINE } from './Footer'
+import { escapeRegExp } from '@/test-utils/escape-regexp'
 import { NETWORK_SUBTITLE, shellChains } from './chains'
 
 beforeEach(() => {
@@ -435,9 +436,6 @@ describe('footer', () => {
     expect(screen.getByRole('contentinfo').textContent).not.toMatch(/Block #/)
   })
 })
-
-// Backslash is in the class so a literal `\` in a title is escaped too (CodeQL js/incomplete-sanitization).
-const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
 
 describe('help drawer + fabs', () => {
   it('? opens the drawer with v1\'s help sections; Esc, ✕ and the overlay close it', () => {

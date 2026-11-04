@@ -225,15 +225,40 @@ async function loadOrders(): Promise<AutonomousOrder[]> {
   return encrypted ?? []
 }
 
-/** Encrypt + persist the order list under the v4 key. */
-async function saveOrders(orders: AutonomousOrder[]): Promise<void> {
+// [fix/v1-maintenance C4] Writes are serialised PER STORAGE KEY. secureSet is async (AES-GCM) and its
+// duration varies, so two overlapping saves could finish out of order and leave the OLDER list in storage.
+// Each save is queued behind the previous one for the same key (FIFO ⇒ the later call is written last,
+// last-write-wins by call order). A failed write never blocks the queue. The payload is snapshotted
+// synchronously at call time, so later mutation of `orders` cannot change what an earlier call writes.
+const pendingWrites = new Map<string, Promise<void>>()
+
+function enqueueWrite(key: string, write: () => Promise<void>): Promise<void> {
+  const prev = pendingWrites.get(key) ?? Promise.resolve()
+  const next = prev.then(write, write) // run after the previous write settles, whichever way it settled
+  pendingWrites.set(key, next)
+  const cleanup = () => { if (pendingWrites.get(key) === next) pendingWrites.delete(key) }
+  next.then(cleanup, cleanup)
+  return next
+}
+
+/**
+ * Resolve once every queued/in-flight order write has settled (including writes enqueued while waiting).
+ * The queue is module-level, so a write started by one hook instance outlives its unmount; callers that must
+ * observe a settled store (tests between cases, a teardown) await this instead of racing the queue.
+ */
+export async function flushOrderWrites(): Promise<void> {
+  while (pendingWrites.size > 0) await Promise.allSettled([...pendingWrites.values()])
+}
+
+/** Encrypt + persist the order list under the v4 key. Exported for tests (write-ordering). */
+export async function saveOrders(orders: AutonomousOrder[]): Promise<void> {
   if (typeof window === 'undefined') return
   // Pre-serialise BigInt → string; SecureStorage's internal JSON.stringify
   // cannot handle BigInt on its own.
   const serialisable = JSON.parse(
     JSON.stringify(orders, (_, v) => (typeof v === 'bigint' ? v.toString() : v)),
   )
-  await secureSet(STORAGE_KEY, serialisable)
+  await enqueueWrite(STORAGE_KEY, () => secureSet(STORAGE_KEY, serialisable))
 }
 
 // ── Dismissed orders (UI-only soft-delete) ───────────────

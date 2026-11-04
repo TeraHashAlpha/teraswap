@@ -1,4 +1,5 @@
-import { CATEGORY_DISPLAY_ORDER, DEFAULT_TOKENS, type Token, type TokenCategory } from '@/lib/tokens'
+import { CATEGORY_DISPLAY_ORDER, type Token, type TokenCategory } from '@/lib/tokens'
+import { isCuratedToken } from '@/lib/chains/tokens'
 import type { PortfolioToken } from '@/hooks/usePortfolio'
 import type { ApprovalRecord } from '@/hooks/useActiveApprovals'
 
@@ -8,11 +9,9 @@ import type { ApprovalRecord } from '@/hooks/useActiveApprovals'
  * and compares. NO price or balance is computed here: USD and balances come from `usePortfolio()` untouched.
  */
 
-/** Lower-cased DEFAULT_TOKENS addresses: v1 treats any held token OUTSIDE this set as "Discovered in Wallet" (Add), on every chain. */
-const DEFAULT_TOKEN_ADDRESSES = new Set<string>(DEFAULT_TOKENS.map((t) => t.address.toLowerCase()))
-
-export function isDefaultToken(token: Token): boolean {
-  return DEFAULT_TOKEN_ADDRESSES.has(token.address.toLowerCase())
+/** v1 treats any held token OUTSIDE the ACTIVE chain's curated list as "Discovered in Wallet" (Add) — shared `isCuratedToken`, per chain. */
+export function isDefaultToken(token: Token, chainId: number): boolean {
+  return isCuratedToken(token.address, chainId)
 }
 
 function categoryIndex(cat: TokenCategory): number {
@@ -28,11 +27,11 @@ export interface PortfolioGroups {
 }
 
 /** v1's split (PortfolioTab useMemo): curated → category buckets, the rest → Discovered in Wallet. */
-export function groupPortfolio(tokens: readonly PortfolioToken[]): PortfolioGroups {
+export function groupPortfolio(tokens: readonly PortfolioToken[], chainId: number): PortfolioGroups {
   const buckets = new Map<TokenCategory, PortfolioToken[]>()
   const discovered: PortfolioToken[] = []
   for (const entry of tokens) {
-    if (isDefaultToken(entry.token)) {
+    if (isDefaultToken(entry.token, chainId)) {
       const list = buckets.get(entry.token.category) ?? []
       list.push(entry)
       buckets.set(entry.token.category, list)

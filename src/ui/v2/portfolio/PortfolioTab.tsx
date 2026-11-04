@@ -101,6 +101,7 @@ export interface PortfolioViewProps {
  */
 export function PortfolioView({ isConnected, address, chainName, portfolio, importedKeys, importKey, onAdd, onSwap, approvalRows: approvalList, approvalCount, onRevoked }: PortfolioViewProps) {
   const { tokens, totalValueUsd, isLoading, isError, lastUpdated, refresh, isChainSupported } = portfolio
+  const activeChainId = useActiveChainId() // the curated/Discovered split follows the ACTIVE chain's list, as v1
 
   // v1's once-a-second clock for "Last updated …"; idle without a timestamp.
   const [now, setNow] = useState<number>(() => Date.now())
@@ -110,7 +111,7 @@ export function PortfolioView({ isConnected, address, chainName, portfolio, impo
     return () => clearInterval(id)
   }, [lastUpdated])
 
-  const { grouped, discovered } = useMemo(() => groupPortfolio(tokens), [tokens])
+  const { grouped, discovered } = useMemo(() => groupPortfolio(tokens, activeChainId), [tokens, activeChainId])
 
   if (!isConnected) {
     return (

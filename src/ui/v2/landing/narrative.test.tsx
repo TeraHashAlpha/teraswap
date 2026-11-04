@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { act, cleanup } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { escapeRegExp } from '@/test-utils/escape-regexp'
 import { NARRATIVE_PHOTOS } from '../photos/narrative'
 import { activeLayers, crossingIO, installBrowser, layer, mountPage, nearIO, scrollTo, section, setMobile, VH } from './narrative-harness'
 import {
@@ -254,8 +255,6 @@ describe('NarrativeStack: observers and lazy photos', () => {
 
 describe('narrative.css (what is allowed to animate)', () => {
   const CSS = readFileSync(join(__dirname, 'narrative.css'), 'utf8')
-  // Backslash is in the class so a literal `\` in a selector is escaped too (CodeQL js/incomplete-sanitization).
-  const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
   const rule = (sel: string) => new RegExp(`${escapeRegExp(sel)}\\s*\\{([^}]*)\\}`).exec(CSS)?.[1] ?? ''
 
   it('layer states: idle has no transition; active and leaving carry opacity 900 ms (--t-photo, --ease-inout) + transform 1600 ms (--t-photo-scale, --ease-out)', () => {
