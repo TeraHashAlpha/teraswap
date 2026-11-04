@@ -1,0 +1,51 @@
+/* [ADR-025 / B9] Analytics (round7 50): typography on the photo, a hairline between sections, no card, no fill. Colours are v2 tokens only. */
+.ts-analytics { width: 100%; max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 0; }
+.ts-an-section { padding: 28px 0; border-top: 1px solid var(--hairline); }
+.ts-an-section:first-child { border-top: 0; padding-top: 0; }
+.ts-an-cap { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); }
+.ts-an-sub { font-size: 12px; color: var(--muted); }
+.ts-an-value { margin-top: 6px; font-family: var(--font-display); font-weight: 700; font-size: 56px; line-height: 1; letter-spacing: 0.5px; color: var(--cream); font-variant-numeric: tabular-nums; }
+.ts-an-value--sm { font-size: 36px; }
+
+.ts-an-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px 40px; }
+.ts-an-kpis--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.ts-an-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px 56px; }
+
+/* ranked rows: rank · label · bar · figure */
+.ts-an-rank { display: flex; align-items: center; gap: 12px; padding: 6px 0; }
+.ts-an-rank-n { width: 20px; flex: none; text-align: right; font-family: var(--font-mono); font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.ts-an-rank-main { flex: 1; min-width: 0; }
+.ts-an-rank-line { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 13px; }
+.ts-an-rank-label { color: var(--text); font-weight: 500; }
+.ts-an-rank-fig { color: var(--muted); font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ts-an-track { position: relative; margin-top: 6px; height: 4px; background: var(--hairline); }
+.ts-an-fill { height: 100%; background: var(--teal); }
+.ts-an-fill[data-lead] { background: var(--cream); }
+
+.ts-an-pairs { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 6px 0; font-size: 13px; }
+
+/* Volume Trend: one bar per day, oldest → newest, left to right */
+.ts-an-bars { display: flex; align-items: flex-end; gap: 3px; height: 120px; }
+.ts-an-bar { flex: 1; min-width: 0; background: var(--teal); opacity: .85; transition: opacity var(--t-fast); }
+.ts-an-bar:hover { opacity: 1; }
+.ts-an-axis { display: flex; justify-content: space-between; margin-top: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+
+/* Recent Activity: one hairline row each */
+.ts-an-act { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; padding: 4px 0; border-top: 1px solid var(--hairline); font-size: 13px; }
+.ts-an-act:first-child { border-top: 0; }
+.ts-an-act-link { display: inline-flex; min-height: 44px; min-width: 44px; align-items: center; justify-content: center; color: var(--cream); }
+.ts-an-act-link:hover { color: var(--text); }
+.ts-an-act-link:focus-visible, .ts-an-action:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.ts-an-action { display: inline-flex; min-height: 44px; align-items: center; font-family: var(--font-mono); font-size: 12px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; text-decoration: underline; text-decoration-color: var(--hairline-underline); text-underline-offset: 6px; }
+
+.ts-an-empty { padding: 32px 0; text-align: center; }
+.ts-an-note { border-left: 2px solid var(--cream); padding-left: 14px; }
+.ts-an-error { border-left: 2px solid var(--red); padding-left: 14px; color: var(--red); font-size: 13px; }
+.ts-an-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+@media (max-width: 900px) {
+  .ts-an-kpis--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .ts-an-kpis, .ts-an-cols { grid-template-columns: minmax(0, 1fr); }
+}
