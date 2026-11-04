@@ -7,6 +7,7 @@
 .ts-an-value { margin-top: 6px; font-family: var(--font-display); font-weight: 700; font-size: 56px; line-height: 1; letter-spacing: 0.5px; color: var(--cream); font-variant-numeric: tabular-nums; }
 .ts-an-value--sm { font-size: 36px; }
 
+.ts-an-h2 { font-family: var(--font-display); font-weight: 700; font-size: 34px; line-height: 1; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text); }
 .ts-an-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px 40px; }
 .ts-an-kpis--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .ts-an-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px 56px; }
@@ -47,5 +48,15 @@
   .ts-an-kpis--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 700px) {
-  .ts-an-kpis, .ts-an-cols { grid-template-columns: minmax(0, 1fr); }
+  /* 375 (343 px of content; no mobile Analytics frame — derived from m06 / m07): one column, smaller figures, activity rows stack */
+  .ts-an-section { padding: 22px 0; }
+  .ts-an-kpis, .ts-an-kpis--4, .ts-an-cols { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .ts-an-value { font-size: 44px; }
+  .ts-an-value--sm { font-size: 32px; }
+  .ts-an-h2 { font-size: 28px; }
+  .ts-an-bars { height: 96px; gap: 2px; }
+  .ts-an-act { flex-direction: column; align-items: flex-start; gap: 0; padding: 8px 0; }
+  .ts-an-act > span:last-child { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+  .ts-an-act-link { margin-left: auto; }
+  .ts-an-rank-line, .ts-an-pairs { font-size: 14px; }
 }

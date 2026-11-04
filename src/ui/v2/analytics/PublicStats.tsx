@@ -96,7 +96,7 @@ export function PublicStats({ payload, loading, failed }: PublicStatsState) {
   return (
     <section aria-labelledby="ts-an-protocol-h" data-testid="public-protocol-stats" className="ts-an-section">
       <header>
-        <h2 id="ts-an-protocol-h" className="font-v2-display text-[34px] font-bold uppercase leading-none tracking-[0.5px] text-v2-text">Protocol performance</h2>
+        <h2 id="ts-an-protocol-h" className="ts-an-h2">Protocol performance</h2>
         <p className="ts-an-sub mt-2">Public totals from the protocol stats API — swap counts, quote counts, and source rankings.</p>
       </header>
       {gate.status === 'loading' && <p className="mt-4 text-[14px] text-v2-muted">Loading protocol stats…</p>}

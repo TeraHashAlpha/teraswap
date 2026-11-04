@@ -115,7 +115,7 @@ export function PersonalStats() {
     <section aria-labelledby="ts-an-personal-h" className="ts-an-section" data-testid="personal">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 id="ts-an-personal-h" className="font-v2-display text-[34px] font-bold uppercase leading-none tracking-[0.5px] text-v2-text">My Analytics</h2>
+          <h2 id="ts-an-personal-h" className="ts-an-h2">My Analytics</h2>
           <p className="ts-an-sub mt-2">
             Aggregated across {data.totalSwaps} swap{data.totalSwaps === 1 ? '' : 's'}
             {data.periodStart ? ` since ${data.periodStart.slice(0, 10)}` : ''}

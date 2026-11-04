@@ -7,12 +7,11 @@ import { useAnalytics } from '@/hooks/useAnalytics'
 import { explorerTxUrl } from '@/lib/chains/tokens'
 import type { DashboardData } from '@/lib/analytics-types'
 import { Segmented } from '../primitives'
+import { rowNavKeyDown } from '../orders/keyboard'
 import {
   ACTIVITY_LABEL,
   ACTIVITY_TONE,
   PERIODS,
-  barHeightPct,
-  barTitle,
   formatUsd,
   periodLabel,
   periodMetrics,
@@ -22,6 +21,7 @@ import {
 } from './analytics-model'
 import { PersonalStats } from './PersonalStats'
 import { PublicStats } from './PublicStats'
+import { VolumeChart } from './VolumeChart'
 import { usePublicStats } from './use-public-stats'
 import './analytics.css'
 
@@ -79,30 +79,10 @@ function PopularPairs({ data }: { data: DashboardData['topPairs'] }) {
   )
 }
 
-/** v1 DailyVolumeChart: one bar per day (oldest → newest), first and last date under it, v1's tooltip on each bar. */
-function VolumeTrend({ data }: { data: DashboardData['dailyVolume'] }) {
-  const maxVol = Math.max(...data.map((d) => d.volumeUsd), 1)
-  if (data.length === 0) return null
-  return (
-    <div data-testid="volume-trend">
-      <h3 className="ts-an-cap mb-3">Volume Trend (30d)</h3>
-      <div className="ts-an-bars">
-        {data.map((d, i) => (
-          <div key={`${d.date}-${i}`} className="ts-an-bar" style={{ height: `${barHeightPct(d.volumeUsd, maxVol)}%` }} title={barTitle(d)} />
-        ))}
-      </div>
-      <div className="ts-an-axis">
-        <span>{data[0]?.date}</span>
-        <span>{data[data.length - 1]?.date}</span>
-      </div>
-    </div>
-  )
-}
-
 /** v1 ActivityFeed: the latest ten, no wallet addresses; the type word, the pair (or "Trade executed"), the source, the age and the tx link. */
 function RecentActivity({ trades, now }: { trades: DashboardData['recentTrades']; now: number }) {
   return (
-    <div data-testid="recent-activity">
+    <div data-testid="recent-activity" onKeyDown={rowNavKeyDown('[data-an-link]')}>
       <h3 className="ts-an-cap mb-2">Recent Activity</h3>
       {trades.slice(0, 10).map((t) => (
         <div key={t.id} className="ts-an-act" data-testid="activity-row">
@@ -135,7 +115,7 @@ function RecentActivity({ trades, now }: { trades: DashboardData['recentTrades']
  * figure from v1's reads (`useAnalytics` for the tab, `/api/stats` for Gasless Adoption and Protocol performance, `usePersonalAnalytics` for
  * My Analytics): period selector, the three KPIs, Gasless Adoption (once there is a gasless swap), Best Routes + Popular Pairs, Volume Trend,
  * Recent Activity — v1 `AnalyticsDashboard` — then Protocol performance and, for a connected wallet, My Analytics (v1's `/analytics` page).
- * Nothing here polls beyond v1: `useAnalytics` keeps its own 30 s refresh, the other two reads happen once.
+ * ↑ / ↓ / Home / End walk the Recent Activity tx links; ←/→ the period tabs. Nothing here polls beyond v1: `useAnalytics` keeps its own 30 s refresh, the other two reads happen once.
  */
 export function AnalyticsTab() {
   const { dashboard, loading } = useAnalytics()
@@ -202,7 +182,7 @@ export function AnalyticsTab() {
 
         {dashboard.dailyVolume.length > 0 && (
           <div className="ts-an-section">
-            <VolumeTrend data={dashboard.dailyVolume} />
+            <VolumeChart data={dashboard.dailyVolume} />
           </div>
         )}
 
@@ -214,10 +194,11 @@ export function AnalyticsTab() {
   }
 
   return (
-    <div className="ts-analytics" data-testid="analytics">
+    <section className="ts-analytics" data-testid="analytics" aria-labelledby="ts-an-h">
+      <h2 id="ts-an-h" className="ts-an-sr">Analytics</h2>
       {tab}
       <PublicStats {...stats} />
       {isConnected && <PersonalStats />}
-    </div>
+    </section>
   )
 }
