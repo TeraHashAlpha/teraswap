@@ -469,6 +469,14 @@ export const NATIVE_ETH = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' as const
 export const WETH_ADDRESS = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' as const
 
 // ── Etherscan ────────────────────────────────────────────
+/**
+ * @deprecated [fix/tx-links-remaining] Mainnet-only — a Base/Arbitrum tx got an etherscan.io link
+ * where the tx doesn't exist. Every caller (SwapBox, ToastProvider, LimitOrderPanel,
+ * ConditionalOrderPanel, AdminMonitor) migrated to the chain-aware `explorerTxUrl` from
+ * `@/lib/chains/tokens`. Kept per CLAUDE.md rule #4 (never delete) — enforced at 0 callers by
+ * `etherscan-tx-guard.test.ts`. Do not add a new caller; use `explorerTxUrl(txHash, chainId)` with
+ * the chain the tx was actually sent on.
+ */
 export const ETHERSCAN_TX = 'https://etherscan.io/tx/'
 
 // ── Price deviation (Chainlink) ─────────────────────────

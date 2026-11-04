@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useCallback, useState, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ETHERSCAN_TX } from '@/lib/constants'
+import { explorerTxUrl } from '@/lib/chains/tokens'
 
 /* ── Types ── */
 export type ToastType = 'success' | 'error' | 'warning' | 'info' | 'loading'
@@ -14,8 +14,13 @@ export interface Toast {
   description?: string
   /** Auto-dismiss in ms (0 = sticky) */
   duration?: number
-  /** Transaction hash — shows Etherscan link */
+  /** Transaction hash — shows a chain-aware explorer link */
   txHash?: string
+  /** [fix/tx-links-remaining] Chain `txHash` was SENT on (caller's send-site chainId, e.g. useSwap's
+   *  txChainId) — never guessed from the wallet's current chain. Falls back to mainnet (1) only when
+   *  a caller legitimately has no chainId (matches the `?? 1` fallback used everywhere else a record
+   *  carries an optional chainId). */
+  chainId?: number
   /** Custom action button */
   action?: { label: string; onClick: () => void }
   /** [hotfix] Caller-supplied de-dupe key. When set, any existing toast
@@ -179,12 +184,12 @@ function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: () => voi
           {/* Tx hash link */}
           {t.txHash && (
             <a
-              href={`${ETHERSCAN_TX}${t.txHash}`}
+              href={explorerTxUrl(t.txHash, t.chainId ?? 1)}
               target="_blank"
               rel="noopener noreferrer"
               className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-cream-gold transition-colors hover:text-cream"
             >
-              View on Etherscan
+              View on explorer
               <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
                 <polyline strokeLinecap="round" strokeLinejoin="round" points="15 3 21 3 21 9" />

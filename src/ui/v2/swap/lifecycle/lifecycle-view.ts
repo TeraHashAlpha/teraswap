@@ -134,7 +134,7 @@ export function buildTimeline(i: { route: TimelineRoute; status: SwapStatus; las
   })
 }
 
-/** SwapBox's `ETHERSCAN_TX` is mainnet-only; the order chain's own explorer, named as its host names itself (Etherscan / Basescan / Arbiscan). */
+/** [fix/tx-links-remaining] v1's now-deprecated `ETHERSCAN_TX` was mainnet-only; this names the order chain's own explorer, as its host names itself (Etherscan / Basescan / Arbiscan). */
 export function explorerName(blockExplorerUrl: string): string {
   try {
     const sld = new URL(blockExplorerUrl).hostname.split('.').slice(-2, -1)[0] ?? ''

@@ -40,11 +40,12 @@ import { useSplitRoute } from '@/hooks/useSplitRoute'
 import { useSplitSwap } from '@/hooks/useSplitSwap'
 import SplitRouteVisualizer from './SplitRouteVisualizer'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
-import { DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD, PRICE_IMPACT_CONSENT_TOLERANCE, DEPEG_CONSENT_TOLERANCE } from '@/lib/constants'
+import { DEFAULT_SLIPPAGE, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD, PRICE_IMPACT_CONSENT_TOLERANCE, DEPEG_CONSENT_TOLERANCE } from '@/lib/constants'
 import { isTrustedSpender } from '@/lib/trusted-addresses'
 import { useQuoteChainId } from '@/hooks/useChainId'
 import { isChainActive, getChainConfig, remapTokenToChain } from '@/lib/chains'
 import { isUsdStablecoin } from '@/lib/chains/stablecoins'
+import { explorerTxUrl } from '@/lib/chains/tokens'
 import { estimateSwapUsd } from '@/lib/swap-usd-estimate'
 import { estimateMevSavings } from '@/lib/mev-savings'
 import { selectBestWithMevPreference } from '@/lib/mev-preference'
@@ -272,7 +273,7 @@ export default function SwapBox() {
     () => Object.fromEntries((meta?.all ?? []).map((q) => [q.source, q.toAmount])),
     [meta],
   )
-  const { status: swapStatus, txHash, errorMessage: swapError, priceGuardBlocked, priceGuardDeviation, unpricedAckRequired, simulationPassed, simulationSkipped, fallbackNotice, pendingSwap, pendingCowOrder, mevSurplusActualWei, execute: executeSwap, confirmSwap, confirmCowOrder, reset: resetSwap } =
+  const { status: swapStatus, txHash, txChainId, errorMessage: swapError, priceGuardBlocked, priceGuardDeviation, unpricedAckRequired, simulationPassed, simulationSkipped, fallbackNotice, pendingSwap, pendingCowOrder, mevSurplusActualWei, execute: executeSwap, confirmSwap, confirmCowOrder, reset: resetSwap } =
     useSwap(tokenIn, tokenOut, amountIn, slippage, quoteToAmountBySource, bestNonCowGasUsd)
 
   // [SPRINT-9S S2] Direction-agnostic execution price. Derive the USD price of the NON-stable
@@ -408,7 +409,7 @@ export default function SwapBox() {
         ? Number(formatUnits(successOutBig, tokenOut.decimals))
         : null
       const successOutDisplay = successOutNum !== null ? fmtToken(successOutNum) : '—'
-      toast({ type: 'success', title: 'Swap confirmed!', description: `${amountIn} ${tokenIn.symbol} → ${successOutDisplay} ${tokenOut.symbol}${savingsLine}`, txHash, duration: 10000 })
+      toast({ type: 'success', title: 'Swap confirmed!', description: `${amountIn} ${tokenIn.symbol} → ${successOutDisplay} ${tokenOut.symbol}${savingsLine}`, txHash, chainId: txChainId, duration: 10000 })
       swapToastId.current = null
 
       // numeric-format-allow: stored in swap history (addRecord), not display
@@ -1187,11 +1188,14 @@ export default function SwapBox() {
           </div>
         )}
 
-        {/* Pending tx link — show Etherscan link while waiting for confirmation */}
+        {/* Pending tx link — chain-aware explorer link while waiting for confirmation.
+            [fix/tx-links-remaining] txChainId is the chain this tx was actually SENT on
+            (captured at send time by useSwap), never the live/active wallet chain — a
+            chain switch mid-confirmation must not repaint this link to the wrong explorer. */}
         {swapStatus === 'swapping' && txHash && (
           <div className="mt-3 text-center text-sm">
-            <a href={`${ETHERSCAN_TX}${txHash}`} target="_blank" rel="noopener noreferrer" className="text-cream-35 transition hover:text-cream hover:underline">
-              Transaction sent — track on Etherscan &#8599;
+            <a href={explorerTxUrl(txHash, txChainId ?? activeChainId)} target="_blank" rel="noopener noreferrer" className="text-cream-35 transition hover:text-cream hover:underline">
+              Transaction sent — track on explorer &#8599;
             </a>
           </div>
         )}
@@ -1200,7 +1204,7 @@ export default function SwapBox() {
         {swapStatus === 'success' && txHash && (
           <div className="mt-3 space-y-2">
             <div className="text-center text-sm">
-              <a href={`${ETHERSCAN_TX}${txHash}`} target="_blank" rel="noopener noreferrer" className="text-cream-65 transition hover:text-cream hover:underline">View on Etherscan &#8599;</a>
+              <a href={explorerTxUrl(txHash, txChainId ?? activeChainId)} target="_blank" rel="noopener noreferrer" className="text-cream-65 transition hover:text-cream hover:underline">View on explorer &#8599;</a>
             </div>
             {/* Share button — "I just saved X% via TeraSwap" */}
             {meta && meta.all.length > 1 && tokenIn && tokenOut && (() => {
