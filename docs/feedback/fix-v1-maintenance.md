@@ -37,3 +37,10 @@ Base: origin/main `a5cd8fe`. Worktree `~/ts-worktrees/v1-maintenance`. No PR (ow
 5. **diff --stat** origin/main..HEAD: 23 files, +467 / −44, 5 code commits (all SSH-signed, noreply committer) + this feedback edit.
    Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/v1-maintenance (no PR opened).
    Not touched: swap/DCA execution, gates, signing, approvals, API routes; no new deps/secrets.
+
+## PR #655 follow-up — `api-hardening-guard` flake (C4 side-effect)
+- **Symptom:** `useOrderEngine.test.ts:813` "survives unmount + remount" → `expected [] to have a length of 1`. CI command (`ci.yml:362`) ×20: **branch 15/20, main (`3869606`) 20/20**; all 5 failures this one test.
+- **Cause:** C4's queue is module-level. A case that returns right after its first write lands ("writes an encrypted payload") leaves later writes queued; orders are deterministic (same `orderHash` in every case), so one landing after the next case's `localStorage.clear()` satisfied the waitFor with a stale copy, then the case's own empty-list write landed before the remount read. Production ordering is correct (FIFO); the leak is test isolation.
+- **Fix:** `flushOrderWrites()` (hook module) awaited in the file's `afterEach`; +1 unit test for it. No assertion/timeout/retry changed.
+- **Counts (CI command ×20):** before fix 15/20 · after fix **20/20** · main 20/20 · fix reverted, run alone 18/20 (same test) → causal.
+- Suite 413 files / 6602 tests green · lint 93 warn / 0 err · tsc clean · build ok. origin/main moved to `3869606` (package.json + lockfile only) — no overlap with this branch.
