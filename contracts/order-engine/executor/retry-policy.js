@@ -175,17 +175,51 @@ export function classifySwapApiMiss({ configMissing = false, networkError = fals
 // Reset by any order miss or a fill (consecutive infra misses only); gone on restart (the row then
 // carries last_attempt_at + the ladder count, as before).
 
+// [A73 C(3) / C(1)] Three infra reasons are not an outage that heals by itself — they are most likely
+// OUR bug or config: `unclassified` (a throw no rule recognised), `swap-api:misroute` (our API returned
+// calldata for another router) and `keeper-config`. The order is still never burned, but ops must
+// hear about a persistent run of them: per order, at INFRA_ALERT_STREAK consecutive such misses or
+// — under the floor backoff, which spaces attempts out — once INFRA_ALERT_AFTER_MS have passed since
+// the run began (and at least two misses), ONE high-urgency alert, then at most one per
+// INFRA_ALERT_COOLDOWN_MS while it persists. Any other infra reason, an order miss or a fill resets it.
+export const INFRA_ALERT_STREAK = 20
+export const INFRA_ALERT_AFTER_MS = 10 * 60_000
+export const INFRA_ALERT_COOLDOWN_MS = 60 * 60_000
+export const UNRECOGNISED_INFRA_REASONS = Object.freeze(["unclassified", "swap-api:misroute", "keeper-config"])
+
 /**
  * Record one infra miss for `orderId` in `map` (executor.js orderInfraMisses). Never throws.
  * @param {Map<string, object>} map
  * @param {string} orderId
- * @param {{ reason: string, nowMs: number }} p
- * @returns {{ streak: number, lastAttempt: number, reason: string, backoffMs: number }}
+ * @param {{ reason: string, nowMs: number, alertStreak?: number, alertAfterMs?: number, cooldownMs?: number }} p
+ * @returns {{ streak: number, lastAttempt: number, reason: string, backoffMs: number,
+ *   unrecognisedStreak: number, unrecognisedSince: number|null, lastAlertAt: number|null, alert: boolean }}
+ *   alert = send the one high-urgency ops alert NOW (C(3)); the entry remembers when, for the cooldown.
  */
-export function recordInfraMiss(map, orderId, { reason, nowMs }) {
+export function recordInfraMiss(
+  map,
+  orderId,
+  { reason, nowMs, alertStreak = INFRA_ALERT_STREAK, alertAfterMs = INFRA_ALERT_AFTER_MS, cooldownMs = INFRA_ALERT_COOLDOWN_MS },
+) {
   const prev = map.get(orderId)
   const streak = (prev ? prev.streak : 0) + 1
-  const entry = { streak, lastAttempt: nowMs, reason: String(reason), backoffMs: backoffMs(streak) }
+  const r = String(reason)
+  const unrecognised = UNRECOGNISED_INFRA_REASONS.includes(r)
+  const unrecognisedStreak = unrecognised ? (prev ? prev.unrecognisedStreak || 0 : 0) + 1 : 0
+  const unrecognisedSince = !unrecognised ? null : prev && prev.unrecognisedStreak > 0 && prev.unrecognisedSince != null ? prev.unrecognisedSince : nowMs
+  const lastAlertAt = prev && prev.lastAlertAt != null ? prev.lastAlertAt : null
+  const due = unrecognised && (unrecognisedStreak >= alertStreak || (unrecognisedStreak >= 2 && nowMs - unrecognisedSince >= alertAfterMs))
+  const alert = due && (lastAlertAt == null || nowMs - lastAlertAt >= cooldownMs)
+  const entry = {
+    streak,
+    lastAttempt: nowMs,
+    reason: r,
+    backoffMs: backoffMs(streak),
+    unrecognisedStreak,
+    unrecognisedSince,
+    lastAlertAt: alert ? nowMs : lastAlertAt,
+    alert,
+  }
   map.set(orderId, entry)
   return { ...entry }
 }

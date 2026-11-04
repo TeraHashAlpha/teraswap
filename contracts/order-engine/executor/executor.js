@@ -116,7 +116,7 @@ import {
 } from "./idle-backoff.js"
 import { ExecutorMonitor } from "./monitor.js"            // [EX-MON] Prometheus + Telegram
 // [DCA-OBS] Freeze-urgency scoring + Telegram alert builders (pure/fail-safe modules).
-import { computeFreezeScore, scoreTier, TIER_WARN_THRESHOLD } from "./freeze-score.js"
+import { computeFreezeScore, scoreTier, TIER_WARN_THRESHOLD, TIER_CRITICAL_THRESHOLD } from "./freeze-score.js"
 import { buildQuotePath, buildSwapRoutePayload, computeNetChunkAmount, sourceForRouter } from "./swap-route.js" // [chore/dca-router-chainaware] router-constrained route for the net chunk; buildQuotePath = unconstrained best-of-N reference for the deviation gate [chore/dca-deviation-guard]
 import { decodeSwapFailed, extractRevertData, decodeExecutorMarketRevert } from "./revert-decode.js" // [chore/dca-swapfailed] unwrap SwapFailed(bytes); [FIX-P1B-M01] the executor's own market reverts
 // [CHORE-KEEPER-RECORD-EXECUTIONS] Confirmed-only, idempotent order_executions row
@@ -883,6 +883,20 @@ async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, 
     stats.infraMisses++
     const infra = recordInfraMiss(orderInfraMisses, dbOrder.id, { reason: plan.causeReason, nowMs: Date.now() })
     log(`  Order ${dbOrder.id.slice(0, 8)}... infra miss (${plan.causeReason}) — NOT counted (${plan.failures}/${MAX_CYCLE_FAILURES}); order left active, infra streak ${infra.streak}, retry in ~${Math.round(infra.backoffMs / 1000)}s`)
+    // [A73 C(3) / C(1)] A persistent run of UNRECOGNISED infra misses (unclassified / misroute /
+    // keeper-config) is most likely our bug or config: page ops ONCE (critical tier), then at most
+    // hourly while it persists. The order is still never burned.
+    if (infra.alert) {
+      try {
+        await alertOps(
+          {
+            kind: "infra-miss-streak",
+            detail: `Order ${dbOrder.id} (${dbOrder.order_type}) on chain ${CHAIN_ID} missed ${infra.unrecognisedStreak} consecutive cycles for an UNRECOGNISED infra reason (${plan.causeReason}) over ~${Math.max(1, Math.round((Date.now() - infra.unrecognisedSince) / 60_000))} min. NOT counted against the order (ADR-026) — this points at the keeper or /api/swap, not the order: read this order's "infra miss" log lines; docs/Runbooks/EXECUTOR-OPERATIONS.md § 8. Next reminder in ≥ 1 h while it persists.`,
+          },
+          TIER_CRITICAL_THRESHOLD,
+        )
+      } catch { /* alert is best-effort, never blocks the cycle */ }
+    }
   } else if (plan.kind === "fail") {
     log(`  Order ${dbOrder.id.slice(0, 8)}... FAILED — reason=${plan.reason} cause=${plan.cause}:${plan.causeReason} (after ${plan.failures} attempt(s))`)
   } else {

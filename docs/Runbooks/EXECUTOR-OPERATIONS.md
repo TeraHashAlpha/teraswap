@@ -286,7 +286,11 @@ holds, within their expiry. An order that expires DURING the outage is recorded 
 - Keeper `/health` → `stats.infraMisses` (misses not counted this process) and `stats.pausedCycles`.
 - Supabase (read-only): `SELECT id, order_type, status, consecutive_failures, last_attempt_at,
   last_infra_miss_at, last_infra_miss_reason FROM orders WHERE chain_id = <id> AND last_infra_miss_at > now() - interval '24 hours';`
-- pm2 log: `infra miss (<reason>)` lines, one per order per attempted cycle.
+- pm2 log: `infra miss (<reason>)` lines, one per attempted cycle (attempts space out at the ladder's
+  cadence — 30 s, 60 s, … ≤ 30 min — while the infra misses persist).
+- Telegram `🛠️ Ops issue: infra-miss-streak` (critical tier): one order has missed ~10 min / 20 cycles
+  in a row for an UNRECOGNISED infra reason (`unclassified`, `swap-api:misroute`, `keeper-config`) — that
+  is the keeper or `/api/swap`, not the order; read that order's log lines. Repeats at most hourly.
 
 **Nothing to do for the orders themselves** once the cause is fixed (§ 5 restart, § 7 key swap, gas
 top-up): they resume on their own. What to check is that the cause IS fixed — a persistent infra

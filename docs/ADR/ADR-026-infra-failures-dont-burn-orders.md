@@ -63,6 +63,13 @@ out of gas — none of which the user can fix, and none of which says anything a
    Any order miss or fill clears the streak; a restart drops it (the row's `last_attempt_at` + count
    still apply).
 
+2c. **An unrecognised infra run pages ops** (A73 C(3) / C(1)): `unclassified`, `swap-api:misroute`
+   and `keeper-config` are most likely our bug or config, not an outage that heals. Per order, in
+   memory: at 20 consecutive such misses, or once ~10 min have passed since the run began (under the
+   floor backoff the time rule fires first, on the 6th miss), ONE critical-tier `alertOps`
+   (`infra-miss-streak`) naming the order and the reason, then at most hourly while it persists. Any
+   other infra reason, an order miss or a fill resets it. The order is still never burned.
+
 3. **While `paused: rpc-auth` the keeper attempts nothing**: no lock, no tx, no counter, no patch.
    The cycle still runs its balance read (the probe that clears the pause) and the event watcher
    keeps polling, so recovery is automatic.

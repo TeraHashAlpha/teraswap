@@ -31,6 +31,10 @@ import {
   recordInfraMiss,
   clearInfraMisses,
   RETRY_BACKOFF_MAX_MS,
+  INFRA_ALERT_STREAK,
+  INFRA_ALERT_AFTER_MS,
+  INFRA_ALERT_COOLDOWN_MS,
+  UNRECOGNISED_INFRA_REASONS,
 } from "./retry-policy.js"
 
 const CAP = 8
@@ -384,6 +388,81 @@ describe("recordInfraMiss / clearInfraMisses — in-memory infra streak, ladder 
     assert.ok(handler.includes("clearInfraMisses(orderInfraMisses, dbOrder.id)"))
     const fill = sliceBetween(src, "// [DCA-OBS] A successful execution clears the consecutive-failure signal.", "const now = new Date().toISOString()")
     assert.ok(fill.includes("clearInfraMisses(orderInfraMisses, dbOrder.id)"), "a fill clears the infra streak too")
+  })
+})
+
+// ─── [A73 C(3) / C(1)] An UNRECOGNISED infra streak pages ops; the order is still never burned ──
+// `unclassified` (a throw no rule recognised), `swap-api:misroute` and `keeper-config` are not an
+// outage that heals by itself — they are most likely OUR bug or config. Per order, in memory: at N
+// consecutive such misses (≈20, or ~10 min under the floor backoff) ONE high-urgency alertOps naming
+// the order and the reason, then at most once per hour while it persists. Any other infra reason,
+// an order miss or a fill resets the streak.
+
+describe("recordInfraMiss — the unrecognised-infra streak alert [A73 C(3) / C(1)]", () => {
+  const MIN = 60_000
+  test("the constants and the reason set", () => {
+    assert.equal(INFRA_ALERT_STREAK, 20)
+    assert.equal(INFRA_ALERT_AFTER_MS, 10 * MIN)
+    assert.equal(INFRA_ALERT_COOLDOWN_MS, 60 * MIN)
+    assert.deepEqual([...UNRECOGNISED_INFRA_REASONS], ["unclassified", "swap-api:misroute", "keeper-config"])
+  })
+  test("20 consecutive unclassified misses in quick succession ⇒ alert exactly on the 20th; then silent for an hour; then once more", () => {
+    const map = new Map()
+    const alerts = []
+    for (let i = 1; i <= 25; i++) {
+      const r = recordInfraMiss(map, "o-1", { reason: "unclassified", nowMs: T0 + i * 1000 })
+      if (r.alert) alerts.push(i)
+      assert.equal(r.unrecognisedStreak, i)
+    }
+    assert.deepEqual(alerts, [20], "one alert at N, none for the 21st–25th (cooldown)")
+    const alertedAt = T0 + 20_000
+    assert.equal(recordInfraMiss(map, "o-1", { reason: "unclassified", nowMs: alertedAt + INFRA_ALERT_COOLDOWN_MS - 1 }).alert, false)
+    assert.equal(recordInfraMiss(map, "o-1", { reason: "unclassified", nowMs: alertedAt + INFRA_ALERT_COOLDOWN_MS }).alert, true, "re-armed after the cooldown while it persists")
+  })
+  test("under the floor backoff the time rule fires first: ladder-spaced unclassified misses alert once ~10 min have passed (the 6th, at 15.5 min)", () => {
+    const map = new Map()
+    let t = T0
+    const outcomes = []
+    for (let i = 1; i <= 8; i++) {
+      const r = recordInfraMiss(map, "o-1", { reason: "keeper-config", nowMs: t })
+      outcomes.push([Math.round((t - T0) / 1000), r.alert])
+      t += r.backoffMs
+    }
+    // misses at 0, 30, 90, 210, 450, 930, 1890 … s — the first ≥ 600 s after the streak began is the 6th
+    assert.deepEqual(outcomes, [[0, false], [30, false], [90, false], [210, false], [450, false], [930, true], [1890, false], [3690, false]])
+  })
+  test("a recognised infra reason never alerts and RESETS the unrecognised streak; misroute and keeper-config count like unclassified", () => {
+    const map = new Map()
+    for (let i = 1; i <= 50; i++) assert.equal(recordInfraMiss(map, "o-1", { reason: "rpc-transport", nowMs: T0 + i }).alert, false)
+    assert.equal(map.get("o-1").unrecognisedStreak, 0)
+    for (let i = 1; i <= 19; i++) recordInfraMiss(map, "o-1", { reason: i % 2 ? "swap-api:misroute" : "keeper-config", nowMs: T0 + 100 + i })
+    assert.equal(map.get("o-1").unrecognisedStreak, 19)
+    recordInfraMiss(map, "o-1", { reason: "rpc-auth", nowMs: T0 + 200 }) // a real outage in between
+    assert.equal(map.get("o-1").unrecognisedStreak, 0, "the unrecognised run is broken")
+    assert.equal(map.get("o-1").streak, 70, "the floor-backoff streak keeps counting every infra miss")
+    assert.equal(recordInfraMiss(map, "o-1", { reason: "unclassified", nowMs: T0 + 201 }).alert, false, "starts again at 1")
+  })
+  test("an order miss or a fill resets everything; the order was never burned", () => {
+    const k = keeperModel()
+    const r = row()
+    let t = T0
+    for (let i = 0; i < 20; i++) k.miss(r, (t += 1000), { err: new TypeError("Cannot read properties of undefined (reading 'x')") })
+    assert.equal(k.infraStreak(r), 20)
+    assert.equal(r.consecutive_failures, 0)
+    assert.equal(r.status, "active")
+    k.miss(r, (t += 1000), { minedRevert: true })
+    assert.equal(k.infraStreak(r), 0)
+    assert.equal(r.consecutive_failures, 1)
+  })
+  test("executor.js wiring: the handler sends ONE high-urgency alertOps naming order + reason when recordInfraMiss says so", () => {
+    const src = executorSource()
+    assert.ok(src.includes('import { computeFreezeScore, scoreTier, TIER_WARN_THRESHOLD, TIER_CRITICAL_THRESHOLD } from "./freeze-score.js"'), "high urgency = the critical tier")
+    const handler = sliceBetween(src, "async function handleExecutionFailure(", "\nasync function unlockStaleOrders")
+    assert.ok(handler.includes("if (infra.alert) {"))
+    assert.ok(handler.includes('kind: "infra-miss-streak"'))
+    assert.ok(handler.includes("TIER_CRITICAL_THRESHOLD,"))
+    assert.ok(/detail: `Order \$\{dbOrder\.id\}[^`]*\$\{plan\.causeReason\}/.test(handler), "names the order and the reason")
+    assert.ok(/detail: `[^`]*NOT counted/.test(handler), "says the order is not burned")
   })
 })
 
