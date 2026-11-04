@@ -5,6 +5,10 @@
  * Replaces a bare `npm audit --audit-level=high`. Behaviour:
  *   - FAILS (exit 1) on ANY high/critical advisory that is NOT in audit-allowlist.json.
  *   - PASSES (exit 0) when every remaining high/critical is explicitly allowlisted.
+ *   - ENFORCES allowlist expiry: an entry whose `expires` (ISO date) is in the past no longer
+ *     allowlists — the advisory blocks with an `EXPIRED allowlist entry …` line. An entry with no
+ *     `expires` is INVALID (blocks) unless it is explicitly `noPatch: true` with a `reviewDate`.
+ *     The rules live in scripts/audit-gate-lib.mjs (unit-tested in audit-gate.test.mjs).
  *   - WARNS (does not fail) when an allowlist entry is stale (its fix has aged past
  *     min-release-age and should now be converted to an `overrides` pin), or when an
  *     allowlisted advisory is no longer present (entry can be deleted).
@@ -16,10 +20,11 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { evaluateAllowlist, expiredLine, invalidLine, isIsoDate } from "./audit-gate-lib.mjs";
 
 const ROOT = new URL("../", import.meta.url);
 const allowlist = JSON.parse(readFileSync(new URL("audit-allowlist.json", ROOT), "utf8"));
-const allowed = new Map((allowlist.allow || []).map((a) => [a.id, a]));
+const allow = allowlist.allow || [];
 
 // npm audit exits non-zero when vulnerabilities exist — capture stdout regardless.
 // Static argv + no shell (execFileSync): no command-injection surface.
@@ -56,23 +61,27 @@ for (const vuln of Object.values(data.vulnerabilities || {})) {
   }
 }
 
-const unallowed = [...found].filter(([id]) => !allowed.has(id));
-const usedAllow = [...found].filter(([id]) => allowed.has(id));
+// [fix/flaky-tests-allowlist-expiry] `today` decides expiry, so AUDIT_GATE_TODAY (a test/debug
+// override) is honoured only outside CI — otherwise setting it to a past date would un-expire entries.
+const override = process.env.AUDIT_GATE_TODAY;
+const useOverride = isIsoDate(override) && !process.env.CI;
+if (override && !useOverride) console.log("audit-gate: ignoring AUDIT_GATE_TODAY (CI, or not an ISO date).");
+const today = useOverride ? override : new Date().toISOString().slice(0, 10);
+
+const { allowlisted: usedAllow, blocking, invalidEntries } = evaluateAllowlist(allow, found, today);
 
 console.log(
   `audit-gate: ${found.size} high/critical advisor${found.size === 1 ? "y" : "ies"} present, ` +
-    `${usedAllow.length} allowlisted, ${unallowed.length} blocking.`
+    `${usedAllow.length} allowlisted, ${blocking.length} blocking.`
 );
-for (const [id, info] of usedAllow) {
-  const meta = allowed.get(id);
+for (const { id, info, entry, label } of usedAllow) {
   console.log(
-    `  ALLOWLISTED  ${info.severity.toUpperCase().padEnd(8)} ${info.pkg} (${id}) — fix ${meta.fixedIn}, ages in ${meta.ageInOn}`
+    `  ALLOWLISTED  ${info.severity.toUpperCase().padEnd(8)} ${info.pkg} (${id}) — fix ${entry.fixedIn}, ${label}`
   );
 }
 
 // Staleness / cleanup nudges (warn-only — must never re-red the gate on a future date).
-const today = process.env.AUDIT_GATE_TODAY || new Date().toISOString().slice(0, 10);
-for (const a of allowlist.allow || []) {
+for (const a of allow) {
   if (a.ageInOn && a.ageInOn <= today && found.has(a.id)) {
     console.log(
       `  ⚠ STALE     ${a.package} (${a.id}) aged in on ${a.ageInOn} — replace this allowlist entry with an \`overrides\` pin "${a.package}": "${a.fixedIn}".`
@@ -83,14 +92,24 @@ for (const a of allowlist.allow || []) {
   }
 }
 
-if (unallowed.length) {
-  console.error(
-    `\naudit-gate FAILED — ${unallowed.length} high/critical advisor${unallowed.length === 1 ? "y is" : "ies are"} NOT allowlisted:`
-  );
-  for (const [id, info] of unallowed) {
-    console.error(`  ${info.severity.toUpperCase()}  ${info.pkg} (${id}) — ${info.title}`);
-    console.error(`      ${info.url}`);
+// Fail closed on a malformed allowlist even when the bad entry is currently unused.
+const invalidUnused = invalidEntries.filter((e) => !blocking.some((b) => b.id === e.id));
+
+if (blocking.length || invalidUnused.length) {
+  const total = blocking.length + invalidUnused.length;
+  console.error(`\naudit-gate FAILED — ${total} problem${total === 1 ? "" : "s"}:`);
+  for (const b of blocking) {
+    if (b.reason === "expired") {
+      console.error(`  ${expiredLine(b.id, b.date)}`);
+    } else if (b.reason === "invalid") {
+      console.error(`  ${invalidLine(b.id, b.detail)}`);
+    } else {
+      console.error(`  NOT allowlisted:`);
+    }
+    console.error(`  ${b.info.severity.toUpperCase()}  ${b.info.pkg} (${b.id}) — ${b.info.title}`);
+    console.error(`      ${b.info.url}`);
   }
+  for (const e of invalidUnused) console.error(`  ${invalidLine(e.id, e.detail)}`);
   console.error(
     "\nResolve via an npm `overrides` pin to a patched version. ONLY if the patch is blocked by\n" +
       ".npmrc min-release-age, add a justified, dated entry to audit-allowlist.json (Architect review)."
