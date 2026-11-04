@@ -458,6 +458,9 @@ export default function SwapBox() {
           method: 'exact',
           timestamp: Date.now(),
           needsRevoke: false,
+          // [fix/revoke-chain] the wallet's chain for this swap (wagmi `useAccount().chain`, no fallback) — the chain the
+          // approve was sent on; undefined = unknown, never a guessed default. Revoke is bound to it.
+          chainId: chain?.id,
         })
       }
     }
