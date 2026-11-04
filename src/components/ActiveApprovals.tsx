@@ -1,11 +1,8 @@
 'use client'
 
-import { useState } from 'react'
-import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
-import { erc20Abi } from 'viem'
+import { useAccount } from 'wagmi'
 import { useActiveApprovals, type ApprovalRecord } from '@/hooks/useActiveApprovals'
-import { explorerTxUrl } from '@/lib/chains/tokens'
-import { useActiveChainId } from '@/hooks/useChainId'
+import { REVOKE_COPY, useRevokeApproval } from '@/hooks/useRevokeApproval'
 
 function timeSince(ts: number): string {
   const seconds = Math.floor((Date.now() - ts) / 1000)
@@ -16,38 +13,8 @@ function timeSince(ts: number): string {
 }
 
 function RevokeRow({ record, onRevoked }: { record: ApprovalRecord; onRevoked: (id: string) => void }) {
-  const [revoking, setRevoking] = useState(false)
-  const chainId = useActiveChainId() // [SPRINT-9S S3] chain-aware revoke-tx explorer link
-
-  const {
-    writeContract,
-    data: revokeHash,
-    error: revokeError,
-    reset: resetRevoke,
-  } = useWriteContract()
-
-  const { isSuccess: revokeConfirmed, isLoading: revokeWaiting } = useWaitForTransactionReceipt({
-    hash: revokeHash,
-  })
-
-  // Mark revoked after on-chain confirmation
-  if (revokeConfirmed && revoking) {
-    onRevoked(record.id)
-    setRevoking(false)
-  }
-
-  const handleRevoke = () => {
-    setRevoking(true)
-    resetRevoke()
-    writeContract({
-      address: record.tokenAddress,
-      abi: erc20Abi,
-      functionName: 'approve',
-      args: [record.spenderAddress, 0n],
-    })
-  }
-
-  const isPending = revoking && !revokeConfirmed && !revokeError
+  // [fix/revoke-chain] one shared hook decides the action; this row only renders it (v2's ApprovalsPanel renders the same hook)
+  const { action, chainName } = useRevokeApproval(record, onRevoked)
 
   return (
     <div className="flex items-center justify-between gap-2 rounded-lg bg-surface-secondary/60 px-3 py-2">
@@ -59,31 +26,45 @@ function RevokeRow({ record, onRevoked }: { record: ApprovalRecord; onRevoked: (
         </div>
         <div className="mt-0.5 flex items-center gap-2 text-[10px] text-cream-35">
           <span>{record.method === 'infinite' ? 'Infinite allowance' : record.method === 'exact' ? 'Exact allowance' : 'Permit2'}</span>
+          {chainName && (
+            <>
+              <span>&middot;</span>
+              <span>{chainName}</span>
+            </>
+          )}
           <span>&middot;</span>
           <span>{timeSince(record.timestamp)}</span>
         </div>
       </div>
 
-      {revokeConfirmed ? (
+      {action.kind === 'revoked' ? (
         <span className="flex items-center gap-1 text-[10px] font-semibold text-success">
-          &#10003; Revoked
-          {revokeHash && (
-            <a href={explorerTxUrl(revokeHash, chainId)} target="_blank" rel="noopener noreferrer" className="text-cream-35 hover:text-cream transition">&#8599;</a>
-          )}
+          {REVOKE_COPY.revoked}
+          <a href={action.explorerUrl} target="_blank" rel="noopener noreferrer" className="text-cream-35 hover:text-cream transition">&#8599;</a>
         </span>
-      ) : revokeError ? (
-        <button onClick={handleRevoke} className="rounded-lg border border-danger/30 bg-danger/10 px-2.5 py-1 text-[10px] font-semibold text-danger transition hover:bg-danger/20">
-          Retry
+      ) : action.kind === 'unknown' ? (
+        <span className="max-w-[45%] text-right text-[10px] leading-snug text-cream-35">{REVOKE_COPY.unknownChain}</span>
+      ) : action.kind === 'switch' ? (
+        <button
+          onClick={action.onClick}
+          disabled={action.pending}
+          className="rounded-lg border border-warning/30 bg-warning/10 px-2.5 py-1 text-[10px] font-semibold text-warning transition hover:bg-warning/20 disabled:opacity-50"
+        >
+          {REVOKE_COPY.switchTo(action.chainName)}
+        </button>
+      ) : action.kind === 'retry' ? (
+        <button onClick={action.onClick} className="rounded-lg border border-danger/30 bg-danger/10 px-2.5 py-1 text-[10px] font-semibold text-danger transition hover:bg-danger/20">
+          {REVOKE_COPY.retry}
         </button>
       ) : (
         <button
-          onClick={handleRevoke}
-          disabled={isPending}
+          onClick={action.onClick}
+          disabled={action.pending}
           className="rounded-lg border border-cream-15 bg-surface-tertiary px-2.5 py-1 text-[10px] font-semibold text-cream-65 transition hover:border-cream-50 hover:text-cream disabled:opacity-50"
         >
-          {isPending
-            ? revokeWaiting ? 'Confirming…' : 'Revoking…'
-            : 'Revoke'
+          {action.pending
+            ? action.waiting ? REVOKE_COPY.confirming : REVOKE_COPY.revoking
+            : REVOKE_COPY.revoke
           }
         </button>
       )}

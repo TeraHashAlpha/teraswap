@@ -2,7 +2,7 @@
 
 ## Checklist
 - [x] Worktree ~/ts-worktrees/revoke-chain off origin/main f2b6bcd (#649, B8 merged), real `npm ci`, SSH-signed noreply committer
-- [x] C1 records carry the chain (+ versioned reader, fixtures) · [ ] C2 revoke is chain-bound · [ ] C3 "revoked" means revoked
+- [x] C1 records carry the chain (+ versioned reader, fixtures) · [x] C2 revoke is chain-bound (shared hook, v1 + v2 rows) · [ ] C3 "revoked" means revoked
 - [ ] Verify (suite vs origin/main, lint delta 0, tsc, build, rpc-budget guards, CodeQL full suite) · [ ] push + compare link
 
 ## Premises checked (owner answer pending — default applied, listed first)

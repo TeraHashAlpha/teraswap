@@ -13,8 +13,10 @@ import { DEFAULT_TOKENS } from '@/lib/tokens'
 import { fmtToken } from '@/lib/format'
 
 vi.mock('wagmi', () => ({
+  useAccount: () => ({ address: '0xd44d00000000000000000000000000000000962d', isConnected: true, chain: { id: 8453 } }),
   useWriteContract: () => ({ writeContract: vi.fn(), data: undefined, error: null, reset: vi.fn() }),
   useWaitForTransactionReceipt: () => ({ isSuccess: false, isLoading: false }),
+  useSwitchChain: () => ({ switchChain: vi.fn(), isPending: false }),
 }))
 vi.mock('@/hooks/useChainId', () => ({ useActiveChainId: () => 8453 }))
 
