@@ -6,7 +6,7 @@ Scoped exception to "the owner merges every PR manually": a Dependabot PR may me
 | Rule | Auto only if |
 |---|---|
 | R1 identity | PR author **and every commit** is `dependabot[bot]`; `dependabot/fetch-metadata` (SHA-pinned) verified it and found ≥ 1 dependency |
-| R2 semver | every package is a **patch or minor** bump |
+| R2 semver | every package is a **patch or minor** bump; a **minor on a 0.x version counts as major** (review) |
 | R3 scope | ecosystem `npm` or `github-actions`, **root project only**; the PR touches only `package.json` + `package-lock.json` (npm) or `.github/{workflows,actions}/*.y(a)ml` (actions) |
 | R4 packages | not deny-listed, and for npm only **`devDependencies`** (see below) |
 | R5 groups | a grouped PR qualifies only if **every** package in it does |
@@ -15,9 +15,9 @@ Scoped exception to "the owner merges every PR manually": a Dependabot PR may me
 In practice today: the weekly `dev-dependencies` group (when all minor/patch and none deny-listed) and the weekly `actions` group (when none is a major).
 
 ## What never auto-merges (→ `deps-review`)
-- Any **major** bump (also blocked upstream by `.github/dependabot.yml` `ignore`, kept as defence in depth).
+- Any **major** bump, and any **minor bump on a `0.x` version** (also a minor whose previous version is missing/unparseable — fail-closed) (majors also blocked upstream by `.github/dependabot.yml` `ignore`, kept as defence in depth).
 - Anything under `contracts/**` (keeper lockfile, `contracts/order-engine`) or any non-root directory.
-- Deny-list: `viem`, `wagmi`, `@wagmi/*`, `@rainbow-me/*`, `next`, `react`, `react-dom`, `ethers`, `@tanstack/react-query`, `@walletconnect/*`, `@supabase/*`, `@aws-sdk/*`, `zod`. Defined in `scripts/dependabot/auto-merge-eligibility.mjs` (`DENY_EXACT` / `DENY_SCOPES`); changing it is a code change with a test.
+- Deny-list: `viem`, `wagmi`, `@wagmi/*`, `@rainbow-me/*`, `next`, `eslint-config-next` (must move together with `next`), `react`, `react-dom`, `ethers`, `@tanstack/react-query`, `@walletconnect/*`, `@supabase/*`, `@aws-sdk/*`, `zod`. Defined in `scripts/dependabot/auto-merge-eligibility.mjs` (`DENY_EXACT` / `DENY_SCOPES`); changing it is a code change with a test.
 - **Every runtime `dependencies` bump and every transitive (indirect) bump.** The owner's rule asks to review runtime packages whose lockfile entry is used by `src/app/api/**`. That is not reliably computable in a `pull_request_target` job that must not check out PR code (it needs the PR's resolved dependency graph vs. the route import graph), so the owner's stated fallback applies: only `devDependencies` + github-actions auto-merge. Revisit if/when a base-only, lockfile-diff-only check is written.
 - Human-pushed commits on a Dependabot branch, PRs whose metadata cannot be verified, anything the script cannot parse (fail-closed).
 
@@ -43,5 +43,4 @@ Set `DEPS_AUTO_MERGE` to `off` (or delete it). Effective on the next event: the 
 ## Known limits
 - "Require up-to-date" in branch protection: after one Dependabot PR merges the others go BEHIND and wait until `@dependabot rebase` (a rebase by Dependabot re-triggers this workflow and CI).
 - A merge armed with `GITHUB_TOKEN` may not trigger `push`-to-`main` workflows; check post-merge deploy/CI on the first auto-merge (same caveat as the catalog flow).
-- Semver-minor on `0.x` packages can be breaking; R2 follows the owner's rule (patch/minor) and does not special-case `0.x`. Required checks are the backstop.
 - The workflow file itself is only loaded from the default branch: it takes effect after merge to `main`.

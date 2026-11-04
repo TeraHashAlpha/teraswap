@@ -26,6 +26,8 @@ const dev = (name: string, over: Dep = {}): Dep => ({
   updateType: 'version-update:semver-minor',
   directory: '/',
   packageEcosystem: 'npm_and_yarn',
+  prevVersion: '3.2.1',
+  newVersion: '3.3.0',
   ...over,
 })
 const action = (name: string, over: Dep = {}): Dep => ({
@@ -34,6 +36,8 @@ const action = (name: string, over: Dep = {}): Dep => ({
   updateType: 'version-update:semver-patch',
   directory: '/',
   packageEcosystem: 'github_actions',
+  prevVersion: '4.1.0',
+  newVersion: '4.1.1',
   ...over,
 })
 const npmFacts = (deps: Dep[] = [dev('vitest')], over: Record<string, unknown> = {}) => ({
@@ -81,6 +85,27 @@ describe('R2 update type', () => {
     expect(failing(npmFacts([dev('vitest', { updateType: undefined })]))).toEqual(['R2'])
     expect(failing(npmFacts([dev('vitest', { updateType: 'version-update:semver-prerelease' })]))).toEqual(['R2'])
   })
+  const zero = (over: Dep = {}) => dev('some-lib', { updateType: 'version-update:semver-minor', prevVersion: '0.12.3', newVersion: '0.13.0', ...over })
+  it('0.x minor counts as major → review', () => {
+    const v = evaluateEligibility(npmFacts([zero()]), ON)
+    expect(v.rules.filter((r) => !r.ok).map((r) => r.id)).toEqual(['R2'])
+    expect(v.reasons[0]).toMatch(/some-lib \(0\.x minor\)/)
+  })
+  it('0.x minor with a leading v (actions) → review', () =>
+    expect(failing(actionsFacts([action('acme/act', { updateType: 'version-update:semver-minor', prevVersion: 'v0.4.0', newVersion: 'v0.5.0' })]))).toEqual(['R2']))
+  it('0.x patch is still fine; 1.x+ minor is still fine', () => {
+    expect(evaluateEligibility(npmFacts([zero({ updateType: 'version-update:semver-patch', newVersion: '0.12.4' })]), ON).eligible).toBe(true)
+    expect(evaluateEligibility(npmFacts([zero({ prevVersion: '1.0.0', newVersion: '1.1.0' })]), ON).eligible).toBe(true)
+    expect(evaluateEligibility(npmFacts([zero({ prevVersion: '10.0.3', newVersion: '10.1.0' })]), ON).eligible).toBe(true)
+  })
+  it('minor with missing / unparseable previous version → review (fail-closed)', () => {
+    for (const prevVersion of [undefined, '', 'abc123def', 'latest']) expect(failing(npmFacts([zero({ prevVersion })]))).toEqual(['R2'])
+  })
+  it('0.x minor inside a group blocks the whole group', () => {
+    const v = evaluateEligibility(npmFacts([dev('vitest'), zero()]), ON)
+    expect(v.eligible).toBe(false)
+    expect(v.reasons.join(' ')).toMatch(/grouped PR: 1 of 2.*some-lib/)
+  })
   it('allowed set is exactly patch + minor', () =>
     expect([...ALLOWED_UPDATE_TYPES]).toEqual(['version-update:semver-patch', 'version-update:semver-minor']))
 })
@@ -113,7 +138,7 @@ describe('R3 scope', () => {
 })
 
 describe('R4 deny-list + runtime split', () => {
-  const denied = ['viem', 'wagmi', '@wagmi/core', '@wagmi/connectors', '@rainbow-me/rainbowkit', 'next', 'react', 'react-dom',
+  const denied = ['viem', 'wagmi', 'eslint-config-next', '@wagmi/core', '@wagmi/connectors', '@rainbow-me/rainbowkit', 'next', 'react', 'react-dom',
     'ethers', '@tanstack/react-query', '@walletconnect/ethereum-provider', '@supabase/supabase-js', '@aws-sdk/client-s3', 'zod']
   for (const name of denied) {
     it(`deny-listed ${name} → review even as a devDependency patch`, () => {
@@ -128,7 +153,7 @@ describe('R4 deny-list + runtime split', () => {
     expect(isDenied('@supabase')).toBe(false)
   })
   it('lists cover the brief verbatim', () => {
-    expect([...DENY_EXACT].sort()).toEqual(['@tanstack/react-query', 'ethers', 'next', 'react', 'react-dom', 'viem', 'wagmi', 'zod'])
+    expect([...DENY_EXACT].sort()).toEqual(['@tanstack/react-query', 'eslint-config-next', 'ethers', 'next', 'react', 'react-dom', 'viem', 'wagmi', 'zod'])
     expect([...DENY_SCOPES].sort()).toEqual(['@aws-sdk/', '@rainbow-me/', '@supabase/', '@wagmi/', '@walletconnect/'])
   })
   it('runtime `dependencies` bump (not deny-listed) → review: src/app/api usage not computable', () => {

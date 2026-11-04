@@ -22,7 +22,9 @@
  *
  * Rules (all required):
  *   R1 author     PR author AND every commit author is `dependabot[bot]`; fetch-metadata returned >= 1 dep
- *   R2 semver     every dependency is semver-patch or semver-minor (any major / unknown → review)
+ *   R2 semver     every dependency is semver-patch or semver-minor (any major / unknown → review).
+ *                 A minor bump on a 0.x version counts as MAJOR (0.x minors may break) → review; a minor
+ *                 whose previous version is missing/unparseable is also review (fail-closed)
  *   R3 scope      ecosystem npm or github-actions, directory "/" only, and the PR touches only that
  *                 ecosystem's files (package.json + package-lock.json | .github/workflows|actions/*.yml);
  *                 anything under contracts/** (keeper lockfile) → review
@@ -42,7 +44,7 @@ export const BOT = 'dependabot[bot]'
 
 /** Always-review packages (lower-case). Scope prefixes end with `/`. */
 export const DENY_EXACT = Object.freeze([
-  'viem', 'wagmi', 'next', 'react', 'react-dom', 'ethers', '@tanstack/react-query', 'zod',
+  'viem', 'wagmi', 'next', 'eslint-config-next', 'react', 'react-dom', 'ethers', '@tanstack/react-query', 'zod',
 ])
 export const DENY_SCOPES = Object.freeze([
   '@wagmi/', '@rainbow-me/', '@walletconnect/', '@supabase/', '@aws-sdk/',
@@ -54,6 +56,12 @@ export const ALLOWED_UPDATE_TYPES = Object.freeze([
 
 const NPM_FILES = Object.freeze(['package.json', 'package-lock.json'])
 const ACTIONS_FILE = /^\.github\/(workflows|actions)\/.+\.ya?ml$/
+
+/** True when `prevVersion` is a 0.x version (leading `v` allowed). Unparseable → null (caller fails closed). */
+export function isZeroMajor(prevVersion) {
+  const m = /^v?(\d+)(?:\.|$)/.exec(String(prevVersion ?? '').trim())
+  return m ? Number(m[1]) === 0 : null
+}
 
 const lc = (s) => String(s ?? '').toLowerCase()
 
@@ -97,10 +105,12 @@ export function evaluateEligibility(facts, { autoMerge = '' } = {}) {
   else if (deps.length === 0) rule('R1', false, 'no dependabot metadata (fetch-metadata found no updated dependencies)')
   else rule('R1', true)
 
-  // R2 — update type (per dependency; a group needs all of them)
-  const badType = deps.filter((d) => !ALLOWED_UPDATE_TYPES.includes(d?.updateType))
+  // R2 — update type (per dependency; a group needs all of them). 0.x minor == major.
+  const typeLabel = (d) => String(d?.updateType ?? 'unknown').replace('version-update:semver-', '')
+  const zeroMinor = (d) => d?.updateType === 'version-update:semver-minor' && isZeroMajor(d?.prevVersion) !== false
+  const badType = deps.filter((d) => !ALLOWED_UPDATE_TYPES.includes(d?.updateType) || zeroMinor(d))
   rule('R2', deps.length > 0 && badType.length === 0,
-    `not patch/minor: ${list(badType.map((d) => `${d?.dependencyName} (${String(d?.updateType ?? 'unknown').replace('version-update:semver-', '')})`))}`)
+    `not patch/minor or 0.x minor: ${list(badType.map((d) => `${d?.dependencyName} (${zeroMinor(d) ? (isZeroMajor(d?.prevVersion) ? '0.x minor' : 'minor, prev version unknown') : typeLabel(d)})`))}`)
 
   // R3 — ecosystem, directory, files
   const ecos = [...new Set(deps.map((d) => normalizeEcosystem(d?.packageEcosystem)))]
