@@ -403,13 +403,11 @@ function OrderCard({
             </div>
           )}
 
-          {/* Tx hash — [RQ-2026-06-11] chain-aware helper; orders are mainnet-only
-              today (executor deployed on chainId 1 only, AutonomousOrder carries no
-              chainId), so this stays the mainnet explorer byte-identically. When the
-              order engine activates on Base, thread the order's chain here. */}
+          {/* Tx hash — [fix/v1-maintenance C1] explorer follows the ORDER's chain
+              (orderChainId), never the connected wallet's. */}
           {order.txHash && (
             <a
-              href={explorerTxUrl(order.txHash, 1)}
+              href={explorerTxUrl(order.txHash, orderChainId)}
               target="_blank"
               rel="noopener noreferrer"
               className="mb-3 flex items-center gap-1 text-[11px] text-cream-40 hover:text-cream transition-colors"
@@ -454,6 +452,7 @@ function OrderCard({
               tokenOutDecimals={order.tokenOutDecimals}
               dcaTotal={order.dcaTotal}
               dcaExecuted={order.dcaExecuted}
+              chainId={orderChainId}
             />
           )}
 
