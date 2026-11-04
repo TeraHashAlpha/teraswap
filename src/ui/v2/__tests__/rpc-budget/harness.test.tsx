@@ -43,7 +43,7 @@ afterAll(() => {
   if (process.env.RPC_TABLE_OUT) writeFileSync(process.env.RPC_TABLE_OUT, `${table}\n`)
 })
 
-const STATES: State[] = ['a0', 'a', 'b', 'c', 'c20', 'p']
+const STATES: State[] = ['a0', 'a', 'b', 'c', 'c20', 'p', 'an']
 
 describe.each(['v1', 'v2'] as Ui[])('browser RPC harness — %s', (ui) => {
   it.each(STATES)('state %s: visible then hidden', async (state) => {
