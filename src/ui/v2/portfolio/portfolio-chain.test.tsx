@@ -17,6 +17,7 @@ vi.mock('wagmi', () => ({
   useBalance: () => { h.balanceCalls += 1; return { data: { value: 5n * 10n ** 17n, decimals: 18, symbol: 'ETH', formatted: '0.5' } } },
   useWriteContract: () => ({ writeContract: vi.fn(), data: undefined, error: null, reset: vi.fn() }),
   useWaitForTransactionReceipt: () => ({ isSuccess: false, isLoading: false }),
+  useSwitchChain: () => ({ switchChain: vi.fn(), isPending: false }),
 }))
 vi.mock('@/hooks/useChainId', () => ({ useActiveChainId: () => h.chainId }))
 vi.mock('@/hooks/useTokenBalances', () => ({ useTokenBalances: () => ({ balances: new Map(), isLoading: false, isError: false }) }))

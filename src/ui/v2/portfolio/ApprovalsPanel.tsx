@@ -1,82 +1,70 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { useWaitForTransactionReceipt, useWriteContract } from 'wagmi'
-import { erc20Abi } from 'viem'
 import type { ApprovalRecord } from '@/hooks/useActiveApprovals'
-import { useActiveChainId } from '@/hooks/useChainId'
-import { explorerTxUrl } from '@/lib/chains/tokens'
+import { REVOKE_COPY, useRevokeApproval } from '@/hooks/useRevokeApproval'
 import { Button } from '../primitives'
 import { methodLabel, revokeCashUrl, timeSince } from './portfolio-model'
 
 const CAPS = 'font-v2-mono text-[10px] font-semibold uppercase tracking-[1.5px]'
 
 /**
- * One approval as a hairline row (round7 44 / m06) — v1 `RevokeRow`: `TOKEN → spender`, the allowance kind · age, and the revoke control:
- * Revoke → Revoking… / Confirming… → ✓ Revoked ↗ (the revoke tx on the ACTIVE chain, as v1), or Retry after an error.
+ * One approval as a hairline row (round7 44 / m06) — v1 `RevokeRow`: `TOKEN → spender`, the allowance kind · chain · age, and the
+ * action `useRevokeApproval` (shared with v1) decides: Revoke → Revoking… / Confirming… → ✓ Revoked ↗ (the revoke tx on the
+ * RECORD's chain), Retry after an error, v1's "Switch to {chain}" when the wallet is on another chain, or — the one addition to
+ * v1's copy — the neutral "Network unknown" line for a record whose chain is unknown (no button: it is never revoked blind).
  *
- * The write is v1's: `approve(spender, 0)` on the token, sent through wagmi's `useWriteContract` ONLY when the user presses Revoke. v1 marks the
- * record revoked DURING render and the row vanishes at once; here the mark happens in an effect and the parent keeps the row listed, so the
- * "✓ Revoked ↗" v1 prints (and its explorer link) is actually readable.
+ * The write is v1's: `approve(spender, 0)` on the token, sent through wagmi's `useWriteContract` ONLY when the user presses Revoke,
+ * and only with `chainId` = the record's chain. v1 drops a revoked row at once; here the parent keeps it listed so "✓ Revoked ↗"
+ * (and its explorer link) is actually readable.
  */
 function RevokeRow({ record, onRevoked }: { record: ApprovalRecord; onRevoked: (id: string) => void }) {
-  const [revoking, setRevoking] = useState(false)
-  const chainId = useActiveChainId()
-  const { writeContract, data: revokeHash, error: revokeError, reset: resetRevoke } = useWriteContract()
-  const { isSuccess: revokeConfirmed, isLoading: revokeWaiting } = useWaitForTransactionReceipt({ hash: revokeHash })
-
-  // Report the confirmation once per press (a ref, not state: `revoking` stays true and `isPending` below already reads the receipt).
-  const reported = useRef(false)
-  useEffect(() => {
-    if (revokeConfirmed && revoking && !reported.current) {
-      reported.current = true
-      onRevoked(record.id)
-    }
-  }, [revokeConfirmed, revoking, onRevoked, record.id])
-
-  const handleRevoke = () => {
-    reported.current = false
-    setRevoking(true)
-    resetRevoke()
-    writeContract({ address: record.tokenAddress, abi: erc20Abi, functionName: 'approve', args: [record.spenderAddress, 0n] })
-  }
-  const isPending = revoking && !revokeConfirmed && !revokeError
+  const { action, chainName } = useRevokeApproval(record, onRevoked)
 
   return (
-    <li className="ts-pf-approval" data-testid="approval-row" data-approval-id={record.id}>
+    <li className="ts-pf-approval" data-testid="approval-row" data-approval-id={record.id} data-chain-id={record.chainId ?? 'unknown'}>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2 text-[15px] font-semibold text-v2-text">
           <span>{record.tokenSymbol}</span>
           <span className="text-v2-muted">&rarr;</span>
           <span>{record.spenderLabel}</span>
         </div>
-        <div className="mt-1 flex items-center gap-2 text-[13px] text-v2-muted">
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-[13px] text-v2-muted">
           <span>{methodLabel(record.method)}</span>
+          {chainName && (
+            <>
+              <span>&middot;</span>
+              <span data-testid="approval-chain">{chainName}</span>
+            </>
+          )}
           <span>&middot;</span>
           <span>{timeSince(record.timestamp)}</span>
         </div>
       </div>
 
-      {revokeConfirmed ? (
+      {action.kind === 'revoked' ? (
         <span className="flex items-center gap-1 text-[13px] font-semibold text-v2-green" data-testid="approval-revoked">
-          &#10003; Revoked
-          {revokeHash && (
-            <a
-              href={explorerTxUrl(revokeHash, chainId)}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="View revoke transaction"
-              className="ts-pf-link inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-v2-muted hover:text-v2-text"
-            >
-              &#8599;
-            </a>
-          )}
+          {REVOKE_COPY.revoked}
+          <a
+            href={action.explorerUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="View revoke transaction"
+            className="ts-pf-link inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-v2-muted hover:text-v2-text"
+          >
+            &#8599;
+          </a>
         </span>
-      ) : revokeError ? (
-        <Button variant="text" tone="danger" onClick={handleRevoke} data-testid="approval-retry">Retry</Button>
+      ) : action.kind === 'unknown' ? (
+        <span className="max-w-[45%] text-right text-[12px] leading-snug text-v2-muted" data-testid="approval-chain-unknown">{REVOKE_COPY.unknownChain}</span>
+      ) : action.kind === 'switch' ? (
+        <Button variant="text" onClick={action.onClick} disabled={action.pending} className="!text-v2-amber" data-pf-action="" data-testid="approval-switch">
+          {REVOKE_COPY.switchTo(action.chainName)}
+        </Button>
+      ) : action.kind === 'retry' ? (
+        <Button variant="text" tone="danger" onClick={action.onClick} data-testid="approval-retry">{REVOKE_COPY.retry}</Button>
       ) : (
-        <Button variant="text" tone="danger" onClick={handleRevoke} disabled={isPending} data-pf-action="" data-testid="approval-revoke">
-          {isPending ? (revokeWaiting ? 'Confirming…' : 'Revoking…') : 'Revoke'}
+        <Button variant="text" tone="danger" onClick={action.onClick} disabled={action.pending} data-pf-action="" data-testid="approval-revoke">
+          {action.pending ? (action.waiting ? REVOKE_COPY.confirming : REVOKE_COPY.revoking) : REVOKE_COPY.revoke}
         </Button>
       )}
     </li>
