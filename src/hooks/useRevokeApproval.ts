@@ -59,15 +59,18 @@ export function useRevokeApproval(record: ApprovalRecord, onRevoked: (id: string
   const walletChainId = chain?.id
   const { switchChain, isPending: switching } = useSwitchChain()
   const { writeContract, data: hash, error: writeError, reset } = useWriteContract()
-  const { isSuccess: confirmed, isLoading: waiting } = useWaitForTransactionReceipt({
+  const { data: receipt, isLoading: waiting, error: receiptError } = useWaitForTransactionReceipt({
     hash,
     chainId: recordChainId, // the receipt is read on the RECORD's chain, whatever the wallet shows now
     query: { enabled: hash !== undefined && recordChainId !== undefined },
   })
   const [pressed, setPressed] = useState(false)
 
-  const revoked = hash !== undefined && confirmed
-  const failed = writeError !== null
+  // [C3] "revoked" means revoked: only a receipt with status success on the record's chain. The query's own success flag is
+  // "a receipt was fetched", which a reverted tx also satisfies — so it is never the condition. wagmi's watcher throws on a
+  // reverted receipt (error, no data); a receipt that still reports `reverted` is treated the same: the record stays open.
+  const revoked = hash !== undefined && receipt?.status === 'success'
+  const failed = Boolean(writeError) || Boolean(receiptError) || receipt?.status === 'reverted'
 
   // Report the confirmation once per press.
   const reported = useRef(false)

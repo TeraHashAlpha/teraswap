@@ -22,7 +22,10 @@ const h = vi.hoisted(() => ({
   switching: false,
   hash: undefined as string | undefined,
   err: null as Error | null,
+  /** the receipt query: `confirmed` = a receipt was fetched (query success), `receipt` = what it says, `receiptErr` = the watcher threw */
   confirmed: false,
+  receipt: undefined as { status: 'success' | 'reverted' } | undefined,
+  receiptErr: null as Error | null,
   waiting: false,
   supported: true,
   /** every `chainId` the receipt watcher was asked for (the record's chain, never the wallet's) */
@@ -34,7 +37,7 @@ vi.mock('wagmi', () => ({
   useWriteContract: () => ({ writeContract: h.write, data: h.hash, error: h.err, reset: h.reset }),
   useWaitForTransactionReceipt: (p: { hash?: string; chainId?: number }) => {
     if (p.hash) h.receiptChainIds.push(p.chainId)
-    return { isSuccess: h.confirmed, isLoading: h.waiting }
+    return { data: h.receipt, isSuccess: h.confirmed, isLoading: h.waiting, error: h.receiptErr }
   },
   useSwitchChain: () => ({ switchChain: h.switchChain, isPending: h.switching }),
 }))
@@ -68,7 +71,7 @@ beforeEach(() => {
   h.chainId = 8453
   h.write.mockReset(); h.reset.mockReset(); h.switchChain.mockReset()
   h.switching = false
-  h.hash = undefined; h.err = null; h.confirmed = false; h.waiting = false; h.supported = true
+  h.hash = undefined; h.err = null; h.confirmed = false; h.receipt = undefined; h.receiptErr = null; h.waiting = false; h.supported = true
   h.receiptChainIds = []
   useActiveApprovals.setState({ approvals: [A, B, INFINITE, ...HIDDEN] })
 })
@@ -237,7 +240,7 @@ describe('Active Approvals — Revoke is bound to the record\'s chain (fake writ
     // a wallet-following watcher would have asked for 8453 only
     expect(new Set(h.receiptChainIds)).toEqual(new Set([8453, 1]))
 
-    h.waiting = false; h.confirmed = true
+    h.waiting = false; h.confirmed = true; h.receipt = { status: 'success' }
     act(() => { rerender(<PortfolioTab />) })
     const row = first()
     expect(row.textContent).toContain('✓ Revoked')
@@ -269,7 +272,7 @@ describe('Active Approvals — Revoke is bound to the record\'s chain (fake writ
   it.each([[1], [8453], [42161]])('the revoke tx link follows the RECORD\'s chain %i (new URL().hostname), not the wallet\'s', (chainId) => {
     h.chainId = chainId === 8453 ? 1 : 8453 // the wallet is always somewhere else
     h.hash = '0xfeed000000000000000000000000000000000000000000000000000000000001'
-    h.confirmed = true
+    h.confirmed = true; h.receipt = { status: 'success' }
     useActiveApprovals.setState({ approvals: [rec({ chainId })] })
     const { container } = render(<PortfolioTab />)
     const a = container.querySelector('a[aria-label="View revoke transaction"]') as HTMLAnchorElement
@@ -288,5 +291,77 @@ describe('Active Approvals — Revoke is bound to the record\'s chain (fake writ
     expect(h.write).toHaveBeenCalledTimes(1)
     expect(h.write.mock.calls[0][0].chainId).toBe(8453)
     expect(h.reset).toHaveBeenCalled()
+  })
+})
+
+describe('Active Approvals — "revoked" means revoked (fix/revoke-chain C3; fake receipt, nothing sent)', () => {
+  const press = () => {
+    const view = render(<PortfolioTab />)
+    fireEvent.click(within(rowOf(view.container, 'USDC')).getByTestId('approval-revoke'))
+    h.hash = HASH; h.waiting = true
+    view.rerender(<PortfolioTab />)
+    expect(within(rowOf(view.container, 'USDC')).getByText('Confirming…')).toBeTruthy()
+    return view
+  }
+  const stillOpen = (container: HTMLElement) => {
+    const row = rowOf(container, 'USDC')
+    expect(row.textContent).not.toContain('✓ Revoked')
+    expect(within(row).queryByLabelText('View revoke transaction')).toBeNull()
+    expect(within(row).getByTestId('approval-retry').textContent).toBe('Retry') // v1's error copy
+    expect(useActiveApprovals.getState().approvals.find((x) => x.id === A.id)?.active).toBe(true)
+    expect(within(container).getByTestId('approvals-count').textContent).toBe('3')
+  }
+
+  it('a receipt with status success on the record\'s chain → ✓ Revoked, and only then is the store marked', () => {
+    const view = press()
+    expect(useActiveApprovals.getState().approvals.find((x) => x.id === A.id)?.active).toBe(true) // not before the receipt
+    h.waiting = false; h.confirmed = true; h.receipt = { status: 'success' }
+    act(() => { view.rerender(<PortfolioTab />) })
+    expect(rowOf(view.container, 'USDC').textContent).toContain('✓ Revoked')
+    expect(useActiveApprovals.getState().approvals.find((x) => x.id === A.id)?.active).toBe(false)
+    expect(new Set(h.receiptChainIds)).toEqual(new Set([8453, 1])) // each row's watcher on its record's chain
+  })
+
+  it('a receipt was fetched (query success) but the tx REVERTED → not revoked: Retry, record stays open (v1 would have printed ✓ Revoked)', () => {
+    const view = press()
+    h.waiting = false; h.confirmed = true; h.receipt = { status: 'reverted' }
+    act(() => { view.rerender(<PortfolioTab />) })
+    stillOpen(view.container)
+  })
+
+  it('wagmi\'s watcher throws on a reverted receipt (its real behaviour: error, no data) → Retry, record stays open', () => {
+    const view = press()
+    h.waiting = false; h.confirmed = false; h.receipt = undefined; h.receiptErr = new Error('execution reverted')
+    act(() => { view.rerender(<PortfolioTab />) })
+    stillOpen(view.container)
+  })
+
+  it('query success with NO receipt is not a revoke (the old `isSuccess` condition is never enough)', () => {
+    const view = press()
+    h.waiting = false; h.confirmed = true; h.receipt = undefined
+    act(() => { view.rerender(<PortfolioTab />) })
+    const row = rowOf(view.container, 'USDC')
+    expect(row.textContent).not.toContain('✓ Revoked')
+    expect(useActiveApprovals.getState().approvals.find((x) => x.id === A.id)?.active).toBe(true)
+  })
+
+  it('the wallet rejects the write → Retry, record stays open, no receipt was ever watched', () => {
+    const view = render(<PortfolioTab />)
+    fireEvent.click(within(rowOf(view.container, 'USDC')).getByTestId('approval-revoke'))
+    h.err = new Error('User rejected the request.')
+    act(() => { view.rerender(<PortfolioTab />) })
+    stillOpen(view.container)
+    expect(h.receiptChainIds).toEqual([])
+  })
+
+  it('v1\'s row obeys the same rule: a reverted receipt leaves v1 on Retry too', () => {
+    useActiveApprovals.setState({ approvals: [A] })
+    const v1 = render(<ActiveApprovals />)
+    fireEvent.click(within(v1.container).getByText('Revoke'))
+    h.hash = HASH; h.confirmed = true; h.receipt = { status: 'reverted' }
+    act(() => { v1.rerender(<ActiveApprovals />) })
+    expect(v1.container.textContent).not.toContain('✓ Revoked')
+    expect(within(v1.container).getByText('Retry')).toBeTruthy()
+    expect(useActiveApprovals.getState().approvals[0].active).toBe(true)
   })
 })
