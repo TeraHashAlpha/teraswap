@@ -242,8 +242,9 @@ export interface InfraMissCount {
 }
 
 /**
- * Orders on `chainId` the keeper could NOT attempt for an infrastructure reason in the last 24 h.
- * Never throws; see InfraMissStatus for the three outcomes.
+ * LIVE orders (status active / executing — [A73 S-6]) on `chainId` the keeper could NOT attempt for an
+ * infrastructure reason in the last 24 h. A filled, cancelled, expired or failed order's old trail is
+ * not an order the outage is still holding up. Never throws; see InfraMissStatus for the outcomes.
  */
 export async function countInfraMissOrders24h(chainId: number, nowMs: number = Date.now()): Promise<InfraMissCount> {
   const supabase = getSupabase()
@@ -255,6 +256,7 @@ export async function countInfraMissOrders24h(chainId: number, nowMs: number = D
       .select('id', { count: 'exact', head: true })
       .eq('chain_id', chainId)
       .gte('last_infra_miss_at', since)
+      .in('status', ['active', 'executing'])
     if (error) {
       const text = `${(error as { code?: string }).code ?? ''} ${(error as { message?: string }).message ?? ''}`
       if (MISSING_INFRA_MISS_COLUMN.test(text)) return { count: null, status: 'missing' }

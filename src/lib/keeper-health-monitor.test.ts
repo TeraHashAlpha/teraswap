@@ -434,7 +434,7 @@ describe('keeper paused state (keeper_runtime_config.paused)', () => {
 import { countInfraMissOrders24h, INFRA_MISS_WINDOW_MS } from './keeper-health-monitor'
 
 function makeInfraMissStub({ count = 0, error = null, runtimeRow = null }: { count?: number | null; error?: unknown; runtimeRow?: unknown } = {}) {
-  const calls: Array<{ cols: unknown; opts: unknown; chainId: unknown; since: unknown }> = []
+  const calls: Array<{ cols: unknown; opts: unknown; chainId: unknown; since: unknown; statuses: unknown }> = []
   return {
     calls,
     from: (table: string) =>
@@ -442,10 +442,13 @@ function makeInfraMissStub({ count = 0, error = null, runtimeRow = null }: { cou
         ? {
             select: (cols: unknown, opts: unknown) => ({
               eq: (_c: string, chainId: unknown) => ({
-                gte: (_col: string, since: unknown) => {
-                  calls.push({ cols, opts, chainId, since })
-                  return Promise.resolve({ count, error })
-                },
+                gte: (_col: string, since: unknown) => ({
+                  // [A73 S-6] the count is restricted to LIVE orders (status in active / executing)
+                  in: (_col2: string, statuses: unknown) => {
+                    calls.push({ cols, opts, chainId, since, statuses })
+                    return Promise.resolve({ count, error })
+                  },
+                }),
               }),
             }),
           }
@@ -462,7 +465,8 @@ describe('[ADR-026] countInfraMissOrders24h', () => {
     const stub = makeInfraMissStub({ count: 3 })
     mockGetSupabase.mockReturnValue(stub as unknown as ReturnType<typeof makeSupabaseStub>)
     expect(await countInfraMissOrders24h(8453, NOW)).toEqual({ count: 3, status: 'ok' })
-    expect(stub.calls).toEqual([{ cols: 'id', opts: { count: 'exact', head: true }, chainId: 8453, since: new Date(NOW - INFRA_MISS_WINDOW_MS).toISOString() }])
+    // [A73 S-6] only LIVE orders: a filled, cancelled, expired or failed order's old trail does not count
+    expect(stub.calls).toEqual([{ cols: 'id', opts: { count: 'exact', head: true }, chainId: 8453, since: new Date(NOW - INFRA_MISS_WINDOW_MS).toISOString(), statuses: ['active', 'executing'] }])
     expect(INFRA_MISS_WINDOW_MS).toBe(24 * 60 * 60 * 1000)
   })
 

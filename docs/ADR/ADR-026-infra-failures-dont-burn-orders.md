@@ -81,9 +81,11 @@ out of gas — none of which the user can fix, and none of which says anything a
    `FIX-RETRY-FALLBACK-MIGRATION-LAGS` is untouched. `orders.error` is NOT reused: the UI treats a
    non-null `error` as a failed order (`DcaOrdersList.tsx`).
 
-5. **Visibility.** `GET /api/monitor/keepers` adds `infraMissOrders24h` per chain (count of orders
-   with `last_infra_miss_at` in the last 24 h; `null` when unreadable). The daily report shows it;
-   the keeper's `/health` counts `infraMisses` per process. Runbook: `EXECUTOR-OPERATIONS.md` § 8.
+5. **Visibility.** `GET /api/monitor/keepers` adds `infraMissOrders24h` per chain (count of LIVE
+   orders — status active / executing, A73 S-6 — with `last_infra_miss_at` in the last 24 h) and
+   `infraMissStatus` (`ok` / `missing` = migration pending, ℹ️ / `error` = the read failed, ⚠️ —
+   A73 S-4). The daily report shows it; the keeper's `/health` counts `infraMisses` per process.
+   Runbook: `EXECUTOR-OPERATIONS.md` § 8.
 
 ## Consequences
 

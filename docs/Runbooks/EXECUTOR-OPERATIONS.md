@@ -280,12 +280,13 @@ after that fill. Limit / stop-loss orders simply fill on the first healthy cycle
 holds, within their expiry. An order that expires DURING the outage is recorded `expired` as before.
 
 **Reading it afterwards:**
-- Daily report row `Orders with infra misses (24 h)` (⚠️ when > 0, with an attention bullet;
-  ℹ️ `unknown` until migration `20261104120000_orders_infra_miss.sql` is applied) — source
-  `GET /api/monitor/keepers` → `chains[].infraMissOrders24h`.
+- Daily report row `Orders with infra misses (24 h)` — LIVE orders (active / executing) only — (⚠️ when
+  > 0, with an attention bullet; ℹ️ `unknown` until migration `20261104120000_orders_infra_miss.sql` is
+  applied; ⚠️ `error` when the read itself failed) — source `GET /api/monitor/keepers` →
+  `chains[].infraMissOrders24h` + `infraMissStatus`.
 - Keeper `/health` → `stats.infraMisses` (misses not counted this process) and `stats.pausedCycles`.
 - Supabase (read-only): `SELECT id, order_type, status, consecutive_failures, last_attempt_at,
-  last_infra_miss_at, last_infra_miss_reason FROM orders WHERE chain_id = <id> AND last_infra_miss_at > now() - interval '24 hours';`
+  last_infra_miss_at, last_infra_miss_reason FROM orders WHERE chain_id = <id> AND status IN ('active', 'executing') AND last_infra_miss_at > now() - interval '24 hours';`
 - pm2 log: `infra miss (<reason>)` lines, one per attempted cycle (attempts space out at the ladder's
   cadence — 30 s, 60 s, … ≤ 30 min — while the infra misses persist).
 - Telegram `🛠️ Ops issue: infra-miss-streak` (critical tier): one order has missed ~10 min / 20 cycles
