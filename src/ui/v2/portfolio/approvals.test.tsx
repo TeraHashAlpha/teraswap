@@ -45,7 +45,7 @@ const VELORA = '0x000000000000000000000000000000000000dEaD' as const
 const PERMIT2 = '0x000000000022D473030F116dDEE9F6B43aC78BA3' as const
 const rec = (over: Partial<ApprovalRecord>): ApprovalRecord => ({
   id: `${over.tokenAddress}:${over.spenderAddress}`.toLowerCase(), tokenAddress: USDC, tokenSymbol: 'USDC', spenderAddress: VELORA, spenderLabel: 'Velora',
-  source: 'paraswap' as ApprovalRecord['source'], method: 'exact', timestamp: Date.now() - 17 * DAY, active: true, needsRevoke: true, ...over,
+  source: 'paraswap' as ApprovalRecord['source'], method: 'exact', timestamp: Date.now() - 17 * DAY, active: true, needsRevoke: true, chainId: 8453, ...over,
 })
 const A = rec({ tokenAddress: USDC, tokenSymbol: 'USDC' })
 const B = rec({ tokenAddress: ETHFI, tokenSymbol: 'ETHFI', spenderAddress: PERMIT2, spenderLabel: 'Permit2', method: 'permit2', timestamp: Date.now() - 28 * DAY })

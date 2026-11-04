@@ -27,7 +27,7 @@ const odd = { address: '0x6c240dda6b5c336df09a4d011139beaaa1ea2aa2' as `0x${stri
 const row = (token: PortfolioToken['token'], balance: bigint, valueUsd: number | null): PortfolioToken => ({ token, balance, balanceFormatted: fmtToken(balance, token.decimals), priceUsd: 1, valueUsd })
 const approval = (symbol: string): ApprovalRecord => ({
   id: symbol, tokenAddress: usdc.address as `0x${string}`, tokenSymbol: symbol, spenderAddress: '0x000000000000000000000000000000000000dEaD', spenderLabel: 'Velora',
-  source: 'paraswap' as ApprovalRecord['source'], method: 'exact', timestamp: Date.now(), active: true, needsRevoke: true,
+  source: 'paraswap' as ApprovalRecord['source'], method: 'exact', timestamp: Date.now(), active: true, needsRevoke: true, chainId: 8453,
 })
 const portfolio = (over: Partial<PortfolioData> = {}): PortfolioData => ({
   tokens: [row(eth, 10n ** 16n, 27.77), row(usdc, 5_000_000n, 5), row(odd, 10n ** 18n, 329.43)], totalValueUsd: 362.2, isLoading: false, isError: false,

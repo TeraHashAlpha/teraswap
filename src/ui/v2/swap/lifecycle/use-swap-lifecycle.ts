@@ -48,7 +48,7 @@ export interface LifecycleArgs {
  */
 export function useSwapLifecycle(a: LifecycleArgs) {
   const { tokenIn, tokenOut, amountIn, slippage, meta, activeChainId, approval } = a
-  const { address } = useAccount()
+  const { address, chain } = useAccount()
   const { toast, dismiss } = useV2Toast()
   const { addRecord } = useSwapHistory()
   const { addApproval } = useActiveApprovals()
@@ -221,6 +221,7 @@ export function useSwapLifecycle(a: LifecycleArgs) {
           method: 'exact',
           timestamp: Date.now(),
           needsRevoke: false,
+          chainId: chain?.id, // [fix/revoke-chain] as v1 SwapBox: the wallet's chain for this swap, never a UI default
         })
       }
     }
