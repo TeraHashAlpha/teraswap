@@ -195,7 +195,11 @@ describe('usePortfolio', () => {
 
   it('filters out zero-balance tokens', async () => {
     const { result } = renderHook(() => usePortfolio())
-    await waitFor(() => expect(result.current.tokens.length).toBeGreaterThan(0))
+    // Wait until the multicall fallback has produced the non-zero USDC row; only then is "WBTC
+    // absent" a statement about the zero-balance filter rather than about a half-loaded list.
+    await waitFor(() =>
+      expect(result.current.tokens.find((t) => t.token.symbol === 'USDC')).toBeDefined(),
+    )
     expect(result.current.tokens.find((t) => t.token.symbol === 'WBTC')).toBeUndefined()
   })
 
@@ -345,7 +349,11 @@ describe('usePortfolio', () => {
       { [USDC]: 1 },
     )
     const { result } = renderHook(() => usePortfolio())
-    await waitFor(() => expect(result.current.tokens.length).toBeGreaterThan(0))
+    // Wait for the discovered USDC itself — the native-ETH row (instant useBalance mock)
+    // makes `tokens.length > 0` true before discovery resolves.
+    await waitFor(() =>
+      expect(result.current.tokens.find((t) => t.token.address.toLowerCase() === USDC)).toBeDefined(),
+    )
     const usdc = result.current.tokens.find((t) => t.token.address.toLowerCase() === USDC)!
     // The curated DEFAULT_TOKENS entry — mocked above as { symbol: 'USDC',
     // decimals: 6 } — must win over what Alchemy returned.
@@ -369,7 +377,11 @@ describe('usePortfolio', () => {
       {},
     )
     const { result } = renderHook(() => usePortfolio())
-    await waitFor(() => expect(result.current.tokens.length).toBeGreaterThan(0))
+    // Wait for the discovered UNK row itself, not just "any row": the native-ETH row (instant
+    // useBalance mock) makes `tokens.length > 0` true before discovery resolves.
+    await waitFor(() =>
+      expect(result.current.tokens.find((t) => t.token.symbol === 'UNK')).toBeDefined(),
+    )
     const unk = result.current.tokens.find((t) => t.token.symbol === 'UNK')!
     expect(unk.token.category).toBe('Other')
   })
@@ -614,7 +626,11 @@ describe('usePortfolio', () => {
       {},
     )
     const { result } = renderHook(() => usePortfolio())
-    await waitFor(() => expect(result.current.tokens.length).toBeGreaterThan(0))
+    // Wait for the discovered UNK row itself, not just "any row": the native-ETH row (instant
+    // useBalance mock) makes `tokens.length > 0` true before discovery resolves.
+    await waitFor(() =>
+      expect(result.current.tokens.find((t) => t.token.symbol === 'UNK')).toBeDefined(),
+    )
     const unk = result.current.tokens.find((t) => t.token.symbol === 'UNK')!
     expect(unk.balance).toBe(expectedBalance)
   })

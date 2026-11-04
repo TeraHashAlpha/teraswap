@@ -27,6 +27,8 @@ vi.mock('@rainbow-me/rainbowkit', async () => {
   }
 })
 vi.mock('next/navigation', () => ({ usePathname: () => '/portfolio', useRouter: () => ({ push: vi.fn() }) }))
+// B8: the shell tests are about the strip, not the Portfolio tab (its own tests mock the hooks it reads).
+vi.mock('../portfolio/PortfolioTab', () => ({ PortfolioTab: () => <section data-tab-pane="portfolio" aria-busy="true" /> }))
 vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars', v2BodyFontFamily: 'body-font' }))
 
 import { AppShell } from './AppShell'
