@@ -5,7 +5,7 @@ Base: origin/main `a5cd8fe`. Worktree `~/ts-worktrees/v1-maintenance`. No PR (ow
 ## Checklist
 - [x] C1 tx links use the order's chain
 - [x] C2 Portfolio L2 classification
-- [ ] C3 Portfolio hidden-tab polling
+- [x] C3 Portfolio hidden-tab polling
 - [ ] C4 serialise saveOrders
 - [ ] C5 shared escapeRegExp (test-utils)
 - [ ] Verify: suite vs main · lint delta · tsc · build · rpc-budget · CodeQL (full security-extended)
@@ -15,6 +15,7 @@ Base: origin/main `a5cd8fe`. Worktree `~/ts-worktrees/v1-maintenance`. No PR (ow
 |---|--------|-------|------|---------------|
 | C1 | `explorerTxUrl(…, 1)` → order's chain; `ExecutionTimeline` gets `chainId` prop (default 1) | `OrderDashboard.tsx` (link + `chainId={orderChainId}`), `ExecutionTimeline.tsx` (prop + link) | `ExecutionTimeline.test.tsx`, `OrderDashboard.test.tsx` "per-chain explorer link" (1/8453/42161, `new URL()` hostname; wallet stays on 1) | yes: 4/6 new cases red (8453, 42161 in both files) before the fix |
 | C2 | curated vs Discovered uses the ACTIVE chain's list: new `isCuratedToken(address, chainId)` | `lib/chains/tokens.ts` (helper), `PortfolioTab.tsx` `isDefaultToken(token, activeChainId)`; v2 `portfolio-model.ts` + `PortfolioTab.tsx` (restated mainnet-only copy, same fix) | `PortfolioTab.test.tsx` (USDC 8453/42161 curated; unknown still Discovered+Add; mainnet addr on Base is Discovered), `tokens.test.ts`, v2 `portfolio.test.tsx` parity (own USDC curated in both tabs) | yes: 7 new cases red on main (2 "unknown stays discovered" guards pass on both) |
+| C3 | both 60 s API timers (discovery + prices) pause when hidden; one refresh on visible; new `setVisibleInterval` | `lib/visible-interval.ts`, `hooks/usePortfolio.ts` (discovery + prices effects) | `usePortfolio.test.ts` "hidden-tab polling" (fake timers, mocked `visibilityState`) | yes: 3/5 red on main (hidden, visible-again, mounted-hidden); baseline + unmount guards pass on both |
 
 ## v2 parity tests updated
 - `ui/v2/portfolio/portfolio-a11y.test.tsx`: fixture ran on Base with MAINNET ETH/USDC addresses (only "curated" because v1's set ignored the chain) → now Base's own ETH/USDC from `getChainTokenList(8453)`.
@@ -22,5 +23,6 @@ Base: origin/main `a5cd8fe`. Worktree `~/ts-worktrees/v1-maintenance`. No PR (ow
 
 ## Findings
 ### Edge case
+- C3: "its own API timer" is TWO timers (discovery + prices, both 60 s) — both paused. Initial fetch on mount is unchanged (also when mounted hidden). `useBalance`'s `refetchInterval: 30_000` is TanStack (already background-paused), untouched.
 - C2: premise partly false — v2 does NOT render through a shared classifier; `portfolio-model.ts` restated v1's mainnet-only set ("on every chain"). Fixed there too via the shared `isCuratedToken`, else v1/v2 would diverge on L2. "Catalog" = `getChainTokenList` (curated list, what `usePortfolio` already uses for metadata), not the full search catalog (long tail would hide real Add candidates).
 - C1: `LimitOrderPanel.tsx:1044`, `ConditionalOrderPanel.tsx:917`, `SwapBox.tsx:1193/1203`, `ToastProvider.tsx:182`, `AdminMonitor.tsx:837` still use `ETHERSCAN_TX` (mainnet-only). They are creation/toast/admin surfaces, not Orders/fill rows → left untouched (out of scope + read-scope); worth a follow-up if those panels can run on L2.
