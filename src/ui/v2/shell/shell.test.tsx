@@ -53,6 +53,8 @@ vi.mock('../dca/DcaCard', () => ({ DcaCard: () => <section data-tab-pane="dca" a
 // B7: likewise the Orders tab (its own tests run it on v1's engine contract): here the pane is a stub.
 vi.mock('../orders/OrdersTab', () => ({ OrdersTab: () => <section data-tab-pane="orders" aria-busy="true" /> }))
 vi.mock('../history/HistoryTab', () => ({ HistoryTab: () => <section data-tab-pane="history" aria-busy="true" /> }))
+// B8: likewise the Portfolio tab (its own tests run it on v1's usePortfolio contract): here the pane is a stub.
+vi.mock('../portfolio/PortfolioTab', () => ({ PortfolioTab: () => <section data-tab-pane="portfolio" aria-busy="true" /> }))
 vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars', v2BodyFontFamily: 'body-font' }))
 // Base / Arbitrum FeeCollectors are env-driven (unset under test) → every chain would be "coming soon".
 // Only that gate is overridden, as in v1's ChainSelector test.
@@ -362,14 +364,14 @@ describe('panes', () => {
     expect(pane?.querySelectorAll('.ts-v2-skeleton').length).toBe(0)
   })
 
-  it.each(['orders', 'history'] as const)('%s mounts its B7 tab, not the placeholder', (tab) => {
+  it.each(['orders', 'history', 'portfolio'] as const)('%s mounts its B7/B8 tab, not the placeholder', (tab) => {
     render(<AppShell tab={tab} />)
     const pane = document.querySelector(`[data-tab-pane="${tab}"]`)
     expect(pane).not.toBeNull() // the stubbed tab above; the real ones are tested in orders/ and history/
     expect(pane?.querySelectorAll('.ts-v2-skeleton').length).toBe(0)
   })
 
-  it.each(['portfolio', 'limit', 'sltp', 'analytics'] as const)('%s is a Skeleton placeholder', (tab) => {
+  it.each(['limit', 'sltp', 'analytics'] as const)('%s is a Skeleton placeholder', (tab) => {
     useDisconnectedChainSelection.setState({ chainId: 8453 })
     render(<AppShell tab={tab} />)
     const pane = document.querySelector(`[data-tab-pane="${tab}"]`)
