@@ -18,8 +18,8 @@ Owner answers 04 Nov (supersede goal): scope A+B (tab = AnalyticsDashboard; + /a
 5 CodeQL full security-extended: main 13 -> branch 13, identical file:line list, 0 new.
 6 v1 proof: 0 v1 files changed; / /swap /docs chunk bytes identical, /analytics +140 B (0.007%), 0 v2 markers in v1
   chunks,
-  route table identical. Suite 411/6572 -> 413/6622 green; lint 93=93; tsc 0; build ok; diff 16 files, all src/ui/v2 +
-  this.
+  route table identical. Suite 411/6572 -> 413/6622 green; lint 93=93; tsc 0; build ok; diff 19 files, only src/ui/v2 +
+  docs/feedback.
   Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...feat/ui-v2-analytics
 ## Concerns
 - v1 useAnalytics polls /api/analytics every 30 s even in a hidden tab (HTTP, not RPC); fixing it needs src/hooks (out
