@@ -7,6 +7,7 @@
  *   a0 landing, a swap idle                ≤ 1   (owner: the live footer block is the only on-chain figure; relaxed from 0)
  *   b  visitor, pair + amount (quoting)    ≤ 6
  *   c  wallet, pair + amount (ETH→USDC)    ≤ 12   c20 the same with an ERC-20 sell (USDC→ETH)
+ *   p  wallet on the Portfolio tab (B8)    ≤ 6    (measured 4 for v1 and v2: the footer block + 3 wallet reads; the holdings add none of their own)
  *   d  hidden tab                          = 0, and returning to visible refreshes each source once (0 < n ≤ mount burst)
  * The page-load burst is reported by the harness table, not budgeted per minute; it is capped here so it cannot grow unnoticed.
  */
@@ -20,15 +21,17 @@ vi.mock('@/lib/sounds', async () => {
   return Object.fromEntries(Object.entries(actual).map(([k, v]) => [k, typeof v === 'function' ? vi.fn() : v]))
 })
 vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars', v2BodyFontFamily: 'body-font' }))
+// [B8] the v2 Portfolio tab's Swap button navigates with the App Router (no Next app mounted here; nothing is pressed).
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), usePathname: () => '/portfolio' }))
 vi.mock('@/components/ParticleNetwork', () => ({ default: () => null, setParticleTurbo: vi.fn() }))
 
 import { installHarnessGlobals, runScenario, sum, type State, type Ui } from './scenarios'
 
 beforeAll(() => installHarnessGlobals())
 
-const BUDGET_PER_MIN: Record<State, number> = { a0: 1, a: 1, b: 6, c: 12, c20: 12 }
+const BUDGET_PER_MIN: Record<State, number> = { a0: 1, a: 1, b: 6, c: 12, c20: 12, p: 6 }
 /** One-time page-load burst ceilings (block + 2 fee reads + Chainlink/gas multicall, plus wallet reads). */
-const MOUNT_CEILING: Record<State, number> = { a0: 4, a: 4, b: 4, c: 12, c20: 12 }
+const MOUNT_CEILING: Record<State, number> = { a0: 4, a: 4, b: 4, c: 12, c20: 12, p: 12 }
 
 describe.each(['v1', 'v2'] as Ui[])('browser RPC budgets — %s', (ui) => {
   it.each(Object.keys(BUDGET_PER_MIN) as State[])('state %s: visible ≤ budget, hidden = 0, return refreshes once', async (state) => {
