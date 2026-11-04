@@ -86,9 +86,15 @@ export function rpcEnvSource(chainId: number): string {
 const loggedChains = new Set<number>()
 
 function logSourceOnce(chainId: number): void {
-  if (typeof window !== 'undefined' || loggedChains.has(chainId)) return
-  loggedChains.add(chainId)
-  console.info(`rpc: chain=${chainId} source=${rpcEnvSource(chainId)}`)
+  if (typeof window !== 'undefined') return
+  // [CodeQL js/log-injection] Never log the caller's value: resolve it to the matching entry of the
+  // static supported-chain list (1 / 8453 / 42161). An unsupported or hostile id finds nothing and
+  // is dropped, so only a static literal reaches the logger, the source NAME comes from the static
+  // SERVER_NAMES table, and `loggedChains` can never hold more than RPC_ENV_CHAIN_IDS.length ids.
+  const known = RPC_ENV_CHAIN_IDS.find((id) => id === chainId)
+  if (known === undefined || loggedChains.has(known)) return
+  loggedChains.add(known)
+  console.info(`rpc: chain=${known} source=${rpcEnvSource(known)}`)
 }
 
 /** Test-only: forget which chains already logged their source. */
