@@ -226,6 +226,8 @@ const SINK =
 const ERR_ID_DEFAULT = String.raw`err|e|error|[a-z]\w*Err|[a-z]\w*Error`
 // [CodeQL js/incomplete-sanitization] A complete regex-literal escaper: ONE pass over the backslash AND every
 // other metacharacter (`\ ^ $ . * + ? ( ) [ ] { } |`), so no input can reintroduce an unescaped metacharacter.
+// Same rule as the frontend tests' shared `src/test-utils/escape-regexp.ts`; this file is a separate package
+// (plain Node, no `@/` alias), so it keeps its own copy — keep the two in step.
 const escapeRegExp = (s) => s.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")
 const errIdPattern = (names) => `(?:${[ERR_ID_DEFAULT, ...[...names].map(escapeRegExp)].join("|")})`
 const rawText = (id) => new RegExp(String.raw`(?<![\w$])${id}\s*\??\.\s*(?:message|shortMessage|details|stack|cause|metaMessages)\b`)

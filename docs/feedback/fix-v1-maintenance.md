@@ -7,7 +7,7 @@ Base: origin/main `a5cd8fe`. Worktree `~/ts-worktrees/v1-maintenance`. No PR (ow
 - [x] C2 Portfolio L2 classification
 - [x] C3 Portfolio hidden-tab polling
 - [x] C4 serialise saveOrders
-- [ ] C5 shared escapeRegExp (test-utils)
+- [x] C5 shared escapeRegExp (test-utils)
 - [ ] Verify: suite vs main · lint delta · tsc · build · rpc-budget · CodeQL (full security-extended)
 
 ## 1. Items (change · file:line · test · fails-on-main)
@@ -17,6 +17,7 @@ Base: origin/main `a5cd8fe`. Worktree `~/ts-worktrees/v1-maintenance`. No PR (ow
 | C2 | curated vs Discovered uses the ACTIVE chain's list: new `isCuratedToken(address, chainId)` | `lib/chains/tokens.ts` (helper), `PortfolioTab.tsx` `isDefaultToken(token, activeChainId)`; v2 `portfolio-model.ts` + `PortfolioTab.tsx` (restated mainnet-only copy, same fix) | `PortfolioTab.test.tsx` (USDC 8453/42161 curated; unknown still Discovered+Add; mainnet addr on Base is Discovered), `tokens.test.ts`, v2 `portfolio.test.tsx` parity (own USDC curated in both tabs) | yes: 7 new cases red on main (2 "unknown stays discovered" guards pass on both) |
 | C3 | both 60 s API timers (discovery + prices) pause when hidden; one refresh on visible; new `setVisibleInterval` | `lib/visible-interval.ts`, `hooks/usePortfolio.ts` (discovery + prices effects) | `usePortfolio.test.ts` "hidden-tab polling" (fake timers, mocked `visibilityState`) | yes: 3/5 red on main (hidden, visible-again, mounted-hidden); baseline + unmount guards pass on both |
 | C4 | `saveOrders` writes queued per storage key (FIFO, payload snapshotted at call time, failed write doesn't block); `saveOrders` now exported for the test | `hooks/useOrderEngine.ts` `enqueueWrite` + `saveOrders` | `useOrderEngine.save-ordering.test.ts` (controllable `secureSet`, newest write settled first) | yes: run vs origin/main's body (exported) → 3/4 red (final state = older list); snapshot guard passes on both |
+| C5 | one shared escaper; the 2 v2 test copies import it; keeper copy kept + pointer comment | `src/test-utils/escape-regexp.ts`; `narrative.test.tsx:11`, `shell.test.tsx:91`; `redact.test.mjs:229` (comment) | `src/test-utils/escape-regexp.test.ts` (every metachar + backslash round-trip) | yes: module absent on main → test file cannot resolve (red); keeper 23/23 |
 
 ## v2 parity tests updated
 - `ui/v2/portfolio/portfolio-a11y.test.tsx`: fixture ran on Base with MAINNET ETH/USDC addresses (only "curated" because v1's set ignored the chain) → now Base's own ETH/USDC from `getChainTokenList(8453)`.
