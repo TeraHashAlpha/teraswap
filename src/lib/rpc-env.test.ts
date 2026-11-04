@@ -94,4 +94,33 @@ describe('rpc: chain=<id> source=<ENV_NAME> log', () => {
     ])
     expect(JSON.stringify(info.mock.calls)).not.toContain('secret-key')
   })
+
+  it('logs every supported chain (1, 8453, 42161) exactly once', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+    for (let i = 0; i < 3; i++) for (const id of [1, 8453, 42161]) serverRpcEnvUrl(id)
+    expect(info.mock.calls.map((c) => c[0])).toEqual([
+      'rpc: chain=1 source=public-default',
+      'rpc: chain=8453 source=public-default',
+      'rpc: chain=42161 source=public-default',
+    ])
+  })
+
+  it('unsupported / hostile chain ids never reach the logger, and resolution is unchanged', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+    const hostile = [
+      999, 0, -1, 1.5, 8453.5, NaN, Infinity,
+      '1\nrpc: chain=1 source=FORGED' as unknown as number,
+    ]
+    for (const id of hostile) {
+      expect(serverRpcEnvUrl(id)).toBeUndefined()
+      expect(() => serverRpcUrl(id)).toThrow(/no RPC resolver/)
+    }
+    // A numeric string still resolves via object-key coercion (pre-existing behaviour, #628 — not
+    // changed here) but is not a supported *number*, so it is never logged.
+    serverRpcUrl('8453' as unknown as number)
+    expect(info).not.toHaveBeenCalled()
+    // A hostile id must not have consumed or poisoned the once-per-chain bookkeeping.
+    serverRpcUrl(1)
+    expect(info.mock.calls.map((c) => c[0])).toEqual(['rpc: chain=1 source=public-default'])
+  })
 })
