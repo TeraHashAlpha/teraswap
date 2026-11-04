@@ -205,10 +205,20 @@ async function main() {
   // Summary
   console.log(`\n📊 Summary: ${captured}/${MONITORED_ENDPOINTS.length} captured, ${unreachable} unreachable\n`)
 
-  // Check for existing baseline and show diff
-  if (fs.existsSync(outputPath)) {
+  // Check for existing baseline and show diff. Read it and treat ENOENT as "none" instead of
+  // existsSync-then-read, so no check/use window is left on outputPath before the write below
+  // (CodeQL js/file-system-race). Unreadable-for-any-other-reason still reports as corrupt.
+  let existingRaw: string | null = null
+  try {
+    existingRaw = fs.readFileSync(outputPath, 'utf-8')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.log('⚠ Existing baseline is corrupt. Will overwrite.')
+    }
+  }
+  if (existingRaw !== null) {
     try {
-      const existing: BaselineFile = JSON.parse(fs.readFileSync(outputPath, 'utf-8'))
+      const existing: BaselineFile = JSON.parse(existingRaw)
       const diffs = diffBaselines(existing, baseline)
 
       if (diffs.length === 0) {

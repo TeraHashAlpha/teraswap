@@ -49,7 +49,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { encodeFunctionData, decodeFunctionResult } from 'viem'
+import { encodeFunctionData, decodeFunctionResult, getAddress } from 'viem'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const REPO = join(here, '..')
@@ -199,7 +199,11 @@ async function call(url, to, functionName) {
 }
 
 /** Every reading for one feed from one endpoint. */
-async function readFeed(url, feed) {
+async function readFeed(url, feedFromConfig) {
+  // The address is parsed out of a source file. Validate it as a 20-byte hex address and re-emit
+  // it in canonical form before it goes into any RPC request body (CodeQL js/file-access-to-http).
+  // Lower-cased first so a differently-cased config entry is accepted exactly as before.
+  const feed = getAddress(feedFromConfig.toLowerCase())
   const code = await rpc(url, 'eth_getCode', [feed, 'latest'])
   const codeBytes = code && code !== '0x' ? (code.length - 2) / 2 : 0
   if (codeBytes === 0) return { codeBytes: 0, dead: true }
