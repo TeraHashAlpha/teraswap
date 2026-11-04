@@ -107,6 +107,16 @@ describe.each([1, 8453, 42161])('Portfolio holdings — chain %i', (chainId) => 
     if (v2Labels.length > cats.length) expect(v2Labels[v2Labels.length - 1]).toBe('Discovered in Wallet')
   })
 
+  it('[fix/v1-maintenance C2] the chain\'s own USDC is curated in BOTH tabs (Swap, never Add), as v1', async () => {
+    const { v1, v2 } = await mount()
+    const usdc = ERC20_BY_CHAIN[chainId].find((t) => t.symbol === 'USDC')!
+    for (const root of [v1, v2]) {
+      expect(within(root).queryByLabelText('Add USDC to tokens')).toBeNull()
+      expect(within(root).getByLabelText('Swap USDC')).toBeTruthy()
+    }
+    expect(v2.querySelector(`[data-token="${usdc.address.toLowerCase()}"]`)?.getAttribute('data-discovered')).toBeNull()
+  })
+
   it('Add imports the token and the row rejoins the curated look (Swap, no address) — as v1', async () => {
     const { v1, v2 } = await mount()
     const token = ERC20_BY_CHAIN[chainId].find((t) => t.symbol === 'ETHFI')
