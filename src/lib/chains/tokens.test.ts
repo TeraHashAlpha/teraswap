@@ -336,3 +336,22 @@ describe('getCanonicalUsdc — chain-aware DCA default-buy resolution [CHORE-DCA
     expect(getCanonicalUsdc(unsupportedChainId)).toBeNull()
   })
 })
+
+// [fix/v1-maintenance C2] isCuratedToken — per-chain curated membership (case-insensitive).
+import { isCuratedToken as _isCuratedToken } from './tokens'
+describe('isCuratedToken [fix/v1-maintenance C2]', () => {
+  const MAINNET_USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
+  const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+  const ARB_USDC = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'
+  it('each chain curates its own USDC, case-insensitively', () => {
+    expect(_isCuratedToken(MAINNET_USDC, 1)).toBe(true)
+    expect(_isCuratedToken(BASE_USDC.toLowerCase(), 8453)).toBe(true)
+    expect(_isCuratedToken(ARB_USDC, 42161)).toBe(true)
+  })
+  it('lists are per chain: a mainnet address is not curated on Base/Arbitrum, and unknowns are not curated anywhere', () => {
+    expect(_isCuratedToken(MAINNET_USDC, 8453)).toBe(false)
+    expect(_isCuratedToken(BASE_USDC, 1)).toBe(false)
+    expect(_isCuratedToken('0xDeadBeefDeadBeefDeadBeefDeadBeefDeadBeef', 42161)).toBe(false)
+    expect(_isCuratedToken(MAINNET_USDC, 999999)).toBe(false)
+  })
+})

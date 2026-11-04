@@ -245,6 +245,23 @@ export function getChainTokenList(chainId: number): Token[] {
   return (CHAIN_TOKENS[chainId] ?? []).map((t) => chainTokenToToken(t, chainId))
 }
 
+const curatedAddressSets = new Map<number, Set<string>>()
+
+/**
+ * [fix/v1-maintenance C2] Is `address` part of `chainId`'s curated list (the same list
+ * `getChainTokenList` returns and usePortfolio uses for curated metadata)? Portfolio uses this to
+ * split "curated" rows from "Discovered in Wallet" per ACTIVE chain — mainnet's list must not
+ * decide that for Base/Arbitrum.
+ */
+export function isCuratedToken(address: string, chainId: number): boolean {
+  let set = curatedAddressSets.get(chainId)
+  if (!set) {
+    set = new Set(getChainTokenList(chainId).map((t) => t.address.toLowerCase()))
+    curatedAddressSets.set(chainId, set)
+  }
+  return set.has(address.toLowerCase())
+}
+
 // [SPRINT-9Y] Map a ChainToken to the rich Token the selector renders.
 // [CHORE-STABLECOIN-CONSTANT] Carries the chainId so the category fallback is chain-keyed.
 function chainTokenToToken(t: ChainToken, chainId: number): Token {

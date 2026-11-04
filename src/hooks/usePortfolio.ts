@@ -9,6 +9,7 @@ import { useActiveChainId } from '@/hooks/useChainId'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { getChainTokenList } from '@/lib/chains/tokens'
 import { isPortfolioSupportedChain } from '@/lib/portfolio-chains'
+import { setVisibleInterval } from '@/lib/visible-interval'
 import { useTokenBalances } from './useTokenBalances'
 
 // ── Public surface ────────────────────────────────────────
@@ -190,11 +191,12 @@ function useDiscoveredTokens(address: string | undefined, chainId: number): {
     }
 
     fetchDiscovery()
-    const interval = setInterval(fetchDiscovery, DISCOVERY_REFRESH_MS)
+    // [fix/v1-maintenance C3] paused while the tab is hidden; one refresh when it is visible again.
+    const stopPolling = setVisibleInterval(fetchDiscovery, DISCOVERY_REFRESH_MS)
 
     return () => {
       cancelled = true
-      clearInterval(interval)
+      stopPolling()
     }
   }, [address, chainId, refreshCounter])
 
@@ -413,11 +415,12 @@ export function usePortfolio(): PortfolioData {
     }
 
     fetchPrices()
-    const interval = setInterval(fetchPrices, PRICES_REFRESH_MS)
+    // [fix/v1-maintenance C3] paused while the tab is hidden; one refresh when it is visible again.
+    const stopPolling = setVisibleInterval(fetchPrices, PRICES_REFRESH_MS)
 
     return () => {
       cancelled = true
-      clearInterval(interval)
+      stopPolling()
     }
   }, [heldAddressesKey, heldEntries.length, refreshCounter, activeChainId])
 
