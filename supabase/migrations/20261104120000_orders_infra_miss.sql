@@ -35,6 +35,14 @@
 --  Idempotent (IF NOT EXISTS) — safe to re-run.
 --  OPS: apply to the LIVE Supabase DB MANUALLY (CI does NOT run migrations against prod). Order
 --  relative to the keeper restart does not matter — the keeper degrades to "trail not recorded".
+--  [A73 S-5] On the live table build the index CONCURRENTLY so it never takes a write lock on
+--  `orders` while the keeper is running:
+--      CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_last_infra_miss_at
+--        ON orders (chain_id, last_infra_miss_at) WHERE last_infra_miss_at IS NOT NULL;
+--  CONCURRENTLY cannot run inside a transaction block — run that one statement on its own (the
+--  Supabase SQL editor wraps a multi-statement run in a transaction), after the two ALTERs below.
+--  The plain form below is for an empty / fresh database (schema.sql parity) and is also safe on a
+--  table this small today.
 -- ══════════════════════════════════════════════════════════
 
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS last_infra_miss_at TIMESTAMPTZ;

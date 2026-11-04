@@ -151,6 +151,12 @@ CREATE INDEX IF NOT EXISTS idx_orders_hash       ON orders (order_hash);
 -- (CONCURRENTLY must run outside a transaction).
 CREATE INDEX IF NOT EXISTS idx_orders_chain_status ON orders (chain_id, status);
 CREATE INDEX IF NOT EXISTS idx_orders_chain_active ON orders (chain_id, status, created_at) WHERE status = 'active';
+-- [ADR-026 / A73 S-5] The 24 h infra-miss count (GET /api/monitor/keepers) filters on
+-- chain_id + last_infra_miss_at; partial so it only holds rows that ever missed. Mirrors
+-- supabase/migrations/20261104120000_orders_infra_miss.sql (build it CONCURRENTLY on a live table).
+CREATE INDEX IF NOT EXISTS idx_orders_last_infra_miss_at
+  ON orders (chain_id, last_infra_miss_at)
+  WHERE last_infra_miss_at IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_executions_order  ON order_executions (order_id);
 -- [CHORE-KEEPER-RECORD-EXECUTIONS] Defense-in-depth idempotency for the keeper's per-fill

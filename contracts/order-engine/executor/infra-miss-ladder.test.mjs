@@ -530,6 +530,11 @@ describe("executor.js wiring — paused gate, infra log, column tolerance, migra
     assert.ok(adds.every((l) => !/NOT NULL|DEFAULT/.test(l)), "nullable, no default — a pre-migration row reads as never missed")
     const schema = readFileSync(new URL("../schema.sql", import.meta.url), "utf-8")
     assert.ok(schema.includes("last_infra_miss_at") && schema.includes("last_infra_miss_reason"))
+    // [A73 S-5] the partial index is mirrored in schema.sql, and the OPS note tells the owner to build it
+    // CONCURRENTLY on the live table (outside a transaction).
+    assert.match(schema, /CREATE INDEX IF NOT EXISTS idx_orders_last_infra_miss_at\s+ON orders \(chain_id, last_infra_miss_at\)\s+WHERE last_infra_miss_at IS NOT NULL;/)
+    assert.match(sql, /CREATE INDEX CONCURRENTLY/, "the OPS comment names the CONCURRENTLY form")
+    assert.match(sql, /outside a transaction|cannot run inside a transaction/i)
   })
 })
 
