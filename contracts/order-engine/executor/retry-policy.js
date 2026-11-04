@@ -241,15 +241,19 @@ export function classifyMissCause({
   //    The chain decides; the next cycle re-reads it through canExecute. Never counted.
   if (txSent) return infra("receipt-unavailable")
   const meta = err == null ? null : collectErrorMeta(err)
-  // 6. The KEEPER wallet is out of gas — ours, not the user's balance.
-  if (meta && (meta.names.includes("InsufficientFundsError") || KEEPER_GAS_TEXT.test(meta.text))) return infra("keeper-gas")
+  // [A73 S-2] A revert anywhere in the chain is the CONTRACT talking (the same guard rpc-auth.js
+  // applies before its auth words): its text can say "insufficient funds" too, so the keeper-gas
+  // rule below applies only when nothing reverted.
+  const isRevert = !!meta && (meta.names.some((n) => REVERT_NAME.test(n)) || REVERT_TEXT.test(meta.text))
+  // 6. The KEEPER wallet is out of gas — ours, not the user's balance. Never on a revert.
+  if (meta && !isRevert && (meta.names.includes("InsufficientFundsError") || KEEPER_GAS_TEXT.test(meta.text))) return infra("keeper-gas")
   // 7. A permanent cause decoded from the revert (allowance / balance / nonce) — order, by code.
   const permanent = classifyFailure({ err, swapReason })
   if (permanent.terminal) return order(permanent.reason)
   // 8. A decoded executor / router revert — order, named.
   if (executorErrorName) return order(`revert:${executorErrorName}`)
   if (swapReason) return order("revert:swap-failed")
-  if (meta && (meta.names.some((n) => REVERT_NAME.test(n)) || REVERT_TEXT.test(meta.text))) return order("revert")
+  if (isRevert) return order("revert")
   // 9. The provider / network could not be reached or answered with an HTTP error.
   if (meta && (meta.statuses.length > 0 || meta.names.some((n) => TRANSPORT_NAME.test(n)) || meta.codes.some((c) => TRANSPORT_CODE.test(c)) || TRANSPORT_TEXT.test(meta.text))) {
     return infra("rpc-transport")

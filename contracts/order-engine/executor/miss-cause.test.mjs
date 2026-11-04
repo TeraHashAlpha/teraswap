@@ -55,6 +55,13 @@ describe("classifyMissCause — the cause table (ADR-026 §2)", () => {
       assert.deepEqual(classifyMissCause({ err: named("InsufficientFundsError", "The total cost (gas * gas fee + value) of executing this transaction exceeds the balance of the account.") }), infra("keeper-gas"))
       assert.deepEqual(classifyMissCause({ err: new Error("insufficient funds for gas * price + value") }), infra("keeper-gas"))
     })
+    test("[A73 S-2] a REVERT whose text happens to say 'insufficient funds' is the contract talking ⇒ order, never keeper-gas", () => {
+      assert.deepEqual(classifyMissCause({ err: named("ContractFunctionRevertedError", "execution reverted: insufficient funds for transfer") }), orderCause("revert"))
+      assert.deepEqual(classifyMissCause({ err: new Error("execution reverted: exceeds the balance of the account") }), orderCause("revert"))
+      assert.deepEqual(classifyMissCause({ err: named("ContractFunctionExecutionError", 'The contract function "executeOrder" reverted.\n\nError: insufficient funds for gas') }), orderCause("revert"))
+      // the node's own insufficient-funds verdict (no revert anywhere in the chain) is still ours
+      assert.deepEqual(classifyMissCause({ err: Object.assign(named("InsufficientFundsError", "The total cost (gas * gas fee + value) of executing this transaction exceeds the balance of the account."), { cause: new Error("insufficient funds for gas * price + value") }) }), infra("keeper-gas"))
+    })
     test("a SENT tx whose receipt could not be fetched ⇒ infra receipt-unavailable (the chain decides; the next cycle re-reads it)", () => {
       assert.deepEqual(classifyMissCause({ txSent: true, err: named("WaitForTransactionReceiptTimeoutError", "Timed out while waiting for transaction") }), infra("receipt-unavailable"))
       assert.deepEqual(classifyMissCause({ txSent: true, err: http(502, "Bad Gateway") }), infra("receipt-unavailable"))
