@@ -60,8 +60,8 @@ export function installHarnessGlobals(): void {
   )
 }
 
-/** a0 landing visitor · a swap visitor, no amount · b visitor + amount · c wallet + amount (ETH→USDC) · c20 wallet + amount, ERC-20 sell (USDC→ETH) */
-export type State = 'a0' | 'a' | 'b' | 'c' | 'c20'
+/** a0 landing visitor · a swap visitor, no amount · b visitor + amount · c wallet + amount (ETH→USDC) · c20 wallet + amount, ERC-20 sell (USDC→ETH) · p wallet on the Portfolio tab (B8) */
+export type State = 'a0' | 'a' | 'b' | 'c' | 'c20' | 'p'
 
 export interface ScenarioResult {
   ui: Ui
@@ -130,6 +130,30 @@ export async function runScenario(opts: { ui: Ui; state: State; hide?: boolean }
       const { LandingV2 } = await import('@/ui/v2/landing')
       tree = <LandingV2 onLaunchApp={() => {}} />
     }
+  } else if (state === 'p') {
+    // [B8] The Portfolio tab with a connected wallet: v1's PortfolioTab / the v2 tab, both over the same usePortfolio().
+    // /api/portfolio/* answers `{}` (HTTP is not RPC): discovery is "available" with no ERC-20s, so the native balance is the RPC reader.
+    if (ui === 'v1') {
+      const [{ default: PortfolioTab }, { default: Footer }] = await Promise.all([import('@/components/PortfolioTab'), import('@/components/Footer')])
+      tree = (
+        <>
+          <PortfolioTab />
+          <Footer />
+        </>
+      )
+    } else {
+      const [{ PortfolioTab }, { Footer }, { V2ToastProvider }] = await Promise.all([
+        import('@/ui/v2/portfolio/PortfolioTab'),
+        import('@/ui/v2/shell/Footer'),
+        import('@/ui/v2/shell/toasts'),
+      ])
+      tree = (
+        <V2ToastProvider>
+          <PortfolioTab />
+          <Footer />
+        </V2ToastProvider>
+      )
+    }
   } else if (ui === 'v1') {
     const [{ default: SwapBox }, { default: Footer }] = await Promise.all([import('@/components/SwapBox'), import('@/components/Footer')])
     tree = (
@@ -163,7 +187,7 @@ export async function runScenario(opts: { ui: Ui; state: State; hide?: boolean }
     })
     // `Providers` is loaded through next/dynamic in production only; here it is the component itself.
 
-    if (state === 'c' || state === 'c20') {
+    if (state === 'c' || state === 'c20' || state === 'p') {
       // Let WagmiProvider's reconnect-on-mount finish first, or its "no recent connector" result lands after connect().
       await advance(250)
       await act(async () => {
@@ -223,7 +247,7 @@ export async function runScenario(opts: { ui: Ui; state: State; hide?: boolean }
   } finally {
     cleanup()
     // The wagmi config is a module singleton: drop the mock wallet so the next scenario starts as a visitor.
-    if (state === 'c' || state === 'c20') await act(async () => { await disconnect(config).catch(() => {}) })
+    if (state === 'c' || state === 'c20' || state === 'p') await act(async () => { await disconnect(config).catch(() => {}) })
     try { localStorage.clear(); sessionStorage.clear() } catch { /* jsdom storage unavailable */ }
     clock = Math.max(clock, Date.now())
     vi.useRealTimers()
