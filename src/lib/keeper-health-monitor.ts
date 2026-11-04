@@ -219,10 +219,49 @@ export async function readKeeperPausedState(chainId: number): Promise<KeeperPaus
   }
 }
 
+// ── [ADR-026] Orders with INFRA misses in the last 24 h ──
+// The keeper tags every miss `infra` (RPC auth/transport, paused, Supabase or /api/swap down, keeper
+// gas, receipt unreadable) or `order`, counts only `order` misses toward 'failed', and records an
+// infra miss on orders.last_infra_miss_at / _reason (migration 20261104120000_orders_infra_miss.sql,
+// applied manually). This is the off-host READ of that trail: one head-count per chain, read-only.
+
+export const INFRA_MISS_WINDOW_MS = 24 * 60 * 60 * 1000
+
+/** Supabase/PostgREST "column does not exist" — the ADR-026 migration is not applied yet. */
+const MISSING_INFRA_MISS_COLUMN = /42703|PGRST204|last_infra_miss/i
+
+/**
+ * Orders on `chainId` the keeper could NOT attempt for an infrastructure reason in the last 24 h.
+ * `null` = unreadable (no Supabase, query error, migration not applied). Never throws.
+ */
+export async function countInfraMissOrders24h(chainId: number, nowMs: number = Date.now()): Promise<number | null> {
+  const supabase = getSupabase()
+  if (!supabase) return null
+  try {
+    const since = new Date(nowMs - INFRA_MISS_WINDOW_MS).toISOString()
+    const { count, error } = await supabase
+      .from('orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('chain_id', chainId)
+      .gte('last_infra_miss_at', since)
+    if (error) {
+      const text = `${(error as { code?: string }).code ?? ''} ${(error as { message?: string }).message ?? ''}`
+      if (!MISSING_INFRA_MISS_COLUMN.test(text)) console.warn(`[KEEPER] infra-miss count failed (chain ${chainId}): ${text.trim()}`)
+      return null
+    }
+    return typeof count === 'number' ? count : null
+  } catch {
+    return null
+  }
+}
+
 /** Every chain in KEEPER_CHAINS — for GET /api/monitor/keepers (the daily report's read). */
-export async function readAllKeeperPausedStates(): Promise<Array<KeeperPausedState & { active: boolean }>> {
+export async function readAllKeeperPausedStates(): Promise<Array<KeeperPausedState & { active: boolean; infraMissOrders24h: number | null }>> {
   return Promise.all(
-    KEEPER_CHAINS.map(async (c) => ({ ...(await readKeeperPausedState(c.chainId)), active: isChainActive(c.chainId) })),
+    KEEPER_CHAINS.map(async (c) => {
+      const [paused, infraMissOrders24h] = await Promise.all([readKeeperPausedState(c.chainId), countInfraMissOrders24h(c.chainId)])
+      return { ...paused, active: isChainActive(c.chainId), infraMissOrders24h }
+    }),
   )
 }
 

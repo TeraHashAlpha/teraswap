@@ -63,6 +63,16 @@ describe('GET /api/monitor/keepers', () => {
     expect(body.chains[0]).toEqual({ chainId: 8453, active: true, readable: true, paused: 'rpc-auth', pausedSince: SINCE })
   })
 
+  it('[ADR-026] infraMissOrders24h passes through per chain (a number, or null when unreadable); it never changes the status', async () => {
+    mockReadAll.mockResolvedValue([
+      { chainId: 8453, active: true, readable: true, paused: null, pausedSince: null, infraMissOrders24h: 3 },
+      { chainId: 42161, active: false, readable: true, paused: null, pausedSince: null, infraMissOrders24h: null },
+    ])
+    const body = await (await callGET({ Authorization: `Bearer ${TEST_SECRET}` })).json()
+    expect(body.status).toBe('OK')
+    expect(body.chains.map((c: { chainId: number; infraMissOrders24h: unknown }) => [c.chainId, c.infraMissOrders24h])).toEqual([[8453, 3], [42161, null]])
+  })
+
   it('OK when readable and nothing is paused; UNKNOWN when nothing could be read (e.g. migration pending)', async () => {
     mockReadAll.mockResolvedValueOnce([{ chainId: 8453, active: true, readable: true, paused: null, pausedSince: null }])
     expect((await (await callGET({ Authorization: `Bearer ${TEST_SECRET}` })).json()).status).toBe('OK')

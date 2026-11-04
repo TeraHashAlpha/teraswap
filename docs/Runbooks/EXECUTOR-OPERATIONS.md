@@ -257,6 +257,43 @@ keeper (the key sits inside a URL path in a host env file). Every keeper RPC cal
 
 ---
 
+## 8. What happens to orders during an outage (ADR-026)
+
+**Rule:** a miss caused by OUR infrastructure never counts against a user's order. The keeper tags
+every miss (`retry-policy.js classifyMissCause`) and only an `order` miss advances
+`orders.consecutive_failures` toward `MAX_CYCLE_FAILURES` (8) → `failed`.
+
+| Cause | Examples | What the keeper does |
+|---|---|---|
+| **infra** (ours) | RPC key rejected (`rpc-auth`), provider 5xx / 429 / timeout / socket (`rpc-transport`), keeper wallet out of gas (`keeper-gas`), a sent tx whose receipt could not be read (`receipt-unavailable`), `/api/swap` 5xx / 429 / unreachable / wrong-router calldata (`swap-api:*`), a keeper config gap (`keeper-config`), an unrecognised throw before any tx (`unclassified`) | Order stays **active**; `consecutive_failures` untouched; row gets `last_attempt_at` + `last_infra_miss_at` / `last_infra_miss_reason`; log line `infra miss (<reason>) — NOT counted (n/8)`; retried on the next healthy cycle (after the ladder's own backoff only if the order was already mid-ladder). |
+| **order** (the order's) | mined revert, simulated revert (slippage / minOut / floor), allowance / balance / nonce, expiry, `/api/swap` answered with no route for the pair | Exactly as before: counted (or failed now for a permanent cause), `no_route_after_retries` / `min_output_unreachable` at the cap. |
+
+**While `paused: rpc-auth`** (3 consecutive key rejections, § 4 / § 7) the cycle logs
+`PAUSED (rpc-auth): N active order(s) NOT attempted — no lock, no tx, no retry count` and does nothing
+else; the cycle-start balance read and the event watcher keep probing, so the pause clears by itself
+once the key works (one `RPC auth recovered` alert) and the next cycle attempts again.
+
+**DCA during an outage:** nothing is back-filled and nothing is executed twice. The contract's
+`dcaLastExecution + dcaInterval` gate is the only thing that decides whether a chunk is due, so after
+a 2.5-interval outage the first healthy cycle fills ONE chunk and the next one comes a full interval
+after that fill. Limit / stop-loss orders simply fill on the first healthy cycle whose price condition
+holds, within their expiry. An order that expires DURING the outage is recorded `expired` as before.
+
+**Reading it afterwards:**
+- Daily report row `Orders with infra misses (24 h)` (⚠️ when > 0, with an attention bullet;
+  ℹ️ `unknown` until migration `20261104120000_orders_infra_miss.sql` is applied) — source
+  `GET /api/monitor/keepers` → `chains[].infraMissOrders24h`.
+- Keeper `/health` → `stats.infraMisses` (misses not counted this process) and `stats.pausedCycles`.
+- Supabase (read-only): `SELECT id, order_type, status, consecutive_failures, last_attempt_at,
+  last_infra_miss_at, last_infra_miss_reason FROM orders WHERE chain_id = <id> AND last_infra_miss_at > now() - interval '24 hours';`
+- pm2 log: `infra miss (<reason>)` lines, one per order per attempted cycle.
+
+**Nothing to do for the orders themselves** once the cause is fixed (§ 5 restart, § 7 key swap, gas
+top-up): they resume on their own. What to check is that the cause IS fixed — a persistent infra
+miss is never capped, so it keeps retrying (and logging) until the order fills or expires.
+
+---
+
 ## References
 
 - ADR — order engine architecture (see `docs/ADR/`)

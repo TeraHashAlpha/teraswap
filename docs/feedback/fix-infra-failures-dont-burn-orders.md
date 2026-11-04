@@ -4,8 +4,8 @@
 - [x] Worktree `~/ts-worktrees/infra-failures-dont-burn-orders` off origin/main a5cd8fe, real `npm ci` (root + executor), SSH-signed noreply committer
 - [x] C1 classify every miss (`classifyMissCause` / `classifySwapApiMiss`, plan carries `cause`), ADR-026 Proposed, index row
 - [x] C2 only `order` misses count; infra ⇒ `last_attempt_at` + `last_infra_miss_*`, order alive; paused ⇒ no attempt; migration (manual)
-- [ ] C3 visibility: `/api/monitor/keepers.infraMissOrders24h` + daily report + `/health.infraMisses` + runbook § 8
-- [ ] Verify: keeper suite Node 20.20.2 + 22.23.4 (0 cancelled), vitest, lint, tsc, CodeQL 0 new; push + compare link
+- [x] C3 visibility: `/api/monitor/keepers.infraMissOrders24h` + daily report + `/health.infraMisses` + runbook § 8
+- [x] Verify: keeper suite Node 20.20.2 + 22.23.4 (0 cancelled), vitest, lint, tsc, CodeQL 0 new · [x] push + compare link
 
 ## 1. Cause table
 ADR: `docs/ADR/ADR-026-infra-failures-dont-burn-orders.md` § Decision 1 (the table lives there; one line per site).
@@ -39,3 +39,22 @@ submission-refused / routing-gap / canExecute=false / lock conflict.
 ## Premises checked
 - "reuse rpc-auth.js classification": done (`classifyRpcError` imported into retry-policy.js; a revert saying "not on whitelist" stays order).
 - `orders.error` cannot hold the infra reason: `DcaOrdersList.tsx:110` shows any non-null `error` as a failed order ⇒ two new columns.
+
+## 3. Test matrix (`infra-miss-ladder.test.mjs` 19 + `miss-cause.test.mjs` 25 = 44/44 on Node 22; same on 20)
+auth outage 20 cycles ⇒ count 0, active, `last_infra_miss_reason=rpc-auth`, then healthy ⇒ exactly one fill ✓ · paused ⇒ 20 cycles,
+row byte-identical, first healthy cycle fills ✓ · 503 outage over 2.5 DCA intervals ⇒ count 0, ONE chunk on recovery, next chunk
+exactly `lastExec + interval` (no back-fill) ✓ · sent-and-reverted ⇒ +1 ✓ · 8 order misses ⇒ `failed` + alert as before ✓ ·
+MIXED 3 order / 20 infra / 4 order ⇒ active at 7, 8th ORDER miss fails (28 attempts) ✓ · fill resets count, keeps trail ✓ ·
+backoff from last attempt ≤ 30 min, restart-proof ✓ · columns tolerated when absent (both-missing order too) ✓ · cause table 21 ✓.
+
+## 4. Suites
+Keeper `node --test`: **877/877, 0 fail, 0 cancelled** on Node 20.20.2 AND 22.23.4 (CI versions; tarballs SHA-verified). One earlier run
+tripped `chain-verify` "10x input … exceeds RATIO_BOUND" while vitest+lint+tsc ran concurrently — the known timing flake (file untouched),
+0/3 on a quiet machine. vitest 411 files / 6580 pass · eslint 0 errors / 93 warnings (unchanged, cap 94) · tsc clean ·
+CodeQL `javascript-security-extended` (codeql-local.sh): **13 → 13, 0 new** (same file:line set as after #653: orders/route.ts ×8, auth.ts:47,
+api-auth.ts:94, fingerprint-validator.ts:319, capture-endpoint-baseline.ts:54, telegram/webhook:163).
+
+## 5. Diff + link
+`git diff --stat origin/main..HEAD`: 17 files, +1328/−26 (before this file's final edit). 3 signed commits (classify / counter / visibility).
+Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/infra-failures-dont-burn-orders — owner opens the PR as DRAFT;
+**Auditor required** (keeper execution logic). Migration `20261104120000_orders_infra_miss.sql` is applied MANUALLY by the owner.

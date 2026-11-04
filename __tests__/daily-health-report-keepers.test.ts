@@ -39,10 +39,20 @@ function tokens(body: unknown): string {
   return execFileSync(process.execPath, ['-e', tokenScript(), JSON.stringify(body)], { encoding: 'utf-8' })
 }
 
+/** [ADR-026] The monitor step's `keepers_infra=` token builder: /api/monitor/keepers body → "chainId=<n|unknown>" tokens. */
+function infraTokenScript(): string {
+  const m = YML.match(/keepers_infra=\$\(node -e '([^']+)' "\$keepers_body"\)/)
+  if (!m) throw new Error('keepers_infra= token builder not found in daily-health-report.yml')
+  return m[1]
+}
+function infraTokens(body: unknown): string {
+  return execFileSync(process.execPath, ['-e', infraTokenScript(), JSON.stringify(body)], { encoding: 'utf-8' })
+}
+
 /** The compose step on an otherwise healthy production, with the given keeper inputs. */
-function report(keepersStatus: string, keepers: string): string {
+function report(keepersStatus: string, keepers: string, keepersInfra = ''): string {
   const script = join(dir, 'compose-report.mjs')
-  const out = join(dir, `report-${keepersStatus}-${keepers.replace(/[^a-z0-9]/gi, '_')}.md`)
+  const out = join(dir, `report-${keepersStatus}-${keepers.replace(/[^a-z0-9]/gi, '_')}-${keepersInfra.replace(/[^a-z0-9]/gi, '_')}.md`)
   writeFileSync(script, composeScript())
   execFileSync(process.execPath, [script], {
     env: {
@@ -60,6 +70,7 @@ function report(keepersStatus: string, keepers: string): string {
       ALERTS_STATUS: 'OK',
       KEEPERS_STATUS: keepersStatus,
       KEEPERS: keepers,
+      KEEPERS_INFRA: keepersInfra,
       GAS_CHAINS: '',
       GIT_COUNT: '0',
     },
@@ -103,5 +114,41 @@ describe('[A71 M-2] daily-health-report: keeper state', () => {
     const unreachable = report('UNKNOWN', '')
     expect(unreachable).toContain('UNKNOWN — /api/monitor/keepers could not be read')
     expect(unreachable).toContain('🟡 WARNING')
+  })
+})
+
+describe('[ADR-026] daily-health-report: orders with infra misses in the last 24 h', () => {
+  const INFRA_ROW = '| Orders with infra misses (24 h) |'
+
+  it('the token builder maps infraMissOrders24h to "chainId=<n>" and a null to "unknown"; every character whitelisted', () => {
+    const body = {
+      status: 'OK',
+      chains: [
+        { chainId: 8453, active: true, readable: true, paused: null, pausedSince: null, infraMissOrders24h: 3 },
+        { chainId: 42161, active: false, readable: true, paused: null, pausedSince: null, infraMissOrders24h: null },
+        { chainId: 1, active: true, readable: true, paused: null, pausedSince: null, infraMissOrders24h: '7\nmalicious' },
+      ],
+    }
+    expect(infraTokens(body)).toBe('8453=3 42161=unknown 1=unknown')
+    expect(infraTokens({ status: 'OK', chains: [{ chainId: 8453 }] })).toBe('8453=unknown') // an older route deploy without the field
+    expect(infraTokens('')).toBe('')
+  })
+
+  it('a chain with infra misses ⇒ ⚠️ row + WARNING + an attention bullet that says the orders were NOT counted', () => {
+    const md = report('OK', '8453=ok 42161=inactive', '8453=3 42161=0')
+    expect(md).toContain(`${INFRA_ROW} ⚠️ | Base: 3, Arbitrum One: 0 — misses caused by our infrastructure, NOT counted against the orders (ADR-026) |`)
+    expect(md).toContain('🟡 WARNING')
+    expect(md).toContain('3 order(s) on Base missed a cycle for an infrastructure reason in the last 24 h (ADR-026: not counted against them)')
+  })
+
+  it('all zero ⇒ ✅ row, no warning; all unknown ⇒ ℹ️ row naming the migration, no warning; no tokens ⇒ no row', () => {
+    const ok = report('OK', '8453=ok 42161=inactive', '8453=0 42161=0')
+    expect(ok).toContain(`${INFRA_ROW} ✅ | Base: 0, Arbitrum One: 0 |`)
+    expect(ok).toContain('🟢 OK')
+    const unknown = report('OK', '8453=ok 42161=inactive', '8453=unknown 42161=unknown')
+    expect(unknown).toContain(`${INFRA_ROW} ℹ️ | unknown — migration 20261104120000_orders_infra_miss.sql not applied (or Supabase unreadable) |`)
+    expect(unknown).toContain('🟢 OK')
+    const none = report('OK', '8453=ok 42161=inactive', '')
+    expect(none).not.toContain(INFRA_ROW)
   })
 })

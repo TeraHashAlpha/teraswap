@@ -368,3 +368,19 @@ describe("executor.js wiring — paused gate, infra log, column tolerance, migra
     assert.ok(schema.includes("last_infra_miss_at") && schema.includes("last_infra_miss_reason"))
   })
 })
+
+describe("executor.js wiring — /health counts infra misses and paused cycles (ADR-026 §5)", () => {
+  test("stats.infraMisses / stats.pausedCycles exist, are incremented at the two sites, and are served on /health", () => {
+    const src = executorSource()
+    const stats = sliceBetween(src, "const stats = {", "\n}")
+    assert.ok(stats.includes("infraMisses: 0,"))
+    assert.ok(stats.includes("pausedCycles: 0,"))
+    const handler = sliceBetween(src, "async function handleExecutionFailure(", "\nasync function unlockStaleOrders")
+    assert.ok(handler.includes("stats.infraMisses++"))
+    const gate = sliceBetween(src, "const pausedState = rpcAuthMonitor ? rpcAuthMonitor.state().paused : null", "return orders.length")
+    assert.ok(gate.includes("stats.pausedCycles++"))
+    const health = sliceBetween(src, 'if (req.url === "/health"', 'else if (req.url === "/")')
+    assert.ok(health.includes("infraMisses: stats.infraMisses,"))
+    assert.ok(health.includes("pausedCycles: stats.pausedCycles,"))
+  })
+})

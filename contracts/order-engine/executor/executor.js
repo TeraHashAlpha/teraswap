@@ -870,6 +870,7 @@ async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, 
   } else if (plan.kind === "infra") {
     // [ADR-026 §2] Ours, not the order's: the ladder did not move. Retried on the next healthy cycle
     // (after the ladder's own backoff only if the order was already mid-ladder).
+    stats.infraMisses++
     log(`  Order ${dbOrder.id.slice(0, 8)}... infra miss (${plan.causeReason}) — NOT counted (${plan.failures}/${MAX_CYCLE_FAILURES}); order left active, retried next healthy cycle`)
   } else if (plan.kind === "fail") {
     log(`  Order ${dbOrder.id.slice(0, 8)}... FAILED — reason=${plan.reason} cause=${plan.cause}:${plan.causeReason} (after ${plan.failures} attempt(s))`)
@@ -1387,6 +1388,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   const pausedState = rpcAuthMonitor ? rpcAuthMonitor.state().paused : null
   if (pausedState) {
     log(`  PAUSED (${pausedState}): ${orders.length} active order(s) NOT attempted — no lock, no tx, no retry count (ADR-026)`)
+    stats.pausedCycles++
     await endCycleObservability(obsCtx, publicClient, ownGasSpentWei, { idle: true })
     return orders.length
   }
@@ -2200,6 +2202,10 @@ const stats = {
   // [fix/executor-alert-masking-rpc-auth] null | "rpc-auth" — and the monitor's state behind it.
   paused: null,
   rpcAuth: null,
+  // [ADR-026] misses that were OURS (never counted against an order) and cycles that attempted
+  // nothing because the keeper was paused — per process, for /health.
+  infraMisses: 0,
+  pausedCycles: 0,
 }
 
 // ---- Health check HTTP server ------------------------------------------
@@ -2239,6 +2245,9 @@ function startHealthServer() {
           totalSkipped: stats.totalSkipped,
           totalErrors: stats.totalErrors,
           lastCycleAt: stats.lastCycleAt,
+          // [ADR-026] additive: misses that were ours (not counted) / cycles that attempted nothing
+          infraMisses: stats.infraMisses,
+          pausedCycles: stats.pausedCycles,
         },
       }, null, 2))
     } else if (req.url === "/") {
