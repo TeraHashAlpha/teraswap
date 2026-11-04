@@ -38,6 +38,7 @@ import './dca.css'
 import { DCA_PAUSED_RE, protectionHint, protectionLabel, sanitizeAmountInput } from './dca-model'
 import { useDcaForm, type DcaForm, type PreparedReview } from './use-dca-form'
 import { useDcaLifecycle } from './use-dca-lifecycle'
+import { useCancelFocusRestore } from '../orders/keyboard'
 
 /** README §3: the thousands separator is a thin space (v1's `fmtToken` groups with U+0020). */
 const thin = (s: string) => s.replace(/ /g, '\u2009')
@@ -511,9 +512,12 @@ export function DcaCard({ chainId }: { chainId: number }) {
 
   const active = dcaOrders.filter((o) => ACTIVE_STATUSES.includes(o.status))
   const history = dcaOrders.filter((o) => HISTORY_STATUSES.includes(o.status))
+  // B7: after the cancel review closes, a position that left the list (Active → History) does not drop focus to <body>.
+  const rootRef = useRef<HTMLElement>(null)
+  useCancelFocusRestore(pendingCancel ? { orderId: pendingCancel.action === 'cancel' ? pendingCancel.orderId : null } : null, rootRef, '[role="tab"][aria-selected="true"]')
 
   return (
-    <section data-dca-card="" aria-label="DCA" className="ts-dca">
+    <section ref={rootRef} data-dca-card="" aria-label="DCA" className="ts-dca">
       <div className="ts-dca-tabs">
         <Segmented
           label="DCA"

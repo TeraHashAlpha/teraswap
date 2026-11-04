@@ -68,6 +68,7 @@ import {
 } from '@/lib/order-engine'
 import { NATIVE_ETH } from '@/lib/constants'
 import { getWrappedNative } from '@/lib/chains/registry'
+import { secureGet } from '@/lib/secure-storage'
 
 const ADDRESS = '0x1111111111111111111111111111111111111111'
 const FAKE_SIG = ('0x' + 'cc'.repeat(65))
@@ -795,9 +796,13 @@ describe('useOrderEngine — persistence (encrypted localStorage [P200])', () =>
     await createAndConfirm(first.result)
     const firstOrders = first.result.current.orders
     expect(firstOrders).toHaveLength(1)
-    // Wait for the encrypted write to land before tearing the hook down.
-    await waitFor(() => {
-      expect(localStorage.getItem('teraswap_orders_v4')).not.toBeNull()
+    // Wait for the encrypted write OF THIS ORDER to land before tearing the hook down. "The key
+    // exists" is not enough: right after load the save effect persists the EMPTY list first, so a
+    // slow runner would unmount between that write and the order write and the remount would
+    // decrypt `[]`. Decrypt the store and wait for the actual condition the remount depends on.
+    await waitFor(async () => {
+      const persisted = await secureGet<Array<{ orderHash: string }>>('teraswap_orders_v4')
+      expect(persisted?.map((o) => o.orderHash)).toEqual([firstOrders[0].orderHash])
     })
     first.unmount()
 

@@ -72,6 +72,10 @@ const ALLOWED = new Set([
   'components/dca/DCAFillsTimeline.tsx',
   // DISPLAY: the timeline's own test.
   'components/dca/__tests__/DCAFillsTimeline.test.tsx',
+  // DISPLAY: the v2 UI's restatement of the same per-fill USD (`fillUsdText`, rendered by v2's FillsTimeline as "~$…",
+  // "<$0.01", or "—" when unpriced). Labels a fill that already happened, exactly as DCAFillsTimeline does; gates and
+  // signs nothing. [B7, owner-approved exception to the v2 "nothing in src/lib" rule, 2026-10-31]
+  'ui/v2/dca/positions-model.ts',
   // This suite. It carries SYNTHETIC import strings as fixtures for the detector's own self-test
   // (below) — they are string literals, not imports, and excluding the guard from its own scan is
   // the only honest way to keep those fixtures.
