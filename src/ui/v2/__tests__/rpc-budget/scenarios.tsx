@@ -15,6 +15,7 @@ import { vi } from 'vitest'
 import { connect, disconnect } from 'wagmi/actions'
 import { mock } from 'wagmi/connectors'
 import { fixtureMeta } from '@/ui/v2/swap/test-fixtures'
+import { DASHBOARD, PERSONAL, STATS } from '@/ui/v2/analytics/analytics-fixtures'
 import { rpcCounter, resetRpcCounter, totalRpcCalls } from '@/test-utils/rpc-harness'
 
 export type Ui = 'v1' | 'v2'
@@ -42,7 +43,11 @@ export function installHarnessGlobals(): void {
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       let body: unknown = {}
-      if (url.includes('/api/quote')) {
+      // [B9] the Analytics tab's three reads answer with real-shaped bodies (HTTP is not RPC; v1's PersonalDashboard reads `sourceWinRates`).
+      if (url.includes('/api/analytics/personal')) body = PERSONAL
+      else if (url.includes('/api/analytics')) body = { dashboard: DASHBOARD }
+      else if (url.includes('/api/stats')) body = STATS
+      else if (url.includes('/api/quote')) {
         // Echo the request's identity exactly as /api/quote does (useQuote rejects a quote that does not name its pair).
         const q = new URL(url, 'http://localhost').searchParams
         body = {
@@ -60,8 +65,8 @@ export function installHarnessGlobals(): void {
   )
 }
 
-/** a0 landing visitor · a swap visitor, no amount · b visitor + amount · c wallet + amount (ETH→USDC) · c20 wallet + amount, ERC-20 sell (USDC→ETH) · p wallet on the Portfolio tab (B8) */
-export type State = 'a0' | 'a' | 'b' | 'c' | 'c20' | 'p'
+/** a0 landing visitor · a swap visitor, no amount · b visitor + amount · c wallet + amount (ETH→USDC) · c20 wallet + amount, ERC-20 sell (USDC→ETH) · p wallet on the Portfolio tab (B8) · an wallet on the Analytics tab (B9) */
+export type State = 'a0' | 'a' | 'b' | 'c' | 'c20' | 'p' | 'an'
 
 export interface ScenarioResult {
   ui: Ui
@@ -74,6 +79,8 @@ export interface ScenarioResult {
   hidden: Record<string, number> | null
   /** Per-method calls in the 5 s after the tab became visible again (null when the scenario never hides). */
   returned: Record<string, number> | null
+  /** [B9] HTTP (not RPC) requests per path over the same two windows — `/api/analytics` is polled by v1's own hook; reported so v1 and v2 compare. */
+  http: { steady: Record<string, number>; hidden: Record<string, number> | null }
 }
 
 export const SETTLE_MS = 5_000
@@ -94,6 +101,16 @@ export function setVisibility(state: 'visible' | 'hidden'): void {
 }
 
 const snap = () => ({ ...rpcCounter.byMethod })
+
+/** Count of `fetch` calls per URL path so far (the global stub is a vi.fn that lives across scenarios; windows are diffed). */
+const httpSnap = (): Record<string, number> => {
+  const out: Record<string, number> = {}
+  for (const [input] of (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls) {
+    const path = new URL(String(input), 'http://localhost').pathname
+    out[path] = (out[path] ?? 0) + 1
+  }
+  return out
+}
 
 async function advance(ms: number): Promise<void> {
   await act(async () => {
@@ -129,6 +146,38 @@ export async function runScenario(opts: { ui: Ui; state: State; hide?: boolean }
     } else {
       const { LandingV2 } = await import('@/ui/v2/landing')
       tree = <LandingV2 onLaunchApp={() => {}} />
+    }
+  } else if (state === 'an') {
+    // [B9] The Analytics tab with a connected wallet. v1 = its three Analytics components in the order the tab + /analytics page show them
+    // (AnalyticsDashboard, PublicProtocolStats, PersonalDashboard), v2 = the one tab. The reads are HTTP; the only RPC is the footer block
+    // and the connected wallet's own reads, so the budget is the Portfolio one.
+    if (ui === 'v1') {
+      const [{ default: AnalyticsDashboard }, { default: PublicProtocolStats }, { default: PersonalDashboard }, { default: Footer }] = await Promise.all([
+        import('@/components/AnalyticsDashboard'),
+        import('@/components/PublicProtocolStats'),
+        import('@/components/PersonalDashboard'),
+        import('@/components/Footer'),
+      ])
+      tree = (
+        <>
+          <AnalyticsDashboard />
+          <PublicProtocolStats payload={STATS} loading={false} failed={false} />
+          <PersonalDashboard />
+          <Footer />
+        </>
+      )
+    } else {
+      const [{ AnalyticsTab }, { Footer }, { V2ToastProvider }] = await Promise.all([
+        import('@/ui/v2/analytics/AnalyticsTab'),
+        import('@/ui/v2/shell/Footer'),
+        import('@/ui/v2/shell/toasts'),
+      ])
+      tree = (
+        <V2ToastProvider>
+          <AnalyticsTab />
+          <Footer />
+        </V2ToastProvider>
+      )
     }
   } else if (state === 'p') {
     // [B8] The Portfolio tab with a connected wallet: v1's PortfolioTab / the v2 tab, both over the same usePortfolio().
@@ -187,7 +236,7 @@ export async function runScenario(opts: { ui: Ui; state: State; hide?: boolean }
     })
     // `Providers` is loaded through next/dynamic in production only; here it is the component itself.
 
-    if (state === 'c' || state === 'c20' || state === 'p') {
+    if (state === 'c' || state === 'c20' || state === 'p' || state === 'an') {
       // Let WagmiProvider's reconnect-on-mount finish first, or its "no recent connector" result lands after connect().
       await advance(250)
       await act(async () => {
@@ -209,9 +258,6 @@ export async function runScenario(opts: { ui: Ui; state: State; hide?: boolean }
     await advance(SETTLE_MS)
     const afterMount = snap()
 
-    const before = snap()
-    await advance(WINDOW_MS)
-    const steadyEnd = snap()
     const diff = (a: Record<string, number>, b: Record<string, number>) => {
       const out: Record<string, number> = {}
       for (const m of new Set([...Object.keys(a), ...Object.keys(b)])) {
@@ -221,14 +267,23 @@ export async function runScenario(opts: { ui: Ui; state: State; hide?: boolean }
       return out
     }
 
+    const before = snap()
+    const httpBefore = httpSnap()
+    await advance(WINDOW_MS)
+    const steadyEnd = snap()
+    const httpSteady = diff(httpBefore, httpSnap())
+
     let hiddenCalls: Record<string, number> | null = null
     let returned: Record<string, number> | null = null
+    let httpHidden: Record<string, number> | null = null
     if (hide) {
       setVisibility('hidden')
       await advance(0)
       const h0 = snap()
+      const hh0 = httpSnap()
       await advance(WINDOW_MS)
       hiddenCalls = diff(h0, snap())
+      httpHidden = diff(hh0, httpSnap())
       const r0 = snap()
       setVisibility('visible')
       await advance(RETURN_MS)
@@ -242,12 +297,13 @@ export async function runScenario(opts: { ui: Ui; state: State; hide?: boolean }
       steady: diff(before, steadyEnd),
       hidden: hiddenCalls,
       returned,
+      http: { steady: httpSteady, hidden: httpHidden },
     }
     return result
   } finally {
     cleanup()
     // The wagmi config is a module singleton: drop the mock wallet so the next scenario starts as a visitor.
-    if (state === 'c' || state === 'c20' || state === 'p') await act(async () => { await disconnect(config).catch(() => {}) })
+    if (state === 'c' || state === 'c20' || state === 'p' || state === 'an') await act(async () => { await disconnect(config).catch(() => {}) })
     try { localStorage.clear(); sessionStorage.clear() } catch { /* jsdom storage unavailable */ }
     clock = Math.max(clock, Date.now())
     vi.useRealTimers()
