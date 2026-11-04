@@ -1,30 +1,36 @@
-# Feedback — feat/ui-v2-analytics (B9: v2 Analytics tab)
-
-Frames (round7/app): desktop `desktop/50-analytics.png`. Mobile: NONE exists (m02–m09 = Swap/DCA/Portfolio/Orders/wallet/help);
-375 derived from `mobile/m06`, `m07`, `mobile-sheet-1/2` per owner answer. Docs read: CHANGELOG.md, FUNCTIONAL-CONTAINERS.md.
-
-## Owner answers (2026-11-04, supersede the goal text)
-- Scope = **A + B**: A = v1 tab `AnalyticsDashboard`; B = v1 `/analytics` page (`PublicProtocolStats` + wallet `PersonalDashboard`),
-  because v2 rewrites `/analytics` to this tab and B would vanish. B has no frame (round7 language, in the delta below).
-- 375 layout: derive from m06/m07 (no mobile Analytics frame).
-
-## Premise deltas (recorded, not blocking)
-- "Aggregates cached 24 h": false in code. `/api/analytics` s-maxage=30, `/api/stats` 60, `/personal` 5 min; v1's `useAnalytics`
-  polls every 30 s with a bare setInterval (no visibility pause; HTTP, not RPC). Reused unchanged ⇒ v2 = v1; nothing added.
-- v1 reads `/api/stats` twice (page + tab); v2 reads it once for both blocks (same URL, once on mount, no polling).
-- v1 charts use no chart library (div bars) ⇒ none added. `PersonalDashboard`'s "Connect a wallet" card is unreachable on
-  `/analytics` (page gates on isConnected) ⇒ not rebuilt; the shell's Connect button owns that.
-
-## Checklist
-- [x] C1 tab: every v1 section, same order/values/states · parity v1 ⊆ v2 (0 missing) · figure equality ×4 periods
-- [ ] C2 charts + a11y + 375 + keyboard + reduced-motion
-- [ ] C3 rpc-budget Analytics scenario (visible + hidden)
-- [ ] Verify: suite vs main · lint Δ0 · tsc · build · v1 module-identical · CodeQL full suite · diff only src/ui/v2 + feedback
-
-## Content-map delta — frame-only extras NOT built (decide later)
-- Eyebrow "PROTOCOL ANALYTICS · PUBLIC" + `{HEADLINE SLOT}` (frame says the text is the owner's call, round-2 A3).
-- "per trade" sub-line under Avg Trade (v1 has none) · "WIN RATE" / "TRADES" column captions.
-- Volume Trend: y-axis $ scale + gridlines, a mid-date label, latest bar in cream (v1: first/last date only, tooltip per bar).
-- Popular Pairs: frame ranks bars by trade COUNT; v1 prints VOLUME (F4 fix) with trades in the tooltip ⇒ v1 kept, no bars.
-- Recent Activity: TYPE/PAIR/ROUTE/AGE/TX header row, tx hash text, "DCA BUY" chip (v1: type word + pair + source + age + ↗).
-- Gasless figures appear twice on one page (tab "Gasless Adoption" + page "Protocol performance") because both v1 surfaces are kept.
+# Feedback — feat/ui-v2-analytics (B9 v2 Analytics) · C1 3b6cd09 · C2 a1dc335 · C3 1d8d6b4 · all items done
+Owner answers 04 Nov (supersede goal): scope A+B (tab = AnalyticsDashboard; + /analytics page = PublicProtocolStats,
+  My Analytics);
+375 derived from m06/m07. Premise deltas: caches are 30 s/60 s/5 min, not 24 h; v1 charts are plain divs (no library
+  to reuse).
+## Evidence
+1 Frames (round7/app): desktop/50-analytics.png; mobile NONE (m06, m07, mobile-sheet-1/2 used). Shots in
+  docs/feedback/feat-ui-v2-analytics/: analytics-desktop · analytics-375 · analytics-375-visitor (.webp). 375: no
+  overflow, 0 errors.
+2 Parity (analytics.test.tsx: v1 AnalyticsDashboard+PublicProtocolStats+PersonalDashboard vs v2): 0 missing text, 0
+  missing
+  hrefs, 0 stale allow, over ready/loading/failed/empty/personal states (>120 v1 text nodes, order pinned).
+3 Figures: 4 periods walked in both, KPI values equal; routes, pairs, trend, ages, gasless, protocol, My Analytics
+  asserted.
+4 rpc-budget `an` (wallet on Analytics): v1 = v2 = mount 4, steady 2/min, hidden 0, return 4 (budget <= 6); guards
+  31/31.
+  HTTP identical: /api/analytics 2/min visible and 2/min hidden (v1's own hook, reused unchanged).
+5 CodeQL full security-extended: main 13 -> branch 13, identical file:line list, 0 new.
+6 v1 proof: 0 v1 files changed; / /swap /docs chunk bytes identical, /analytics +140 B (0.007%), 0 v2 markers in v1
+  chunks,
+  route table identical. Suite 411/6572 -> 413/6622 green; lint 93=93; tsc 0; build ok; diff 16 files, all src/ui/v2 +
+  this.
+  Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...feat/ui-v2-analytics
+## Concerns
+- v1 useAnalytics polls /api/analytics every 30 s even in a hidden tab (HTTP, not RPC); fixing it needs src/hooks (out
+  of scope).
+- sounds-parity.test.tsx timed out once on a cold transform cache (5 s); green 3/3 warm and in the full run.
+- /api/stats is read once for both blocks (v1 reads it twice); PersonalDashboard's Connect card is unreachable on
+  /analytics.
+## Content-map delta: frame-only extras NOT built (decide later)
+- Eyebrow "PROTOCOL ANALYTICS · PUBLIC" + {HEADLINE SLOT}; "per trade" under Avg Trade; WIN RATE / TRADES column
+  captions.
+- Volume Trend: y-axis $ scale, gridlines, mid date, latest bar cream (v1: first/last date + tooltip only).
+- Popular Pairs: frame ranks by trade COUNT with bars; v1 prints VOLUME (F4 fix), kept, no bars.
+- Recent Activity: TYPE/PAIR/ROUTE/AGE/TX header row, tx hash text, DCA BUY chip (v1: word, pair, source, age, arrow).
+- Gasless figures appear twice (tab Gasless Adoption + page Protocol performance): both v1 surfaces kept.
