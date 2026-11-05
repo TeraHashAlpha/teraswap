@@ -1,9 +1,10 @@
 'use client'
 
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useMemo, type ReactNode } from 'react'
 import { RainbowKitProvider } from '@rainbow-me/rainbowkit'
 import { useQuoteChainId } from '@/hooks/useChainId'
+import ComingSoonPanel from '@/components/ComingSoonPanel'
 import '../v2.css'
 import './shell.css'
 import { v2FontClassNames } from '../font-loader'
@@ -34,13 +35,50 @@ import { V2ToastProvider } from './toasts'
  */
 export function AppShell({ tab, children, onLogoClick }: { tab?: V2TabId; children?: ReactNode; onLogoClick?: () => void }) {
   const pathname = usePathname()
+  const router = useRouter()
   const chainId = useQuoteChainId()
   const active = tab ?? tabIdFromPathname(pathname)
   const rkTheme = useMemo(() => createV2RainbowTheme(), [])
+  const toSwap = () => router.push('/swap')
 
-  // B3: the Swap tab is the real card; B6: DCA; B7: Orders (v1 OrderDashboard) and History (v1 WalletHistory); B8: Portfolio (v1 PortfolioTab); B9: Analytics (v1 AnalyticsDashboard + the /analytics page). Every other tab is still a placeholder until its block lands.
+  // B3: the Swap tab is the real card; B6: DCA; B7: Orders (v1 OrderDashboard) and History (v1 WalletHistory); B8: Portfolio (v1 PortfolioTab); B9: Analytics (v1 AnalyticsDashboard + the /analytics page).
+  // [H-1, A75] Limit, SL/TP, and DCA on a chain that is neither gated (DcaNetworkGate) nor live (DcaCard) have no
+  // real pane of their own: v1's ComingSoonPanel carries them, never TabPane's permanent empty skeleton — a direct
+  // /limit or /sltp visit, and DCA on Arbitrum (in DCA_CHAINS, OrderExecutorV3 not yet operational per
+  // docs/DEPLOYMENTS.md) or with NEXT_PUBLIC_DCA_ENABLED unset, all land here. `data-tab-pane` keeps the attribute
+  // TabPane carried, so callers that query "the pane" by tab id still find it. Every other tab is still a
+  // placeholder until its block lands.
   const pane =
-    children ?? (active === 'swap' ? <SwapCard /> : active === 'dca' && shouldShowDcaGate(chainId) ? <DcaNetworkGate /> : active === 'dca' && isDcaLive(chainId) ? <DcaCard key={chainId} chainId={chainId} /> : active === 'orders' ? <OrdersTab /> : active === 'history' ? <HistoryTab /> : active === 'portfolio' ? <PortfolioTab /> : active === 'analytics' ? <AnalyticsTab /> : <TabPane tab={active} />)
+    children ??
+    (active === 'swap' ? (
+      <SwapCard />
+    ) : active === 'dca' && shouldShowDcaGate(chainId) ? (
+      <DcaNetworkGate />
+    ) : active === 'dca' && isDcaLive(chainId) ? (
+      <DcaCard key={chainId} chainId={chainId} />
+    ) : active === 'dca' ? (
+      <div data-tab-pane="dca">
+        <ComingSoonPanel mode="dca" chainId={chainId} onSwap={toSwap} />
+      </div>
+    ) : active === 'limit' ? (
+      <div data-tab-pane="limit">
+        <ComingSoonPanel mode="limit" chainId={chainId} onSwap={toSwap} />
+      </div>
+    ) : active === 'sltp' ? (
+      <div data-tab-pane="sltp">
+        <ComingSoonPanel mode="sltp" chainId={chainId} onSwap={toSwap} />
+      </div>
+    ) : active === 'orders' ? (
+      <OrdersTab />
+    ) : active === 'history' ? (
+      <HistoryTab />
+    ) : active === 'portfolio' ? (
+      <PortfolioTab />
+    ) : active === 'analytics' ? (
+      <AnalyticsTab />
+    ) : (
+      <TabPane tab={active} />
+    ))
 
   return (
     <RainbowKitProvider theme={rkTheme} locale="en">

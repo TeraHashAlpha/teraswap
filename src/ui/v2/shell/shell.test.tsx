@@ -249,19 +249,29 @@ describe('DCA tab', () => {
     expect(useDisconnectedChainSelection.getState().chainId).toBe(42161)
   })
 
-  it('on a DCA chain, or with the launch flag off, the plain pane shows — no claim, never "Soon"', () => {
+  it('on a DCA chain, the plain pane shows — no claim, never "Soon"', () => {
     h.pathname = '/dca'
     useDisconnectedChainSelection.setState({ chainId: 8453 })
     render(<AppShell />)
     expect(document.querySelector('[data-dca-gate]')).toBeNull()
     expect(document.querySelector('[data-tab-pane="dca"]')).not.toBeNull()
-    cleanup()
-    useDisconnectedChainSelection.setState({ chainId: null })
-    process.env.NEXT_PUBLIC_DCA_ENABLED = 'false'
+  })
+
+  // [H-1, A75] Required test: NEXT_PUBLIC_DCA_ENABLED unset. With the launch flag off, isDcaLive and
+  // shouldShowDcaGate are BOTH false on every chain — the tab used to fall all the way through to the permanent
+  // empty skeleton. It must show v1's ComingSoonPanel instead; the tab STRIP's own label still never says "Soon"
+  // (unaffected — that is the DCA tab's own, deliberate difference from Limit/SL-TP, pinned in 'tabs' above).
+  it('with the launch flag unset, v1\'s ComingSoonPanel shows on a DCA chain — never the skeleton, never a bare unclaimed pane', () => {
+    h.pathname = '/dca'
+    h.dcaLive = new Set() // the real isDcaLive would also say false for every chain once the flag is off
+    useDisconnectedChainSelection.setState({ chainId: 8453 })
+    delete process.env.NEXT_PUBLIC_DCA_ENABLED
     render(<AppShell />)
     expect(document.querySelector('[data-dca-gate]')).toBeNull()
-    expect(screen.queryByText(/DCA runs on/)).toBeNull()
-    expect(document.querySelector('[data-tab-pane="dca"]')?.textContent).not.toMatch(/soon/i)
+    expect(document.querySelector('.ts-v2-skeleton')).toBeNull()
+    expect(screen.getByText('Smart DCA Engine')).toBeTruthy()
+    expect(screen.getByText('Coming Soon')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Swap Now/ })).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'DCA' }).textContent).not.toMatch(/soon/i)
   })
 })
@@ -294,6 +304,21 @@ describe('DCA tab · per selected network (the gate, never the skeleton, when DC
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(heading)
     expect(screen.getByText(`${NAMES[chainId]} is selected. Switch network to create or manage DCA positions.`)).toBeTruthy()
     expect(screen.getAllByRole('button', { name: /^Switch to / }).map((b) => b.textContent)).toEqual(buttons)
+  })
+
+  // [H-1, A75] Arbitrum is in DCA_CHAINS (the allowlist) but, per docs/DEPLOYMENTS.md, OrderExecutorV3 is not yet
+  // operational there — the network is neither "wrong" (so the gate never shows, confirmed above) nor live, so
+  // v1's ComingSoonPanel must carry the tab, never the permanent skeleton.
+  it('chain 42161: neither the gate nor the live card — v1\'s ComingSoonPanel, never the skeleton', () => {
+    h.pathname = '/dca'
+    h.dcaLive = new Set([8453]) // Arbitrum's v3 executor is not wired (real isDcaLive would also say false)
+    useDisconnectedChainSelection.setState({ chainId: 42161 })
+    render(<AppShell />)
+    expect(document.querySelector('[data-dca-gate]')).toBeNull()
+    expect(document.querySelector('.ts-v2-skeleton')).toBeNull()
+    expect(screen.getByText('Smart DCA Engine')).toBeTruthy()
+    expect(screen.getByText('Coming Soon')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Swap Now/ })).toBeTruthy()
   })
 
   it('connected on Ethereum: the buttons call wagmi switchChain', () => {
@@ -383,13 +408,30 @@ describe('panes', () => {
     expect(pane?.querySelectorAll('.ts-v2-skeleton').length).toBe(0)
   })
 
-  it.each(['limit', 'sltp'] as const)('%s is a Skeleton placeholder', (tab) => {
+  // [H-1, A75] A direct /limit or /sltp visit has no real pane (owner decision: stays "Soon") — it must render
+  // v1's ComingSoonPanel, the same teaser the DCA gate's sibling modes use, never the permanent empty skeleton.
+  it.each(['limit', 'sltp'] as const)('%s renders v1\'s ComingSoonPanel, never the skeleton', (tab) => {
     useDisconnectedChainSelection.setState({ chainId: 8453 })
     render(<AppShell tab={tab} />)
     const pane = document.querySelector(`[data-tab-pane="${tab}"]`)
     expect(pane).not.toBeNull()
-    expect(pane?.querySelectorAll('.ts-v2-skeleton').length).toBeGreaterThan(0)
-    expect(pane?.textContent).toBe('')
+    expect(pane?.querySelectorAll('.ts-v2-skeleton').length).toBe(0)
+    expect(pane?.hasAttribute('aria-busy')).toBe(false)
+    expect(pane?.textContent).not.toBe('')
+    expect(screen.getByText(tab === 'limit' ? 'Limit Orders' : 'Take Profit')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Swap Now/ })).toBeTruthy()
+  })
+
+  it('direct /limit and /sltp visits never leave the skeleton up regardless of chain', () => {
+    for (const chainId of [1, 8453, 42161]) {
+      cleanup()
+      useDisconnectedChainSelection.setState({ chainId })
+      for (const tab of ['limit', 'sltp'] as const) {
+        cleanup()
+        render(<AppShell tab={tab} />)
+        expect(document.querySelector('.ts-v2-skeleton')).toBeNull()
+      }
+    }
   })
 })
 
