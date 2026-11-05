@@ -87,6 +87,13 @@ export function isInfraMissColumnRejection(body) {
   return INFRA_MISS_COLUMNS.some((col) => body.includes(col))
 }
 
+/**
+ * [A73d L-1] How many `cause` links ANY walk of an error chain reads. ONE constant for collectErrorMeta
+ * (the cause rules) and collectErrorText (isFloorRevert, the permanent signatures): the two halves of
+ * one classification must see the same links, and neither may walk a hostile chain to its end.
+ */
+const MAX_CAUSE_DEPTH = 10
+
 /** Error-chain metadata for the cause rules below. Never throws; cycle-safe; depth-bounded. */
 function collectErrorMeta(err) {
   const names = []
@@ -101,7 +108,7 @@ function collectErrorMeta(err) {
   // (nothing readable ⇒ `unclassified`, an unrecognised infra miss): never a throw out of the failure
   // handler, which would abort the cycle for every other order.
   try {
-    for (let depth = 0; e != null && depth < 10; depth++) {
+    for (let depth = 0; e != null && depth < MAX_CAUSE_DEPTH; depth++) {
       if (typeof e !== "object") {
         parts.push(String(e))
         break
@@ -596,8 +603,8 @@ const PERMANENT_SIGNATURES = [
 
 /**
  * Flatten a viem-style error (or string) into ONE lowercase string for matching.
- * Walks message / shortMessage / details / metaMessages and the .cause chain.
- * Never throws; tolerant of cycles, null, and plain strings.
+ * Walks message / shortMessage / details / metaMessages and the .cause chain, MAX_CAUSE_DEPTH links
+ * deep (the same bound as collectErrorMeta). Never throws; tolerant of cycles, null, and plain strings.
  * @param {unknown} err
  * @returns {string}
  */
@@ -610,7 +617,8 @@ export function collectErrorText(err) {
   // [A73c S-14] Same guard as collectErrorMeta: a throwing accessor / revoked Proxy ends the walk and
   // the text read so far is returned — "never throws" must hold for a hostile object too.
   try {
-    while (e && typeof e === "object" && !seen.has(e)) {
+    // [A73d L-1] Bounded at collectErrorMeta's depth: the same MAX_CAUSE_DEPTH links, not the whole chain.
+    for (let depth = 0; depth < MAX_CAUSE_DEPTH && e && typeof e === "object" && !seen.has(e); depth++) {
       seen.add(e)
       for (const k of ["shortMessage", "message", "details", "reason"]) {
         if (typeof e[k] === "string") parts.push(e[k])
