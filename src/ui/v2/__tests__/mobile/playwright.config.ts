@@ -1,4 +1,10 @@
 import { defineConfig, devices } from '@playwright/test'
+import { resolve } from 'node:path'
+
+// [L-8, A75] `npx next start` must run from the REPO ROOT (where package.json / .next live), not from this
+// config file's own directory (Playwright's default webServer cwd) — the documented command is run from an
+// arbitrary shell, not necessarily one already cd'd to the root.
+const REPO_ROOT = resolve(__dirname, '../../../../..')
 
 /**
  * [feat/ui-v2-mobile-parity] Real-render gates for the v2 shell at 375 (and the 1440 desktop shots). Layout does not exist in jsdom, so
@@ -7,8 +13,9 @@ import { defineConfig, devices } from '@playwright/test'
  *   UI_V2_ENABLED=true NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=<any 32 chars> npm run build   # once
  *   npx playwright test --config src/ui/v2/__tests__/mobile/playwright.config.ts            # starts `next start` itself
  *
- * `V2_BASE_URL` points it at a server you already run; `V2_SHOTS_DIR` writes the 375 / 1440 screenshot of every route. This suite is NOT in
- * the repo's CI workflows (`.github/` is outside this slice's diff scope) — wiring it into e2e.yml is the follow-up.
+ * `V2_BASE_URL` points it at a server you already run; `V2_SHOTS_DIR` writes the 375 / 1440 screenshot of every route.
+ * [L-8, A75] Wired into `.github/workflows/e2e.yml`'s `v2-mobile-parity` job (own job: it needs a real build +
+ * server, unlike the isolated-harness job above it).
  */
 const PORT = 3917
 const baseURL = process.env.V2_BASE_URL ?? `http://127.0.0.1:${PORT}`
@@ -24,5 +31,5 @@ export default defineConfig({
   use: { baseURL, ...devices['Desktop Chrome'], bypassCSP: true /* the L2 RPC hosts the CSP would refuse are stubbed in rig.ts */, launchOptions: { executablePath: process.env.PW_CHROMIUM || undefined } },
   webServer: process.env.V2_BASE_URL
     ? undefined
-    : { command: `npx next start -p ${PORT}`, url: baseURL, reuseExistingServer: true, timeout: 120_000, env: { UI_V2_ENABLED: 'true', NEXT_TELEMETRY_DISABLED: '1' } },
+    : { command: `npx next start -p ${PORT}`, cwd: REPO_ROOT, url: baseURL, reuseExistingServer: true, timeout: 120_000, env: { UI_V2_ENABLED: 'true', NEXT_TELEMETRY_DISABLED: '1' } },
 })
