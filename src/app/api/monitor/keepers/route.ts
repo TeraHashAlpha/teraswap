@@ -12,8 +12,12 @@
  * hammering the Supabase reads costs a 429, not a database round-trip per request.
  *
  * Response: { status: 'OK' | 'PAUSED' | 'UNKNOWN', chains: [{ chainId, active, readable, paused,
- * pausedSince }] } — UNKNOWN when any ACTIVE chain could not be read (no Supabase, or the migration
+ * pausedSince, infraMissOrders24h, infraMissStatus }] } — UNKNOWN when any ACTIVE chain could not be read (no Supabase, or the migration
  * 20261031120000_keeper_runtime_config_paused.sql is not applied yet) or none could; never OK then.
+ * [ADR-026] infraMissOrders24h = orders the keeper could not attempt for OUR reasons in the last 24 h;
+ * [A73 S-4] infraMissStatus is tri-state: 'ok' (a number), 'missing' (migration
+ * 20261104120000_orders_infra_miss.sql not applied — the report shows ℹ️), 'error' (the read failed —
+ * the report shows ⚠️). Neither changes `status` — those orders were NOT counted against.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
