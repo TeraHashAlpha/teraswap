@@ -36,12 +36,25 @@ export const REDACTED = "/REDACTED"
 export const ALERT_LINK_HOSTS = Object.freeze(["etherscan.io", "sepolia.etherscan.io", "basescan.org", "arbiscan.io"])
 
 const TAIL = "[^\\s\"'<>(),]*"
-// [A71 L-4] A scheme starts wherever the previous character could not be part of one. `\b` missed
-// `rpc_https://host/v2/<key>`: `_` is a word character, so there was no boundary before `https`.
-const SCHEME_URL = new RegExp(`(?<![a-z0-9+.-])([a-z][a-z0-9+.-]{0,30})://(${TAIL})`, "gi")
+// [A71b S-3] No lookbehind: the leftmost match wins. [A71 L-4] had required "the previous character
+// cannot be part of a scheme" (so `rpc_https://` matched, `_` not being one), but a URL glued to 27+
+// scheme characters — a 0x address (42 of them) written straight in front of it — then had NO valid
+// start at all (the scheme is capped at 31, every later start is preceded by a scheme character) and
+// passed untouched. Without the boundary the scheme is simply the last <= 31 scheme characters before
+// `://`; whatever precedes them is left as it was, and the URL itself is always redacted. Bounded
+// quantifier, one pass: at most 31 characters are tried per start, so the cost stays linear.
+const SCHEME_URL = new RegExp(`([a-z][a-z0-9+.-]{0,30})://(${TAIL})`, "gi")
 // [A71 L-4] JSON-escaped slashes (`https:\/\/host\/v2\/<key>`, also double-escaped) hid the URL from
 // every pattern below; they are normalised to `/` first.
 const ESCAPED_SLASH = /\\+\//g
+// [A71b S-3] Other encodings of the same slash hid it just as well: percent-encoded (`%2F`, also
+// double-encoded `%252F`), a JSON unicode / hex escape (`\u002f`, `\x2f`), an HTML entity (`&#x2F;`,
+// `&#47;`, `&sol;`). They are decoded to `/` before anything else looks at the text. The backslash
+// forms need the backslash, so a plain `0x2f` is never touched. Over-decoding only ever over-redacts.
+const ENCODED_SLASH = /%(?:25){0,4}2f|\\+u002f|\\+x2f|&#x0{0,8}2f;|&#0{0,8}47;|&sol;/gi
+// The scheme's own colon, encoded (`https%3A%2F%2F…`): decoded only in front of `//`, so a stray
+// `%3A` elsewhere in an error text is not rewritten.
+const ENCODED_COLON = /%(?:25){0,4}3a(?=\/\/)|\\+u003a(?=\/\/)|\\+x3a(?=\/\/)|&#x0{0,8}3a;(?=\/\/)|&#0{0,8}58;(?=\/\/)|&colon;(?=\/\/)/gi
 // Lookbehind: only at a token start, so neither pattern re-enters a URL pattern 1 already handled.
 const HOSTPORT_PATH = new RegExp(
   `(?<![\\w/:.@-])((?:\\[[0-9a-f:.]{2,45}\\]|[a-z0-9_.-]{1,255}):\\d{1,5})[/?#]${TAIL}`,
@@ -65,6 +78,8 @@ export function redactUrl(text, { allowHosts = [] } = {}) {
   const allow = new Set(allowHosts.map((h) => h.toLowerCase()))
   return String(text)
     .replace(ESCAPED_SLASH, "/")
+    .replace(ENCODED_SLASH, "/")
+    .replace(ENCODED_COLON, ":")
     .replace(SCHEME_URL, (match, scheme, rest) => {
       // A `file:///…` frame in a stack trace is a local path, not an endpoint — keep the frames.
       if (scheme.toLowerCase() === "file") return match
