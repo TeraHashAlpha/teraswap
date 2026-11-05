@@ -60,13 +60,19 @@ const fromCode = (n, original) => DELIMS.get(n) ?? original
 // is a percent sign, not a delimiter, and is left alone.
 const PCT = /%(?:25)*([0-9a-f]{2})/gi
 // `\u002f` `\u{2f}` `\x2f` (also double-escaped: one to eight backslashes)
-const ESC = /\\+(?:u0{0,6}([0-9a-f]{2})|u\{0*([0-9a-f]{1,6})\}|x([0-9a-f]{2}))/gi
-const OCTAL = /\\+([0-7]{3})/g
+const ESC = /\\{1,8}(?:u0{0,6}([0-9a-f]{2})|u\{0*([0-9a-f]{1,6})\}|x([0-9a-f]{2}))/gi
+const OCTAL = /\\{1,8}([0-7]{3})/g
 // `&#x2F;` `&#x2F` `&#47;` `&#47` `&sol;`, behind any number of `&amp;` layers. The numeric forms match
 // on the code's PREFIX ("&#x2F0xabc" is a slash followed by "0xabc") — an under-decode is a leak.
 const ENT = /&(?:amp;)*(?:#x0*(2f|3a|40|3f|23|5c|25);?|#0*(47|58|64|63|35|92|37);?|(sol|colon|commat|quest|num|bsol|percnt);)/gi
 // [A71 L-4] JSON-escaped slashes (`https:\/\/host\/v2\/<key>`, also double-escaped)
-const ESCAPED_SLASH = /\\+\//g
+const ESCAPED_SLASH = /\\{1,8}\//g
+// [A74 S-9] `\\+` before a literal is O(N²) on a run of N backslashes that is NOT followed by it (every
+// start rescans the run: 80 000 backslashes blocked the loop ~16 s). The decoders above take `\\{1,8}`; a
+// longer run is first clamped to 8 in ONE linear pass (a run at its start matches whole), so a long run
+// is still decoded — it can never be a hiding place for a delimiter — and never costly.
+const LONG_BACKSLASH_RUN = /\\{9,}/g
+const EIGHT_BACKSLASHES = "\\".repeat(8)
 
 const MAX_FOLDS = 16
 /** Marker returned when the text is nested deeper than the decoder will go: fail closed. */
@@ -74,6 +80,7 @@ export const OVER_ENCODED = "[REDACTED: nested encoding]"
 
 function decodeOnce(s) {
   return s
+    .replace(LONG_BACKSLASH_RUN, EIGHT_BACKSLASHES)
     .replace(ESCAPED_SLASH, "/")
     .replace(PCT, (m, hex) => (hex === "25" ? m : fromCode(parseInt(hex, 16), m)))
     .replace(ESC, (m, u, ub, x) => fromCode(parseInt(u ?? ub ?? x, 16), m))
