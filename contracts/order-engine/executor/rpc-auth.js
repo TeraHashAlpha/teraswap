@@ -36,7 +36,10 @@
  * auth errors from one origin ⇒ state `paused: rpc-auth`, ONE high-urgency alert, a reminder at most
  * once per RPC_AUTH_ALERT_COOLDOWN_MS with the suppressed count, and ONE recovery alert once no origin
  * has an open auth streak any more [A71b S-1: every refused origin must answer once — the event
- * watcher reports getBlockNumber, getLogs and its log-processing phase `poll` separately]. `muted` (returned by onRpcError) is true ONLY for an auth error
+ * watcher reports getBlockNumber, getLogs and its log-processing phase `poll` separately].
+ * [A74 S-10] A streak that sees no NEW auth error for RPC_AUTH_STREAK_TTL_MS is aged out (an origin that
+ * fails some other way after the key was fixed neither errors "auth" nor succeeds, and would hold the
+ * pause for ever), and a count older than that restarts from 1. `muted` (returned by onRpcError) is true ONLY for an auth error
  * while paused — the only case where a caller's own alert (Degraded / "Ops issue: rpc" /
  * consecutive-errors) repeats one the monitor already sent. The state is REPORTED (health, metrics,
  * keeper_runtime_config); it is not a new gate — with the provider refusing, nothing can execute
@@ -67,6 +70,13 @@ export const PAUSED_RPC_AUTH = "rpc-auth"
 
 /** Consecutive auth errors before the state flips — small: an auth rejection does not heal. */
 export const RPC_AUTH_THRESHOLD = 3
+/**
+ * [A74 S-10] An auth streak with no NEW auth error for this long is aged out. It must outlast the slowest
+ * cadence at which an origin that is still refused re-reports (the idle full cycle, 5 min — idle-backoff.js),
+ * with margin, so a refused origin is never aged out; and short enough that a streak left open by an origin
+ * that failed some OTHER way after the key was fixed cannot hold the pause for long.
+ */
+export const RPC_AUTH_STREAK_TTL_MS = 900_000
 /** Reminder interval while the rejection persists (same cadence as the low-gas alert). */
 export const RPC_AUTH_ALERT_COOLDOWN_MS = 3_600_000
 
@@ -154,12 +164,14 @@ export function createRpcAuthMonitor({
   source = "RPC_URL",
   threshold = RPC_AUTH_THRESHOLD,
   cooldownMs = RPC_AUTH_ALERT_COOLDOWN_MS,
+  streakTtlMs = RPC_AUTH_STREAK_TTL_MS,
   now = Date.now,
   alert,
   onStateChange = () => {},
   log = () => {},
 } = {}) {
   const streaks = new Map() // origin → consecutive auth errors from THAT origin (A71 M-1)
+  const streakAt = new Map() // origin → when its LAST auth error arrived (A74 S-10)
   let pausedSince = null
   let lastAlertAt = 0
   let suppressed = 0
@@ -186,18 +198,33 @@ export function createRpcAuthMonitor({
     }
   }
 
+  // [A74 S-10] Age out every streak whose last auth error is older than the TTL: that origin has not been
+  // refused for a whole TTL, which is exactly what a refused origin would have refreshed. Without it an
+  // origin that fails some OTHER way after the key was fixed (never an auth error, never a success) holds
+  // the pause for ever.
+  const pruneStale = (t) => {
+    for (const [k, at] of streakAt) {
+      if (t - at > streakTtlMs) {
+        streaks.delete(k)
+        streakAt.delete(k)
+      }
+    }
+  }
+
   async function onRpcError(origin, err) {
     const { kind, signal } = classifyRpcError(err)
     if (kind !== RPC_AUTH) return { kind, signal, alerted: false, muted: false }
+    const t = now()
+    pruneStale(t) // a stale count restarts from 1: "consecutive" means within the TTL
     const key = String(origin)
     const consecutive = (streaks.get(key) || 0) + 1
     streaks.set(key, consecutive)
+    streakAt.set(key, t)
     lastSignal = signal
     lastOrigin = origin
     // Not paused and this origin is below the threshold: counted only — the caller's own alert stays.
     if (pausedSince == null && consecutive < threshold) return { kind, signal, alerted: false, muted: false }
 
-    const t = now()
     const base = { chainId, source, signal, consecutive, threshold, origin }
     if (pausedSince == null) {
       pausedSince = t // set before any await: a concurrent report sees the pause and is rate-limited
@@ -222,6 +249,8 @@ export function createRpcAuthMonitor({
 
   async function onRpcSuccess(origin) {
     streaks.delete(String(origin)) // only THIS origin's streak: another origin may still be refused
+    streakAt.delete(String(origin))
+    pruneStale(now())
     if (pausedSince == null) return { recovered: false }
     // [A71b S-1] Stay paused while ANY origin still has an open auth streak, however short: an origin
     // one or two errors in is still being refused. Clearing on "below the threshold" produced a false
