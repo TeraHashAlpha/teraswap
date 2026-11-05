@@ -26,6 +26,7 @@ import {
   ExecutionRevertedError,
   HttpRequestError,
   InsufficientFundsError,
+  InternalRpcError,
   NonceTooLowError,
   TimeoutError,
   TransactionExecutionError,
@@ -61,6 +62,12 @@ after(async () => {
 /** Every error in the chain, outermost first (viem's BaseError.walk). */
 const chain = (err) => chainNames(err).join(" > ")
 const hasInChain = (err, Cls) => err instanceof BaseError && err.walk((e) => e instanceof Cls) !== null
+/** The keeper's three call sites, each building its error through viem itself. */
+const ALL_SITES = [
+  ["read canExecute", (spec) => stub.readError(spec)],
+  ["write executeOrder @ eth_estimateGas", (spec) => stub.writeError(spec)],
+  ["write executeOrder @ eth_sendRawTransaction", (spec) => stub.writeError(spec, { failAt: "eth_sendRawTransaction" })],
+]
 
 describe("[A73b S-7] wrapped keeper-side node errors — the viem wrappers are not revert evidence", () => {
   test("write site: the node's 'insufficient funds' at eth_estimateGas arrives as CFEE > TEE > InsufficientFundsError > EGEE > … ⇒ infra keeper-gas", async () => {
@@ -204,5 +211,73 @@ describe("[A73b S-8] wrapped provider / transport failures at both executor site
     assert.equal(plan.kind, "infra")
     assert.notEqual(plan.patch.status, "failed")
     assert.equal(plan.patch.error, undefined)
+  })
+})
+
+// [A73c S-12] viem GUESSES a revert from any JSON-RPC -32603: getContractError wraps an
+// InternalRpcError as ContractFunctionRevertedError ('…reverted with the following reason: Internal
+// error') although no contract code ran — a provider's own internal error, also when it comes on a
+// 5xx with a JSON-RPC body (viem returns that body into the RPC pipeline: no HttpRequestError, no
+// status reaches the keeper). Such a chain is a revert only with INDEPENDENT proof: an
+// ExecutionRevertedError (the node's code 3 / its "execution reverted" words) or hex revert data.
+describe("[A73c S-12] a JSON-RPC -32603 is not a revert — viem only guesses one", () => {
+  const GUESSED = [
+    ["-32603 'Internal error'", { rpc: { code: -32603, message: "Internal error" } }],
+    ["HTTP 500 carrying a JSON-RPC -32603 body", { http: 500, rpc: { code: -32603, message: "internal server error" } }],
+    ["-32603 with the provider's upstream words", { rpc: { code: -32603, message: "upstream connect error or disconnect/reset before headers" } }],
+  ]
+  for (const [site, build] of ALL_SITES) {
+    for (const [what, spec] of GUESSED) {
+      test(`${site}: ${what} ⇒ infra:rpc-transport (viem's guessed ContractFunctionRevertedError is no evidence)`, async () => {
+        const err = await build(spec)
+        assert.ok(err instanceof ContractFunctionExecutionError, chain(err))
+        assert.ok(hasInChain(err, ContractFunctionRevertedError), `viem guesses a revert from -32603: ${chain(err)}`)
+        assert.ok(hasInChain(err, InternalRpcError), chain(err))
+        assert.equal(hasInChain(err, ExecutionRevertedError), false, chain(err))
+        assert.equal(hasInChain(err, HttpRequestError), false, `no HTTP status survives: ${chain(err)}`)
+        assert.deepEqual(classifyMissCause({ err }), infra("rpc-transport"), chain(err))
+      })
+    }
+  }
+  test("write site: a -32603 carrying the node's 'insufficient funds' / 'nonce too low' is the KEEPER's ⇒ keeper-gas / keeper-nonce, not a guessed revert", async () => {
+    const funds = await stub.writeError({ rpc: { code: -32603, message: "insufficient funds for gas * price + value: balance 0" } })
+    assert.ok(hasInChain(funds, ContractFunctionRevertedError) && hasInChain(funds, InsufficientFundsError), chain(funds))
+    assert.deepEqual(classifyMissCause({ err: funds }), infra("keeper-gas"), chain(funds))
+    const nonce = await stub.writeError({ rpc: { code: -32603, message: "nonce too low: next nonce 7, tx nonce 5" } })
+    assert.ok(hasInChain(nonce, ContractFunctionRevertedError) && hasInChain(nonce, NonceTooLowError), chain(nonce))
+    assert.deepEqual(classifyMissCause({ err: nonce }), infra("keeper-nonce"), chain(nonce))
+  })
+
+  describe("a REAL revert delivered under -32603 stays the order's — independent proof in the chain", () => {
+    for (const [site, build] of ALL_SITES.slice(0, 2)) {
+      test(`${site}: -32603 with hex revert data on the body ⇒ order revert`, async () => {
+        const err = await build({ rpc: { code: -32603, message: "Internal error", data: INSUFFICIENT_OUTPUT_DATA } })
+        assert.ok(hasInChain(err, InternalRpcError) && hasInChain(err, ContractFunctionRevertedError), chain(err))
+        assert.equal(hasInChain(err, ExecutionRevertedError), false, chain(err))
+        assert.deepEqual(classifyMissCause({ err }), order("revert"), chain(err))
+      })
+      test(`${site}: -32603 'Internal JSON-RPC error.' with a NESTED { data: 0x… } (wallet-style) ⇒ order revert`, async () => {
+        const err = await build({ rpc: { code: -32603, message: "Internal JSON-RPC error.", data: { code: 3, message: "execution reverted", data: revertStringData("Too little received") } } })
+        assert.ok(hasInChain(err, InternalRpcError), chain(err))
+        assert.deepEqual(classifyMissCause({ err }), order("revert"), chain(err))
+      })
+      test(`${site}: -32603 whose message is the node's 'execution reverted' (no data) ⇒ order revert via ExecutionRevertedError`, async () => {
+        const err = await build({ rpc: { code: -32603, message: "execution reverted" } })
+        assert.ok(hasInChain(err, InternalRpcError) && hasInChain(err, ExecutionRevertedError), chain(err))
+        assert.deepEqual(classifyMissCause({ err }), order("revert"), chain(err))
+      })
+    }
+  })
+
+  test("S-12 end to end: a provider-internal -32603 leaves the ladder untouched, 20 times in a row (kind infra, count 3 stays 3, never failed)", async () => {
+    const err = await stub.writeError({ http: 500, rpc: { code: -32603, message: "internal server error" } })
+    for (let i = 0; i < 20; i++) {
+      const plan = planFailureHandling({ dbOrder: dbOrder(), err, prevFailures: 3, nowSec: NOW_SEC, nowIso: NOW })
+      assert.equal(plan.kind, "infra")
+      assert.equal(plan.causeReason, "rpc-transport")
+      assert.equal(plan.failures, 3)
+      assert.equal(plan.patch.status, "active")
+      assert.equal("consecutive_failures" in plan.patch, false)
+    }
   })
 })

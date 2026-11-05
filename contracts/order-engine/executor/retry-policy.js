@@ -94,6 +94,7 @@ function collectErrorMeta(err) {
   const codes = []
   const parts = []
   const seen = new Set()
+  let revertData = false
   let e = err
   for (let depth = 0; e != null && depth < 10; depth++) {
     if (typeof e !== "object") {
@@ -107,10 +108,16 @@ function collectErrorMeta(err) {
     if (typeof e.code === "string" || typeof e.code === "number") codes.push(String(e.code))
     for (const k of ["shortMessage", "message", "details", "reason"]) if (typeof e[k] === "string") parts.push(e[k])
     if (Array.isArray(e.metaMessages)) for (const m of e.metaMessages) if (typeof m === "string") parts.push(m)
+    // [A73c S-12] Hex revert data (at least a 4-byte selector) on any link — the only proof that a
+    // contract actually returned something: viem keeps the node's `data` on RpcRequestError (a hex
+    // string, or a wallet-style nested { data: 0x… }) and the raw input on ContractFunctionRevertedError.raw.
+    if ([e.data, e.raw, e.data && typeof e.data === "object" ? e.data.data : null].some(isHexRevertData)) revertData = true
     e = e.cause
   }
-  return { names, statuses, codes, text: parts.join(" \n ").toLowerCase() }
+  return { names, statuses, codes, revertData, text: parts.join(" \n ").toLowerCase() }
 }
+
+const isHexRevertData = (d) => typeof d === "string" && /^0x[0-9a-f]{8}/i.test(d)
 
 // [A73b S-7] A revert needs POSITIVE evidence somewhere in the `cause` chain: a name matching /Revert/
 // (viem ContractFunctionRevertedError, ExecutionRevertedError) or revert text. viem's WRAPPERS —
@@ -325,7 +332,16 @@ export function classifyMissCause({
   // rule below applies only when nothing reverted. [A73b S-7] POSITIVE evidence only: a decoded
   // executor error or SwapFailed reason, a /Revert/-named error in the chain, or revert text — never
   // a viem wrapper's name.
-  const isRevert = !!executorErrorName || !!swapReason || (!!meta && (meta.names.some((n) => REVERT_NAME.test(n)) || REVERT_TEXT.test(meta.text)))
+  // [A73c S-12] …and never viem's GUESS: getContractError wraps ANY JSON-RPC -32603 (InternalRpcError)
+  // as ContractFunctionRevertedError ("…reverted with the following reason: Internal error") although
+  // no contract code ran — a provider's own internal error, also on a 5xx with a JSON-RPC body (viem
+  // returns that body into the RPC pipeline, so no HTTP status survives). Such a chain is a revert
+  // only with independent proof: an ExecutionRevertedError (the node's code 3 / its "execution
+  // reverted" words) or hex revert data on some link. Otherwise it falls to the keeper-side rules
+  // below (keeper-gas / keeper-nonce if the node said so, else rpc-transport).
+  const guessedRevert = !!meta && meta.names.includes("InternalRpcError") && !meta.names.includes("ExecutionRevertedError") && !meta.revertData
+  const isRevert =
+    !!executorErrorName || !!swapReason || (!!meta && !guessedRevert && (meta.names.some((n) => REVERT_NAME.test(n)) || REVERT_TEXT.test(meta.text)))
   // 6. The KEEPER wallet is out of gas — ours, not the user's balance. Never on a revert.
   if (meta && !isRevert && (meta.names.includes("InsufficientFundsError") || KEEPER_GAS_TEXT.test(meta.text))) return infra("keeper-gas")
   // 6b. [A73b S-7] The KEEPER's tx nonce was rejected by the node — ours. Never on a revert.

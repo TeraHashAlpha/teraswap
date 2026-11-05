@@ -114,6 +114,7 @@ export function revertStringData(reason) {
  *   { http: 503, body?: string }                       — an HTTP error page from the provider
  *   { hang: true }                                     — never answers (viem's TimeoutError, transport timeout)
  *   { rpc: { code, message, data? } }                  — a JSON-RPC error body (the node's words)
+ *   { http: 500, rpc: { code, message, data? } }       — the same body on a non-2xx response
  * Every other method gets a plumbing answer (chainId / nonce / gas / tx hash).
  */
 function answer(method, params, spec, failAt) {
@@ -165,6 +166,14 @@ export async function startRpcStub() {
       seen.push(method)
       const r = answer(method, call?.params, current.spec, current.failAt) || {}
       if (r.hang) return // a REAL open socket; stop() destroys it
+      if (r.http && r.rpc) {
+        // A non-2xx response that still carries a valid JSON-RPC error body: viem returns it into the
+        // normal RPC error pipeline (utils/rpc/http.js), so it surfaces as RpcRequestError — the HTTP
+        // status never reaches the keeper.
+        res.writeHead(r.http, { "content-type": "application/json" })
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: call?.id ?? 1, error: r.rpc }))
+        return
+      }
       if (r.http) {
         res.writeHead(r.http, { "content-type": "text/plain" })
         res.end(r.body ?? "")
