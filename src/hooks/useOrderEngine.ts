@@ -648,7 +648,7 @@ export function useOrderEngine() {
                 updated[idx] = { ...updated[idx], status: newStatus, dcaExecuted: row.dca_executed, txHash: row.tx_hash, amountOut: row.amount_out, error: row.error }
 
                 if (newStatus === 'filled') {
-                  setLatestEvent({ type: 'order_filled', orderId: updated[idx].id, txHash: row.tx_hash ?? '' })
+                  setLatestEvent({ type: 'order_filled', orderId: updated[idx].id, txHash: row.tx_hash ?? '', chainId: updated[idx].chainId })
                 }
               }
             }
