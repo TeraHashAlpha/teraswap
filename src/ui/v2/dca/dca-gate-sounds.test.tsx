@@ -251,7 +251,6 @@ describe('(5b) sounds: the same sounds.ts calls as v1 for the same actions', () 
   const ORDER_EVENTS = [
     { type: 'order_created', orderId: 'o', orderHash: '0x1' },
     { type: 'dca_execution', orderId: 'o', executionNumber: 2 },
-    { type: 'order_filled', orderId: 'o', txHash: '0xabc' },
     { type: 'order_cancelled', orderId: 'o' },
     { type: 'order_error', orderId: 'o', error: 'boom' },
     { type: 'order_error', orderId: 'o', error: 'New DCA orders are temporarily paused…' },
@@ -267,6 +266,27 @@ describe('(5b) sounds: the same sounds.ts calls as v1 for the same actions', () 
     render(<DcaCard chainId={BASE} />)
     expect(h.soundLog).toEqual(v1Sounds)
     expect(h.toast.mock.calls.map((c) => c[0])).toEqual(v1Toast)
+  })
+
+  // [L-3, A75] order_filled is split out: v1's own toast (DCAPanel.tsx) omits `chainId` and so falls back to
+  // ToastProvider's hard `?? 1` (always Etherscan, wrong for a Base/Arbitrum DCA order — a v1 bug this PR does not
+  // touch). v2 passes the order's OWN chain explicitly — the one the DcaCard instance is scoped to, not whatever is
+  // currently selected — so the explorer link is never wrong and never drifts if the wallet switches network while
+  // the toast is still on screen (toasts.tsx:135's `t.chainId ?? selectedChain` only needs the override supplied).
+  it('order_filled → the same sound and toast copy as v1, PLUS the order\'s own chainId (v1 has none)', () => {
+    const event = { type: 'order_filled', orderId: 'o', txHash: '0xabc' } as const
+    h.engine.latestEvent = event
+    render(<DCAPanel chainId={BASE} />)
+    const v1Sounds = [...h.soundLog]
+    const [v1Toast] = h.toast.mock.calls.map((c) => c[0]) as [Record<string, unknown>]
+    cleanup()
+    h.soundLog.length = 0
+    h.toast.mockClear()
+    render(<DcaCard chainId={BASE} />)
+    const [v2Toast] = h.toast.mock.calls.map((c) => c[0]) as [Record<string, unknown>]
+    expect(h.soundLog).toEqual(v1Sounds)
+    expect(v1Toast.chainId).toBeUndefined()
+    expect(v2Toast).toEqual({ ...v1Toast, chainId: BASE })
   })
 
   it('Cancel / Remove rows → playClick, as v1\'s dashboard', () => {

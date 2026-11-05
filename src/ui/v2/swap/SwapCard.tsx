@@ -402,9 +402,12 @@ export function SwapCard() {
   const executionActive = lc.status !== 'idle'
   // [L-1] v1's Share button (SwapBox.tsx): only once the swap has actually succeeded, from the same live `meta`/tokenIn/tokenOut.
   const shareText = lc.status === 'success' ? buildShareText(meta, tokenIn, tokenOut) : null
+  // [L-3, A75] v1's own rule (SwapBox.tsx: `explorerTxUrl(txHash, txChainId ?? activeChainId)`): once the tx is
+  // sent, the link follows the chain it was actually SENT on, never the currently selected chain — a network switch
+  // while the tx is pending/just-succeeded must not move the link.
   const explorerUrl = (() => {
     try {
-      return getChainConfig(activeChainId).blockExplorer
+      return getChainConfig(lc.swap.txChainId ?? activeChainId).blockExplorer
     } catch {
       return getChainConfig(1).blockExplorer
     }

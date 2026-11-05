@@ -138,6 +138,16 @@ describe('28a — pending', () => {
     expect(a.href).toBe(`https://${host}/tx/${TX}`)
     expect(a.textContent).toContain(name)
   })
+  // [L-3, A75] The tx was SENT on chain 1 (useSwap's own `txChainId`); the wallet then switches network before the
+  // card re-renders. The link must stay on the chain the tx actually lives on, never follow the newly selected one.
+  it('a network switch AFTER the tx was sent never moves the link off the order\'s own chain', () => {
+    mount({ status: 'swapping', txHash: TX, txChainId: 1 })
+    h.chainId = 8453
+    h.account = { ...h.account, chain: { id: 8453 } }
+    view.rerender(<SwapCard />)
+    const a = within(execCol()).getByTestId('exec-tx-link') as HTMLAnchorElement
+    expect(a.href).toBe(`https://etherscan.io/tx/${TX}`)
+  })
   it('CoW pending: v1\'s MEV-protected line and the Waiting for solver step', () => {
     const m = fixtureMeta()
     const cow = { ...m.all[0], source: 'cowswap' as const, gasUsd: 0 }

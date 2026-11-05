@@ -495,7 +495,10 @@ export function DcaCard({ chainId }: { chainId: number }) {
     }
     if (latestEvent.type === 'order_filled') {
       playSwapConfirmMP3()
-      toast({ type: 'success', title: 'DCA complete!', description: 'All DCA buys executed successfully.', txHash: latestEvent.txHash, duration: 10000 })
+      // [L-3, A75] v1 omits chainId here (falls back to ToastProvider's hard `?? 1`, wrong for a Base/Arbitrum
+      // order — a v1 bug this PR does not touch). v2 names the order's OWN chain, so the explorer link is right
+      // from the start and never drifts to whatever the wallet switches to while the toast is still on screen.
+      toast({ type: 'success', title: 'DCA complete!', description: 'All DCA buys executed successfully.', txHash: latestEvent.txHash, chainId, duration: 10000 })
       if (address) {
         trackTrade({ type: 'dca_buy', wallet: address, tokenIn: '', tokenInAddress: '', tokenOut: '', tokenOutAddress: '', amountIn: '0', amountOut: '0', volumeUsd: 0, source: 'teraswap_order_engine', txHash: latestEvent.txHash || '' })
       }
