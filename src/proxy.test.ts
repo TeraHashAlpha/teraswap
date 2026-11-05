@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { config, proxy } from './proxy'
 import { isV2EnableEnabled, isV2KitEnabled } from '@/ui/v2/kit-gate'
-import { V2_TAB_PATHS } from '@/ui/v2/shell/tab-paths'
+import { V2_TAB_PATHS, V2_ONLY_TAB_PATHS } from '@/ui/v2/shell/tab-paths'
 import { signUiVersionCookie } from '@/ui/v2/ui-cookie'
 
 const SECRET = 'test-cookie-secret-abc123'
@@ -65,16 +65,32 @@ describe('`/` (the v1 landing)', () => {
   })
 })
 
+// [L-5, A75] Swap and Analytics are real v1 pages; the other 6 tab URLs have no v1 page at all.
+const V1_PAGE_PATHS = TAB_PATHS.filter((p) => !V2_ONLY_TAB_PATHS.includes(p)) // /swap, /analytics
+const redirectsHome = (res: Response) => res.status >= 300 && res.status < 400 && new URL(res.headers.get('location') ?? 'x:/').pathname === '/'
+
 describe('the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the same gate)', () => {
-  it.each(TAB_PATHS)('%s: no env, no cookie → untouched (v1 keeps its own page)', (path) => {
+  it.each(V1_PAGE_PATHS)('%s: no env, no cookie → untouched (v1 keeps its own page)', (path) => {
     expect(passes(proxy(req(path)))).toBe(true)
   })
-  it.each(TAB_PATHS)('%s: forged / wrong-secret / secret-less cookie → untouched', (path) => {
+  it.each(V1_PAGE_PATHS)('%s: forged / wrong-secret / secret-less cookie → untouched', (path) => {
     expect(passes(proxy(req(path, 'f'.repeat(64))))).toBe(true)
     expect(passes(proxy(req(path, signUiVersionCookie('other-secret'))))).toBe(true)
     const cookie = signUiVersionCookie(SECRET)
     delete process.env.UI_V2_COOKIE_SECRET
     expect(passes(proxy(req(path, cookie)))).toBe(true)
+  })
+  // [L-5, A75] with v2 off, a v2-only tab URL (no v1 page) redirects to `/` instead of falling through to
+  // Next's generic 404 — it used to be "untouched", which meant a raw framework 404 once v2 went off.
+  it.each(V2_ONLY_TAB_PATHS)('%s (v2-only, no v1 page): no env, no cookie → redirected to /', (path) => {
+    expect(redirectsHome(proxy(req(path)))).toBe(true)
+  })
+  it.each(V2_ONLY_TAB_PATHS)('%s (v2-only, no v1 page): forged / wrong-secret / secret-less cookie → redirected to /', (path) => {
+    expect(redirectsHome(proxy(req(path, 'f'.repeat(64))))).toBe(true)
+    expect(redirectsHome(proxy(req(path, signUiVersionCookie('other-secret'))))).toBe(true)
+    const cookie = signUiVersionCookie(SECRET)
+    delete process.env.UI_V2_COOKIE_SECRET
+    expect(redirectsHome(proxy(req(path, cookie)))).toBe(true)
   })
   it.each(TAB_PATHS)('%s: UI_V2_ENABLED=true → rewritten to /v2%s', (path) => {
     process.env.UI_V2_ENABLED = 'true'
