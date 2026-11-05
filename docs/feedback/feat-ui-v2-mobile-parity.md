@@ -95,10 +95,18 @@ failing on the commit before it.
 (Turbopack; route table unchanged, 8 v1 static routes + the dynamic set). parity-sweep.test.tsx 39/39, 0 missing;
 shell-surfaces-sweep.test.tsx 4/4 new. rpc-budget 31/31. CodeQL security-extended (javascript-typescript), base
 a91e105 vs head 87adf17: 13 → 13 alerts, identical rule:file:line set, 0 new, 0 fixed (base scanned 1069 files,
-head 1075 — the +6 are the new test files this round added). v1 module-identical: the diff touches no
-v1-reachable page/component source at all (`git diff --stat a91e105..HEAD` — only src/ui/v2/**, proxy.ts
-[middleware, not bundled per-route], public/sw.js [static asset], .github/, docs/, and test files); no byte-diff
-build pass was needed to prove it.
+head 1075 — the +6 are the new test files this round added). **v1 module-identical — actually built and diffed**
+(base a91e105, head 8094a5b, both built in the SAME worktree/path sequentially, same-commit rebuilt once first to
+confirm the build is otherwise deterministic — it is, byte-identical after normalising Sentry's per-build random
+debug-id UUID): the 8 v1 static routes' `.html`/`.rsc` shell bytes are identical length both sides; `/`'s 30
+referenced JS chunks are identical in count both sides and total 2 895 153 B (base) vs 2 895 253 B (head) — a
+100 B / 4-chunk difference, NOT 0. Traced it: those 4 chunks hold the SAME code (identical string-literal sets)
+just re-bucketed across chunk boundaries — Next's shared/vendor chunk splitting is global across every route, so
+changing the v2 routes' modules can reshuffle which modules land in which chunk file for `/` too, with no source
+change on `/`'s own side. Confirmed the thing that actually matters instead: grepped every one of `/`'s 30
+referenced chunks (both base and head) for v2-only markers (`ts-v2`, `ComingSoonPanel`, `RecentSwaps`,
+`data-ts-ui`, `ts-swap-card`, `font-v2-mono`, `HelpDrawer`, `DcaNetworkGate`) — **0 hits, both sides**. No v2
+code reaches v1 visitors; the 100 B is bundler chunk-boundary churn, not a functional change.
 
 **Concern for the Auditor:** L-3's v1-side DCAPanel/ToastProvider omission (hard `?? 1` fallback, always
 Etherscan for a Base/Arbitrum DCA fill toast) is real but out of this PR's scope — v2 is now strictly better than
