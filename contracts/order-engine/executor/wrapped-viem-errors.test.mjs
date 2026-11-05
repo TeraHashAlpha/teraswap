@@ -151,3 +151,58 @@ describe("[A73b S-7] wrapped keeper-side node errors — the viem wrappers are n
     assert.equal(read.walk((e) => e instanceof HttpRequestError).status, 429)
   })
 })
+
+describe("[A73b S-8] wrapped provider / transport failures at both executor sites ⇒ infra, never a revert", () => {
+  const SITES = [
+    ["read canExecute (executor.js readContract)", (spec) => stub.readError(spec)],
+    ["write executeOrder @ eth_estimateGas (executor.js writeContract)", (spec) => stub.writeError(spec)],
+    ["write executeOrder @ eth_sendRawTransaction", (spec) => stub.writeError(spec, { failAt: "eth_sendRawTransaction" })],
+  ]
+  // The matrix: the provider's answer → the innermost viem error in the wrapped chain → the class.
+  // The last two are provider pages whose words look like a PERMANENT order cause (PERMANENT_SIGNATURES
+  // `insufficient balance` / `exceeds allowance`): transport anywhere in the chain decides, before any
+  // text rule — a page can say anything, and a terminal `failed` for it would burn the order outright.
+  const MATRIX = [
+    ["HTTP 503", PROVIDER_503, HttpRequestError, infra("rpc-transport")],
+    ["HTTP 429", PROVIDER_429, HttpRequestError, infra("rpc-transport")],
+    ["HTTP 502 (an HTML page)", { http: 502, body: "<html><body>502 Bad Gateway</body></html>" }, HttpRequestError, infra("rpc-transport")],
+    ["timeout (a hung provider)", PROVIDER_HANG, TimeoutError, infra("rpc-transport")],
+    ["HTTP 403 (allowlist)", { http: 403, body: "Unspecified origin not on whitelist." }, HttpRequestError, infra("rpc-auth")],
+    ["HTTP 503 whose page says 'insufficient balance'", { http: 503, body: "insufficient balance on this plan — upgrade to continue" }, HttpRequestError, infra("rpc-transport")],
+    ["HTTP 402 whose page says 'exceeds allowance'", { http: 402, body: "daily request volume exceeds allowance for this key" }, HttpRequestError, infra("rpc-transport")],
+  ]
+  for (const [site, build] of SITES) {
+    for (const [what, spec, Inner, expected] of MATRIX) {
+      test(`${site}: ${what} ⇒ ${expected.cause}:${expected.reason}`, async () => {
+        const err = await build(spec)
+        assert.ok(err instanceof ContractFunctionExecutionError, chain(err))
+        assert.ok(hasInChain(err, Inner), chain(err))
+        assert.deepEqual(classifyMissCause({ err }), expected, chain(err))
+      })
+    }
+  }
+  test("S-8 end to end: a wrapped 503 at the write site leaves the ladder untouched (kind infra, count 3 stays 3, order active)", async () => {
+    const err = await stub.writeError(PROVIDER_503)
+    const plan = planFailureHandling({ dbOrder: dbOrder(), err, prevFailures: 3, nowSec: NOW_SEC, nowIso: NOW })
+    assert.equal(plan.kind, "infra")
+    assert.equal(plan.causeReason, "rpc-transport")
+    assert.equal(plan.failures, 3)
+    assert.equal(plan.patch.status, "active")
+    assert.equal("consecutive_failures" in plan.patch, false)
+  })
+  test("S-8 end to end: a wrapped timeout at the read site (canExecute) leaves the ladder untouched", async () => {
+    const err = await stub.readError(PROVIDER_HANG)
+    const plan = planFailureHandling({ dbOrder: dbOrder({ consecutive_failures: 7 }), err, prevFailures: 7, nowSec: NOW_SEC, nowIso: NOW })
+    assert.equal(plan.kind, "infra")
+    assert.equal(plan.causeReason, "rpc-transport")
+    assert.equal(plan.failures, 7)
+    assert.equal(plan.patch.status, "active")
+  })
+  test("S-8 end to end: a provider page saying 'insufficient balance' is NOT a terminal failure (the order is not marked failed)", async () => {
+    const err = await stub.writeError({ http: 503, body: "insufficient balance on this plan" })
+    const plan = planFailureHandling({ dbOrder: dbOrder(), err, prevFailures: 3, nowSec: NOW_SEC, nowIso: NOW })
+    assert.equal(plan.kind, "infra")
+    assert.notEqual(plan.patch.status, "failed")
+    assert.equal(plan.patch.error, undefined)
+  })
+})

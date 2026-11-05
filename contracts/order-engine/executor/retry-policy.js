@@ -134,6 +134,11 @@ const TRANSPORT_NAME = /^(?:HttpRequestError|TimeoutError|WebSocketRequestError|
 const TRANSPORT_TEXT = /fetch failed|econnrefused|econnreset|etimedout|enotfound|eai_again|ehostunreach|epipe|socket hang up|network error|timed out|timeout|und_err_/
 const TRANSPORT_CODE = /^(?:ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|EPIPE|UND_ERR_|ERR_NETWORK)/
 
+/** Transport / HTTP / timeout / socket evidence anywhere in the `cause` chain (collectErrorMeta walks every link). */
+function isTransportMeta(meta) {
+  return meta.statuses.length > 0 || meta.names.some((n) => TRANSPORT_NAME.test(n)) || meta.codes.some((c) => TRANSPORT_CODE.test(c)) || TRANSPORT_TEXT.test(meta.text)
+}
+
 // [A73 S-1] /api/swap's error bodies carry a machine-readable `code` (src/app/api/swap/route.ts). The
 // keeper classifies by CODE first — an HTTP status alone says nothing about whose fault a miss is —
 // and only falls back to the status when the body has none (an older API deploy, a platform page).
@@ -300,6 +305,12 @@ export function classifyMissCause({
   if (meta && !isRevert && (meta.names.includes("InsufficientFundsError") || KEEPER_GAS_TEXT.test(meta.text))) return infra("keeper-gas")
   // 6b. [A73b S-7] The KEEPER's tx nonce was rejected by the node — ours. Never on a revert.
   if (meta && !isRevert && (meta.names.some((n) => KEEPER_NONCE_NAME.test(n)) || KEEPER_NONCE_TEXT.test(meta.text))) return infra("keeper-nonce")
+  // 6c. [A73b S-8] The provider / network could not be reached, timed out, or answered with an HTTP
+  //     error — anywhere in the chain: viem wraps a 503 / timeout at BOTH executor sites as
+  //     ContractFunctionExecutionError → … → HttpRequestError | TimeoutError. Decided BEFORE the
+  //     permanent text rules: a provider's error page can say "insufficient balance" or "exceeds
+  //     allowance", and a terminal `failed` for it would burn the order outright. Never on a revert.
+  if (meta && !isRevert && isTransportMeta(meta)) return infra("rpc-transport")
   // 7. A permanent cause decoded from the revert (allowance / balance / nonce) — order, by code.
   const permanent = classifyFailure({ err, swapReason })
   if (permanent.terminal) return order(permanent.reason)
@@ -307,13 +318,9 @@ export function classifyMissCause({
   if (executorErrorName) return order(`revert:${executorErrorName}`)
   if (swapReason) return order("revert:swap-failed")
   if (isRevert) return order("revert")
-  // 9. The provider / network could not be reached or answered with an HTTP error.
-  if (meta && (meta.statuses.length > 0 || meta.names.some((n) => TRANSPORT_NAME.test(n)) || meta.codes.some((c) => TRANSPORT_CODE.test(c)) || TRANSPORT_TEXT.test(meta.text))) {
-    return infra("rpc-transport")
-  }
-  // 10. No evidence at all: keep today's counting (an untouched call site must not stop counting).
+  // 9. No evidence at all: keep today's counting (an untouched call site must not stop counting).
   if (meta == null) return order("unknown")
-  // 11. Something threw before any tx was sent and nothing above recognised it: the keeper did not
+  // 10. Something threw before any tx was sent and nothing above recognised it: the keeper did not
   //     complete the attempt — ours by the ambiguity rule.
   return infra("unclassified")
 }
