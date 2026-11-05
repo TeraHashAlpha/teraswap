@@ -3,7 +3,8 @@
 import { fmtUsd, fmtPct, fmtInt, fmtFixed } from '@/lib/format'
 import { useState, useMemo, useCallback } from 'react'
 import { useAnalytics } from '@/hooks/useAnalytics'
-import { AGGREGATOR_META, ETHERSCAN_TX, type AggregatorName } from '@/lib/constants'
+import { AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
+import { explorerTxUrl } from '@/lib/chains/tokens'
 import { scoreAllWallets, detectWalletClusters } from '@/lib/sybil-detector'
 import { clearAnalytics } from '@/lib/analytics-tracker'
 import { seedDemoData } from '@/lib/analytics-seed'
@@ -834,7 +835,7 @@ function ActivityTab({ trades, period: _period }: { trades: TradeEvent[]; period
                 <span className="text-[#556677]">{sourceLabel(t.source)}</span>
                 <span className="w-8 text-right text-[#445566]">{timeAgo(t.timestamp)}</span>
                 {t.txHash && (
-                  <a href={`${ETHERSCAN_TX}${t.txHash}`} target="_blank" rel="noopener noreferrer"
+                  <a href={explorerTxUrl(t.txHash, t.chainId)} target="_blank" rel="noopener noreferrer"
                     className="text-[#334455] hover:text-[#4fc3f7]">↗</a>
                 )}
               </span>
