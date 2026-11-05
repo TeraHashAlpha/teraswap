@@ -96,23 +96,31 @@ function collectErrorMeta(err) {
   const seen = new Set()
   let revertData = false
   let e = err
-  for (let depth = 0; e != null && depth < 10; depth++) {
-    if (typeof e !== "object") {
-      parts.push(String(e))
-      break
+  // [A73c S-14] An error object can be hostile to READ — an accessor that throws, a revoked Proxy as
+  // a `cause`. The walk ends at the hostile link and the miss is classified on what was read so far
+  // (nothing readable ⇒ `unclassified`, an unrecognised infra miss): never a throw out of the failure
+  // handler, which would abort the cycle for every other order.
+  try {
+    for (let depth = 0; e != null && depth < 10; depth++) {
+      if (typeof e !== "object") {
+        parts.push(String(e))
+        break
+      }
+      if (seen.has(e)) break
+      seen.add(e)
+      if (typeof e.name === "string") names.push(e.name)
+      if (typeof e.status === "number") statuses.push(e.status)
+      if (typeof e.code === "string" || typeof e.code === "number") codes.push(String(e.code))
+      for (const k of ["shortMessage", "message", "details", "reason"]) if (typeof e[k] === "string") parts.push(e[k])
+      if (Array.isArray(e.metaMessages)) for (const m of e.metaMessages) if (typeof m === "string") parts.push(m)
+      // [A73c S-12] Hex revert data (at least a 4-byte selector) on any link — the only proof that a
+      // contract actually returned something: viem keeps the node's `data` on RpcRequestError (a hex
+      // string, or a wallet-style nested { data: 0x… }) and the raw input on ContractFunctionRevertedError.raw.
+      if ([e.data, e.raw, e.data && typeof e.data === "object" ? e.data.data : null].some(isHexRevertData)) revertData = true
+      e = e.cause
     }
-    if (seen.has(e)) break
-    seen.add(e)
-    if (typeof e.name === "string") names.push(e.name)
-    if (typeof e.status === "number") statuses.push(e.status)
-    if (typeof e.code === "string" || typeof e.code === "number") codes.push(String(e.code))
-    for (const k of ["shortMessage", "message", "details", "reason"]) if (typeof e[k] === "string") parts.push(e[k])
-    if (Array.isArray(e.metaMessages)) for (const m of e.metaMessages) if (typeof m === "string") parts.push(m)
-    // [A73c S-12] Hex revert data (at least a 4-byte selector) on any link — the only proof that a
-    // contract actually returned something: viem keeps the node's `data` on RpcRequestError (a hex
-    // string, or a wallet-style nested { data: 0x… }) and the raw input on ContractFunctionRevertedError.raw.
-    if ([e.data, e.raw, e.data && typeof e.data === "object" ? e.data.data : null].some(isHexRevertData)) revertData = true
-    e = e.cause
+  } catch {
+    /* a hostile link ends the walk: classify on what was read so far */
   }
   return { names, statuses, codes, revertData, text: parts.join(" \n ").toLowerCase() }
 }
@@ -599,15 +607,21 @@ export function collectErrorText(err) {
   const parts = []
   const seen = new Set()
   let e = err
-  while (e && typeof e === "object" && !seen.has(e)) {
-    seen.add(e)
-    for (const k of ["shortMessage", "message", "details", "reason"]) {
-      if (typeof e[k] === "string") parts.push(e[k])
+  // [A73c S-14] Same guard as collectErrorMeta: a throwing accessor / revoked Proxy ends the walk and
+  // the text read so far is returned — "never throws" must hold for a hostile object too.
+  try {
+    while (e && typeof e === "object" && !seen.has(e)) {
+      seen.add(e)
+      for (const k of ["shortMessage", "message", "details", "reason"]) {
+        if (typeof e[k] === "string") parts.push(e[k])
+      }
+      if (Array.isArray(e.metaMessages)) {
+        for (const m of e.metaMessages) if (typeof m === "string") parts.push(m)
+      }
+      e = e.cause
     }
-    if (Array.isArray(e.metaMessages)) {
-      for (const m of e.metaMessages) if (typeof m === "string") parts.push(m)
-    }
-    e = e.cause
+  } catch {
+    /* a hostile link ends the walk */
   }
   return parts.join(" ").toLowerCase()
 }

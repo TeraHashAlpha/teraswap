@@ -32,7 +32,7 @@ import {
   TransactionExecutionError,
 } from "viem"
 
-import { FAILURE_REASON, MISS_CAUSE, classifyMissCause, planFailureHandling } from "./retry-policy.js"
+import { FAILURE_REASON, MISS_CAUSE, UNRECOGNISED_INFRA_REASONS, classifyFailure, classifyMissCause, collectErrorText, planFailureHandling } from "./retry-policy.js"
 import { startRpcStub, chainNames, revertStringData, INSUFFICIENT_OUTPUT_DATA } from "./viem-wrapped-errors.fixture.mjs"
 
 const infra = (reason) => ({ cause: MISS_CAUSE.INFRA, reason })
@@ -384,5 +384,89 @@ describe("[A73c S-13] with an HTTP status in the chain only decoded revert data 
     const err = await stub.readError(REVERT_GETH)
     assert.equal(hasInChain(err, HttpRequestError), false, chain(err))
     assert.deepEqual(classifyMissCause({ err }), order("revert"), chain(err))
+  })
+})
+
+// [A73c S-14] An error object can be hostile to READ: an accessor that throws, a revoked Proxy as a
+// `cause`. Both chain walks (collectErrorMeta, collectErrorText) ran unguarded, so the throw escaped
+// classifyMissCause / planFailureHandling — out of the failure handler and out of the cycle, for every
+// other order too. The walk now ends at the hostile link and the miss is classified on what was read:
+// nothing readable ⇒ an UNRECOGNISED infra miss (`unclassified`, which feeds the C(3) alert streak);
+// the order is never burned and the cycle continues.
+describe("[A73c S-14] a hostile error object never throws out of the classifier", () => {
+  const revoked = () => {
+    const { proxy, revoke } = Proxy.revocable({}, {})
+    revoke()
+    return proxy
+  }
+  const hostile = (obj, key) =>
+    Object.defineProperty(obj, key, {
+      configurable: true,
+      get() {
+        throw new Error(`hostile accessor: ${key}`)
+      },
+    })
+  const plan = (err, over = {}) => planFailureHandling({ dbOrder: dbOrder(), err, prevFailures: 3, nowSec: NOW_SEC, nowIso: NOW, ...over })
+
+  test("a real viem error whose own `name` accessor throws ⇒ nothing readable ⇒ infra:unclassified (unrecognised); the plan is an infra miss, the cycle continues", async () => {
+    const err = await stub.writeError(PROVIDER_503)
+    assert.ok(err instanceof ContractFunctionExecutionError)
+    hostile(err, "name")
+    assert.doesNotThrow(() => classifyMissCause({ err }))
+    assert.deepEqual(classifyMissCause({ err }), infra("unclassified"))
+    assert.ok(UNRECOGNISED_INFRA_REASONS.includes("unclassified"))
+    const p = plan(err)
+    assert.equal(p.kind, "infra")
+    assert.equal(p.causeReason, "unclassified")
+    assert.equal(p.failures, 3)
+    assert.equal(p.patch.status, "active")
+    assert.equal("consecutive_failures" in p.patch, false)
+  })
+  test("a revoked Proxy as the FIRST `cause` of a real viem error ⇒ only the wrapper was readable ⇒ infra:unclassified, no throw", async () => {
+    const err = await stub.readError(PROVIDER_503)
+    err.cause = revoked()
+    assert.doesNotThrow(() => classifyMissCause({ err }))
+    assert.deepEqual(classifyMissCause({ err }), infra("unclassified"))
+    assert.equal(plan(err).kind, "infra")
+  })
+  test("a revoked Proxy grafted as the INNERMOST `cause` of a real 503 chain ⇒ the walk stops there and classifies on what it read: infra:rpc-transport", async () => {
+    const err = await stub.readError(PROVIDER_503)
+    const inner = err.walk((e) => e instanceof HttpRequestError)
+    inner.cause = revoked()
+    assert.doesNotThrow(() => classifyMissCause({ err }))
+    assert.deepEqual(classifyMissCause({ err }), infra("rpc-transport"))
+    const p = plan(err)
+    assert.equal(p.kind, "infra")
+    assert.equal(p.failures, 3)
+  })
+  test("a throwing `details` accessor deep in a REAL revert chain ⇒ what was read before it still decides: the allowance revert stays terminal", async () => {
+    const err = await stub.readError({
+      rpc: { code: 3, message: "execution reverted: ERC20: transfer amount exceeds allowance", data: revertStringData("ERC20: transfer amount exceeds allowance") },
+    })
+    hostile(err.walk((e) => e.name === "RpcRequestError"), "details")
+    assert.doesNotThrow(() => classifyMissCause({ err }))
+    assert.deepEqual(classifyMissCause({ err }), order(FAILURE_REASON.INSUFFICIENT_ALLOWANCE))
+    assert.equal(plan(err).kind, "fail")
+  })
+  test("both walks are guarded on their own: collectErrorText and classifyFailure return on a hostile chain", async () => {
+    const err = await stub.writeError(PROVIDER_503)
+    hostile(err.walk((e) => e instanceof HttpRequestError), "details")
+    assert.doesNotThrow(() => collectErrorText(err))
+    assert.equal(typeof collectErrorText(err), "string")
+    assert.doesNotThrow(() => classifyFailure({ err }))
+    assert.deepEqual(classifyFailure({ err }), { terminal: false, reason: null })
+    const whole = revoked()
+    assert.equal(collectErrorText(whole), "")
+    assert.deepEqual(classifyMissCause({ err: whole }), infra("unclassified"))
+    assert.equal(plan(whole).kind, "infra")
+  })
+  test("twenty hostile misses in a row never move the ladder (the order is not burned for an error we could not read)", async () => {
+    const err = await stub.writeError(PROVIDER_503)
+    hostile(err, "name")
+    for (let i = 0; i < 20; i++) {
+      const p = plan(err)
+      assert.equal(p.kind, "infra")
+      assert.equal(p.failures, 3)
+    }
   })
 })
