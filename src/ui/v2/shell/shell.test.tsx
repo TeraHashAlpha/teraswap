@@ -200,11 +200,20 @@ describe('tabs', () => {
     }
   })
 
-  it('Limit / SL/TP lose "Soon" when v1\'s isLimitLive gate says live', () => {
-    h.limitLive = true
-    render(<AppShell />)
-    expect(screen.getByRole('tab', { name: 'Limit' }).hasAttribute('disabled')).toBe(false)
-    expect(screen.queryByText('Soon')).toBeNull()
+  it('Limit / SL/TP stay disabled "Soon" even when v1\'s isLimitLive gate says live — v2 has no pane for them (owner decision)', () => {
+    for (const chain of [1, 8453, 42161]) {
+      cleanup()
+      h.limitLive = true
+      useDisconnectedChainSelection.setState({ chainId: chain })
+      render(<AppShell />)
+      for (const name of ['Limit', 'SL/TP']) {
+        const tab = screen.getByRole('tab', { name: new RegExp(`^${name.replace('/', '\\/')}`) })
+        expect(tab.hasAttribute('disabled')).toBe(true)
+        expect(tab.textContent).toMatch(/soon/i)
+        fireEvent.click(tab)
+      }
+      expect(h.push).not.toHaveBeenCalled() // the skeleton TabPane is never reachable from the strip
+    }
   })
 
   it('the tab in the URL is active; clicking another navigates to its path', () => {

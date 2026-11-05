@@ -8,6 +8,10 @@
 import { cleanup, fireEvent, render, screen, waitFor, act } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BASE, h, offchainInfo, resetHarness } from './dca-harness'
+import { compareContent } from '../__tests__/content-parity'
+
+const nav = vi.hoisted(() => ({ push: vi.fn() }))
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: nav.push }) }))
 
 vi.mock('wagmi', async () => {
   const { h } = await import('./dca-harness')
@@ -116,6 +120,34 @@ describe('(5a) chain gate', () => {
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('DCA runs on Base and Arbitrum One.')
     expect([screen.getByRole('button', { name: 'Switch to Base' }).textContent, screen.getByRole('button', { name: 'Switch to Arbitrum One' }).textContent]).toEqual(v1Buttons)
     expect(document.body.textContent).not.toMatch(/soon/i)
+  })
+
+  it("content parity: every visible text node of v1's ComingSoonPanel(dca) is in the gate (the teaser title and description included)", () => {
+    h.account = { ...h.account, isConnected: false, chain: undefined }
+    const v1 = render(<ComingSoonPanel mode="dca" chainId={1} onSwap={() => {}} />)
+    const v1Root = v1.container.cloneNode(true) as HTMLElement
+    cleanup()
+    const v2 = render(<DcaNetworkGate />)
+    const r = compareContent(v1Root, v2.container, [{ text: '⟳', reason: "v1's teaser icon: decorative; the gate is a hero without a glyph" }])
+    expect(r.missingText).toEqual([])
+    expect(r.missingHrefs).toEqual([])
+    expect(r.staleAllow).toEqual([])
+  })
+
+  it("v1's \"Swap Now →\" is there and does what v1's onSwap does: go to the Swap tab (and play nothing)", () => {
+    h.account = { ...h.account, isConnected: false, chain: undefined }
+    const onSwap = vi.fn()
+    render(<ComingSoonPanel mode="dca" chainId={1} onSwap={onSwap} />)
+    const v1Label = screen.getByRole('button', { name: /^Swap Now/ }).textContent
+    fireEvent.click(screen.getByRole('button', { name: /^Swap Now/ }))
+    expect(onSwap).toHaveBeenCalledTimes(1)
+    cleanup()
+    h.soundLog.length = 0
+    render(<DcaNetworkGate />)
+    expect(screen.getByRole('button', { name: /^Swap Now/ }).textContent).toBe(v1Label)
+    fireEvent.click(screen.getByRole('button', { name: /^Swap Now/ }))
+    expect(nav.push).toHaveBeenCalledExactlyOnceWith('/swap')
+    expect(h.soundLog).toEqual([])
   })
 
   it("the chain list is the SAME source as v1's: DCA_CHAINS, named by the registry (v1's panel and the v2 gate list equal chains)", () => {
