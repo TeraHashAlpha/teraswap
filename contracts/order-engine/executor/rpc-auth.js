@@ -58,7 +58,7 @@
  * no other env reads, no network.
  */
 
-import { chmodSync, closeSync, constants, lstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs"
+import { closeSync, constants, fchmodSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { redactUrl } from "./redact.js"
@@ -278,6 +278,9 @@ export function keeperStateDir() {
 // [A71b S-2] O_NOFOLLOW makes open() fail (ELOOP) when the LAST path component is a symlink. (Absent on
 // Windows, where the flag is simply 0 — the keeper runs on Linux/macOS hosts.)
 const NOFOLLOW = constants.O_NOFOLLOW ?? 0
+const DIRECTORY = constants.O_DIRECTORY ?? 0
+
+const ourUid = () => (typeof process.getuid === "function" ? process.getuid() : null)
 
 /**
  * [A71b S-2] The state directory must be a plain directory, never a symlink: lstat (not stat) looks at
@@ -290,12 +293,85 @@ function plainDirStat(d) {
   return st
 }
 
-/** Default gate read: only from a directory this process owns and nobody else can write, never via a link. */
-function readOwnedState(f) {
-  const d = plainDirStat(dirname(f))
-  const uid = typeof process.getuid === "function" ? process.getuid() : null
-  if ((uid !== null && d.uid !== uid) || (d.mode & 0o022) !== 0) throw new Error("untrusted state directory")
-  const fd = openSync(f, constants.O_RDONLY | NOFOLLOW) // a symlinked gate file is refused, not followed
+/**
+ * [A74 S-12] The OPENED state file must be a regular file, ours, with exactly one name: a hard link
+ * (nlink > 1) is another name for an inode someone else may control — or one we must not rewrite.
+ * `uid` null = the platform has none (not checked). Pure, so it is tested with plain objects.
+ * @param {{ isFile(): boolean, uid: number, nlink: number }} st — an fstat of the opened descriptor
+ * @param {number|null} uid
+ */
+export function assertOwnedRegularFile(st, uid) {
+  if (!st.isFile()) throw new Error("state file is not a regular file")
+  if (uid !== null && st.uid !== uid) throw new Error("state file has the wrong owner (uid)")
+  if (st.nlink !== 1) throw new Error("state file has more than one hard link")
+}
+
+/**
+ * [A74 S-12] The state directory's PARENT (HOME) must not be writable by group or others: whoever can write
+ * there can rename or replace `~/.teraswap-keeper` at any moment, and no check on the directory or the file
+ * can make that safe. (`stat`, not `lstat`: HOME itself may legitimately be a link to the real directory.)
+ */
+function assertTrustedParent(d) {
+  const p = statSync(dirname(d))
+  if (!p.isDirectory() || (p.mode & 0o022) !== 0) throw new Error("untrusted state directory: its parent is writable by others")
+}
+
+/**
+ * [A74 S-12] Check the directory by path, then pin it by DESCRIPTOR: open it O_DIRECTORY|O_NOFOLLOW, require
+ * the same inode as the lstat, ours — and tighten it with fchmod (which acts on the object we hold, never on
+ * whatever the path points at by now). Returns the lstat so callers can re-check it after their own open.
+ */
+function pinStateDir(d, { tighten }) {
+  assertTrustedParent(d)
+  const before = plainDirStat(d)
+  const uid = ourUid()
+  const fd = openSync(d, constants.O_RDONLY | NOFOLLOW | DIRECTORY)
+  try {
+    const st = fstatSync(fd)
+    if (!st.isDirectory() || st.dev !== before.dev || st.ino !== before.ino) throw new Error("state directory changed while it was opened")
+    if (uid !== null && st.uid !== uid) throw new Error("untrusted state directory")
+    if (tighten) fchmodSync(fd, 0o700) // an existing looser directory is tightened (throws if not ours ⇒ not persisted)
+    else if ((st.mode & 0o022) !== 0) throw new Error("untrusted state directory")
+  } finally {
+    closeSync(fd)
+  }
+  return before
+}
+
+/**
+ * [A74 S-12] Open the state file and prove, AFTER the open, that what we hold is what we checked: fstat of
+ * the descriptor (regular, ours, nlink 1), the path still names that very inode and is not a link, and the
+ * directory is still the one we pinned. A swap between the check and the open is a refusal, not a read or
+ * write of the new object. Opened WITHOUT O_TRUNC: truncation happens only after these checks.
+ */
+function openStateFile(f, flags, mode, dirBefore, hooks) {
+  const fd = openSync(f, flags | NOFOLLOW, mode)
+  try {
+    hooks.afterOpen?.() // test seam: a rename-and-replace race, made deterministic
+    const st = fstatSync(fd)
+    assertOwnedRegularFile(st, ourUid())
+    const byPath = lstatSync(f)
+    if (byPath.isSymbolicLink() || byPath.dev !== st.dev || byPath.ino !== st.ino) throw new Error("state file changed while it was opened")
+    const dirNow = lstatSync(dirname(f))
+    if (dirNow.isSymbolicLink() || !dirNow.isDirectory() || dirNow.dev !== dirBefore.dev || dirNow.ino !== dirBefore.ino) {
+      throw new Error("state directory changed while the file was opened")
+    }
+    return fd
+  } catch (e) {
+    closeSync(fd)
+    throw e
+  }
+}
+
+/**
+ * Default gate read: only from a directory this process owns and nobody else can write (under a parent
+ * nobody else can write), never via a link, and only from a regular file with one name.
+ * @param {string} f
+ * @param {{ afterOpen?: () => void }} [hooks] — test seam
+ */
+export function readOwnedState(f, hooks = {}) {
+  const dirBefore = pinStateDir(dirname(f), { tighten: false })
+  const fd = openStateFile(f, constants.O_RDONLY, 0, dirBefore, hooks) // a symlinked gate file is refused, not followed
   try {
     return readFileSync(fd, "utf-8")
   } finally {
@@ -303,14 +379,22 @@ function readOwnedState(f) {
   }
 }
 
-/** Default gate write: create / tighten the directory to 0700, the file to 0600; refuse any symlink. */
-function writeOwnedState(f, s) {
+/**
+ * Default gate write: create / tighten the directory to 0700, the file to 0600; refuse any symlink, hard
+ * link, non-regular file or swap.
+ * @param {string} f
+ * @param {string} s
+ * @param {{ afterOpen?: () => void }} [hooks] — test seam
+ */
+export function writeOwnedState(f, s, hooks = {}) {
   const d = dirname(f)
+  assertTrustedParent(d) // before mkdir: nothing is created under a parent others can write
   mkdirSync(d, { recursive: true, mode: 0o700 })
-  plainDirStat(d) // a link here ⇒ throws before anything is chmodded or written
-  chmodSync(d, 0o700) // an existing looser directory is tightened (throws if not ours ⇒ not persisted ⇒ louder)
-  const fd = openSync(f, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | NOFOLLOW, 0o600)
+  const dirBefore = pinStateDir(d, { tighten: true }) // a link here ⇒ throws before anything is chmodded or written
+  const fd = openStateFile(f, constants.O_WRONLY | constants.O_CREAT, 0o600, dirBefore, hooks)
   try {
+    ftruncateSync(fd, 0)
+    fchmodSync(fd, 0o600) // O_CREAT's mode applies only to a NEW file; an existing 0644 one is tightened here
     writeFileSync(fd, s)
   } finally {
     closeSync(fd)
