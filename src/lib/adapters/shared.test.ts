@@ -115,4 +115,34 @@ describe('isNoRouteError — the adapter said the PAIR cannot be routed', () => 
       expect(isNoRouteError(m)).toBe(false)
     }
   })
+
+  // [A73b S-10] friendlyError applies its network / timeout / 429 / 403 rules FIRST and only then the
+  // liquidity / no-route rules. isNoRouteError mirrors that precedence: a message an earlier rule claims
+  // (an outage, a limit, an auth error) is never a NO_ROUTE, even when it also contains the no-route words.
+  const OUTAGE_WITH_ROUTE_WORDS = [
+    'Uniswap V3: failed to fetch — no route computed',
+    'NetworkError: no pool query aborted',
+    'timeout while searching for a route: no route found',
+    'HTTP 429 rate limit — no route returned',
+    'rate limit hit before the insufficient liquidity check',
+    '403 Forbidden: no pool access for this key',
+    'insufficient liquidity (upstream timeout)',
+  ]
+  it('[A73b S-10] returns false when an EARLIER friendlyError rule (network / timeout / 429 / 403) claims the same message', () => {
+    for (const m of OUTAGE_WITH_ROUTE_WORDS) {
+      expect(isNoRouteError(m)).toBe(false)
+      expect(friendlyError('src', new Error(m))).not.toMatch(/No route found for this pair|Insufficient liquidity for this pair\/amount/)
+    }
+  })
+  it('[A73b S-10] the two agree on every message: NO_ROUTE ⇔ friendlyError chose the liquidity / no-route copy', () => {
+    const samples = [
+      'No route found', 'NO ROUTE for WETH/XYZ', 'no pool exists', 'Insufficient liquidity for amount', 'insufficient LIQUIDITY',
+      ...OUTAGE_WITH_ROUTE_WORDS,
+      '1inch API timeout', 'Request timed out', '429 rate limit', '403 forbidden', 'failed to fetch', 'insufficient funds for gas', 'Unknown error', '',
+    ]
+    for (const m of samples) {
+      const chose = /No route found for this pair|Insufficient liquidity for this pair\/amount/.test(friendlyError('src', new Error(m)))
+      expect(isNoRouteError(m)).toBe(chose)
+    }
+  })
 })

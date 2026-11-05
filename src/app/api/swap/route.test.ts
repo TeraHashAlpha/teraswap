@@ -383,6 +383,21 @@ describe('POST /api/swap — adapter no-route ⇒ 422 NO_ROUTE, same error text 
     expect(body.code).toBe('NO_ROUTE')
     expect(body.error).not.toContain('SUPER_SECRET_KEY')
   })
+  // [A73b S-10] friendlyError's earlier rules (network / timeout / 429 / 403) win over the no-route words:
+  // an outage that happens to mention a route is still the generic 502 with no code — the keeper must
+  // not count it against the order.
+  it.each([
+    '1inch: timeout — no route found in time',
+    'Velora: 429 rate limit, no pool data returned',
+    'Uniswap V3: 403 forbidden — no route',
+    'Odos: failed to fetch (no route computed)',
+  ])('"%s" matches an earlier friendlyError rule ⇒ 502, no code', async (msg) => {
+    mockFetchSwapFromSource.mockRejectedValueOnce(new Error(msg))
+    const res = await POST(makeRequest({ source: '1inch', ...VALID_BASE }))
+    expect(res.status).toBe(502)
+    const body = await res.json()
+    expect(body.code).toBeUndefined()
+  })
 })
 
 describe('POST /api/swap — V12 upstream fetch error [P127]', () => {
