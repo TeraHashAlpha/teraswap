@@ -393,7 +393,10 @@ export function SwapCard() {
   // [A69 L-1] Confirm is gated like the CTA behind it (v1's SwapButton order): a price-gate block lands, or the quote it would execute is gone. It says
   // the CTA's own words and is disabled — never a press that silently does nothing. A hook already working keeps its in-flight label, and a frozen
   // transaction (v1's TransactionPreview) is signed regardless, as in v1.
-  const confirmGated = !frozenSwap && !confirmBtn.disabled && (cta.kind === 'blocked' || cta.kind === 'finding-route' || cta.kind === 'no-quotes')
+  // [A69b S-2] Gated on the CTA's own disabled state, not on three of its kinds: `ctaFor` ranks insufficient-balance (and connect / wrong-network) AHEAD of
+  // `blocked`, so a gate block hidden behind one of them left Confirm enabled as "Confirm & Sign" while the press silently did nothing
+  // (`lifecycle.confirm` returns on `gates.anyBlocked`). `anyBlocked` is added for the two ranks that stay enabled (connect, wrong-network).
+  const confirmGated = !frozenSwap && !confirmBtn.disabled && ((cta.disabled && cta.kind !== 'in-flight') || gates.anyBlocked)
 
   // The Execution column is up from the first hook step until the visitor starts over (New swap, or any change to the trade).
   const executionActive = lc.status !== 'idle'

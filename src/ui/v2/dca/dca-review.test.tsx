@@ -45,7 +45,7 @@ function reviewFor(info: PreparedReview['info']): PreparedReview {
     tokenIn: weth(), tokenOut: usdc(), amountIn: '500000000000000000', minAmountOut: '1200000000', maxSlippageBps: 300,
     expirySeconds: 2_592_000, router: '0x1111111111111111111111111111111111111111', priceInUsd: 2500, dcaInterval: 86_400, dcaTotal: 10,
   })
-  return { draft, info, symbols: ['USDC'], minAmountOut: '1200000000' }
+  return { draft, info, symbols: ['USDC'], minAmountOut: '1200000000', priceKey: '' }
 }
 const VIEW: DcaReviewView = {
   symbolIn: 'WETH', symbolOut: 'USDC', chainName: 'Base', total: '0.5', perBuy: '0.05', buys: 10, every: '1d', duration: '10.0 days', expires: '30d',

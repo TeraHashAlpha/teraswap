@@ -467,6 +467,13 @@ export function DcaCard({ chainId }: { chainId: number }) {
     reset(structural ? undefined : { reviewOnly: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the draft alone: `reset` is a new function every render
   }, [draftKey, priceKey])
+  // [A70b S-2] A review that reopens after a price moved under a frozen / signing order (a 409, or a tier change) carries the floor of the OLD
+  // prices: its key is stored on it, and it closes the moment it differs from the form's. (A review opened at the current prices never differs.)
+  const reviewPriceKey = lc.review?.priceKey
+  const closeReview = lc.closeReview
+  useEffect(() => {
+    if (lc.phase === 'review' && reviewPriceKey !== undefined && reviewPriceKey !== priceKey) closeReview()
+  }, [lc.phase, reviewPriceKey, priceKey, closeReview])
   // v1 latches `frozen` on the freeze-403 inside its event effect; the same latch, set while rendering the event in (no effect-set).
   const [seenEvent, setSeenEvent] = useState(latestEvent)
   if (latestEvent !== seenEvent) {
