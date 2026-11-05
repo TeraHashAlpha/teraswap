@@ -215,15 +215,15 @@ keeper (the key sits inside a URL path in a host env file). Every keeper RPC cal
      (macOS and Linux `grep`/`sed`; pinned by `contracts/order-engine/executor/runbook-rpc-inventory.test.mjs`):
      ```bash
      cd contracts/order-engine/executor
-     HOST='<provider-host>'
+     HOST='<provider-host>'   # hostnames are case-insensitive: both greps below use -i (-iF)
      # (a) every assignment whose value is a URL — `VAR=…`, `VAR = …`, `export VAR=…`, indented, quoted
      #     or not. Prints "file  VAR  scheme://host": never the userinfo, path or query (where keys live).
      grep -HE "^[[:space:]]*(export[[:space:]]+)?[A-Za-z0-9_]+[[:space:]]*=[[:space:]]*[\"']?[A-Za-z][A-Za-z0-9+.-]*://" .env.executor* \
        | sed -E "s|^([^:]+):[[:space:]]*(export[[:space:]]+)?([A-Za-z0-9_]+)[[:space:]]*=[[:space:]]*[\"']?([A-Za-z][A-Za-z0-9+.-]*)://([^/?#@\"' ]*@)?([^/?#\"' ]*).*|\1  \3  \4://\6|" \
-       | grep -F "$HOST"
+       | grep -iF "$HOST"
      # (b) every line that names the host in ANY shape (a URL list, a commented-out line, …).
      #     Prints "file:line  VAR" only — a line (b) lists that (a) did not is a consumer (a) missed.
-     grep -HnF "$HOST" .env.executor* \
+     grep -HniF "$HOST" .env.executor* \
        | sed -E "s|^([^:]+:[0-9]+):[[:space:]]*(export[[:space:]]+)?([A-Za-z0-9_]*).*|\1  \3|"
      ```
    - Vercel, **Production + Preview + Development**: Project → Settings → Environment Variables, search
