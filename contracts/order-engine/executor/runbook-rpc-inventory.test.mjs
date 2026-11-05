@@ -78,3 +78,55 @@ test("[A71 L-6] § 7 step 1 lists every g.alchemy.com consumer in every shape, a
   assert.ok(!out.includes("/v2"), out)
   assert.ok(!out.includes("supabase"), out)
 })
+
+// ─── [A71b S-4] ──────────────────────────────────────────────────────────────────────────────────
+// Hostnames are case-insensitive, and an env file may spell one in capitals (`BASE-MAINNET.G.ALCHEMY.COM`,
+// pasted from a dashboard). The audited block used `grep -F`, which is case-sensitive: that consumer
+// was invisible — the same "grep missed a consumer" failure as INC-2026-10-30-001 — and so was a
+// run with the host typed in capitals against lower-case files.
+function runInventory(cwd, host) {
+  const runnable = inventoryBlock()
+    .split("\n")
+    .filter((l) => !/^cd contracts\/order-engine\/executor\s*$/.test(l))
+    .join("\n")
+    .replaceAll("<provider-host>", host)
+  const r = spawnSync("bash", ["-c", runnable], { cwd, encoding: "utf-8" })
+  assert.equal(r.stderr, "")
+  return r.stdout.split("\n")
+}
+
+const upperDir = mkdtempSync(join(tmpdir(), "rpc-inventory-upper-"))
+after(() => rmSync(upperDir, { recursive: true, force: true }))
+writeFileSync(
+  join(upperDir, ".env.executor"),
+  [
+    `RPC_URL="https://BASE-MAINNET.G.ALCHEMY.COM/v2/${KEY}"`,
+    `FALLBACK_RPC_URL=wss://Arb-Mainnet.g.Alchemy.com/ws/${KEY}`,
+    `# OLD_RPC_URL=HTTPS://ETH-MAINNET.G.ALCHEMY.COM/v2/${KEY}`,
+    "SUPABASE_URL=https://example.supabase.co",
+    "",
+  ].join("\n"),
+)
+
+test("[A71b S-4] a host spelled in capitals in the env file is listed (lower-case HOST), and never prints the key", () => {
+  const out = runInventory(upperDir, "g.alchemy.com")
+  for (const row of [
+    ".env.executor  RPC_URL  https://BASE-MAINNET.G.ALCHEMY.COM",
+    ".env.executor  FALLBACK_RPC_URL  wss://Arb-Mainnet.g.Alchemy.com",
+  ]) {
+    assert.ok(out.includes(row), `missing "${row}" in:\n${out.join("\n")}`)
+  }
+  assert.ok(out.includes(".env.executor:1  RPC_URL"), "(b) lists the line by hostname")
+  assert.ok(out.some((l) => l.startsWith(".env.executor:3 ")), "(b) lists the commented-out upper-case line")
+  const all = out.join("\n")
+  assert.ok(!all.includes(KEY), `key printed:\n${all}`)
+  assert.ok(!all.toLowerCase().includes("/v2"), all)
+  assert.ok(!all.includes("supabase"), all)
+})
+
+test("[A71b S-4] HOST typed in capitals finds lower-case files too", () => {
+  const out = runInventory(dir, "G.ALCHEMY.COM")
+  assert.ok(out.includes(".env.executor  RPC_URL  https://base-mainnet.g.alchemy.com"), out.join("\n"))
+  assert.ok(out.includes(".env.executor.arbitrum:3  RPC_URLS"), out.join("\n"))
+  assert.ok(!out.join("\n").includes(KEY))
+})

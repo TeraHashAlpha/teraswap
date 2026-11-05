@@ -10,19 +10,29 @@
  *                    through redactUrl, optionally truncated AFTER redaction (a slice taken first
  *                    could cut the URL into a shape the patterns no longer see).
  *
+ * What is read first [A74 S-5]: the text is DECODED to a fixpoint (percent, stacked percent, JSON/JS and octal
+ * escapes, HTML entities — for `/ : @ ? # \\ %` only), so an encoded delimiter cannot hide a URL; text nested
+ * deeper than the decoder goes is replaced by OVER_ENCODED (fail closed).
+ *
  * Which URLs, deliberately broad (over-redaction costs a lookup, a leak costs a key rotation):
- *   1. anything with a scheme (http, https, ws, wss, custom; any case) — userinfo included; the one
- *      exception is `file://` (a stack-trace frame, so a redacted stack keeps its frames);
- *   2. a schemeless `host:port/…` (`127.0.0.1:8545/v2/<key>`, `[::1]:8545/…`);
- *   3. a schemeless dotted host with an alphabetic TLD followed by a path (`provider.example/v2/<key>`).
+ *   1. anything with a scheme (http, https, ws, wss, custom; any case) — userinfo included, whatever
+ *      characters the password holds [S-7]; an authority that is not a plain host[:port] is dropped
+ *      (`[authority-redacted]`) [S-5]; the one exception is `file:///…` (a stack-trace frame, so a redacted
+ *      stack keeps its frames);
+ *   2. a schemeless `host:port/…` (`127.0.0.1:8545/v2/<key>`, `[::1]:8545/…`) [S-6: after any character];
+ *   3. a schemeless dotted host with an alphabetic TLD followed by a path (`provider.example/v2/<key>`), and
+ *      a schemeless `user:secret@host/path` loses its userinfo.
  * A bare host (`https://basescan.org`, `api.example.com`) carries no secret and is left alone, so
  * a version string like `viem@2.47.10` is never touched (no alphabetic TLD).
+ * `allowHosts` [S-8]: a link to an allow-listed explorer survives ONLY as `/tx|address|block/0x<hex>` on exactly
+ * that host (no port, no userinfo); anything else on that host is redacted like any other URL.
  *
  * chain-verify.js keeps its own STRICTER `redactUrls` (whole URL → `<redacted-url>`, plus long hex
  * runs) for its boot refusals; that is a superset of this one and is pinned by its own tests.
  *
  * Every quantifier is bounded or a single pass over a negated class — linear in the input, no
- * nested repetition (a redactor that backtracks inside an alert path is a denial of service).
+ * nested repetition (a redactor that backtracks inside an alert path is a denial of service); backslash
+ * runs are clamped to 8 first [S-9].
  */
 
 export const REDACTED = "/REDACTED"
@@ -36,24 +46,119 @@ export const REDACTED = "/REDACTED"
 export const ALERT_LINK_HOSTS = Object.freeze(["etherscan.io", "sepolia.etherscan.io", "basescan.org", "arbiscan.io"])
 
 const TAIL = "[^\\s\"'<>(),]*"
-// [A71 L-4] A scheme starts wherever the previous character could not be part of one. `\b` missed
-// `rpc_https://host/v2/<key>`: `_` is a word character, so there was no boundary before `https`.
-const SCHEME_URL = new RegExp(`(?<![a-z0-9+.-])([a-z][a-z0-9+.-]{0,30})://(${TAIL})`, "gi")
-// [A71 L-4] JSON-escaped slashes (`https:\/\/host\/v2\/<key>`, also double-escaped) hid the URL from
-// every pattern below; they are normalised to `/` first.
-const ESCAPED_SLASH = /\\+\//g
-// Lookbehind: only at a token start, so neither pattern re-enters a URL pattern 1 already handled.
-const HOSTPORT_PATH = new RegExp(
-  `(?<![\\w/:.@-])((?:\\[[0-9a-f:.]{2,45}\\]|[a-z0-9_.-]{1,255}):\\d{1,5})[/?#]${TAIL}`,
+// [A71b S-3] No boundary in front of the SCHEME: the leftmost match wins. [A71 L-4] had required "the previous character
+// cannot be part of a scheme" (so `rpc_https://` matched, `_` not being one), but a URL glued to 27+
+// scheme characters — a 0x address (42 of them) written straight in front of it — then had NO valid
+// start at all (the scheme is capped at 31, every later start is preceded by a scheme character) and
+// passed untouched. Without the boundary the scheme is simply the last <= 31 scheme characters before
+// `://`; whatever precedes them is left as it was, and the URL itself is always redacted. Bounded
+// quantifier, one pass: at most 31 characters are tried per start, so the cost stays linear.
+// (the scheme pattern is the first alternative of URL_RE, below)
+// [A74 S-5] Every URL delimiter — `/ : @ ? #` — and the backslash and percent that spell the others can
+// be written in an encoding that hides it from the patterns below: percent (`%2F`, stacked `%252F`),
+// JSON / JS escapes (`\u002f`, `\u{2f}`, `\x2f`), octal (`\057`), HTML entities numeric (`&#x2F;`,
+// `&#47;`, with or without the closing `;`, behind any number of `&amp;`) and named (`&sol;`). All of
+// them are decoded here, to a FIXPOINT (a `&#37;2F` is `%2F` is `/`), before anything looks at the
+// text. Over-decoding only ever over-redacts, and only these eight characters are ever produced.
+const DELIMS = new Map([
+  [0x2f, "/"], [0x3a, ":"], [0x40, "@"], [0x3f, "?"], [0x23, "#"], [0x5c, "\\"], [0x25, "%"],
+])
+const NAMED = new Map([["sol", "/"], ["colon", ":"], ["commat", "@"], ["quest", "?"], ["num", "#"], ["bsol", "\\"], ["percnt", "%"]])
+const fromCode = (n, original) => DELIMS.get(n) ?? original
+
+// `%2F`, `%252F`, `%25252F`…: any number of `25` (an encoded `%`) in front of the byte. A lone `%25`
+// is a percent sign, not a delimiter, and is left alone.
+const PCT = /%(?:25)*([0-9a-f]{2})/gi
+// `\u002f` `\u{2f}` `\x2f` (also double-escaped: one to eight backslashes)
+const ESC = /\\{1,8}(?:u0{0,6}([0-9a-f]{2})|u\{0*([0-9a-f]{1,6})\}|x([0-9a-f]{2}))/gi
+const OCTAL = /\\{1,8}([0-7]{3})/g
+// `&#x2F;` `&#x2F` `&#47;` `&#47` `&sol;`, behind any number of `&amp;` layers. The numeric forms match
+// on the code's PREFIX ("&#x2F0xabc" is a slash followed by "0xabc") — an under-decode is a leak.
+const ENT = /&(?:amp;)*(?:#x0*(2f|3a|40|3f|23|5c|25);?|#0*(47|58|64|63|35|92|37);?|(sol|colon|commat|quest|num|bsol|percnt);)/gi
+// [A71 L-4] JSON-escaped slashes (`https:\/\/host\/v2\/<key>`, also double-escaped)
+const ESCAPED_SLASH = /\\{1,8}\//g
+// [A74 S-9] `\\+` before a literal is O(N²) on a run of N backslashes that is NOT followed by it (every
+// start rescans the run: 80 000 backslashes blocked the loop ~16 s). The decoders above take `\\{1,8}`; a
+// longer run is first clamped to 8 in ONE linear pass (a run at its start matches whole), so a long run
+// is still decoded — it can never be a hiding place for a delimiter — and never costly.
+const LONG_BACKSLASH_RUN = /\\{9,}/g
+const EIGHT_BACKSLASHES = "\\".repeat(8)
+
+const MAX_FOLDS = 16
+/** Marker returned when the text is nested deeper than the decoder will go: fail closed. */
+export const OVER_ENCODED = "[REDACTED: nested encoding]"
+
+function decodeOnce(s) {
+  return s
+    .replace(LONG_BACKSLASH_RUN, EIGHT_BACKSLASHES)
+    .replace(ESCAPED_SLASH, "/")
+    .replace(PCT, (m, hex) => (hex === "25" ? m : fromCode(parseInt(hex, 16), m)))
+    .replace(ESC, (m, u, ub, x) => fromCode(parseInt(u ?? ub ?? x, 16), m))
+    .replace(OCTAL, (m, oct) => fromCode(parseInt(oct, 8), m))
+    .replace(ENT, (m, hex, dec, name) =>
+      name !== undefined ? NAMED.get(name.toLowerCase()) : fromCode(hex !== undefined ? parseInt(hex, 16) : parseInt(dec, 10), m),
+    )
+}
+
+/** Decode to a fixpoint; null when the text is still changing after MAX_FOLDS (hostile nesting). */
+function normalise(text) {
+  let s = String(text)
+  for (let i = 0; i < MAX_FOLDS; i++) {
+    const next = decodeOnce(s)
+    if (next === s) return s
+    s = next
+  }
+  return decodeOnce(s) === s ? s : null
+}
+// [A74 S-6] ONE pass, scheme URL | schemeless path. The schemeless patterns used to start at a "token
+// start" (`(?<![\w/:.@-])`), so a keyed URL written after a `/` (what the S-3 `%2F` decode produces), a
+// `:`, `@`, `.`, `-`, or glued to a word character (`0x<64 hex>host.example/v2/KEY`) was never seen.
+// They no longer find a host at all: they find the PATH DELIMITER and look BEHIND it for a host
+// (`dotted.host` with an alphabetic TLD, or `host:port`), then redact from the delimiter on — the host
+// text in front of it is left exactly as it was, whatever precedes it. Being alternatives of the same
+// regex as the scheme URL, text a scheme URL already consumed (an allowed explorer link, an
+// already-redacted `https://host/REDACTED`) is never scanned again. Cost: the lookahead rejects every
+// position that is not `/ ? #` in O(1); the lookbehind then reads at most a few hundred characters.
+const HOST_BEHIND = "(?:(?:[a-z0-9_-]{1,63}\\.){1,8}[a-z]{2,24}|(?:\\[[0-9a-f:.]{2,45}\\]|[a-z0-9_.-]{1,255}):\\d{1,5})"
+// [A74 S-7] The userinfo is matched ON ITS OWN, in front of TAIL: everything up to the last `@` before the
+// first `/ ? #` or whitespace. TAIL stops at `( ) , ' " < >`, so a password containing one of them used to
+// end the match inside the userinfo and leave the rest of it (and the real host and path) in the text.
+// One scan of a negated class to the end of the segment (`/` cannot be in it), so it stays linear.
+const URL_RE = new RegExp(
+  `([a-z][a-z0-9+.-]{0,30})://((?:[^\\s/?#]*@)?)(${TAIL})|((?=[/?#])(?<=${HOST_BEHIND})[/?#]${TAIL})`,
   "gi",
 )
-const HOST_PATH = new RegExp(`(?<![\\w/:.@-])((?:[a-z0-9_-]{1,63}\\.){1,8}[a-z]{2,24})[/?#]${TAIL}`, "gi")
 
-function hostOf(hostPort) {
-  if (hostPort.startsWith("[")) return hostPort.slice(0, hostPort.indexOf("]") + 1)
-  const colon = hostPort.lastIndexOf(":")
-  return colon === -1 ? hostPort : hostPort.slice(0, colon)
+// [A74 S-6] `user:secret@host.example/path` with no scheme: the `@` followed by a host and a path
+// delimiter. The userinfo is the run of non-delimiter characters in front of the `@` (at most 255). It runs
+// AFTER URL_RE, which has already removed every scheme URL's own userinfo.
+const AT_HOST = new RegExp(
+  `@(?=(?:(?:[a-z0-9_-]{1,63}\\.){1,8}[a-z]{2,24}|(?:\\[[0-9a-f:.]{2,45}\\]|[a-z0-9_.-]{1,255}):\\d{1,5})[/?#])`,
+  "gi",
+)
+const USERINFO_STOP = /[\s/?#@"'<>]/
+function stripBareUserinfo(s) {
+  if (!s.includes("@")) return s
+  let out = ""
+  let last = 0
+  for (const m of s.matchAll(AT_HOST)) {
+    let start = m.index
+    while (start > last && m.index - start < 255 && !USERINFO_STOP.test(s[start - 1])) start--
+    if (start === m.index) continue // nothing in front of the "@": not a userinfo
+    out += s.slice(last, start)
+    last = m.index + 1
+  }
+  return last === 0 ? s : out + s.slice(last)
 }
+
+// [A74 S-8] The only path an allow-listed explorer host may keep: exactly the links event-watcher.js
+// builds (`/tx/0x<hash>`; `/address` and `/block` for the same family) — no query, fragment, extra
+// segment or non-hex tail. The host test alone let `https://basescan.org/api?apikey=KEY` through.
+const EXPLORER_TAIL = /^\/(?:tx|address|block)\/0x[0-9a-f]+$/i
+
+/** What stands in for an authority that is not a plain host[:port]. */
+export const AUTHORITY_DROPPED = "[authority-redacted]"
+const PLAIN_HOSTPORT = /^(?:[a-z0-9_.-]{1,255}|\[[0-9a-f:.]{2,45}\])(?::\d{1,5})?$/i
 
 /**
  * @param {unknown} text
@@ -63,22 +168,24 @@ function hostOf(hostPort) {
  */
 export function redactUrl(text, { allowHosts = [] } = {}) {
   const allow = new Set(allowHosts.map((h) => h.toLowerCase()))
-  return String(text)
-    .replace(ESCAPED_SLASH, "/")
-    .replace(SCHEME_URL, (match, scheme, rest) => {
-      // A `file:///…` frame in a stack trace is a local path, not an endpoint — keep the frames.
-      if (scheme.toLowerCase() === "file") return match
-      const end = rest.search(/[/?#]/)
-      const authority = end === -1 ? rest : rest.slice(0, end)
-      const tail = end === -1 ? "" : rest.slice(end)
-      const at = authority.lastIndexOf("@")
-      const hostPort = at === -1 ? authority : authority.slice(at + 1)
-      if (at === -1 && (tail === "" || tail === "/")) return match
-      if (at === -1 && allow.has(hostOf(hostPort).toLowerCase())) return match
-      return `${scheme}://${hostPort}${REDACTED}`
-    })
-    .replace(HOSTPORT_PATH, (_m, hostPort) => `${hostPort}${REDACTED}`)
-    .replace(HOST_PATH, (_m, host) => `${host}${REDACTED}`)
+  const decoded = normalise(text)
+  if (decoded === null) return OVER_ENCODED // nested deeper than any real error: say nothing rather than half
+  const redacted = decoded.replace(URL_RE, (match, scheme, userinfo, rest, bare) => {
+    if (bare !== undefined) return REDACTED
+    // A `file:///…` frame in a stack trace is a local path, not an endpoint — keep the frames.
+    if (scheme.toLowerCase() === "file" && userinfo === "") return match
+    const end = rest.search(/[/?#]/)
+    const authority = end === -1 ? rest : rest.slice(0, end)
+    const tail = end === -1 ? "" : rest.slice(end)
+    // [A74 S-5] The authority must be a plain host[:port]; anything else (`host:KEY`, `host;KEY`, an
+    // escape that did not decode) is dropped, never echoed back.
+    if (!PLAIN_HOSTPORT.test(authority)) return `${scheme}://${AUTHORITY_DROPPED}${REDACTED}`
+    if (userinfo === "" && (tail === "" || tail === "/")) return match
+    if (userinfo === "" && allow.has(authority.toLowerCase()) && EXPLORER_TAIL.test(tail)) return match
+    return `${scheme}://${authority}${REDACTED}`
+  })
+  // After the URL pass, so a scheme URL's own userinfo (already gone) is never this one's business.
+  return stripBareUserinfo(redacted)
 }
 
 /**
