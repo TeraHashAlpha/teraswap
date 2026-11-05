@@ -248,6 +248,31 @@ export function clearInfraMisses(map, orderId) {
 }
 
 /**
+ * [A73b S-9] Drop the streaks of orders that are no longer in the active set the cycle just fetched
+ * (cancelled / filled / failed elsewhere — the keeper has no cancel path of its own, so absence from
+ * fetchActiveOrders is the only signal). An EMPTY active set leaves the map untouched: fetchActiveOrders
+ * also returns [] on a Supabase error, and a stale entry is bounded by the last active set and dropped
+ * on the next non-empty fetch. Never throws.
+ * @param {Map<string, object>} map
+ * @param {Iterable<string>|null|undefined} activeIds
+ * @returns {number} entries dropped
+ */
+export function pruneInfraMisses(map, activeIds) {
+  if (!map || activeIds == null || typeof activeIds[Symbol.iterator] !== "function") return 0
+  const keep = new Set()
+  for (const id of activeIds) keep.add(String(id))
+  if (keep.size === 0) return 0
+  let dropped = 0
+  for (const id of [...map.keys()]) {
+    if (!keep.has(String(id))) {
+      map.delete(id)
+      dropped++
+    }
+  }
+  return dropped
+}
+
+/**
  * The cause table (ADR-026 §2), as ONE pure function. Rules are applied top-down; the first that
  * has positive evidence wins.
  * @param {{

@@ -161,6 +161,7 @@ import {
   classifySwapApiMiss,
   recordInfraMiss,
   clearInfraMisses,
+  pruneInfraMisses,
   stripInfraMissColumns,
   isInfraMissColumnRejection,
   readPersistedRetryState,
@@ -1414,6 +1415,11 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
 
   log(`  Found ${orders.length} active order(s)`)
 
+  // [A73b S-9] An order that left the active set (cancelled / filled / failed elsewhere) takes its
+  // in-memory infra streak with it — the keeper has no cancel path of its own, so absence from the
+  // set just fetched is the signal (an empty set leaves the map alone: see pruneInfraMisses).
+  pruneInfraMisses(orderInfraMisses, orders.map((o) => o.id))
+
   // [ADR-026 §3] While the provider rejects our credentials nothing can execute: attempt NOTHING —
   // no lock, no tx, no retry count, no patch. The balance read above and the event watcher keep
   // probing, so the pause clears by itself (rpc-auth.js onRpcSuccess) and the next cycle attempts
@@ -1462,6 +1468,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         await updateOrderStatus(dbOrder.id, "expired")
         orderRetries.delete(dbOrder.id)
         quorumSkips.delete(dbOrder.id) // [ADR-024] drop the skip streak too (no Map leak)
+        clearInfraMisses(orderInfraMisses, dbOrder.id) // [A73b S-9] and the infra streak (no Map leak)
         log(`  Order ${dbOrder.id.slice(0, 8)}... expired (expiry: ${dbOrder.expiry})`)
         continue
       }
