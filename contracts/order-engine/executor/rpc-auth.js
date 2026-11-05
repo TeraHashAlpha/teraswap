@@ -29,7 +29,8 @@
  * reaches the threshold; a transient error neither counts nor resets. RPC_AUTH_THRESHOLD consecutive
  * auth errors from one origin ⇒ state `paused: rpc-auth`, ONE high-urgency alert, a reminder at most
  * once per RPC_AUTH_ALERT_COOLDOWN_MS with the suppressed count, and ONE recovery alert once no origin
- * is over the threshold any more. `muted` (returned by onRpcError) is true ONLY for an auth error
+ * has an open auth streak any more [A71b S-1: every refused origin must answer once — the event
+ * watcher reports getBlockNumber, getLogs and its log-processing phase `poll` separately]. `muted` (returned by onRpcError) is true ONLY for an auth error
  * while paused — the only case where a caller's own alert (Degraded / "Ops issue: rpc" /
  * consecutive-errors) repeats one the monitor already sent. The state is REPORTED (health, metrics,
  * keeper_runtime_config); it is not a new gate — with the provider refusing, nothing can execute
@@ -205,7 +206,10 @@ export function createRpcAuthMonitor({
   async function onRpcSuccess(origin) {
     streaks.delete(String(origin)) // only THIS origin's streak: another origin may still be refused
     if (pausedSince == null) return { recovered: false }
-    if (maxStreak() >= threshold) return { recovered: false } // still refused elsewhere: stay paused
+    // [A71b S-1] Stay paused while ANY origin still has an open auth streak, however short: an origin
+    // one or two errors in is still being refused. Clearing on "below the threshold" produced a false
+    // recovery alert and a re-pause one error later.
+    if (streaks.size > 0) return { recovered: false }
     const since = iso(pausedSince)
     const n = suppressed
     pausedSince = null
