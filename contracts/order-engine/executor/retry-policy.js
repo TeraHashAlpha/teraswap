@@ -552,7 +552,10 @@ const PERMANENT_SIGNATURES = [
   {
     reason: FAILURE_REASON.INSUFFICIENT_ALLOWANCE,
     patterns: [
-      /exceeds allowance/,
+      // [A73c S-11] NOT geth's own "gas required exceeds allowance (N)" (eth_estimateGas: the gas was
+      // capped at what the sender's balance affords, or the call ran out of gas at that cap) — that is
+      // no ERC20 allowance: it stays an ordinary counted revert (order:revert, the 8-miss ladder).
+      /(?<!gas required )exceeds allowance/,
       /insufficient allowance/,
       /allowanceexpired/,
       /insufficientallowance/,

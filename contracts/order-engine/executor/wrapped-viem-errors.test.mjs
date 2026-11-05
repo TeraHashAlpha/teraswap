@@ -32,7 +32,7 @@ import {
   TransactionExecutionError,
 } from "viem"
 
-import { MISS_CAUSE, classifyMissCause, planFailureHandling } from "./retry-policy.js"
+import { FAILURE_REASON, MISS_CAUSE, classifyMissCause, planFailureHandling } from "./retry-policy.js"
 import { startRpcStub, chainNames, revertStringData, INSUFFICIENT_OUTPUT_DATA } from "./viem-wrapped-errors.fixture.mjs"
 
 const infra = (reason) => ({ cause: MISS_CAUSE.INFRA, reason })
@@ -280,4 +280,59 @@ describe("[A73c S-12] a JSON-RPC -32603 is not a revert — viem only guesses on
       assert.equal("consecutive_failures" in plan.patch, false)
     }
   })
+})
+
+// [A73c S-11] geth's own "gas required exceeds allowance (N)" at eth_estimateGas is NOT the ERC20
+// allowance: the node capped the gas at what the sender's balance affords, or the call ran out of gas
+// at that cap. viem labels it ExecutionRevertedError (its nodeMessage), and the permanent signature
+// /exceeds allowance/ made it a TERMINAL insufficient_allowance — the order failed on its first miss
+// with a reason that sends the user to re-approve. It is an ordinary counted revert: order:revert on
+// the 8-miss ladder, never terminal.
+describe("[A73c S-11] geth 'gas required exceeds allowance' is a counted revert, never a terminal allowance failure", () => {
+  const GAS_ALLOWANCE = { rpc: { code: -32000, message: "gas required exceeds allowance (21000)" } }
+  const ERC20_ALLOWANCE = {
+    rpc: { code: 3, message: "execution reverted: ERC20: transfer amount exceeds allowance", data: revertStringData("ERC20: transfer amount exceeds allowance") },
+  }
+  test("write site @ eth_estimateGas: CFEE > TEE > ExecutionRevertedError > EGEE > … ⇒ order:revert", async () => {
+    const err = await stub.writeError(GAS_ALLOWANCE)
+    assert.ok(hasInChain(err, ExecutionRevertedError) && hasInChain(err, EstimateGasExecutionError), chain(err))
+    assert.equal(chain(err), "ContractFunctionExecutionError > TransactionExecutionError > ExecutionRevertedError > EstimateGasExecutionError > ExecutionRevertedError > InvalidInputRpcError > RpcRequestError > <rpc body>")
+    assert.deepEqual(classifyMissCause({ err }), order("revert"), chain(err))
+  })
+  test("…COUNTED, not terminal: the plan retries (3 → 4), the order stays active with no error", async () => {
+    const err = await stub.writeError(GAS_ALLOWANCE)
+    const plan = planFailureHandling({ dbOrder: dbOrder(), err, prevFailures: 3, nowSec: NOW_SEC, nowIso: NOW })
+    assert.equal(plan.kind, "retry")
+    assert.equal(plan.cause, MISS_CAUSE.ORDER)
+    assert.equal(plan.causeReason, "revert")
+    assert.equal(plan.failures, 4)
+    assert.equal(plan.patch.status, "active")
+    assert.equal(plan.patch.error, undefined)
+  })
+  test("…on the 8-miss ladder: the 8th consecutive miss fails the order at the CAP (no_route_after_retries + alert), never as insufficient_allowance", async () => {
+    const err = await stub.writeError(GAS_ALLOWANCE)
+    const plan = planFailureHandling({ dbOrder: dbOrder({ consecutive_failures: 7 }), err, prevFailures: 7, nowSec: NOW_SEC, nowIso: NOW })
+    assert.equal(plan.kind, "fail")
+    assert.equal(plan.failures, 8)
+    assert.equal(plan.reason, FAILURE_REASON.NO_ROUTE_AFTER_RETRIES)
+    assert.equal(plan.alert, true)
+    assert.notEqual(plan.patch.error, FAILURE_REASON.INSUFFICIENT_ALLOWANCE)
+  })
+  test("read site: the same words on eth_call ⇒ order:revert, counted (kind retry)", async () => {
+    const err = await stub.readError(GAS_ALLOWANCE)
+    assert.ok(hasInChain(err, ExecutionRevertedError), chain(err))
+    assert.deepEqual(classifyMissCause({ err }), order("revert"), chain(err))
+    assert.equal(planFailureHandling({ dbOrder: dbOrder(), err, prevFailures: 3, nowSec: NOW_SEC, nowIso: NOW }).kind, "retry")
+  })
+  for (const [site, build] of ALL_SITES.slice(0, 2)) {
+    test(`${site}: a GENUINE allowance revert — Error("ERC20: transfer amount exceeds allowance") — is still terminal insufficient_allowance`, async () => {
+      const err = await build(ERC20_ALLOWANCE)
+      assert.ok(hasInChain(err, ContractFunctionRevertedError), chain(err))
+      assert.deepEqual(classifyMissCause({ err }), order(FAILURE_REASON.INSUFFICIENT_ALLOWANCE), chain(err))
+      const plan = planFailureHandling({ dbOrder: dbOrder(), err, prevFailures: 3, nowSec: NOW_SEC, nowIso: NOW })
+      assert.equal(plan.kind, "fail")
+      assert.equal(plan.reason, FAILURE_REASON.INSUFFICIENT_ALLOWANCE)
+      assert.equal(plan.patch.status, "failed")
+    })
+  }
 })
