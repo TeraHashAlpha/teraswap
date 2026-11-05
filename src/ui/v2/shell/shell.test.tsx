@@ -19,6 +19,7 @@ const h = vi.hoisted(() => ({
   blockCalls: [] as unknown[],
   dcaLive: new Set<number>([8453]),
   limitLive: false,
+  crashSwap: false,
 }))
 
 vi.mock('wagmi', () => ({
@@ -47,7 +48,12 @@ vi.mock('@rainbow-me/rainbowkit', async () => {
 })
 vi.mock('next/navigation', () => ({ usePathname: () => h.pathname, useRouter: () => ({ push: h.push }) }))
 // B3: these tests are about the shell, not the Swap card (its own tests mock the hooks it reads): the Swap tab pane is a placeholder here.
-vi.mock('../swap/SwapCard', () => ({ SwapCard: () => <section data-tab-pane="swap" aria-busy="true" /> }))
+vi.mock('../swap/SwapCard', () => ({
+  SwapCard: () => {
+    if (h.crashSwap) throw new Error('boom')
+    return <section data-tab-pane="swap" aria-busy="true" />
+  },
+}))
 // B6a: likewise the DCA form (its own tests mock the hooks it reads): on a live DCA chain the pane is a placeholder here.
 vi.mock('../dca/DcaCard', () => ({ DcaCard: () => <section data-tab-pane="dca" aria-busy="true" /> }))
 // B7: likewise the Orders tab (its own tests run it on v1's engine contract): here the pane is a stub.
@@ -104,6 +110,7 @@ beforeEach(() => {
   h.limitLive = false
   process.env.NEXT_PUBLIC_DCA_ENABLED = 'true' // v1's launch flag: the gate is `flag && !DCA_CHAINS.includes(chain)`
   h.push.mockClear()
+  h.crashSwap = false
   h.switchChain.mockClear()
   useDisconnectedChainSelection.setState({ chainId: null })
   resetMusicStateForTests()
@@ -545,6 +552,22 @@ describe('help drawer + fabs', () => {
     expect(icon(screen.getByRole('button', { name: 'Turn music on' }))).toBe('off')
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Turn music on' })))
     expect(icon(screen.getByRole('button', { name: 'Turn music off' }))).toBe('on')
+    spy.mockRestore()
+  })
+})
+
+// [L-2, A75] v1 copy: SwapBox is wrapped in SwapErrorBoundary (page.tsx:131) so a rendering crash shows a reset
+// button instead of taking down the whole page. AppShell wraps {pane} the same way — every tab, not only Swap,
+// since v2 consolidates them behind one shell.
+describe('pane error boundary (L-2, v1 copy: SwapErrorBoundary)', () => {
+  it('a crash in the pane shows v1\'s reset UI, not a blank page — the shell (header, tabs) survives', () => {
+    h.crashSwap = true
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    render(<AppShell tab="swap" />)
+    expect(screen.getByText('Something went wrong')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Reset & Try Again' })).toBeTruthy()
+    expect(screen.getByRole('banner')).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Swap' })).toBeTruthy()
     spy.mockRestore()
   })
 })

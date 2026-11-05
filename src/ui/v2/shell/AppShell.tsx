@@ -5,6 +5,7 @@ import { useMemo, type ReactNode } from 'react'
 import { RainbowKitProvider } from '@rainbow-me/rainbowkit'
 import { useQuoteChainId } from '@/hooks/useChainId'
 import ComingSoonPanel from '@/components/ComingSoonPanel'
+import SwapErrorBoundary from '@/components/SwapErrorBoundary'
 import '../v2.css'
 import './shell.css'
 import { v2FontClassNames } from '../font-loader'
@@ -97,7 +98,11 @@ export function AppShell({ tab, children, onLogoClick }: { tab?: V2TabId; childr
             <TabBar active={active} />
             {/* Round 7 D2: no solid column on mobile either — the photo (with its uniform scrim) sits behind every screen */}
             <div data-ts-column="" className="flex flex-1 flex-col">
-              <main className="flex-1 px-4 py-8 sm:px-8">{pane}</main>
+              {/* [L-2, A75] v1 copy: SwapBox is wrapped in SwapErrorBoundary (page.tsx:131) — v2 wraps every tab's
+                  pane the same way, since v2 consolidates them behind one shell. */}
+              <main className="flex-1 px-4 py-8 sm:px-8">
+                <SwapErrorBoundary>{pane}</SwapErrorBoundary>
+              </main>
               <Footer photos={[photoForTab(active)]} />
             </div>
           </div>
