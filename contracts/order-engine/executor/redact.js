@@ -103,11 +103,18 @@ function normalise(text) {
 // already-redacted `https://host/REDACTED`) is never scanned again. Cost: the lookahead rejects every
 // position that is not `/ ? #` in O(1); the lookbehind then reads at most a few hundred characters.
 const HOST_BEHIND = "(?:(?:[a-z0-9_-]{1,63}\\.){1,8}[a-z]{2,24}|(?:\\[[0-9a-f:.]{2,45}\\]|[a-z0-9_.-]{1,255}):\\d{1,5})"
-const URL_RE = new RegExp(`([a-z][a-z0-9+.-]{0,30})://(${TAIL})|((?=[/?#])(?<=${HOST_BEHIND})[/?#]${TAIL})`, "gi")
+// [A74 S-7] The userinfo is matched ON ITS OWN, in front of TAIL: everything up to the last `@` before the
+// first `/ ? #` or whitespace. TAIL stops at `( ) , ' " < >`, so a password containing one of them used to
+// end the match inside the userinfo and leave the rest of it (and the real host and path) in the text.
+// One scan of a negated class to the end of the segment (`/` cannot be in it), so it stays linear.
+const URL_RE = new RegExp(
+  `([a-z][a-z0-9+.-]{0,30})://((?:[^\\s/?#]*@)?)(${TAIL})|((?=[/?#])(?<=${HOST_BEHIND})[/?#]${TAIL})`,
+  "gi",
+)
 
 // [A74 S-6] `user:secret@host.example/path` with no scheme: the `@` followed by a host and a path
-// delimiter. The userinfo is the run of non-delimiter characters in front of the `@` (at most 255); a
-// scheme URL's own userinfo (directly after `://`) is URL_RE's business, not this one's.
+// delimiter. The userinfo is the run of non-delimiter characters in front of the `@` (at most 255). It runs
+// AFTER URL_RE, which has already removed every scheme URL's own userinfo.
 const AT_HOST = new RegExp(
   `@(?=(?:(?:[a-z0-9_-]{1,63}\\.){1,8}[a-z]{2,24}|(?:\\[[0-9a-f:.]{2,45}\\]|[a-z0-9_.-]{1,255}):\\d{1,5})[/?#])`,
   "gi",
@@ -120,7 +127,7 @@ function stripBareUserinfo(s) {
   for (const m of s.matchAll(AT_HOST)) {
     let start = m.index
     while (start > last && m.index - start < 255 && !USERINFO_STOP.test(s[start - 1])) start--
-    if (start === m.index || s.startsWith("://", start - 3)) continue // nothing in front, or a scheme URL's own userinfo
+    if (start === m.index) continue // nothing in front of the "@": not a userinfo
     out += s.slice(last, start)
     last = m.index + 1
   }
@@ -147,22 +154,22 @@ export function redactUrl(text, { allowHosts = [] } = {}) {
   const allow = new Set(allowHosts.map((h) => h.toLowerCase()))
   const decoded = normalise(text)
   if (decoded === null) return OVER_ENCODED // nested deeper than any real error: say nothing rather than half
-  return stripBareUserinfo(decoded).replace(URL_RE, (match, scheme, rest, bare) => {
+  const redacted = decoded.replace(URL_RE, (match, scheme, userinfo, rest, bare) => {
     if (bare !== undefined) return REDACTED
     // A `file:///…` frame in a stack trace is a local path, not an endpoint — keep the frames.
-    if (scheme.toLowerCase() === "file") return match
+    if (scheme.toLowerCase() === "file" && userinfo === "") return match
     const end = rest.search(/[/?#]/)
     const authority = end === -1 ? rest : rest.slice(0, end)
     const tail = end === -1 ? "" : rest.slice(end)
-    const at = authority.lastIndexOf("@")
-    const hostPort = at === -1 ? authority : authority.slice(at + 1)
-    // [A74 S-5] Whatever is left after the userinfo must be a plain host[:port]; anything else
-    // (`host:KEY`, `host;KEY`, an escape that did not decode) is dropped, never echoed back.
-    if (!PLAIN_HOSTPORT.test(hostPort)) return `${scheme}://${AUTHORITY_DROPPED}${REDACTED}`
-    if (at === -1 && (tail === "" || tail === "/")) return match
-    if (at === -1 && allow.has(hostOf(hostPort).toLowerCase())) return match
-    return `${scheme}://${hostPort}${REDACTED}`
+    // [A74 S-5] The authority must be a plain host[:port]; anything else (`host:KEY`, `host;KEY`, an
+    // escape that did not decode) is dropped, never echoed back.
+    if (!PLAIN_HOSTPORT.test(authority)) return `${scheme}://${AUTHORITY_DROPPED}${REDACTED}`
+    if (userinfo === "" && (tail === "" || tail === "/")) return match
+    if (userinfo === "" && allow.has(hostOf(authority).toLowerCase())) return match
+    return `${scheme}://${authority}${REDACTED}`
   })
+  // After the URL pass, so a scheme URL's own userinfo (already gone) is never this one's business.
+  return stripBareUserinfo(redacted)
 }
 
 /**
