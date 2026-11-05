@@ -49,7 +49,7 @@
  * no other env reads, no network.
  */
 
-import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { chmodSync, closeSync, constants, lstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { redactUrl } from "./redact.js"
@@ -229,20 +229,46 @@ export function keeperStateDir() {
   return join(homedir(), ".teraswap-keeper")
 }
 
-/** Default gate read: only from a directory this process owns and nobody else can write. */
-function readOwnedState(f) {
-  const d = statSync(dirname(f))
-  const uid = typeof process.getuid === "function" ? process.getuid() : null
-  if ((uid !== null && d.uid !== uid) || (d.mode & 0o022) !== 0) throw new Error("untrusted state directory")
-  return readFileSync(f, "utf-8")
+// [A71b S-2] O_NOFOLLOW makes open() fail (ELOOP) when the LAST path component is a symlink. (Absent on
+// Windows, where the flag is simply 0 — the keeper runs on Linux/macOS hosts.)
+const NOFOLLOW = constants.O_NOFOLLOW ?? 0
+
+/**
+ * [A71b S-2] The state directory must be a plain directory, never a symlink: lstat (not stat) looks at
+ * the link itself, where stat/chmod would act on whatever it points to — another user's directory
+ * forced to 0700, a file written into a place the link's creator chose.
+ */
+function plainDirStat(d) {
+  const st = lstatSync(d)
+  if (st.isSymbolicLink() || !st.isDirectory()) throw new Error("state directory is not a plain directory")
+  return st
 }
 
-/** Default gate write: create / tighten the directory to 0700, the file to 0600. */
+/** Default gate read: only from a directory this process owns and nobody else can write, never via a link. */
+function readOwnedState(f) {
+  const d = plainDirStat(dirname(f))
+  const uid = typeof process.getuid === "function" ? process.getuid() : null
+  if ((uid !== null && d.uid !== uid) || (d.mode & 0o022) !== 0) throw new Error("untrusted state directory")
+  const fd = openSync(f, constants.O_RDONLY | NOFOLLOW) // a symlinked gate file is refused, not followed
+  try {
+    return readFileSync(fd, "utf-8")
+  } finally {
+    closeSync(fd)
+  }
+}
+
+/** Default gate write: create / tighten the directory to 0700, the file to 0600; refuse any symlink. */
 function writeOwnedState(f, s) {
   const d = dirname(f)
   mkdirSync(d, { recursive: true, mode: 0o700 })
+  plainDirStat(d) // a link here ⇒ throws before anything is chmodded or written
   chmodSync(d, 0o700) // an existing looser directory is tightened (throws if not ours ⇒ not persisted ⇒ louder)
-  writeFileSync(f, s, { mode: 0o600 })
+  const fd = openSync(f, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | NOFOLLOW, 0o600)
+  try {
+    writeFileSync(fd, s)
+  } finally {
+    closeSync(fd)
+  }
 }
 
 /**
