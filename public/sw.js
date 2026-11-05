@@ -92,6 +92,16 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
+  // [L-7, A75] Everything past this point is the "network-first HTML page" fallback — it must only ever handle a
+  // SAME-ORIGIN NAVIGATION. The app also makes direct cross-origin GETs (e.g. the public-RPC reads Base/Arbitrum
+  // dial straight from the browser; only mainnet goes through /api/rpc) and same-origin non-navigation fetches
+  // this file does not otherwise recognise — intercepting those and falling back to `caches.match('/')` on
+  // failure would silently hand back the cached HTML shell in place of the real response. Leave them to the
+  // browser entirely (no respondWith at all).
+  if (request.mode !== 'navigate' || url.origin !== self.location.origin) {
+    return
+  }
+
   // Network-first for HTML pages (always show latest UI)
   event.respondWith(
     fetch(request)
