@@ -1,8 +1,10 @@
 /**
  * @vitest-environment node
  *
- * [ADR-025] proxy.ts is the switch: `/` → `/v2` rewrite only for v2; direct `/v2/*` hits are a real 404
- * (rewrite to a non-existent path) unless the same rule says v2.
+ * [ADR-025] proxy.ts is the switch: `/` and the 8 tab paths → an internal `/v2/*` rewrite only for v2. A DIRECT
+ * `/v2/*` hit (typed in, bookmarked, crawled) is ALWAYS a real 404 (rewrite to a non-existent path), whatever the
+ * switch says — [L-4, A75] fixed: it used to pass straight through once the switch was on. The only exceptions are
+ * `/v2/_kit` and `/v2/_enable` (preview/dev only, independent of the switch).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
@@ -115,13 +117,17 @@ describe('direct requests to /v2/* (requirement: must NOT render v2 without env/
       expect(res.headers.get('x-middleware-next')).toBeNull()
     }
   })
-  it('UI_V2_ENABLED=true → passes through', () => {
+  // [L-4, A75] A DIRECT /v2/* hit never reaches here via the tab-rewrite rule (that rule returns its own
+  // NextResponse.rewrite before this function would run again for the rewritten path) — so arriving here with a
+  // /v2/* path IS the direct hit, whatever the switch says. Only `/v2/_kit` and `/v2/_enable` (preview/dev only)
+  // are reachable by URL; the switch alone must never open the rest of the tree to a typed-in /v2/<tab>.
+  it('UI_V2_ENABLED=true → still a real 404 (the switch opens `/` and the 8 tab paths, never a direct /v2/* hit)', () => {
     process.env.UI_V2_ENABLED = 'true'
-    expect(passes(proxy(req('/v2')))).toBe(true)
-    expect(passes(proxy(req('/v2/swap')))).toBe(true)
+    expect(rewrittenTo(proxy(req('/v2')))).toBe('/v2-disabled')
+    expect(rewrittenTo(proxy(req('/v2/swap')))).toBe('/v2-disabled')
   })
-  it('valid cookie → passes through', () => {
-    expect(passes(proxy(req('/v2', signUiVersionCookie(SECRET))))).toBe(true)
+  it('valid cookie → still a real 404', () => {
+    expect(rewrittenTo(proxy(req('/v2', signUiVersionCookie(SECRET))))).toBe('/v2-disabled')
   })
 })
 

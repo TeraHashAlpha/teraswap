@@ -10,7 +10,10 @@ import { UI_COOKIE_NAME, resolveUiVersion } from '@/ui/v2/ui-cookie'
  *   `/`      v2 → rewrite to /v2 (URL unchanged; the Swap tab, or the landing before the app is launched); v1 → untouched (static v1 page, byte-identical)
  *   `/<tab>` the 8 app tabs (`V2_TAB_PATHS`): ONE generic rule — v2 → rewrite to `/v2/<tab>` (URL unchanged); v1 → untouched
  *            (`/swap` and `/analytics` are v1 pages today and stay exactly as they are for v1 visitors)
- *   `/v2/*`  only when the switch says v2; otherwise a REAL 404 (rewrite to a path that does not exist)
+ *   `/v2/*`  NEVER reachable by a direct hit — [L-4, A75] fixed: it used to pass through once the switch said v2.
+ *            A request that reaches this function with a `/v2/*` path IS a direct hit (the tab rewrite above
+ *            returns its own response before this would ever re-run on the rewritten path), so it is always a
+ *            REAL 404 (rewrite to a path that does not exist)
  *   `/v2/_kit` the dev kit: Preview/`next dev` only, independent of the switch (a prod owner cookie does not open it)
  *   `/v2/_enable` the preview opt-in form (POSTs the admin secret, sets the signed cookie): same gate as the kit — it must
  *            be reachable BEFORE the cookie exists, so it cannot depend on the switch
@@ -34,7 +37,8 @@ export function proxy(req: NextRequest) {
     return v2 ? NextResponse.rewrite(new URL(`/v2${req.nextUrl.pathname}`, req.url)) : NextResponse.next()
   }
   const path = req.nextUrl.pathname
-  const allowed = path === '/v2/_kit' ? isV2KitEnabled() : path === '/v2/_enable' ? isV2EnableEnabled() : v2
+  const inV2Tree = path === '/v2' || path.startsWith('/v2/')
+  const allowed = path === '/v2/_kit' ? isV2KitEnabled() : path === '/v2/_enable' ? isV2EnableEnabled() : inV2Tree ? false : v2
   return allowed ? NextResponse.next() : NextResponse.rewrite(new URL(NOT_FOUND_PATH, req.url))
 }
 
