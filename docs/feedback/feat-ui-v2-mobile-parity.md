@@ -51,3 +51,7 @@ Concerns for the Auditor:
 | Limit panel, SL/TP panel | Limit, SL/TP | no v2 pane exists; tabs stay "Soon" | owner, this slice (asked) |
 | "Coming Soon on <chain>" banner | Swap | only on a chain with no FeeCollector (P223); unreachable on 1/8453/42161; pinned to its 2 strings | owner, this slice: record, don't add |
 | Smart DCA Engine · description · "Swap Now →" | DCA gate | WAS missing; ADDED verbatim (commit bc36226) | owner, this slice |
+| "Recent swaps (N)" list (v1 SwapHistory) | Swap | same shared `useSwapHistory` store, v1's copy; no-box (hairline, not v1's rounded box) | owner, A75 L-1: BUILD |
+| Share button ("Share — saved X%" / "Share swap") | Swap | v1's tweet-intent Share (SwapBox.tsx), from the live quote/tokenIn/tokenOut, once the swap succeeds | owner, A75 L-1: BUILD |
+| Theme toggle | Header | v2 is dark-only (no light mode); the control has no v2 counterpart | owner, A75 L-1: NOT built |
+| Desktop dot-nav (landing `ScrollSpy`) | landing | v1's `lg`-only section dots; v2's scroll narrative (photo sections) replaces the need for a jump-nav | owner, A75 L-1: NOT built |

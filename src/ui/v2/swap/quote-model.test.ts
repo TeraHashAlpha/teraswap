@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { parseUnits } from 'viem'
 import type { NormalizedQuote } from '@/lib/adapters/types'
-import { buildQuoteView, formatGas, priceImpact, quoteIsForAmount, routeHopLabel, routeText } from './quote-model'
+import { INTEGRATED_DEX_SOURCE_COUNT } from '@/config/product-claims'
+import { buildQuoteView, buildShareText, formatGas, priceImpact, quoteIsForAmount, routeHopLabel, routeText } from './quote-model'
 import { knownDexName } from './route-names'
 import { ETH, USDC, fixtureMeta, NO_ORACLE } from './test-fixtures'
 
@@ -217,5 +218,41 @@ describe('est. gas: USD first, ETH at 2 significant digits, never "~0"', () => {
     const v = buildQuoteView({ ...base, meta: m, tokenInUsdPrice: 2490, gasEstimate: () => ({ eth: 0, usd: 0 }), ethUsdPrice: 2490 })
     expect(v.gas).toBe('$1.23 (~0.00049 ETH)')
     expect(v.gasFree).toBe(false)
+  })
+})
+
+describe('buildShareText (v1 SwapBox.tsx\'s Share button text, verbatim)', () => {
+  it('more than one source compared: the saved-% line, with the real source count and claim', () => {
+    const share = buildShareText(fixtureMeta(), ETH, USDC)
+    expect(share?.label).toBe('Share — saved 0.27%')
+    expect(share?.text).toBe(
+      `I just saved 0.27% on my ETH → USDC swap by comparing 5 DEX sources with @TeraSwapDEX 🔥\n\n` +
+        `TeraSwap meta-aggregates ${INTEGRATED_DEX_SOURCE_COUNT} DEX sources for the best price.\nhttps://www.teraswap.app`,
+    )
+  })
+
+  it('best and worst are the same quote: no "saved" claim, the plain share line', () => {
+    const m = fixtureMeta()
+    const share = buildShareText({ ...m, all: [m.best, m.best] }, ETH, USDC)
+    expect(share?.label).toBe('Share swap')
+    expect(share?.text).toBe(
+      'Just swapped ETH → USDC via @TeraSwapDEX — compared 2 sources for the best price 🔥\n\nhttps://www.teraswap.app',
+    )
+  })
+
+  it('only one source: null — v1 never shows Share without a comparison', () => {
+    const m = fixtureMeta()
+    expect(buildShareText({ ...m, all: [m.best] }, ETH, USDC)).toBeNull()
+  })
+
+  it('no meta, no tokenIn, or no tokenOut: null', () => {
+    expect(buildShareText(null, ETH, USDC)).toBeNull()
+    expect(buildShareText(fixtureMeta(), null, USDC)).toBeNull()
+    expect(buildShareText(fixtureMeta(), ETH, null)).toBeNull()
+  })
+
+  it('a malformed toAmount hides the claim rather than crash ([11-L-01], v1\'s safeBigInt guard)', () => {
+    const m = fixtureMeta()
+    expect(buildShareText({ ...m, best: { ...m.best, toAmount: 'not-a-number' } }, ETH, USDC)).toBeNull()
   })
 })

@@ -184,6 +184,35 @@ describe('28b — success', () => {
     expect(h.swap.reset).toHaveBeenCalled()
     expect((screen.getByLabelText('Sell amount') as HTMLInputElement).value).toBe('')
   })
+
+  describe('[L-1] Share (v1 SwapBox.tsx\'s Share button, owner decision: BUILD in v2)', () => {
+    it('more than one source compared: "Share — saved X%", opens v1\'s tweet intent for the live meta/tokenIn/tokenOut', () => {
+      const open = vi.spyOn(window, 'open').mockReturnValue(null)
+      mount({ status: 'success', txHash: TX })
+      const btn = screen.getByTestId('exec-share')
+      expect(btn.textContent).toBe('Share — saved 0.27%')
+      fireEvent.click(btn)
+      expect(open).toHaveBeenCalledTimes(1)
+      const [url, target, features] = open.mock.calls[0]
+      expect(String(url)).toMatch(/^https:\/\/twitter\.com\/intent\/tweet\?text=/)
+      expect(decodeURIComponent(String(url).split('text=')[1])).toContain('I just saved 0.27% on my ETH → USDC swap by comparing 5 DEX sources with @TeraSwapDEX')
+      expect(target).toBe('_blank')
+      expect(features).toBe('noopener,noreferrer,width=550,height=420')
+      open.mockRestore()
+    })
+
+    it('only one source: no Share button — v1 never shows it without a comparison', () => {
+      const m = fixtureMeta()
+      h.quote = { ...h.quote, meta: taggedFixture({ ...m, all: [m.best] }, '1') }
+      mount({ status: 'success', txHash: TX })
+      expect(screen.queryByTestId('exec-share')).toBeNull()
+    })
+
+    it('not success: no Share button even with a live quote in hand', () => {
+      mount({ status: 'swapping', txHash: TX })
+      expect(screen.queryByTestId('exec-share')).toBeNull()
+    })
+  })
 })
 
 describe('28c — failure', () => {

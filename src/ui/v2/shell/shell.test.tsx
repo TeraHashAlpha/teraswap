@@ -82,6 +82,7 @@ vi.mock('@/lib/order-engine', async () => {
 import { FOOTER_RISK_LINE } from '@/components/Footer'
 import { COPYRIGHT_YEAR, PLATFORM_FEE_LABEL } from '@/config/product-claims'
 import { useDisconnectedChainSelection } from '@/hooks/useChainId'
+import { useSwapHistory } from '@/hooks/useSwapHistory'
 import { helpSections } from '@/lib/help-content'
 import { SUPPORT_EMAIL } from '@/lib/constants'
 import { AppShell } from './AppShell'
@@ -391,6 +392,21 @@ describe('panes', () => {
     const pane = document.querySelector('[data-tab-pane="swap"]')
     expect(pane).not.toBeNull() // the stubbed card above; the real one is tested in swap/
     expect(pane?.querySelectorAll('.ts-v2-skeleton').length).toBe(0)
+  })
+
+  // [L-1, owner decision: BUILD in v2] v1's SwapHistory sits below SwapBox on the Swap tab (page.tsx); v2's
+  // RecentSwaps is its sibling here, below the Swap card — not v1's SwapHistory itself (own component, own test).
+  it('swap carries v1\'s "Recent swaps" below the card, same shared store — hidden until there is a record', () => {
+    useSwapHistory.setState({ records: [] })
+    render(<AppShell tab="swap" />)
+    expect(screen.queryByText(/Recent swaps/)).toBeNull()
+    cleanup()
+    useSwapHistory.setState({
+      records: [{ id: 'r1', date: '2026-11-05', tokenIn: 'ETH', tokenOut: 'USDC', amountIn: '1', amountOut: '2487.6842', txHash: '0xabc', status: 'confirmed', chainId: 1 }],
+    })
+    render(<AppShell tab="swap" />)
+    expect(screen.getByText('Recent swaps (1)')).toBeTruthy()
+    useSwapHistory.setState({ records: [] })
   })
 
   it('dca mounts the DCA card (B6a) on a live DCA chain, not the placeholder', () => {

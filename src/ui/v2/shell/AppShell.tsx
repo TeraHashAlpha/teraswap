@@ -19,6 +19,7 @@ import { NoticeBanner } from './NoticeBanner'
 import { TabBar } from './TabBar'
 import { TabPane } from './TabPane'
 import { SwapCard } from '../swap/SwapCard'
+import { RecentSwaps } from '../swap/RecentSwaps'
 import { DcaCard } from '../dca/DcaCard'
 import { OrdersTab } from '../orders/OrdersTab'
 import { HistoryTab } from '../history/HistoryTab'
@@ -51,7 +52,12 @@ export function AppShell({ tab, children, onLogoClick }: { tab?: V2TabId; childr
   const pane =
     children ??
     (active === 'swap' ? (
-      <SwapCard />
+      // [L-1, owner decision: BUILD in v2] v1's SwapHistory is a sibling below SwapBox (page.tsx), not inside it —
+      // RecentSwaps mirrors that here, below the card.
+      <>
+        <SwapCard />
+        <RecentSwaps />
+      </>
     ) : active === 'dca' && shouldShowDcaGate(chainId) ? (
       <DcaNetworkGate />
     ) : active === 'dca' && isDcaLive(chainId) ? (

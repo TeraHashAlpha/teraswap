@@ -33,7 +33,7 @@ import { CtaButton } from './CtaButton'
 import { shortAddress } from '../shell/format-address'
 import './swap.css'
 import { ctaFor } from './cta'
-import { buildQuoteView, quoteIsForAmount } from './quote-model'
+import { buildQuoteView, buildShareText, quoteIsForAmount } from './quote-model'
 import { QuotePanel, Notice } from './QuotePanel'
 import { TierNotice } from './TierNotice'
 import { SourcesMenu } from './SourcesMenu'
@@ -400,6 +400,8 @@ export function SwapCard() {
 
   // The Execution column is up from the first hook step until the visitor starts over (New swap, or any change to the trade).
   const executionActive = lc.status !== 'idle'
+  // [L-1] v1's Share button (SwapBox.tsx): only once the swap has actually succeeded, from the same live `meta`/tokenIn/tokenOut.
+  const shareText = lc.status === 'success' ? buildShareText(meta, tokenIn, tokenOut) : null
   const explorerUrl = (() => {
     try {
       return getChainConfig(activeChainId).blockExplorer
@@ -572,6 +574,7 @@ export function SwapCard() {
             symbolOut={tokenOut.symbol}
             amountIn={amountIn}
             summary={lc.success}
+            shareText={shareText}
             txHash={lc.swap.txHash}
             explorerUrl={explorerUrl}
             error={lc.error}
