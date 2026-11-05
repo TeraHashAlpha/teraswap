@@ -34,20 +34,24 @@ out of gas — none of which the user can fix, and none of which says anything a
    |---|---|---|
    | keeper `paused: rpc-auth` (rpc-auth.js monitor) | infra | `paused:rpc-auth` — the cycle does not attempt at all |
    | RPC auth / allowlist (`classifyRpcError` = auth, reused) | infra | `rpc-auth` |
-   | RPC transport: HTTP 5xx / 429, viem timeout, socket / `fetch failed` (incl. Supabase thrown mid-attempt) | infra | `rpc-transport` |
-   | keeper wallet cannot pay gas (viem `InsufficientFundsError`) | infra | `keeper-gas` |
+   | RPC transport: HTTP 5xx / 429, viem timeout, socket / `fetch failed` (incl. Supabase thrown mid-attempt) — found ANYWHERE in the error's `cause` chain (A73b S-8: viem wraps a 503 / timeout at both executor sites as `ContractFunctionExecutionError → … → HttpRequestError \| TimeoutError`), and decided BEFORE the permanent text rules when nothing reverted: a provider's error page can say "insufficient balance" | infra | `rpc-transport` |
+   | keeper wallet cannot pay gas (viem `InsufficientFundsError` anywhere in the chain, or the node's words) | infra | `keeper-gas` |
+   | the keeper's tx nonce rejected by the node (viem `NonceTooLow` / `TooHigh` / `MaxValueError`, or its words — a stale nonce after a restart, a concurrent send, a resend) (A73b S-7) | infra | `keeper-nonce` |
    | tx SENT, receipt not readable (timeout / RPC error after send) | infra | `receipt-unavailable` |
    | `/api/swap` by its body CODE (A73 S-1): 5xx / 429 / network / `ORACLE_UNAVAILABLE` / calldata for the wrong router / a 2xx without tx data / a payload-config 400 or config code / an unknown code or un-coded 4xx | infra | `swap-api:<n>`, `swap-api:network`, `swap-api:oracle-unavailable`, `swap-api:misroute`, `swap-api:no-tx-data`, `keeper-config` |
    | anything else thrown before a tx was sent | infra | `unclassified` |
    | mined revert (`receipt.status = reverted`) | order | `reverted` |
-   | simulated revert: executor error / `SwapFailed` / revert text | order | `revert[:<Name>\|swap-failed]` |
+   | simulated revert — POSITIVE evidence only (A73b S-7): a decoded executor error / `SwapFailed` reason, a `/Revert/`-named error anywhere in the chain (viem `ContractFunctionRevertedError`, `ExecutionRevertedError`) or revert text. viem's wrappers (`ContractFunctionExecutionError`, `CallExecutionError`, `EstimateGasExecutionError`, `TransactionExecutionError`) wrap EVERY failure of a contract call and are evidence of nothing | order | `revert[:<Name>\|swap-failed]` |
    | allowance / balance / nonce (permanent, as before) | order | the `FAILURE_REASON` code |
    | `/api/swap` answered with a code that names the order: `NO_ROUTE` (the adapter said no route / no pool / insufficient liquidity — `adapters/shared.ts isNoRouteError`, the same rules as the user copy; a 422 with the same `error` text as the former 502), `unpriced_ack_required`, `PRICE_GUARD` | order | `no-route[:unpriced-ack\|price-guard]` |
    | expired | order | `expired` (own status, as before) |
    | a miss with no evidence at all | order | `unknown` (today's counting — an untouched call site can never silently stop counting) |
 
    Ambiguity rule: `infra` only when the keeper itself could not complete the attempt (no tx
-   sent); any sent-and-reverted tx is `order`. `order` needs positive evidence.
+   sent); any sent-and-reverted tx is `order`. `order` needs positive evidence. Evidence is read
+   from the WHOLE `cause` chain (`collectErrorMeta` walks every link, as viem's `BaseError.walk`
+   does, depth-bounded and cycle-safe because non-viem errors reach the classifier too);
+   `wrapped-viem-errors.test.mjs` pins the real viem 2.47.10 shapes at both executor sites.
 
 2. **Only `order` misses advance the ladder.** `consecutive_failures` and the 8-miss → `failed`
    rule count `order` misses only. An `infra` miss leaves the count untouched, writes

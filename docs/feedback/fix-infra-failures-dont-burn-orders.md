@@ -79,3 +79,48 @@ Verify (A73 tree f206d0a): keeper **891/891, 0 cancelled** on Node 20.20.2 + 22.
 93 warnings (unchanged) · tsc clean · CodeQL `javascript-security-extended`: **13 → 13, 0 new** (same file:line set).
 Diff since the audited head 6e711c8: 18 files, +595/−99 (before this file's edit). #656 stays a DRAFT.
 Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/infra-failures-dont-burn-orders
+
+## A73b fix pass (2026-11-05) — one commit per id, each test red on the previous head, REAL viem 2.47.10 objects
+Every new keeper test builds its errors through viem's OWN `readContract(canExecute)` / `writeContract(executeOrder)` (this
+directory's `node_modules/viem`) against a local JSON-RPC stub (`viem-wrapped-errors.fixture.mjs`) — wrapped exactly as the
+executor receives them, never a bare inner error. Owner's merge of main (4e000cc) was fast-forwarded first; root `npm ci` re-run.
+| Id | Sev | Fix | Commit | Test (red → green) |
+|---|---|---|---|---|
+| S-7 | H | `REVERT_NAME = /Revert/` — the wrappers (`ContractFunctionExecutionError`, `CallExecutionError`, `EstimateGasExecutionError`) are gone; a revert needs POSITIVE evidence anywhere in the chain (a `/Revert/` name, revert text, a decoded executor error / `SwapFailed` reason). The node's insufficient funds anywhere in the chain ⇒ `keeper-gas`; the keeper's tx nonce rejected (`NonceTooLow/TooHigh/MaxValueError` or words) ⇒ new infra label `keeper-nonce` (never on a revert) | `71bee41` | `wrapped-viem-errors` S-7: funds @ estimateGas / @ sendRaw / on eth_call ⇒ keeper-gas, nonce ⇒ keeper-nonce, end-to-end count 3 stays 3; S-2 guard with real reverts (coded, geth, `Error("insufficient funds for transfer")`) stays order — 5 red on 4e000cc |
+| S-8 | H | transport / HTTP / timeout anywhere in the chain ⇒ `rpc-transport`, decided BEFORE the permanent text rules whenever nothing reverted (a provider's page saying "insufficient balance" / "exceeds allowance" was a TERMINAL `failed`); old rule 9 folded into `isTransportMeta` | `ec5004b` | `wrapped-viem-errors` S-8 matrix: 7 answers × 3 sites (read canExecute, write @ eth_estimateGas, write @ eth_sendRawTransaction) + 3 end-to-end — the 5xx / 429 / timeout cases already green after S-7; the two page-text cases (×3 sites) + 1 end-to-end red on 71bee41 |
+| S-9 | L | expiry pre-filter `clearInfraMisses`; every cycle `pruneInfraMisses(orderInfraMisses, ids just fetched)` before the loop (an empty fetch — also a Supabase error — leaves the map alone; bounded by the last active set). The keeper has no cancel path: cancel = absence from `fetchActiveOrders` | `61720c8` | `infra-miss-prune.test.mjs`: pure helper 5 + executor anchors 3 — red on ec5004b (missing export) |
+| S-10 | L | `adapters/shared.ts`: the four earlier friendlyError rules (network / timeout / 429 / 403) are named predicates both functions apply in the SAME order; `isNoRouteError` is false when one of them claims the message; copy strings unchanged | `d7aed7f` | `shared.test.ts` +2 (7 outage messages with route words ⇒ false; NO_ROUTE ⇔ the liquidity / no-route copy over 20 samples) · `swap/route.test.ts` +4 (⇒ 502, no code) — 6 red on 61720c8 |
+
+### Wrapped-error matrix (`wrapped-viem-errors.test.mjs`; chains printed by viem's own `BaseError.walk`, outermost first)
+CFEE = ContractFunctionExecutionError · CEE = CallExecutionError · TEE = TransactionExecutionError · EGEE = EstimateGasExecutionError ·
+CFRE = ContractFunctionRevertedError · ERE = ExecutionRevertedError · IIRE = InvalidInputRpcError · RRE = RpcRequestError.
+Write @ `eth_sendRawTransaction` is the write chain without the EGEE link (same class).
+| Provider / node answer | read `canExecute` | write `executeOrder` @ `eth_estimateGas` | Class now | Class on 4e000cc |
+|---|---|---|---|---|
+| HTTP 503 / 429 / 502 HTML page | CFEE › CEE › HttpRequestError | CFEE › TEE › EGEE › HttpRequestError | `infra:rpc-transport` | `order:revert` |
+| timeout (hung provider) | CFEE › CEE › TimeoutError | CFEE › TEE › EGEE › TimeoutError | `infra:rpc-transport` | `order:revert` |
+| HTTP 403 allowlist | CFEE › CEE › HttpRequestError | CFEE › TEE › EGEE › HttpRequestError | `infra:rpc-auth` | `infra:rpc-auth` |
+| HTTP 503 page "insufficient balance" | CFEE › CEE › HttpRequestError | CFEE › TEE › EGEE › HttpRequestError | `infra:rpc-transport` | `order:insufficient_balance` (TERMINAL) |
+| HTTP 402 page "exceeds allowance" | CFEE › CEE › HttpRequestError | CFEE › TEE › EGEE › HttpRequestError | `infra:rpc-transport` | `order:insufficient_allowance` (TERMINAL) |
+| node "insufficient funds for gas * price + value" | CFEE › CEE › InsufficientFundsError › IIRE › RRE | CFEE › TEE › InsufficientFundsError › EGEE › InsufficientFundsError › IIRE › RRE | `infra:keeper-gas` | `order:revert` |
+| node "nonce too low" | CFEE › CEE › NonceTooLowError › IIRE › RRE | CFEE › TEE › NonceTooLowError › EGEE › NonceTooLowError › IIRE › RRE | `infra:keeper-nonce` | `order:revert` |
+| revert code 3 + `InsufficientOutput()` data | CFEE › CFRE › CEE › ERE › RRE | CFEE › CFRE › TEE › ERE › EGEE › ERE › RRE | `order:revert` (`revert:InsufficientOutput` once decoded) | `order:revert` |
+| revert geth −32000 "execution reverted: …" | CFEE › CEE › ERE › IIRE › RRE | CFEE › TEE › ERE › EGEE › ERE › IIRE › RRE | `order:revert` | `order:revert` |
+| revert `Error("insufficient funds for transfer")` | CFEE › CFRE › CEE › ERE › RRE | CFEE › CFRE › TEE › ERE › EGEE › ERE › RRE | `order:revert` (S-2 guard) | `order:revert` |
+
+Judgement calls (owner's / Auditor's answer supersedes): S-7 and S-8 share one mechanism, so the plain 5xx / timeout cases turn
+green with S-7's commit; S-8's own red tests are the provider pages whose words match `PERMANENT_SIGNATURES` (a terminal burn
+on 71bee41) — the transport-before-text precedence is S-8's change. `keeper-nonce` is a NEW infra label (self-healing, not in the
+unrecognised set). The chain is walked by `collectErrorMeta` (every `cause` link, as viem's `.walk()` visits them; depth-bounded,
+cycle-safe — non-viem `fetch` errors reach the classifier too); each test documents its shape through viem's own `walk`.
+Edge case recorded, NOT changed (pre-existing, outside A73b): geth's `gas required exceeds allowance (N)` at `eth_estimateGas` —
+viem labels it `ExecutionRevertedError` (its nodeMessage) and its text matches PERMANENT `/exceeds allowance/` ⇒ terminal
+`insufficient_allowance`. Ambiguous: the keeper's balance-capped gas allowance (ours) vs. an order that panics / runs out of gas
+at the cap (the order's). Left as is — owner / Auditor call.
+
+Verify (A73b tree d7aed7f): keeper `node --test` **935/935, 0 fail, 0 cancelled** on Node **20.20.2** AND **22.23.4** (CI versions, run alone)
+· vitest 415 files / **6674** pass · eslint 0 errors / 93 warnings (unchanged, cap 94) · tsc clean · CodeQL `javascript-security-extended`
+(codeql-local.sh): **13 → 13, 0 new** (same file:line set: orders/route.ts ×8, auth.ts:47, api-auth.ts:94, fingerprint-validator.ts:319,
+capture-endpoint-baseline.ts:54, telegram/webhook:163) · gitleaks over the 4 commits: no leaks. Root `npm ci` re-run after the owner's
+merge of main (framer-motion 12.43.0). Diff since the audited head 4e000cc: 11 files, +730/−22 (before the docs commit). #656 stays a DRAFT.
+Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/infra-failures-dont-burn-orders
