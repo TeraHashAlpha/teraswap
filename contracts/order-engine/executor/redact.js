@@ -43,7 +43,7 @@ const TAIL = "[^\\s\"'<>(),]*"
 // passed untouched. Without the boundary the scheme is simply the last <= 31 scheme characters before
 // `://`; whatever precedes them is left as it was, and the URL itself is always redacted. Bounded
 // quantifier, one pass: at most 31 characters are tried per start, so the cost stays linear.
-const SCHEME_URL = new RegExp(`([a-z][a-z0-9+.-]{0,30})://(${TAIL})`, "gi")
+// (the scheme pattern itself is part of URL_RE below)
 // [A74 S-5] Every URL delimiter — `/ : @ ? #` — and the backslash and percent that spell the others can
 // be written in an encoding that hides it from the patterns below: percent (`%2F`, stacked `%252F`),
 // JSON / JS escapes (`\u002f`, `\u{2f}`, `\x2f`), octal (`\057`), HTML entities numeric (`&#x2F;`,
@@ -93,12 +93,39 @@ function normalise(text) {
   }
   return decodeOnce(s) === s ? s : null
 }
-// Lookbehind: only at a token start, so neither pattern re-enters a URL pattern 1 already handled.
-const HOSTPORT_PATH = new RegExp(
-  `(?<![\\w/:.@-])((?:\\[[0-9a-f:.]{2,45}\\]|[a-z0-9_.-]{1,255}):\\d{1,5})[/?#]${TAIL}`,
+// [A74 S-6] ONE pass, scheme URL | schemeless path. The schemeless patterns used to start at a "token
+// start" (`(?<![\w/:.@-])`), so a keyed URL written after a `/` (what the S-3 `%2F` decode produces), a
+// `:`, `@`, `.`, `-`, or glued to a word character (`0x<64 hex>host.example/v2/KEY`) was never seen.
+// They no longer find a host at all: they find the PATH DELIMITER and look BEHIND it for a host
+// (`dotted.host` with an alphabetic TLD, or `host:port`), then redact from the delimiter on — the host
+// text in front of it is left exactly as it was, whatever precedes it. Being alternatives of the same
+// regex as the scheme URL, text a scheme URL already consumed (an allowed explorer link, an
+// already-redacted `https://host/REDACTED`) is never scanned again. Cost: the lookahead rejects every
+// position that is not `/ ? #` in O(1); the lookbehind then reads at most a few hundred characters.
+const HOST_BEHIND = "(?:(?:[a-z0-9_-]{1,63}\\.){1,8}[a-z]{2,24}|(?:\\[[0-9a-f:.]{2,45}\\]|[a-z0-9_.-]{1,255}):\\d{1,5})"
+const URL_RE = new RegExp(`([a-z][a-z0-9+.-]{0,30})://(${TAIL})|((?=[/?#])(?<=${HOST_BEHIND})[/?#]${TAIL})`, "gi")
+
+// [A74 S-6] `user:secret@host.example/path` with no scheme: the `@` followed by a host and a path
+// delimiter. The userinfo is the run of non-delimiter characters in front of the `@` (at most 255); a
+// scheme URL's own userinfo (directly after `://`) is URL_RE's business, not this one's.
+const AT_HOST = new RegExp(
+  `@(?=(?:(?:[a-z0-9_-]{1,63}\\.){1,8}[a-z]{2,24}|(?:\\[[0-9a-f:.]{2,45}\\]|[a-z0-9_.-]{1,255}):\\d{1,5})[/?#])`,
   "gi",
 )
-const HOST_PATH = new RegExp(`(?<![\\w/:.@-])((?:[a-z0-9_-]{1,63}\\.){1,8}[a-z]{2,24})[/?#]${TAIL}`, "gi")
+const USERINFO_STOP = /[\s/?#@"'<>]/
+function stripBareUserinfo(s) {
+  if (!s.includes("@")) return s
+  let out = ""
+  let last = 0
+  for (const m of s.matchAll(AT_HOST)) {
+    let start = m.index
+    while (start > last && m.index - start < 255 && !USERINFO_STOP.test(s[start - 1])) start--
+    if (start === m.index || s.startsWith("://", start - 3)) continue // nothing in front, or a scheme URL's own userinfo
+    out += s.slice(last, start)
+    last = m.index + 1
+  }
+  return last === 0 ? s : out + s.slice(last)
+}
 
 /** What stands in for an authority that is not a plain host[:port]. */
 export const AUTHORITY_DROPPED = "[authority-redacted]"
@@ -120,24 +147,22 @@ export function redactUrl(text, { allowHosts = [] } = {}) {
   const allow = new Set(allowHosts.map((h) => h.toLowerCase()))
   const decoded = normalise(text)
   if (decoded === null) return OVER_ENCODED // nested deeper than any real error: say nothing rather than half
-  return decoded
-    .replace(SCHEME_URL, (match, scheme, rest) => {
-      // A `file:///…` frame in a stack trace is a local path, not an endpoint — keep the frames.
-      if (scheme.toLowerCase() === "file") return match
-      const end = rest.search(/[/?#]/)
-      const authority = end === -1 ? rest : rest.slice(0, end)
-      const tail = end === -1 ? "" : rest.slice(end)
-      const at = authority.lastIndexOf("@")
-      const hostPort = at === -1 ? authority : authority.slice(at + 1)
-      // [A74 S-5] Whatever is left after the userinfo must be a plain host[:port]; anything else
-      // (`host:KEY`, `host;KEY`, an escape that did not decode) is dropped, never echoed back.
-      if (!PLAIN_HOSTPORT.test(hostPort)) return `${scheme}://${AUTHORITY_DROPPED}${REDACTED}`
-      if (at === -1 && (tail === "" || tail === "/")) return match
-      if (at === -1 && allow.has(hostOf(hostPort).toLowerCase())) return match
-      return `${scheme}://${hostPort}${REDACTED}`
-    })
-    .replace(HOSTPORT_PATH, (_m, hostPort) => `${hostPort}${REDACTED}`)
-    .replace(HOST_PATH, (_m, host) => `${host}${REDACTED}`)
+  return stripBareUserinfo(decoded).replace(URL_RE, (match, scheme, rest, bare) => {
+    if (bare !== undefined) return REDACTED
+    // A `file:///…` frame in a stack trace is a local path, not an endpoint — keep the frames.
+    if (scheme.toLowerCase() === "file") return match
+    const end = rest.search(/[/?#]/)
+    const authority = end === -1 ? rest : rest.slice(0, end)
+    const tail = end === -1 ? "" : rest.slice(end)
+    const at = authority.lastIndexOf("@")
+    const hostPort = at === -1 ? authority : authority.slice(at + 1)
+    // [A74 S-5] Whatever is left after the userinfo must be a plain host[:port]; anything else
+    // (`host:KEY`, `host;KEY`, an escape that did not decode) is dropped, never echoed back.
+    if (!PLAIN_HOSTPORT.test(hostPort)) return `${scheme}://${AUTHORITY_DROPPED}${REDACTED}`
+    if (at === -1 && (tail === "" || tail === "/")) return match
+    if (at === -1 && allow.has(hostOf(hostPort).toLowerCase())) return match
+    return `${scheme}://${hostPort}${REDACTED}`
+  })
 }
 
 /**
