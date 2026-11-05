@@ -336,3 +336,53 @@ describe("[A73c S-11] geth 'gas required exceeds allowance' is a counted revert,
     })
   }
 })
+
+// [A73c S-13] An HTTP status in the chain means the provider answered with an error PAGE. viem's
+// getNodeError turns page text that says "execution reverted" into an ExecutionRevertedError, and the
+// text rules then read the page's words — a 503 page quoting an upstream revert became a TERMINAL
+// insufficient_allowance. With a status present only DECODED revert data counts as a revert (the
+// executor's own decode: executorErrorName / swapReason); page text is never a revert, never terminal.
+describe("[A73c S-13] with an HTTP status in the chain only decoded revert data is a revert — page text never is", () => {
+  const PAGE_503_ALLOWANCE = { http: 503, body: "upstream error: execution reverted: transfer amount exceeds allowance" }
+  const PAGES = [
+    ["HTTP 503 page quoting 'execution reverted: transfer amount exceeds allowance'", PAGE_503_ALLOWANCE],
+    ["HTTP 502 HTML page saying the request 'was reverted'", { http: 502, body: "<html><body>the request was reverted by the gateway</body></html>" }],
+    ["HTTP 500 page quoting 'execution reverted: insufficient balance'", { http: 500, body: "execution reverted: insufficient balance" }],
+  ]
+  for (const [site, build] of ALL_SITES) {
+    for (const [what, spec] of PAGES) {
+      test(`${site}: ${what} ⇒ infra:rpc-transport, never failed`, async () => {
+        const err = await build(spec)
+        assert.ok(err instanceof ContractFunctionExecutionError && hasInChain(err, HttpRequestError), chain(err))
+        assert.deepEqual(classifyMissCause({ err }), infra("rpc-transport"), chain(err))
+        const plan = planFailureHandling({ dbOrder: dbOrder(), err, prevFailures: 3, nowSec: NOW_SEC, nowIso: NOW })
+        assert.equal(plan.kind, "infra")
+        assert.equal(plan.failures, 3)
+        assert.equal(plan.patch.status, "active")
+        assert.equal(plan.patch.error, undefined)
+      })
+    }
+  }
+  test("why the gate is needed: the page's 'execution reverted' words make viem put an ExecutionRevertedError NEXT TO the HttpRequestError", async () => {
+    const err = await stub.readError(PAGE_503_ALLOWANCE)
+    assert.ok(hasInChain(err, ExecutionRevertedError) && hasInChain(err, HttpRequestError), chain(err))
+    assert.equal(chain(err), "ContractFunctionExecutionError > CallExecutionError > ExecutionRevertedError > HttpRequestError")
+    assert.equal(err.walk((e) => e instanceof HttpRequestError).status, 503)
+  })
+  test("decoded revert data still counts next to a status — by its DECODED name; the page's words are never terminal", async () => {
+    const err = await stub.readError(PAGE_503_ALLOWANCE)
+    assert.deepEqual(classifyMissCause({ err, executorErrorName: "InsufficientOutput" }), order("revert:InsufficientOutput"))
+    assert.deepEqual(classifyMissCause({ err, swapReason: "Too little received" }), order("revert:swap-failed"))
+    const plan = planFailureHandling({ dbOrder: dbOrder(), err, executorErrorName: "InsufficientOutput", prevFailures: 3, nowSec: NOW_SEC, nowIso: NOW })
+    assert.equal(plan.kind, "retry")
+    assert.equal(plan.failures, 4)
+    assert.equal(plan.patch.error, undefined)
+    // …while a DECODED reason that is itself a permanent cause is still terminal: it is revert data, not page text.
+    assert.deepEqual(classifyMissCause({ err, swapReason: "ERC20: transfer amount exceeds allowance" }), order(FAILURE_REASON.INSUFFICIENT_ALLOWANCE))
+  })
+  test("no status in the chain: the node's own 'execution reverted: …' is still the order's (the gate is the status, not the words)", async () => {
+    const err = await stub.readError(REVERT_GETH)
+    assert.equal(hasInChain(err, HttpRequestError), false, chain(err))
+    assert.deepEqual(classifyMissCause({ err }), order("revert"), chain(err))
+  })
+})

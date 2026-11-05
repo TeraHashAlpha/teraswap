@@ -340,8 +340,16 @@ export function classifyMissCause({
   // reverted" words) or hex revert data on some link. Otherwise it falls to the keeper-side rules
   // below (keeper-gas / keeper-nonce if the node said so, else rpc-transport).
   const guessedRevert = !!meta && meta.names.includes("InternalRpcError") && !meta.names.includes("ExecutionRevertedError") && !meta.revertData
+  // [A73c S-13] An HTTP status in the chain means the provider answered with an error PAGE: viem's
+  // getNodeError turns page text that says "execution reverted" into an ExecutionRevertedError, and
+  // the text rules would read the page's words. Next to a status only DECODED revert data is a
+  // revert (the executor's own decode: executorErrorName / swapReason) — never a name or a word;
+  // the miss falls to rpc-transport below, and classifyFailure never reads a page for a permanent cause.
+  const page = !!meta && meta.statuses.length > 0
   const isRevert =
-    !!executorErrorName || !!swapReason || (!!meta && !guessedRevert && (meta.names.some((n) => REVERT_NAME.test(n)) || REVERT_TEXT.test(meta.text)))
+    !!executorErrorName ||
+    !!swapReason ||
+    (!!meta && !page && !guessedRevert && (meta.names.some((n) => REVERT_NAME.test(n)) || REVERT_TEXT.test(meta.text)))
   // 6. The KEEPER wallet is out of gas — ours, not the user's balance. Never on a revert.
   if (meta && !isRevert && (meta.names.includes("InsufficientFundsError") || KEEPER_GAS_TEXT.test(meta.text))) return infra("keeper-gas")
   // 6b. [A73b S-7] The KEEPER's tx nonce was rejected by the node — ours. Never on a revert.
@@ -614,7 +622,10 @@ export function collectErrorText(err) {
  *   terminal=false → transient; retry a later cycle (reason is null)
  */
 export function classifyFailure({ err, swapReason } = {}) {
-  const text = `${swapReason ? String(swapReason) : ""} ${collectErrorText(err)}`.toLowerCase()
+  // [A73c S-13] With an HTTP status in the chain the error text is a provider PAGE, not a revert
+  // reason: it is never read for a permanent cause — only the decoded swapReason is.
+  const pageText = err != null && collectErrorMeta(err).statuses.length > 0
+  const text = `${swapReason ? String(swapReason) : ""} ${pageText ? "" : collectErrorText(err)}`.toLowerCase()
   for (const sig of PERMANENT_SIGNATURES) {
     if (sig.patterns.some((re) => re.test(text))) {
       return { terminal: true, reason: sig.reason }
