@@ -201,6 +201,9 @@ export type OrderEngineEvent =
   | { type: 'order_created'; orderId: string; orderHash: string }
   | { type: 'order_signed'; orderId: string }
   | { type: 'order_cancelled'; orderId: string }
-  | { type: 'order_filled'; orderId: string; txHash: string }
+  // [fix/tx-links-remaining] chainId is the FILLED ORDER's own chain (AutonomousOrder.chainId at
+  // fill time), carried through so the fill toast's explorer link never guesses from the live wallet
+  // chain. Optional for parity with AutonomousOrder.chainId (legacy/local records may lack it).
+  | { type: 'order_filled'; orderId: string; txHash: string; chainId?: number }
   | { type: 'order_error'; orderId: string; error: string }
   | { type: 'dca_execution'; orderId: string; executionNumber: number }

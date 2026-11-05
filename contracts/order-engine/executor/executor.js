@@ -2616,10 +2616,14 @@ async function main() {
       if (probe.length === 0) return
       log("  Active order(s) appeared while idle -- running the full cycle now")
     }
+    const pausedCyclesBefore = stats.pausedCycles
     const activeOrders = await executeCycle(publicClient, walletClient, null, flashbotsPublicClient, flashbotsWalletClient, monitor)
     // [A71 M-1] A full cycle that did not throw ends the "cycle" origin's auth streak (a probe tick,
     // which makes no RPC call, is not evidence and never gets here). Never throws (rpc-auth.js).
-    if (rpcAuthMonitor) await rpcAuthMonitor.onRpcSuccess("cycle")
+    // [A74 S-11] …unless the cycle took the PAUSED branch (stats.pausedCycles moved): it attempted nothing,
+    // so it proves nothing about the "cycle" origin and must not wipe the streak that paused it. The streak
+    // ends by a cycle that really ran, or ages out (rpc-auth.js RPC_AUTH_STREAK_TTL_MS, S-10) — no deadlock.
+    if (rpcAuthMonitor && stats.pausedCycles === pausedCyclesBefore) await rpcAuthMonitor.onRpcSuccess("cycle")
     cadence.record(activeOrders)
     watcher.setIdle(cadence.isIdle())
     if (cadence.isIdle()) log(`  Idle: next RPC cycle in ${IDLE_POLL_INTERVAL_MS / 1000}s (Supabase probe every ${POLL_INTERVAL_MS / 1000}s)`)

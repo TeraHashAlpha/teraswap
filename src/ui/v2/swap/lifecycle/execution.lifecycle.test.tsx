@@ -120,7 +120,10 @@ describe('28a — pending', () => {
     expect(steps()).toEqual([['Preparing swap...', 'done'], ['Simulating transaction...', 'done'], ['Review transaction...', 'done'], ['Executing swap...', 'active'], ['Swap complete', 'todo']])
     const a = within(execCol()).getByTestId('exec-tx-link') as HTMLAnchorElement
     expect(a.href).toBe(`https://etherscan.io/tx/${TX}`)
-    expect(a.textContent).toBe('Transaction sent — track on Etherscan ↗') // v1's sentence
+    // [fix/tx-links-remaining] v1 switched to a generic "track on explorer ↗" (no longer names a
+    // specific host, now that ETHERSCAN_TX — mainnet-only — is deprecated with 0 callers); v2
+    // keeps its own chain-named copy, so this pins v2's text for chain 1, not byte parity with v1.
+    expect(a.textContent).toBe('Transaction sent — track on Etherscan ↗')
     expect(a.rel).toContain('noopener')
     expect(execCol().textContent).toContain('Pre-swap simulation passed — transaction verified safe')
     expect(document.querySelector('[data-cta]')!.textContent).toBe('Executing swap...') // v1's button label, disabled

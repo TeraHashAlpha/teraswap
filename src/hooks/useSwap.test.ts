@@ -1161,3 +1161,82 @@ describe('useSwap — [fix/unpriced-ack-paths M-1] CoW path: 409 → consent dia
     expect(result.current.errorMessage).toMatch(/not yet available/)
   })
 })
+
+// ─────────────────────────────────────────────────────────────
+// [fix/tx-links-remaining] `txChainId` is the chain a tx was actually SENT on — captured once, at
+// the send/sign moment, independent of whatever `useActiveChainId()` reports afterward. Consumers
+// (SwapBox's explorer links, its success toast) must render against this, never the live chain.
+// ─────────────────────────────────────────────────────────────
+describe('useSwap — [fix/tx-links-remaining] txChainId tracks the SEND-time chain', () => {
+  afterEach(() => {
+    vi.mocked(useAccount).mockReturnValue({
+      address: '0x1111111111111111111111111111111111111111',
+    } as unknown as ReturnType<typeof useAccount>)
+  })
+
+  it('is undefined before any swap is sent', () => {
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
+    expect(result.current.txChainId).toBeUndefined()
+  })
+
+  it('standard path: confirmSwap captures the chain active AT SEND TIME (Base), not mainnet', async () => {
+    vi.mocked(useAccount).mockReturnValue({
+      address: '0x1111111111111111111111111111111111111111',
+      chain: { id: 8453 },
+    } as unknown as ReturnType<typeof useAccount>)
+    mockSwapFetch(swapResponse())
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('1inch', ACCEPTED_QUOTE)))
+    await act(async () => { await result.current.execute('1inch') })
+    expect(result.current.status).toBe('confirming')
+
+    await act(async () => { result.current.confirmSwap() })
+
+    expect(mockSendTransaction).toHaveBeenCalled()
+    expect(result.current.txChainId).toBe(8453)
+  })
+
+  it("CoW path: the fulfilled order's txChainId is the FROZEN order chain (Arbitrum), captured at submit/fulfillment", async () => {
+    vi.mocked(useAccount).mockReturnValue({
+      address: '0x1111111111111111111111111111111111111111',
+      chain: { id: 42161 },
+    } as unknown as ReturnType<typeof useAccount>)
+    mockSwapFetch({
+      source: 'cowswap', toAmount: '2950000000', estimatedGas: 0, gasUsd: 0, routes: [],
+      cowOrderParams: {
+        sellToken: TOKEN_IN.address, buyToken: TOKEN_OUT.address, receiver: '0x1111111111111111111111111111111111111111',
+        sellAmount: '1000000000000000000', buyAmount: '2950000000',
+        validTo: Math.floor(Date.now() / 1000) + 600,
+        appData: '{"version":"1.1.0","appCode":"TeraSwap"}', appDataHash: '0x' + 'a'.repeat(64),
+        feeAmount: '500000000000000', kind: 'sell', partiallyFillable: false,
+        sellTokenBalance: 'erc20', buyTokenBalance: 'erc20',
+        from: '0x1111111111111111111111111111111111111111', quoteId: 1, signingScheme: 'eip712',
+      },
+    })
+    mockSignTypedData.mockResolvedValue('0xsignature')
+    vi.mocked(submitCowOrder).mockResolvedValue('order-uid-1')
+    vi.mocked(pollCowOrderStatus).mockResolvedValue({ status: 'fulfilled', txHash: ('0x' + 'c'.repeat(64)) as `0x${string}` })
+
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('1inch', ACCEPTED_QUOTE)))
+    await act(async () => { await result.current.execute('cowswap') })
+    await waitFor(() => expect(result.current.status).toBe('cow_awaiting_review'))
+    await act(async () => { await result.current.confirmCowOrder() })
+    await waitFor(() => expect(result.current.status).toBe('success'))
+
+    expect(result.current.txChainId).toBe(42161)
+  })
+
+  it('reset() clears txChainId back to undefined, same as txHash', async () => {
+    vi.mocked(useAccount).mockReturnValue({
+      address: '0x1111111111111111111111111111111111111111',
+      chain: { id: 8453 },
+    } as unknown as ReturnType<typeof useAccount>)
+    mockSwapFetch(swapResponse())
+    const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('1inch', ACCEPTED_QUOTE)))
+    await act(async () => { await result.current.execute('1inch') })
+    await act(async () => { result.current.confirmSwap() })
+    expect(result.current.txChainId).toBe(8453)
+
+    await act(async () => { result.current.reset() })
+    expect(result.current.txChainId).toBeUndefined()
+  })
+})

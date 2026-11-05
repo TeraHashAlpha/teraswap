@@ -37,7 +37,8 @@ import { playClick, playTouchMP3, playSwapConfirmMP3, playCancelOrderMP3, startW
 import { trackTrade } from '@/lib/analytics-tracker'
 import { useToast } from '@/components/ToastProvider'
 import { useOrderNotifications } from '@/hooks/useOrderNotifications'
-import { ETHERSCAN_TX, DEPEG_CONSENT_TOLERANCE } from '@/lib/constants'
+import { DEPEG_CONSENT_TOLERANCE } from '@/lib/constants'
+import { explorerTxUrl } from '@/lib/chains/tokens'
 import TokenSelector from './TokenSelector'
 // [FEAT-DEPEG-GATE-ORDER-CREATION] The same, twice-audited cbETH depeg circuit-breaker SwapBox
 // uses — wired here so a Take-Profit (or, once live, Stop-Loss) order cannot be created against a
@@ -113,7 +114,7 @@ export default function ConditionalOrderPanel() {
     }
     if (latestEvent.type === 'order_filled') {
       playSwapConfirmMP3()
-      toast({ type: 'success', title: 'Order filled!', description: 'Your conditional order executed successfully.', txHash: latestEvent.txHash, duration: 10000 })
+      toast({ type: 'success', title: 'Order filled!', description: 'Your conditional order executed successfully.', txHash: latestEvent.txHash, chainId: latestEvent.chainId, duration: 10000 })
       if (address) {
         trackTrade({
           type: 'sltp_trigger',
@@ -911,15 +912,15 @@ function ConditionalOrderCard({
         <p className="mb-2 text-[11px] text-red-400">{order.error}</p>
       )}
 
-      {/* Tx hash */}
+      {/* Tx hash — chain-aware explorer link, the order's own chain (orderChainId above), not the connected wallet's */}
       {order.txHash && (
         <a
-          href={`${ETHERSCAN_TX}${order.txHash}`}
+          href={explorerTxUrl(order.txHash, orderChainId)}
           target="_blank"
           rel="noopener noreferrer"
           className="mb-2 block text-[11px] text-cream-gold hover:underline"
         >
-          View on Etherscan ↗
+          View on explorer ↗
         </a>
       )}
 
