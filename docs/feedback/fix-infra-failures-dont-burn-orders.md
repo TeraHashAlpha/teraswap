@@ -124,3 +124,27 @@ Verify (A73b tree d7aed7f): keeper `node --test` **935/935, 0 fail, 0 cancelled*
 capture-endpoint-baseline.ts:54, telegram/webhook:163) · gitleaks over the 4 commits: no leaks. Root `npm ci` re-run after the owner's
 merge of main (framer-motion 12.43.0). Diff since the audited head 4e000cc: 11 files, +730/−22 (before the docs commit). #656 stays a DRAFT.
 Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/infra-failures-dont-burn-orders
+
+## A73c fix pass (2026-11-05) — one commit per id, each with a real-viem test red on the previous head
+The Auditor's candidate diff was read as reference; implemented and tested here. Every test builds its error through viem's own
+`readContract` / `writeContract` against the stub (now also answering a non-2xx that carries a JSON-RPC body).
+| Id | Sev | Fix | Commit | Test (red → green) |
+|---|---|---|---|---|
+| S-12 | H | viem's `getContractError` wraps ANY −32603 (`InternalRpcError`) as `ContractFunctionRevertedError` — also on a 5xx with a JSON-RPC body (viem returns it into the RPC pipeline; no status survives). Such a chain is a revert only with an `ExecutionRevertedError` or hex revert data (≥ 4 bytes: `data` on RpcRequestError, plain or nested, or CFRE.`raw`); otherwise keeper-gas / keeper-nonce if the node said so, else `rpc-transport` | `7c4cbc2` | S-12: 3 answers × 3 sites ⇒ infra:rpc-transport, −32603 funds / nonce ⇒ keeper-gas / keeper-nonce, 20 misses never move the ladder — 11 red on e05223d; real reverts under −32603 (hex data, nested data, "execution reverted" words) stay order |
+| S-11 | M | `/(?<!gas required )exceeds allowance/` — geth's `gas required exceeds allowance (N)` is `order:revert`, counted on the 8-miss ladder, failed only at the cap (`no_route_after_retries` + alert), never terminal | `de2ba8c` | S-11: estimateGas + eth_call shapes ⇒ order:revert, plan retry 3 → 4, 8th miss at the cap — 4 red on 7c4cbc2; a genuine `ERC20: transfer amount exceeds allowance` revert stays terminal |
+| S-13 | L | with an HTTP status in the chain, names / words are no revert evidence (viem turns page text "execution reverted" into an `ExecutionRevertedError` next to the `HttpRequestError`); only the executor's decoded data (`executorErrorName` / `swapReason`) is; `classifyFailure` never reads a page for a permanent cause | `a3f4ec3` | S-13: 3 pages × 3 sites ⇒ infra:rpc-transport, never failed; decoded data next to a page ⇒ order by its decoded name — 10 red on de2ba8c |
+| S-14 | L | try/catch around both walks (`collectErrorMeta`, `collectErrorText`): the walk ends at the hostile link and classifies on what was read; nothing readable ⇒ `unclassified` (unrecognised infra, feeds the C(3) streak) | `b61ae48` | S-14: real viem errors made hostile (wrapper's own `name` accessor, revoked Proxy as first / innermost `cause`, throwing `details` deep in a real revert chain, both walks alone, 20 in a row) — 6 red on a3f4ec3 |
+
+Deltas from the candidate diff (Auditor's call): (1) S-12 also accepts a nested `data.data` hex (wallet-style −32603; the real chain
+already carries it on CFRE.`raw`); (2) S-13 additionally stops `classifyFailure` reading the error text when a status is in the
+chain — the candidate gated only `isRevert`, which leaves a decoded name riding along with a page open to the page's words;
+(3) S-12 knock-on: a −32603 carrying the node's "insufficient funds" / "nonce too low" is now keeper-gas / keeper-nonce (it was
+`order:revert` through the guessed CFRE). Recorded, not changed: `rpc-auth.js classifyRpcError` loses its verdict when ITS walk
+hits a hostile link (its try/catch answers transient), so a 403 with a hostile tail is `rpc-transport`, not `rpc-auth` — still infra.
+The executor's other readers of the error are already guarded (`redactError`, the catch block's revert-decode diagnostics).
+
+Verify (A73c tree b61ae48): keeper `node --test` **976/976, 0 fail, 0 cancelled** on Node **20.20.2** AND **22.23.4** (CI versions, run alone)
+· vitest 415 files / **6674** pass · eslint 0 errors / 93 warnings (unchanged, cap 94) · tsc clean · CodeQL `javascript-security-extended`
+(codeql-local.sh): **13 → 13, 0 new** (same file:line set) · gitleaks over the 4 commits: no leaks.
+Diff since the audited head e05223d: 6 files, +365/−30 (before the docs commit). #656 stays a DRAFT.
+Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/infra-failures-dont-burn-orders
