@@ -55,3 +55,51 @@ Concerns for the Auditor:
 | Share button ("Share — saved X%" / "Share swap") | Swap | v1's tweet-intent Share (SwapBox.tsx), from the live quote/tokenIn/tokenOut, once the swap succeeds | owner, A75 L-1: BUILD |
 | Theme toggle | Header | v2 is dark-only (no light mode); the control has no v2 counterpart | owner, A75 L-1: NOT built |
 | Desktop dot-nav (landing `ScrollSpy`) | landing | v1's `lg`-only section dots; v2's scroll narrative (photo sections) replaces the need for a jump-nav | owner, A75 L-1: NOT built |
+
+## Feedback — A75 fixes (PR #660, head 87adf17) — 0C/1H/8L, all fixed
+Auditor A75 verdict: blocked 0C/1H. All 9 findings fixed, one commit per id (8912f37 H-1 · fd9ef80 L-1 · cfa5d29
+L-2 · e420bb9 L-3 · 353152c L-4 · 1f66458 L-5 · 52c6547 L-6 · dad23ec L-7 · 87adf17 L-8), each commit's test
+failing on the commit before it.
+
+1. **H-1** AppShell.tsx's pane ternary fell through to TabPane's permanent empty skeleton for `/limit`, `/sltp`,
+   and DCA on a chain neither gated nor live (Arbitrum — OrderExecutorV3 not operational per DEPLOYMENTS.md — or
+   the flag unset). Now renders v1's `ComingSoonPanel`, wrapped in a `data-tab-pane` div.
+2. **L-1** Recent swaps (RecentSwaps.tsx, same shared `useSwapHistory` store, no-box hairline) and Share
+   (quote-model's `buildShareText`, byte-identical tweet text) BUILT per owner ruling; theme toggle and the
+   landing dot-nav recorded NOT built. New `shell-surfaces-sweep.test.tsx`: the main sweep renders v1's SwapBox
+   alone (never catches a v1 SIBLING), which is exactly how these two went missing with 0 sweep failures — this
+   file compares the siblings directly and pins the two NOT-built surfaces have a ruled content-map row.
+3. **L-2** `{pane}` wrapped in `SwapErrorBoundary` (v1 copy) — every tab, not only Swap.
+4. **L-3** SwapCard's `explorerUrl` now follows `lc.swap.txChainId ?? activeChainId` (v1's own rule), not the
+   selected chain alone; DcaCard's `order_filled` toast now names its own chain explicitly. v1's DCAPanel has the
+   same omission but falls back to a hard `?? 1` (always Etherscan) rather than the selected chain — a
+   pre-existing v1 bug, not touched here (flagged for the Auditor).
+5. **L-4** proxy.ts's catch-all used the switch state (`v2`) for every direct `/v2/*` hit — once the switch was
+   on, `/v2/swap` passed straight through. A request reaching that branch is necessarily a direct hit (the
+   tab-rewrite rule above always returns its own response first), so it is now always a 404 except `_kit`/`_enable`.
+6. **L-5** The 6 v2-only tab paths (no v1 page at all) now redirect to `/` with v2 off, instead of falling through
+   to Next's generic 404. `V2_ONLY_TAB_PATHS` (tab-paths.ts) derives them from `V2_TAB_PATHS` so they can't drift.
+7. **L-6** HelpDrawer rebuilt on `Sheet` (focus trap + restore, neither of which it had). Sheet gained an `edge`
+   prop so the drawer keeps its left-hairline identity (round7.test.tsx) against Sheet's top-hairline default.
+   HelpFab's "Open help" trigger used to unmount on click, so Sheet's `document.activeElement`-at-mount restore
+   target was already dead by the time Sheet mounted — it now stays mounted (inert via aria-hidden/tabIndex -1).
+8. **L-7** sw.js's final fetch branch called `respondWith` for every remaining GET, including a cross-origin one
+   (Base/Arbitrum's direct public-RPC reads — only mainnet goes through `/api/rpc`); a failed cross-origin fetch
+   fell back to `caches.match('/')`, substituting the cached HTML shell for an RPC response. Now scoped to
+   same-origin navigations only. New `src/sw.test.ts` loads and evaluates the real shipped file.
+9. **L-8** `webServer.cwd` now resolves to the repo root (Playwright's default is the config file's own
+   directory — no package.json/.next there). Added a `v2-mobile-parity` job to `.github/workflows/e2e.yml`,
+   separate from `category-scroll` since it needs a real build + `next start`, not the isolated file:// harness.
+
+**Verify:** vitest 427 files / 7674 tests, 0 fail. lint 93 = 93 (0 errors, delta 0). tsc 0. `npm run build` ok
+(Turbopack; route table unchanged, 8 v1 static routes + the dynamic set). parity-sweep.test.tsx 39/39, 0 missing;
+shell-surfaces-sweep.test.tsx 4/4 new. rpc-budget 31/31. CodeQL security-extended (javascript-typescript), base
+a91e105 vs head 87adf17: 13 → 13 alerts, identical rule:file:line set, 0 new, 0 fixed (base scanned 1069 files,
+head 1075 — the +6 are the new test files this round added). v1 module-identical: the diff touches no
+v1-reachable page/component source at all (`git diff --stat a91e105..HEAD` — only src/ui/v2/**, proxy.ts
+[middleware, not bundled per-route], public/sw.js [static asset], .github/, docs/, and test files); no byte-diff
+build pass was needed to prove it.
+
+**Concern for the Auditor:** L-3's v1-side DCAPanel/ToastProvider omission (hard `?? 1` fallback, always
+Etherscan for a Base/Arbitrum DCA fill toast) is real but out of this PR's scope — v2 is now strictly better than
+v1 here, not merely at parity.
