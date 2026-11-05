@@ -116,7 +116,7 @@ import {
 } from "./idle-backoff.js"
 import { ExecutorMonitor } from "./monitor.js"            // [EX-MON] Prometheus + Telegram
 // [DCA-OBS] Freeze-urgency scoring + Telegram alert builders (pure/fail-safe modules).
-import { computeFreezeScore, scoreTier, TIER_WARN_THRESHOLD } from "./freeze-score.js"
+import { computeFreezeScore, scoreTier, TIER_WARN_THRESHOLD, TIER_CRITICAL_THRESHOLD } from "./freeze-score.js"
 import { buildQuotePath, buildSwapRoutePayload, computeNetChunkAmount, sourceForRouter } from "./swap-route.js" // [chore/dca-router-chainaware] router-constrained route for the net chunk; buildQuotePath = unconstrained best-of-N reference for the deviation gate [chore/dca-deviation-guard]
 import { decodeSwapFailed, extractRevertData, decodeExecutorMarketRevert } from "./revert-decode.js" // [chore/dca-swapfailed] unwrap SwapFailed(bytes); [FIX-P1B-M01] the executor's own market reverts
 // [CHORE-KEEPER-RECORD-EXECUTIONS] Confirmed-only, idempotent order_executions row
@@ -158,6 +158,12 @@ import { classifyRpcError, createRpcAuthMonitor, createBootAlertGate, RPC_AUTH, 
 import {
   MAX_CYCLE_FAILURES,
   planFailureHandling,
+  classifySwapApiMiss,
+  recordInfraMiss,
+  clearInfraMisses,
+  pruneInfraMisses,
+  stripInfraMissColumns,
+  isInfraMissColumnRejection,
   readPersistedRetryState,
   isInBackoffWindow,
   resetRetryStateFields,
@@ -339,6 +345,10 @@ const EXPIRY_URGENCY_SECONDS = parseInt(process.env.GAS_EXPIRY_URGENCY_S || "720
 // restart. The pinned-route path below still writes here (backoff reuse) but
 // never persists a count, so it can never feed the ladder.
 const orderRetries = new Map()   // orderId -> { count, lastAttempt }  (backoff cache)
+// [ADR-026 / A73 S-1] orderId -> { streak, lastAttempt, reason, backoffMs }: consecutive INFRA misses
+// (never counted, never persisted). The cycle gate backs an order off at the ladder's cadence on this
+// streak so an outage does not re-attempt every order every tick; any order miss or fill clears it.
+const orderInfraMisses = new Map()
 // [SPRINT-P1B / ADR-014 (a)] orderId -> consecutive pinned-route reverts. Tracked separately from
 // orderRetries because a pinned-route revert must NEVER walk the failure ladder to 'failed' — the
 // order stays fillable until expiry. Cleared on any successful fill.
@@ -716,7 +726,13 @@ async function updateOrderStatus(orderId, status) {
 //   • a patch that CARRIED those columns is accepted → markPresent() (decision returns to the row)
 // Only a patch that actually carried the columns can clear the state — a status-only patch
 // succeeding proves nothing about the schema, and neither does the stripped re-send below.
+//
+// [ADR-026] The two infra-miss columns (last_infra_miss_at / last_infra_miss_reason, migration
+// 20261104120000_orders_infra_miss.sql, applied manually) get the SAME tolerance, independently: the
+// specific 400 naming one of them re-sends the patch without them (logged once per process) and
+// never touches `retryStateAvailability` — that sensor is about the retry-state columns only.
 const retryStateAvailability = createRetryStateAvailability()
+let infraMissColumnsWarned = false
 async function patchOrderRow(orderId, patch) {
   const send = (body) =>
     supabaseFetch(`orders?id=eq.${orderId}`, {
@@ -724,10 +740,28 @@ async function patchOrderRow(orderId, patch) {
       headers: { Prefer: "return=minimal" },
       body: JSON.stringify(body),
     })
-  const stripped = stripRetryStateColumns(patch)
-  const hadRetryState = Object.keys(stripped).length < Object.keys(patch).length
+  const carriesRetryState = (p) => Object.keys(stripRetryStateColumns(p)).length < Object.keys(p).length
+  const carriesInfraMiss = (p) => Object.keys(stripInfraMissColumns(p)).length < Object.keys(p).length
 
-  let res = await send(patch)
+  let current = patch
+  let res = await send(current)
+  let body = ""
+  if (!res.ok) {
+    try { body = await res.text() } catch { /* body is diagnostic only */ }
+    if (res.status === 400 && carriesInfraMiss(current) && isInfraMissColumnRejection(body)) {
+      if (!infraMissColumnsWarned) {
+        infraMissColumnsWarned = true
+        console.error(
+          `  Order ${orderId.slice(0, 8)}... infra-miss columns REJECTED (${res.status}: ${body.slice(0, 160)}) — ` +
+            `migration 20261104120000_orders_infra_miss.sql is NOT applied; the 24 h infra-miss count stays empty. Re-sending without them (logged once per process).`,
+        )
+      }
+      current = stripInfraMissColumns(current)
+      res = await send(current)
+      if (!res.ok) { try { body = await res.text() } catch { /* diagnostic only */ } }
+    }
+  }
+  const hadRetryState = carriesRetryState(current)
   if (res.ok) {
     // The migration is applied (possibly JUST applied, mid-process): the row can hold the count
     // again, so the decision must go back to reading it. This is what stops the fallback latching.
@@ -740,8 +774,7 @@ async function patchOrderRow(orderId, patch) {
     }
     return res
   }
-  let body = ""
-  try { body = await res.text() } catch { /* body is diagnostic only */ }
+  const stripped = stripRetryStateColumns(current)
   if (res.status === 400 && hadRetryState && /consecutive_failures|last_attempt_at/.test(body)) {
     console.error(
       `  Order ${orderId.slice(0, 8)}... retry-state columns REJECTED (${res.status}: ${body.slice(0, 160)}) — ` +
@@ -758,6 +791,14 @@ async function patchOrderRow(orderId, patch) {
     res = await send(stripped)
     if (res.ok) return res
     try { body = await res.text() } catch { /* diagnostic only */ }
+    // [ADR-026] Both migrations missing: PostgREST named last_attempt_at first (patch key order), so
+    // the infra columns are only rejected NOW — strip them too; the status transition must land.
+    if (res.status === 400 && carriesInfraMiss(stripped) && isInfraMissColumnRejection(body)) {
+      infraMissColumnsWarned = true
+      res = await send(stripInfraMissColumns(stripped))
+      if (res.ok) return res
+      try { body = await res.text() } catch { /* diagnostic only */ }
+    }
   }
   console.error(`  Order ${orderId.slice(0, 8)}... orders PATCH FAILED (${res.status}: ${body.slice(0, 160)}) — patch keys: ${Object.keys(patch).join(",")}`)
   return res
@@ -784,13 +825,22 @@ async function patchOrderRow(orderId, patch) {
 // columns ARE available it returns 0, and since planFailureHandling takes max(persisted, prev),
 // the decision provably follows the ROW — the Map cannot raise it. Do not inline this ternary:
 // the two states are unit-tested through that one function.
-async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, executorErrorName = null, noRoute = false } = {}, obsCtx = null) {
+// [ADR-026] The miss's EVIDENCE (noRouteCause / minedRevert / txSent / the paused state) reaches the
+// plan so every miss is tagged `infra` or `order` (retry-policy.js classifyMissCause); the log line
+// names the cause. Only an `order` miss advances consecutive_failures; an `infra` miss (kind
+// "infra") keeps the order active, writes last_attempt_at + last_infra_miss_at/_reason and leaves the
+// count untouched — the same-process cache mirrors that unchanged count.
+async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, executorErrorName = null, noRoute = false, noRouteCause = null, minedRevert = false, txSent = false } = {}, obsCtx = null) {
   const plan = planFailureHandling({
     dbOrder,
     err,
     swapReason,
     executorErrorName,
     noRoute,
+    noRouteCause,
+    minedRevert,
+    txSent,
+    paused: rpcAuthMonitor ? rpcAuthMonitor.state().paused : null,
     prevFailures: prevFailuresForDecision({
       columnsAvailable: retryStateAvailability.isAvailable(),
       cached: orderRetries.get(dbOrder.id),
@@ -815,6 +865,9 @@ async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, 
   // Apply the Supabase patch (status [+ error] + updated_at + consecutive_failures/last_attempt_at).
   await patchOrderRow(dbOrder.id, plan.patch)
 
+  // [A73 S-1] An ORDER miss (retry / fail / expired) ends the run of consecutive infra misses.
+  if (plan.kind !== "infra") clearInfraMisses(orderInfraMisses, dbOrder.id)
+
   // Refresh the same-process backoff cache (the row already carries the authoritative count).
   if (plan.clearRetries) {
     orderRetries.delete(dbOrder.id)
@@ -824,10 +877,31 @@ async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, 
 
   if (plan.kind === "expired") {
     log(`  Order ${dbOrder.id.slice(0, 8)}... expired — recording 'expired', not a route failure`)
+  } else if (plan.kind === "infra") {
+    // [ADR-026 §2] Ours, not the order's: the ladder did not move. [A73 S-1] The in-memory infra
+    // streak spaces the next attempt at the ladder's cadence (counts nothing, cleared by any order
+    // miss or fill).
+    stats.infraMisses++
+    const infra = recordInfraMiss(orderInfraMisses, dbOrder.id, { reason: plan.causeReason, nowMs: Date.now() })
+    log(`  Order ${dbOrder.id.slice(0, 8)}... infra miss (${plan.causeReason}) — NOT counted (${plan.failures}/${MAX_CYCLE_FAILURES}); order left active, infra streak ${infra.streak}, retry in ~${Math.round(infra.backoffMs / 1000)}s`)
+    // [A73 C(3) / C(1)] A persistent run of UNRECOGNISED infra misses (unclassified / misroute /
+    // keeper-config) is most likely our bug or config: page ops ONCE (critical tier), then at most
+    // hourly while it persists. The order is still never burned.
+    if (infra.alert) {
+      try {
+        await alertOps(
+          {
+            kind: "infra-miss-streak",
+            detail: `Order ${dbOrder.id} (${dbOrder.order_type}) on chain ${CHAIN_ID} missed ${infra.unrecognisedStreak} consecutive cycles for an UNRECOGNISED infra reason (${plan.causeReason}) over ~${Math.max(1, Math.round((Date.now() - infra.unrecognisedSince) / 60_000))} min. NOT counted against the order (ADR-026) — this points at the keeper or /api/swap, not the order: read this order's "infra miss" log lines; docs/Runbooks/EXECUTOR-OPERATIONS.md § 8. Next reminder in ≥ 1 h while it persists.`,
+          },
+          TIER_CRITICAL_THRESHOLD,
+        )
+      } catch { /* alert is best-effort, never blocks the cycle */ }
+    }
   } else if (plan.kind === "fail") {
-    log(`  Order ${dbOrder.id.slice(0, 8)}... FAILED — reason=${plan.reason} (after ${plan.failures} attempt(s))`)
+    log(`  Order ${dbOrder.id.slice(0, 8)}... FAILED — reason=${plan.reason} cause=${plan.cause}:${plan.causeReason} (after ${plan.failures} attempt(s))`)
   } else {
-    log(`  Order ${dbOrder.id.slice(0, 8)}... transient miss ${plan.failures}/${MAX_CYCLE_FAILURES}, retry in ~${Math.round(plan.backoffMs / 1000)}s (left active)`)
+    log(`  Order ${dbOrder.id.slice(0, 8)}... transient miss ${plan.failures}/${MAX_CYCLE_FAILURES} cause=${plan.cause}:${plan.causeReason}, retry in ~${Math.round(plan.backoffMs / 1000)}s (left active)`)
   }
 }
 
@@ -921,15 +995,18 @@ async function readEthUsd(publicClient) {
 // 1inch router → SwapFailed). `amount` here is the per-chunk NET amount (after
 // the contract's 0.1% tokenIn fee — see computeNetChunkAmount at the call site).
 async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecimals, dstDecimals, router) {
+  // [ADR-026] Every "no route" return says WHY, as a classified miss ({ miss: { cause, reason } }):
+  // our API unreachable / 5xx / 429 / a keeper config gap is `infra` (never counted against the
+  // order); the API answering with no acceptable route for this pair is `order`.
   if (!API_URL) {
     log("  TERASWAP_API_URL not configured -- skipping swap route")
-    return null
+    return { miss: classifySwapApiMiss({ configMissing: true }) }
   }
 
   const source = sourceForRouter(router)
   if (!source) {
     console.error(`  Swap route: no /api/swap source maps to order.router ${router} -- skipping (would mis-route)`)
-    return null
+    return { miss: classifySwapApiMiss({ configMissing: true }) }
   }
 
   try {
@@ -949,13 +1026,21 @@ async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecim
       // INVALID_SOURCE / priceGuard cause (chore/keeper-swap-payload-fix).
       const body = await res.text().catch(() => "")
       console.error(`  Swap API error: ${res.status} ${body.slice(0, 300)} (source=${source})`)
-      return null
+      // [A73 S-1] The body's `code` (NO_ROUTE / unpriced_ack_required / PRICE_GUARD / ORACLE_UNAVAILABLE /
+      // …) decides whose miss this is; the status is only the fallback for a body without one.
+      let code = null
+      try {
+        const parsed = JSON.parse(body)
+        code = parsed?.code
+        if (typeof code !== "string") code = null
+      } catch { /* not JSON (a platform page): status-only classification */ }
+      return { miss: classifySwapApiMiss({ status: res.status, code }) }
     }
 
     const data = await res.json()
     if (!data.tx?.data) {
       console.error("  Swap route: missing tx data")
-      return null
+      return { miss: classifySwapApiMiss({ missingData: true }) }
     }
 
     // [chore/dca-router-chainaware] FUND-FLOW GUARD: the calldata MUST target the
@@ -965,7 +1050,7 @@ async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecim
     const target = data.tx.to
     if (!target || !router || target.toLowerCase() !== router.toLowerCase()) {
       console.error(`  Swap route: tx.to ${target} != order.router ${router} (source=${source}) -- refusing to mis-route`)
-      return null
+      return { miss: classifySwapApiMiss({ misroute: true }) }
     }
 
     // [chore/dca-deviation-guard] Also surface the committed router's expected out
@@ -976,7 +1061,7 @@ async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecim
     return { data: data.tx.data, toAmount: data.toAmount ?? null }
   } catch (err) {
     console.error("  fetchSwapRoute error:", redactError(err))
-    return null
+    return { miss: classifySwapApiMiss({ networkError: true }) }
   }
 }
 
@@ -1330,6 +1415,23 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
 
   log(`  Found ${orders.length} active order(s)`)
 
+  // [A73b S-9] An order that left the active set (cancelled / filled / failed elsewhere) takes its
+  // in-memory infra streak with it — the keeper has no cancel path of its own, so absence from the
+  // set just fetched is the signal (an empty set leaves the map alone: see pruneInfraMisses).
+  pruneInfraMisses(orderInfraMisses, orders.map((o) => o.id))
+
+  // [ADR-026 §3] While the provider rejects our credentials nothing can execute: attempt NOTHING —
+  // no lock, no tx, no retry count, no patch. The balance read above and the event watcher keep
+  // probing, so the pause clears by itself (rpc-auth.js onRpcSuccess) and the next cycle attempts
+  // again. Returning the order count keeps the idle cadence in ACTIVE mode (a full cycle every poll).
+  const pausedState = rpcAuthMonitor ? rpcAuthMonitor.state().paused : null
+  if (pausedState) {
+    log(`  PAUSED (${pausedState}): ${orders.length} active order(s) NOT attempted — no lock, no tx, no retry count (ADR-026)`)
+    stats.pausedCycles++
+    await endCycleObservability(obsCtx, publicClient, ownGasSpentWei, { idle: true })
+    return orders.length
+  }
+
   // [ADR-024 / feat/keeper-price-quorum] ONE price-quote context per cycle: the off-chain sources
   // are fetched once for every active DCA token (one DefiLlama + one CoinGecko batch per 50
   // tokens, cached for the cycle) and Chainlink reads are memoized per token. The ETH leg's
@@ -1351,6 +1453,11 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   for (const dbOrder of orders) {
     if (executed >= MAX_BATCH) break
 
+    // [ADR-026] Set the moment writeContract returns a hash: the catch below needs to know whether
+    // a tx was SENT (receipt unavailable ⇒ infra) or the attempt died before any tx (simulated
+    // revert ⇒ order; RPC/transport ⇒ infra).
+    let sentTxHash = null
+
     try {
       // Check if expired (off-chain pre-filter). [chore/dca-resilience] An order
       // that expires mid-retry is recorded 'expired' (its own status) — never a
@@ -1361,6 +1468,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         await updateOrderStatus(dbOrder.id, "expired")
         orderRetries.delete(dbOrder.id)
         quorumSkips.delete(dbOrder.id) // [ADR-024] drop the skip streak too (no Map leak)
+        clearInfraMisses(orderInfraMisses, dbOrder.id) // [A73b S-9] and the infra streak (no Map leak)
         log(`  Order ${dbOrder.id.slice(0, 8)}... expired (expiry: ${dbOrder.expiry})`)
         continue
       }
@@ -1374,6 +1482,12 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       const retryState = orderRetries.get(dbOrder.id) || readPersistedRetryState(dbOrder)
       if (isInBackoffWindow({ count: retryState.count, lastAttempt: retryState.lastAttempt, nowMs: Date.now() })) {
         continue // Still in backoff window — retry a later cycle
+      }
+      // [ADR-026 / A73 S-1] …and the infra floor: consecutive infra misses back off at the ladder's
+      // cadence too (in-memory streak; counts nothing), so an outage never re-attempts every tick.
+      const infraState = orderInfraMisses.get(dbOrder.id)
+      if (infraState && isInBackoffWindow({ count: infraState.streak, lastAttempt: infraState.lastAttempt, nowMs: Date.now() })) {
+        continue // Still inside the infra-miss window — retry a later cycle
       }
 
       // Atomic lock
@@ -1583,12 +1697,13 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
           orderStruct.router,
         )
 
-        if (!swapData) {
+        if (!swapData || swapData.miss) {
           // [chore/dca-resilience] No route THIS cycle is transient: keep the order
           // active and retry a later cycle (backoff). Only after MAX_CYCLE_FAILURES
           // consecutive misses does this fail with no_route_after_retries (+alert).
+          // [ADR-026] The classified miss rides along: an unreachable /api/swap is OUR miss.
           log(`  Order ${dbOrder.id.slice(0, 8)}... -- no swap route this cycle`)
-          await handleExecutionFailure(dbOrder, { noRoute: true }, obsCtx)
+          await handleExecutionFailure(dbOrder, { noRoute: true, noRouteCause: swapData?.miss ?? null }, obsCtx)
           skipped++
           continue
         }
@@ -1904,6 +2019,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         maxPriorityFeePerGas: gasTier.maxPriorityFeePerGas,
       })
 
+      sentTxHash = txHash
       log(`  TX sent: ${txHash}`)
 
       // Wait for confirmation
@@ -1926,6 +2042,8 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         // [chore/dca-resilience] ...and resets THIS order's transient-miss count,
         // so a later isolated miss starts fresh (consecutive, not cumulative).
         orderRetries.delete(dbOrder.id)
+        // [ADR-026 / A73 S-1] ...and the infra-miss streak (a fill proves the path works again).
+        clearInfraMisses(orderInfraMisses, dbOrder.id)
         // [SPRINT-P1B] A fill also clears the pinned-route revert streak (consecutive, not
         // cumulative) so the ops alert only fires on a genuinely stuck route.
         pinnedRouteReverts.delete(dbOrder.id)
@@ -2003,7 +2121,8 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         // cycle (backoff), capping at MAX_CYCLE_FAILURES so a persistently
         // reverting tx stops burning gas and fails with no_route_after_retries
         // (+alert) instead of re-sending forever.
-        await handleExecutionFailure(dbOrder, {}, obsCtx)
+        // [ADR-026] Sent and reverted: the chain judged the order ⇒ `order`, counted.
+        await handleExecutionFailure(dbOrder, { minedRevert: true }, obsCtx)
       }
     } catch (err) {
       // [chore/dca-swapfailed] If the revert is SwapFailed(bytes), unwrap the
@@ -2087,7 +2206,9 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       // [FIX-RETRY-CAP-RESTART] executorErrorName rides along: a DCA that trips the cap on the
       // executor's own InsufficientOutput (the incident's shape — DCA is excluded from the pinned
       // branch above by construction) is failed as min_output_unreachable, not no-route.
-      await handleExecutionFailure(dbOrder, { err, swapReason, executorErrorName }, obsCtx)
+      // [ADR-026] txSent tells the plan whether this is a receipt we could not read (infra) or an
+      // attempt that died before any tx (classified by what threw).
+      await handleExecutionFailure(dbOrder, { err, swapReason, executorErrorName, txSent: sentTxHash !== null }, obsCtx)
     }
   }
 
@@ -2129,6 +2250,10 @@ const stats = {
   // [fix/executor-alert-masking-rpc-auth] null | "rpc-auth" — and the monitor's state behind it.
   paused: null,
   rpcAuth: null,
+  // [ADR-026] misses that were OURS (never counted against an order) and cycles that attempted
+  // nothing because the keeper was paused — per process, for /health.
+  infraMisses: 0,
+  pausedCycles: 0,
 }
 
 // ---- Health check HTTP server ------------------------------------------
@@ -2168,6 +2293,9 @@ function startHealthServer() {
           totalSkipped: stats.totalSkipped,
           totalErrors: stats.totalErrors,
           lastCycleAt: stats.lastCycleAt,
+          // [ADR-026] additive: misses that were ours (not counted) / cycles that attempted nothing
+          infraMisses: stats.infraMisses,
+          pausedCycles: stats.pausedCycles,
         },
       }, null, 2))
     } else if (req.url === "/") {
