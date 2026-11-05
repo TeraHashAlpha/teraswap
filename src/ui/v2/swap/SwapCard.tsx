@@ -616,7 +616,7 @@ export function SwapCard() {
         <SplitRoutePanel splitResult={lc.splitRoute.splitResult} tokenOut={tokenOut} useSplit={lc.splitRoute.useSplit} onToggle={lc.splitRoute.toggleSplit} analyzing={lc.splitRoute.analyzing} />
       )}
 
-      <div className="ts-swap-cta">
+      <div className="ts-swap-cta ts-cta-dock" data-cta-dock="">
         <CtaButton cta={cta} onClick={cta.kind === 'wrong-network' ? onWrongNetwork : onCta} />
         {meta?.gasless?.recommended && meta.best.source !== 'cowswap' && (
           <Button

@@ -379,7 +379,7 @@ export function DcaCreate({ form, onReviewReady }: { form: DcaForm; onReviewRead
             </div>
           )}
 
-          <div className="pt-5">
+          <div className="pt-5 ts-cta-dock" data-cta-dock="">
             <Button
               variant="primary"
               className="w-full"

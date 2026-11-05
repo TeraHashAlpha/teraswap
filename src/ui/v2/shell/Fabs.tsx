@@ -24,6 +24,7 @@ export function MusicToggle() {
       type="button"
       data-v2-music-toggle=""
       onClick={onClick}
+      data-ts-fab=""
       className={`${FAB} left-5`}
       aria-label={on ? 'Turn music off' : 'Turn music on'}
       aria-pressed={on}
@@ -41,7 +42,7 @@ export function HelpFab() {
   return (
     <>
       {!open ? (
-        <button type="button" onClick={() => setOpen(true)} className={`${FAB} right-5`} aria-label="Open help">
+        <button type="button" data-ts-fab="" onClick={() => setOpen(true)} className={`${FAB} right-5`} aria-label="Open help">
           <span aria-hidden="true">?</span>
         </button>
       ) : null}
