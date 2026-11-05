@@ -46,9 +46,9 @@ export const FAILURE_REASON = {
 //
 //   infra — the keeper itself could not complete the attempt (no tx sent): RPC auth/allowlist
 //           (rpc-auth.js classifyRpcError, reused), RPC transport / timeout / 5xx / 429, the keeper
-//           paused, Supabase or /api/swap unreachable, the keeper wallet out of gas, a keeper config
-//           gap, or a SENT tx whose receipt could not be fetched (the chain decides; the next cycle
-//           re-reads it through canExecute).
+//           paused, Supabase or /api/swap unreachable, the keeper wallet out of gas, the keeper's tx
+//           nonce rejected by the node, a keeper config gap, or a SENT tx whose receipt could not be
+//           fetched (the chain decides; the next cycle re-reads it through canExecute).
 //   order — the ORDER is why it did not fill: a revert (mined or simulated) attributable to the
 //           order (slippage / minOut / floor, allowance, balance, nonce), expiry, or our API
 //           answered and there is no acceptable route for this pair.
@@ -112,11 +112,24 @@ function collectErrorMeta(err) {
   return { names, statuses, codes, text: parts.join(" \n ").toLowerCase() }
 }
 
-const REVERT_NAME = /Revert|ContractFunctionExecutionError|CallExecutionError|EstimateGasExecutionError/
+// [A73b S-7] A revert needs POSITIVE evidence somewhere in the `cause` chain: a name matching /Revert/
+// (viem ContractFunctionRevertedError, ExecutionRevertedError) or revert text. viem's WRAPPERS —
+// ContractFunctionExecutionError, CallExecutionError, EstimateGasExecutionError,
+// TransactionExecutionError — wrap EVERY failure of a contract call (a provider 503, a timeout, the
+// node's "insufficient funds" / "nonce too low") and are evidence of nothing; naming them here turned
+// every wrapped keeper-side miss into `order:revert` (A73b S-7 / S-8; wrapped-viem-errors.test.mjs
+// pins the real shapes at both executor sites).
+const REVERT_NAME = /Revert/
 const REVERT_TEXT = /execution reverted|\breverted\b/
 // The KEEPER wallet cannot pay for gas (viem InsufficientFundsError / the node's words). Distinct
 // from the USER's ERC20 balance ("transfer amount exceeds balance"), which is a revert ⇒ order.
 const KEEPER_GAS_TEXT = /insufficient funds for (?:gas|transfer)|exceeds transaction sender account balance|exceeds the balance of the account/
+// [A73b S-7] The KEEPER's tx nonce rejected by the node (viem NonceTooLow / TooHigh / MaxValueError or
+// its words — a stale nonce after a restart, a concurrent send, a resend of a known tx): ours; the
+// next cycle reads a fresh nonce. Distinct from the ORDER's nonce (InvalidNonce / NonceAlreadyUsed),
+// which is a revert ⇒ order (PERMANENT_SIGNATURES).
+const KEEPER_NONCE_NAME = /^Nonce(?:TooLow|TooHigh|MaxValue)Error$/
+const KEEPER_NONCE_TEXT = /nonce too low|nonce too high|transaction already imported|already known/
 const TRANSPORT_NAME = /^(?:HttpRequestError|TimeoutError|WebSocketRequestError|SocketClosedError|RpcRequestError|InternalRpcError|LimitExceededRpcError|ResourceUnavailableRpcError|UnknownRpcError|TransactionReceiptNotFoundError|WaitForTransactionReceiptTimeoutError)$/
 const TRANSPORT_TEXT = /fetch failed|econnrefused|econnreset|etimedout|enotfound|eai_again|ehostunreach|epipe|socket hang up|network error|timed out|timeout|und_err_/
 const TRANSPORT_CODE = /^(?:ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|EPIPE|UND_ERR_|ERR_NETWORK)/
@@ -279,10 +292,14 @@ export function classifyMissCause({
   const meta = err == null ? null : collectErrorMeta(err)
   // [A73 S-2] A revert anywhere in the chain is the CONTRACT talking (the same guard rpc-auth.js
   // applies before its auth words): its text can say "insufficient funds" too, so the keeper-gas
-  // rule below applies only when nothing reverted.
-  const isRevert = !!meta && (meta.names.some((n) => REVERT_NAME.test(n)) || REVERT_TEXT.test(meta.text))
+  // rule below applies only when nothing reverted. [A73b S-7] POSITIVE evidence only: a decoded
+  // executor error or SwapFailed reason, a /Revert/-named error in the chain, or revert text — never
+  // a viem wrapper's name.
+  const isRevert = !!executorErrorName || !!swapReason || (!!meta && (meta.names.some((n) => REVERT_NAME.test(n)) || REVERT_TEXT.test(meta.text)))
   // 6. The KEEPER wallet is out of gas — ours, not the user's balance. Never on a revert.
   if (meta && !isRevert && (meta.names.includes("InsufficientFundsError") || KEEPER_GAS_TEXT.test(meta.text))) return infra("keeper-gas")
+  // 6b. [A73b S-7] The KEEPER's tx nonce was rejected by the node — ours. Never on a revert.
+  if (meta && !isRevert && (meta.names.some((n) => KEEPER_NONCE_NAME.test(n)) || KEEPER_NONCE_TEXT.test(meta.text))) return infra("keeper-nonce")
   // 7. A permanent cause decoded from the revert (allowance / balance / nonce) — order, by code.
   const permanent = classifyFailure({ err, swapReason })
   if (permanent.terminal) return order(permanent.reason)
