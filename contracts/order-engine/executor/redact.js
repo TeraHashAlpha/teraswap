@@ -10,19 +10,29 @@
  *                    through redactUrl, optionally truncated AFTER redaction (a slice taken first
  *                    could cut the URL into a shape the patterns no longer see).
  *
+ * What is read first [A74 S-5]: the text is DECODED to a fixpoint (percent, stacked percent, JSON/JS and octal
+ * escapes, HTML entities — for `/ : @ ? # \\ %` only), so an encoded delimiter cannot hide a URL; text nested
+ * deeper than the decoder goes is replaced by OVER_ENCODED (fail closed).
+ *
  * Which URLs, deliberately broad (over-redaction costs a lookup, a leak costs a key rotation):
- *   1. anything with a scheme (http, https, ws, wss, custom; any case) — userinfo included; the one
- *      exception is `file://` (a stack-trace frame, so a redacted stack keeps its frames);
- *   2. a schemeless `host:port/…` (`127.0.0.1:8545/v2/<key>`, `[::1]:8545/…`);
- *   3. a schemeless dotted host with an alphabetic TLD followed by a path (`provider.example/v2/<key>`).
+ *   1. anything with a scheme (http, https, ws, wss, custom; any case) — userinfo included, whatever
+ *      characters the password holds [S-7]; an authority that is not a plain host[:port] is dropped
+ *      (`[authority-redacted]`) [S-5]; the one exception is `file:///…` (a stack-trace frame, so a redacted
+ *      stack keeps its frames);
+ *   2. a schemeless `host:port/…` (`127.0.0.1:8545/v2/<key>`, `[::1]:8545/…`) [S-6: after any character];
+ *   3. a schemeless dotted host with an alphabetic TLD followed by a path (`provider.example/v2/<key>`), and
+ *      a schemeless `user:secret@host/path` loses its userinfo.
  * A bare host (`https://basescan.org`, `api.example.com`) carries no secret and is left alone, so
  * a version string like `viem@2.47.10` is never touched (no alphabetic TLD).
+ * `allowHosts` [S-8]: a link to an allow-listed explorer survives ONLY as `/tx|address|block/0x<hex>` on exactly
+ * that host (no port, no userinfo); anything else on that host is redacted like any other URL.
  *
  * chain-verify.js keeps its own STRICTER `redactUrls` (whole URL → `<redacted-url>`, plus long hex
  * runs) for its boot refusals; that is a superset of this one and is pinned by its own tests.
  *
  * Every quantifier is bounded or a single pass over a negated class — linear in the input, no
- * nested repetition (a redactor that backtracks inside an alert path is a denial of service).
+ * nested repetition (a redactor that backtracks inside an alert path is a denial of service); backslash
+ * runs are clamped to 8 first [S-9].
  */
 
 export const REDACTED = "/REDACTED"
@@ -36,14 +46,14 @@ export const REDACTED = "/REDACTED"
 export const ALERT_LINK_HOSTS = Object.freeze(["etherscan.io", "sepolia.etherscan.io", "basescan.org", "arbiscan.io"])
 
 const TAIL = "[^\\s\"'<>(),]*"
-// [A71b S-3] No lookbehind: the leftmost match wins. [A71 L-4] had required "the previous character
+// [A71b S-3] No boundary in front of the SCHEME: the leftmost match wins. [A71 L-4] had required "the previous character
 // cannot be part of a scheme" (so `rpc_https://` matched, `_` not being one), but a URL glued to 27+
 // scheme characters — a 0x address (42 of them) written straight in front of it — then had NO valid
 // start at all (the scheme is capped at 31, every later start is preceded by a scheme character) and
 // passed untouched. Without the boundary the scheme is simply the last <= 31 scheme characters before
 // `://`; whatever precedes them is left as it was, and the URL itself is always redacted. Bounded
 // quantifier, one pass: at most 31 characters are tried per start, so the cost stays linear.
-// (the scheme pattern itself is part of URL_RE below)
+// (the scheme pattern is the first alternative of URL_RE, below)
 // [A74 S-5] Every URL delimiter — `/ : @ ? #` — and the backslash and percent that spell the others can
 // be written in an encoding that hides it from the patterns below: percent (`%2F`, stacked `%252F`),
 // JSON / JS escapes (`\u002f`, `\u{2f}`, `\x2f`), octal (`\057`), HTML entities numeric (`&#x2F;`,
