@@ -20,6 +20,12 @@
  *     gone — measured against viem 2.47.10, pinned in rpc-auth.test.mjs.
  * NEVER auth: a contract revert ("execution reverted", ContractFunctionRevertedError) — a revert
  * reason that happens to say "not on whitelist" is the contract talking, not the provider.
+ * [A73d L-2] …but a ContractFunctionRevertedError is a revert only when something proves one: viem's
+ * getContractError wraps ANY JSON-RPC -32603 (InternalRpcError) in that name — a guess, no contract code
+ * ran — so a -32603 whose body carries the provider's auth words ("Unspecified origin not on
+ * whitelist.") is auth, exactly as the same words under -32600 always were. Proof of a real revert, as
+ * in retry-policy.js (A73c S-12): an ExecutionRevertedError in the chain, hex revert data on some link,
+ * or the words "execution reverted".
  * Everything else (timeouts, 429, 5xx, ECONNREFUSED) stays TRANSIENT and keeps today's handling.
  *
  * RUNTIME (createRpcAuthMonitor): every RPC outcome the keeper already observes is reported to ONE
@@ -76,12 +82,18 @@ const AUTH_TEXT = [
 ]
 const REVERT_TEXT = /execution reverted/
 
-/** Flatten an error + its .cause chain: statuses, names, text. Never throws; cycle-safe. */
+// [A73d L-2] Hex revert data (at least a 4-byte selector): the node's `data` on an RpcRequestError, a
+// wallet-style nested { data: 0x… }, or ContractFunctionRevertedError.raw. Same test as retry-policy.js
+// (which imports this module, so it cannot be shared from there without a cycle).
+const isHexRevertData = (d) => typeof d === "string" && /^0x[0-9a-f]{8}/i.test(d)
+
+/** Flatten an error + its .cause chain: statuses, names, text, revert data. Never throws; cycle-safe. */
 function walk(err) {
   const statuses = []
   const names = []
   const parts = []
   const seen = new Set()
+  let revertData = false
   let e = err
   for (let depth = 0; e != null && depth < 10; depth++) {
     if (typeof e !== "object") {
@@ -94,9 +106,10 @@ function walk(err) {
     if (typeof e.name === "string") names.push(e.name)
     for (const k of ["shortMessage", "message", "details", "reason"]) if (typeof e[k] === "string") parts.push(e[k])
     if (Array.isArray(e.metaMessages)) for (const m of e.metaMessages) if (typeof m === "string") parts.push(m)
+    if ([e.data, e.raw, e.data && typeof e.data === "object" ? e.data.data : null].some(isHexRevertData)) revertData = true
     e = e.cause
   }
-  return { statuses, names, text: redactUrl(parts.join(" \n ")).toLowerCase() }
+  return { statuses, names, revertData, text: redactUrl(parts.join(" \n ")).toLowerCase() }
 }
 
 /**
@@ -106,12 +119,16 @@ function walk(err) {
  */
 export function classifyRpcError(err) {
   try {
-    const { statuses, names, text } = walk(err)
+    const { statuses, names, text, revertData } = walk(err)
     const status = statuses.find((s) => AUTH_STATUS.has(s))
     if (status !== undefined) return { kind: RPC_AUTH, signal: `HTTP ${status}` }
     // [A71 L-2] A real HTTP status that is not 401/403 decides it: transient, body never matched.
     if (statuses.length > 0) return { kind: RPC_TRANSIENT, signal: null }
-    if (names.includes("ContractFunctionRevertedError") || REVERT_TEXT.test(text)) return { kind: RPC_TRANSIENT, signal: null }
+    // [A73d L-2] viem's GUESS (-32603 ⇒ ContractFunctionRevertedError, no ExecutionRevertedError, no hex
+    // revert data) is not a revert: the provider's words below decide. "execution reverted" in the text
+    // is still proof on its own.
+    const guessedRevert = names.includes("InternalRpcError") && !names.includes("ExecutionRevertedError") && !revertData
+    if ((names.includes("ContractFunctionRevertedError") && !guessedRevert) || REVERT_TEXT.test(text)) return { kind: RPC_TRANSIENT, signal: null }
     for (const [label, re] of AUTH_TEXT) if (re.test(text)) return { kind: RPC_AUTH, signal: label }
   } catch {
     /* an unclassifiable error is treated like today: transient */
