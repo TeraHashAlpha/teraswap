@@ -41,11 +41,21 @@ export function HelpFab() {
   const close = useCallback(() => setOpen(false), [])
   return (
     <>
-      {!open ? (
-        <button type="button" data-ts-fab="" onClick={() => setOpen(true)} className={`${FAB} right-5`} aria-label="Open help">
-          <span aria-hidden="true">?</span>
-        </button>
-      ) : null}
+      {/* [L-6, A75] Stays mounted (instead of unmounting) while the drawer is open, inert via tabIndex/aria-hidden:
+          Sheet's own focus-restore-on-close reads `document.activeElement` at mount and refocuses it later —
+          unmounting the opener the instant it is clicked would hand Sheet a dead reference, and restore would
+          silently land on <body> instead. */}
+      <button
+        type="button"
+        data-ts-fab=""
+        onClick={() => setOpen(true)}
+        className={`${FAB} right-5`}
+        aria-label="Open help"
+        aria-hidden={open || undefined}
+        tabIndex={open ? -1 : 0}
+      >
+        <span aria-hidden="true">?</span>
+      </button>
       <HelpDrawer open={open} onClose={close} />
     </>
   )

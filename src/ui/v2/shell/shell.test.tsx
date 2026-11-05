@@ -520,14 +520,41 @@ describe('help drawer + fabs', () => {
     for (const s of helpSections) expect(within(dialog).getByRole('button', { name: new RegExp(escapeRegExp(s.title)) })).toBeTruthy()
     expect(within(dialog).getByRole('link', { name: 'Email support' }).getAttribute('href')).toBe(`mailto:${SUPPORT_EMAIL}`)
     expect(within(dialog).getByRole('link', { name: '@TeraHash on X' }).getAttribute('href')).toBe('https://x.com/TeraHash')
-    fireEvent.keyDown(window, { key: 'Escape' })
+    // [L-6, A75] built on modals/Sheet now: Esc is a capturing document listener, not a window one.
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Open help' }))
     fireEvent.click(screen.getByRole('button', { name: 'Close help' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Open help' }))
-    fireEvent.click(document.querySelector('[aria-hidden="true"].fixed.inset-0') as HTMLElement)
+    fireEvent.click(document.querySelector('[data-sheet-backdrop]') as HTMLElement)
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  // [L-6, A75] "build the drawer on modals/Sheet (focus trap + restore)": the drawer used to manage its own Esc
+  // listener and a single focus-on-open call, with no Tab trap and no focus restore on close. Sheet gives it both.
+  it('focus restore: closing the drawer (by any route) returns focus to the "Open help" fab', () => {
+    render(<AppShell />)
+    const fab = screen.getByRole('button', { name: 'Open help' })
+    fab.focus() // jsdom's fireEvent.click does not itself move focus, unlike a real browser click
+    fireEvent.click(fab)
+    expect(document.activeElement).not.toBe(fab)
+    fireEvent.click(screen.getByRole('button', { name: 'Close help' }))
+    expect(document.activeElement).toBe(fab)
+  })
+
+  it('focus trap: Tab from the last focusable control wraps to the first; Shift+Tab from the first wraps to the last', () => {
+    render(<AppShell />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open help' }))
+    const dialog = screen.getByRole('dialog')
+    const focusables = () => Array.from(dialog.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled])'))
+    const first = focusables()[0]
+    const last = focusables()[focusables().length - 1]
+    last.focus()
+    fireEvent.keyDown(last, { key: 'Tab' })
+    expect(document.activeElement).toBe(first)
+    fireEvent.keyDown(first, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(last)
   })
 
   it('search filters the sections, and an answer expands on click', () => {

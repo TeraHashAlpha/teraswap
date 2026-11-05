@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { helpSections } from '@/lib/help-content'
 import { SUPPORT_EMAIL } from '@/lib/constants'
-import { EyebrowLabel, Input, Surface } from '../primitives'
+import { EyebrowLabel, Input } from '../primitives'
 import { cx } from '../primitives/cx'
+import { Sheet } from '../modals/Sheet'
 
 const X_URL = 'https://x.com/TeraHash'
 
@@ -13,26 +14,15 @@ const HELP_LINK =
   'ts-v2-underline inline-flex min-h-[44px] items-center justify-center bg-transparent px-1 font-v2-mono text-[12px] font-medium uppercase tracking-[1.5px] text-v2-cream hover:text-v2-text'
 
 /**
- * [ADR-025] Help Center drawer (pack 03): 440 px from the right; Esc, the overlay and ✕ close it. Content is
- * v1's `helpSections` (same module — no copy is retyped here), with the pack's search field filtering it, and the
- * v1 "need more help" links (X, support e-mail).
+ * [ADR-025, L-6/A75] Help Center drawer (pack 03), built on modals/Sheet: Esc, the overlay, ✕ and Sheet's own Tab
+ * trap + focus-restore-on-close, none of which the drawer used to have (one focus-on-open call, a window Esc
+ * listener, no trap). Content is v1's `helpSections` (same module — no copy is retyped here), with the pack's
+ * search field filtering it, and the v1 "need more help" links (X, support e-mail).
  */
 export function HelpDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [query, setQuery] = useState('')
   const [openSection, setOpenSection] = useState<number | null>(0)
   const [openItem, setOpenItem] = useState<string | null>(null)
-  const closeRef = useRef<HTMLButtonElement>(null)
-  const titleId = useId()
-
-  useEffect(() => {
-    if (!open) return
-    closeRef.current?.focus()
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
 
   const q = query.trim().toLowerCase()
   const sections = useMemo(
@@ -52,40 +42,24 @@ export function HelpDrawer({ open, onClose }: { open: boolean; onClose: () => vo
   if (!open) return null
 
   return (
-    <>
-      <div aria-hidden="true" className="fixed inset-0 z-[60] bg-black/55" onClick={onClose} />
-      {/* Round 7 D3 item 16: a solid --bg panel with a left hairline only. */}
-      <Surface
-        variant="sheet"
-        edge="left"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="fixed inset-y-0 right-0 z-[70] flex w-full max-w-[440px] flex-col overflow-y-auto px-6 py-6"
+    <Sheet onClose={onClose} title="How can we help?" size="md" edge="left" name="help">
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close help"
+        className="absolute right-4 top-4 flex h-11 w-11 items-center justify-center text-v2-muted hover:text-v2-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-v2-teal"
       >
-        <div className="flex items-start justify-between">
-          <EyebrowLabel>Help Center</EyebrowLabel>
-          <button
-            ref={closeRef}
-            type="button"
-            onClick={onClose}
-            aria-label="Close help"
-            className="flex h-11 w-11 items-center justify-center text-v2-muted hover:text-v2-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-v2-teal"
-          >
-            ✕
-          </button>
-        </div>
-        <h2 id={titleId} className="mt-2 font-v2-display text-4xl uppercase leading-none text-v2-text">
-          How can we help?
-        </h2>
-        <Input
-          type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search help…"
-          aria-label="Search help"
-          className="mt-5"
-        />
+        ✕
+      </button>
+      <EyebrowLabel>Help Center</EyebrowLabel>
+      <Input
+        type="search"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search help…"
+        aria-label="Search help"
+        className="mt-3"
+      />
 
         <div className="mt-4">
           {sections.map((section) => {
@@ -145,7 +119,6 @@ export function HelpDrawer({ open, onClose }: { open: boolean; onClose: () => vo
           </div>
           <p className="mt-3 font-v2-mono text-xs text-v2-cream">{SUPPORT_EMAIL}</p>
         </div>
-      </Surface>
-    </>
+    </Sheet>
   )
 }
