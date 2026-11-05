@@ -44,23 +44,65 @@ const TAIL = "[^\\s\"'<>(),]*"
 // `://`; whatever precedes them is left as it was, and the URL itself is always redacted. Bounded
 // quantifier, one pass: at most 31 characters are tried per start, so the cost stays linear.
 const SCHEME_URL = new RegExp(`([a-z][a-z0-9+.-]{0,30})://(${TAIL})`, "gi")
-// [A71 L-4] JSON-escaped slashes (`https:\/\/host\/v2\/<key>`, also double-escaped) hid the URL from
-// every pattern below; they are normalised to `/` first.
+// [A74 S-5] Every URL delimiter — `/ : @ ? #` — and the backslash and percent that spell the others can
+// be written in an encoding that hides it from the patterns below: percent (`%2F`, stacked `%252F`),
+// JSON / JS escapes (`\u002f`, `\u{2f}`, `\x2f`), octal (`\057`), HTML entities numeric (`&#x2F;`,
+// `&#47;`, with or without the closing `;`, behind any number of `&amp;`) and named (`&sol;`). All of
+// them are decoded here, to a FIXPOINT (a `&#37;2F` is `%2F` is `/`), before anything looks at the
+// text. Over-decoding only ever over-redacts, and only these eight characters are ever produced.
+const DELIMS = new Map([
+  [0x2f, "/"], [0x3a, ":"], [0x40, "@"], [0x3f, "?"], [0x23, "#"], [0x5c, "\\"], [0x25, "%"],
+])
+const NAMED = new Map([["sol", "/"], ["colon", ":"], ["commat", "@"], ["quest", "?"], ["num", "#"], ["bsol", "\\"], ["percnt", "%"]])
+const fromCode = (n, original) => DELIMS.get(n) ?? original
+
+// `%2F`, `%252F`, `%25252F`…: any number of `25` (an encoded `%`) in front of the byte. A lone `%25`
+// is a percent sign, not a delimiter, and is left alone.
+const PCT = /%(?:25)*([0-9a-f]{2})/gi
+// `\u002f` `\u{2f}` `\x2f` (also double-escaped: one to eight backslashes)
+const ESC = /\\+(?:u0{0,6}([0-9a-f]{2})|u\{0*([0-9a-f]{1,6})\}|x([0-9a-f]{2}))/gi
+const OCTAL = /\\+([0-7]{3})/g
+// `&#x2F;` `&#x2F` `&#47;` `&#47` `&sol;`, behind any number of `&amp;` layers. The numeric forms match
+// on the code's PREFIX ("&#x2F0xabc" is a slash followed by "0xabc") — an under-decode is a leak.
+const ENT = /&(?:amp;)*(?:#x0*(2f|3a|40|3f|23|5c|25);?|#0*(47|58|64|63|35|92|37);?|(sol|colon|commat|quest|num|bsol|percnt);)/gi
+// [A71 L-4] JSON-escaped slashes (`https:\/\/host\/v2\/<key>`, also double-escaped)
 const ESCAPED_SLASH = /\\+\//g
-// [A71b S-3] Other encodings of the same slash hid it just as well: percent-encoded (`%2F`, also
-// double-encoded `%252F`), a JSON unicode / hex escape (`\u002f`, `\x2f`), an HTML entity (`&#x2F;`,
-// `&#47;`, `&sol;`). They are decoded to `/` before anything else looks at the text. The backslash
-// forms need the backslash, so a plain `0x2f` is never touched. Over-decoding only ever over-redacts.
-const ENCODED_SLASH = /%(?:25){0,4}2f|\\+u002f|\\+x2f|&#x0{0,8}2f;|&#0{0,8}47;|&sol;/gi
-// The scheme's own colon, encoded (`https%3A%2F%2F…`): decoded only in front of `//`, so a stray
-// `%3A` elsewhere in an error text is not rewritten.
-const ENCODED_COLON = /%(?:25){0,4}3a(?=\/\/)|\\+u003a(?=\/\/)|\\+x3a(?=\/\/)|&#x0{0,8}3a;(?=\/\/)|&#0{0,8}58;(?=\/\/)|&colon;(?=\/\/)/gi
+
+const MAX_FOLDS = 16
+/** Marker returned when the text is nested deeper than the decoder will go: fail closed. */
+export const OVER_ENCODED = "[REDACTED: nested encoding]"
+
+function decodeOnce(s) {
+  return s
+    .replace(ESCAPED_SLASH, "/")
+    .replace(PCT, (m, hex) => (hex === "25" ? m : fromCode(parseInt(hex, 16), m)))
+    .replace(ESC, (m, u, ub, x) => fromCode(parseInt(u ?? ub ?? x, 16), m))
+    .replace(OCTAL, (m, oct) => fromCode(parseInt(oct, 8), m))
+    .replace(ENT, (m, hex, dec, name) =>
+      name !== undefined ? NAMED.get(name.toLowerCase()) : fromCode(hex !== undefined ? parseInt(hex, 16) : parseInt(dec, 10), m),
+    )
+}
+
+/** Decode to a fixpoint; null when the text is still changing after MAX_FOLDS (hostile nesting). */
+function normalise(text) {
+  let s = String(text)
+  for (let i = 0; i < MAX_FOLDS; i++) {
+    const next = decodeOnce(s)
+    if (next === s) return s
+    s = next
+  }
+  return decodeOnce(s) === s ? s : null
+}
 // Lookbehind: only at a token start, so neither pattern re-enters a URL pattern 1 already handled.
 const HOSTPORT_PATH = new RegExp(
   `(?<![\\w/:.@-])((?:\\[[0-9a-f:.]{2,45}\\]|[a-z0-9_.-]{1,255}):\\d{1,5})[/?#]${TAIL}`,
   "gi",
 )
 const HOST_PATH = new RegExp(`(?<![\\w/:.@-])((?:[a-z0-9_-]{1,63}\\.){1,8}[a-z]{2,24})[/?#]${TAIL}`, "gi")
+
+/** What stands in for an authority that is not a plain host[:port]. */
+export const AUTHORITY_DROPPED = "[authority-redacted]"
+const PLAIN_HOSTPORT = /^(?:[a-z0-9_.-]{1,255}|\[[0-9a-f:.]{2,45}\])(?::\d{1,5})?$/i
 
 function hostOf(hostPort) {
   if (hostPort.startsWith("[")) return hostPort.slice(0, hostPort.indexOf("]") + 1)
@@ -76,10 +118,9 @@ function hostOf(hostPort) {
  */
 export function redactUrl(text, { allowHosts = [] } = {}) {
   const allow = new Set(allowHosts.map((h) => h.toLowerCase()))
-  return String(text)
-    .replace(ESCAPED_SLASH, "/")
-    .replace(ENCODED_SLASH, "/")
-    .replace(ENCODED_COLON, ":")
+  const decoded = normalise(text)
+  if (decoded === null) return OVER_ENCODED // nested deeper than any real error: say nothing rather than half
+  return decoded
     .replace(SCHEME_URL, (match, scheme, rest) => {
       // A `file:///…` frame in a stack trace is a local path, not an endpoint — keep the frames.
       if (scheme.toLowerCase() === "file") return match
@@ -88,6 +129,9 @@ export function redactUrl(text, { allowHosts = [] } = {}) {
       const tail = end === -1 ? "" : rest.slice(end)
       const at = authority.lastIndexOf("@")
       const hostPort = at === -1 ? authority : authority.slice(at + 1)
+      // [A74 S-5] Whatever is left after the userinfo must be a plain host[:port]; anything else
+      // (`host:KEY`, `host;KEY`, an escape that did not decode) is dropped, never echoed back.
+      if (!PLAIN_HOSTPORT.test(hostPort)) return `${scheme}://${AUTHORITY_DROPPED}${REDACTED}`
       if (at === -1 && (tail === "" || tail === "/")) return match
       if (at === -1 && allow.has(hostOf(hostPort).toLowerCase())) return match
       return `${scheme}://${hostPort}${REDACTED}`
