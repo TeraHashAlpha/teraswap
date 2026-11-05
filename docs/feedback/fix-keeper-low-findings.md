@@ -142,3 +142,21 @@ rows leaking before: 35 / 45; after: 0 / 45
 Keeper `node --test`: **1240/1240** (0 cancelled, 0 skipped) — Node 20.20.2 (`npm ci --ignore-scripts`) 3/3 runs, Node 22.23.4 (`npm ci`) 3/3 runs (base 1025 at `0ec5676`, +215).
 vitest 415 files / 6674 · tsc 0 · eslint 93 warnings (limit 94) · CodeQL `security-extended` (CI's suite): merge-base `f7c4887` 13 → head 13, identical rule+file+line sets (diff empty), 0 new, none in `contracts/order-engine/executor/`.
 Node 20/22: official darwin-arm64 tarballs, SHA-256 checked against nodejs.org SHASUMS256.txt, run from the session scratchpad.
+
+## Feedback — CI red on PR #659 (fix commit: this one; `keeper-suite` + `Keeper Tests`, 1240 tests / 1239 pass / 1 fail / 0 cancelled)
+
+### Assumption that turned out wrong
+- The "1240/1240 on Node 20 and 22" claim above was measured on macOS only. It said nothing about Linux: the failing test passed on every local run because the host's `TMPDIR` is a private 0700 directory.
+
+### Root cause
+- Failing test: `boot gate — one alert per cooldown across pm2 restarts` → `an explicit file round-trips on the real filesystem` (`contracts/order-engine/executor/rpc-auth.test.mjs`, `true !== false` on the second `check().send`).
+- The test put the gate file at `<mkdtemp(os.tmpdir())>/gate.json`, so the *state directory* was the mkdtemp dir and its **parent was `os.tmpdir()`**. On the ubuntu-24.04 runner that is `/tmp` (mode 1777, group/other-writable), which the A74 S-12 `assertTrustedParent` check refuses by design — the write was refused (swallowed, "louder, never quieter"), the file was never created, and the second boot found no state ⇒ `send === true` instead of `false`.
+- It is NOT the HOME check (no test reads the real HOME; the S-12 suites build their own HOME fixtures) and NOT the S-10 ageing/timers (nothing time-dependent in the failing test).
+- Reproduced locally with `TMPDIR=/tmp` (macOS `/tmp` is 1777 too): same assertion, 36/37 in the file. Full suite under a CI-like env (`env -i`, no TTY, `CI=true`, umask 022, `TMPDIR=/tmp`) on Node 20.20.2 before the fix: 1240 / 1239 / 1 / 0 — identical to the CI numbers.
+
+### Fix
+- Test only: the state directory now lives inside the test's own 0700 mkdtemp dir (`<mkdtemp>/state/gate.json`). Production code is unchanged — the parent-writability check stays strict.
+
+### Test gap
+- No other test in the executor suite builds a state directory directly under `os.tmpdir()` (the S-12 / boot-gate / boot tests all use a mkdtemp dir as HOME, so the parent is private). Worth keeping that rule for any future gate fixture: never let `os.tmpdir()` be the state directory's parent.
+- Verification matrix now includes `TMPDIR=/tmp`: Node 20.20.2 ×3 + Node 22.23.4 ×3 under the CI-like env, HOME 0755: 1240/1240, 0 fail, 0 cancelled; plus Node 20 with HOME 0775 and 0700: same.
