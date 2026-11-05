@@ -1,8 +1,9 @@
-## Feedback — feat/ui-v2-mobile-parity · last v2 slice before the full v2 Auditor + prod flag · DRAFT PR (swap/DCA
-gating)
+## Feedback — feat/ui-v2-mobile-parity · last v2 slice before the full v2 Auditor + prod flag · DRAFT PR
 Premise false → asked, owner answered (supersedes the goal): (1) Limit/SL-TP stay "Soon" in v2 (AppShell mounted the
 skeleton; v1's panels were 100 % missing); (2) DCA gate gets v1's teaser copy verbatim; (3) Swap "Coming Soon on
-<chain>": record, don't add. Commits b53a043 · bc36226 sweep · 74b99e5 mobile · e177073 Lows; SSH-signed, noreply.
+<chain>": record, don't add. Also ruled: (4) A69b/A70b S-1 are test-gap findings (code already correct) → mutation
+proof accepted for "fails on main"; (5) S-2 superset formula stays.
+Commits b53a043 · bc36226 sweep · 74b99e5 mobile · e177073 Lows; SSH-signed, noreply.
 1. Parity `__tests__/parity-sweep.test.tsx` (39 tests): v1 text ⊆ v2, links ⊆ v2 → 0 missing, 0 stale allow, chains
    1/8453/42161: Swap 67–77 v1 nodes, Portfolio 21–34, DCA card 44–57, DCA gate 9, Orders ×3 lists 29–98, History 67
    (+5 links), Analytics 208 (+10), landing 139 (+2). Limit/SL-TP: no pane, so the sweep proves the tabs inert
