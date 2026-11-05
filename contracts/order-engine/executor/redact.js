@@ -134,15 +134,14 @@ function stripBareUserinfo(s) {
   return last === 0 ? s : out + s.slice(last)
 }
 
+// [A74 S-8] The only path an allow-listed explorer host may keep: exactly the links event-watcher.js
+// builds (`/tx/0x<hash>`; `/address` and `/block` for the same family) — no query, fragment, extra
+// segment or non-hex tail. The host test alone let `https://basescan.org/api?apikey=KEY` through.
+const EXPLORER_TAIL = /^\/(?:tx|address|block)\/0x[0-9a-f]+$/i
+
 /** What stands in for an authority that is not a plain host[:port]. */
 export const AUTHORITY_DROPPED = "[authority-redacted]"
 const PLAIN_HOSTPORT = /^(?:[a-z0-9_.-]{1,255}|\[[0-9a-f:.]{2,45}\])(?::\d{1,5})?$/i
-
-function hostOf(hostPort) {
-  if (hostPort.startsWith("[")) return hostPort.slice(0, hostPort.indexOf("]") + 1)
-  const colon = hostPort.lastIndexOf(":")
-  return colon === -1 ? hostPort : hostPort.slice(0, colon)
-}
 
 /**
  * @param {unknown} text
@@ -165,7 +164,7 @@ export function redactUrl(text, { allowHosts = [] } = {}) {
     // escape that did not decode) is dropped, never echoed back.
     if (!PLAIN_HOSTPORT.test(authority)) return `${scheme}://${AUTHORITY_DROPPED}${REDACTED}`
     if (userinfo === "" && (tail === "" || tail === "/")) return match
-    if (userinfo === "" && allow.has(hostOf(authority).toLowerCase())) return match
+    if (userinfo === "" && allow.has(authority.toLowerCase()) && EXPLORER_TAIL.test(tail)) return match
     return `${scheme}://${authority}${REDACTED}`
   })
   // After the URL pass, so a scheme URL's own userinfo (already gone) is never this one's business.
