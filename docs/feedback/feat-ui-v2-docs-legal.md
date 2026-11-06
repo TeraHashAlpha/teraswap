@@ -9,10 +9,10 @@ Base: origin/main after feat/ui-v2-mobile-parity (#660), verified merged at `ff0
 - [x] C2: Legal pages — wrapper-only restyle + the one approved copy change + parity test
 - [x] C3: Docs page — full restyle (six containers) + scroll-spy + tables + claims-live + a11y
 - [x] C4: Mobile 375 (overflow test, TOC collapse) + screenshots 375/1440
-- [ ] Verify: suite vs origin/main, lint delta 0, tsc clean, build, v1 module-identical, rpc-budget, CodeQL 0 new
-- [ ] Evidence 1–6 in this file, branch pushed, compare link reported
+- [x] Verify: suite vs origin/main, lint delta 0, tsc clean, build, v1 module-identical, rpc-budget, CodeQL 0 new
+- [x] Evidence 1–6 in this file, branch pushed, compare link reported
 
-## P1 — C1: routing, shells, metadata, help drawer (commit TBD)
+## P1 — C1: routing, shells, metadata, help drawer (`bd2b6d5`)
 
 ### What shipped
 - `src/ui/v2/shell/docs-legal-paths.ts`: `V2_DOCS_LEGAL_PAGES`/`V2_DOCS_LEGAL_PATHS` (`docs`, `terms`, `privacy`).
@@ -44,7 +44,7 @@ Base: origin/main after feat/ui-v2-mobile-parity (#660), verified merged at `ff0
   only RPC call any v2 shell page makes is the Footer's `eth_blockNumber` poll (shared, already budgeted
   elsewhere); a dedicated scenario is planned for the verification pass, not deferred indefinitely.
 
-## P2 — C2: Legal pages restyle + the one copy change (commit TBD)
+## P2 — C2: Legal pages restyle + the one copy change (`8542053`)
 
 ### What shipped
 - `src/components/LegalPage.tsx:131` (v1, the one approved edit): "However, no method of electronic transmission
@@ -77,7 +77,7 @@ Base: origin/main after feat/ui-v2-mobile-parity (#660), verified merged at `ff0
   the parity test, not by single-sourcing. `LegalPage.tsx` is marked read-only-source-of-copy in this goal, so
   refactoring it to export shared data was out of scope; flagging the tradeoff rather than silently taking it.
 
-## P3 — C3: Docs full restyle, six containers, claims-live, a11y (commit TBD)
+## P3 — C3: Docs full restyle, six containers, claims-live, a11y (`471f75d`)
 
 ### What shipped
 - `src/ui/v2/docs-legal/DocsTabV2.tsx` (new, ~1000 lines): full restyle of v1's 1029-line DocsPage, text
@@ -121,7 +121,7 @@ Base: origin/main after feat/ui-v2-mobile-parity (#660), verified merged at `ff0
 - `DocsTabV2` duplicates v1's prose (same risk noted for Legal in P2) — guarded by the parity test, which just
   proved its worth by catching a real drift risk (above), not a hypothetical one.
 
-## P4 — C4: mobile 375, TOC collapse, screenshots (commit TBD)
+## P4 — C4: mobile 375, TOC collapse, screenshots (`ff4bde3`)
 
 ### What shipped
 - `src/ui/v2/docs-legal/LegalPageV2.tsx` + `DocsTabV2.tsx`: below 1024 px the sticky sidebar TOC is NOT just
@@ -146,6 +146,81 @@ Base: origin/main after feat/ui-v2-mobile-parity (#660), verified merged at `ff0
 - `docs/feedback/feat-ui-v2-docs-legal/{docs,terms,privacy}-{375,1440}.jpg` — real Chromium renders against
   `UI_V2_ENABLED=true next start`, from the SAME build the mobile gate ran green against (post tap-target fix).
 
-## Verification pass (full suite, lint, tsc, build, v1 module-identity, rpc-budget, CodeQL)
+## P5 — rpc-budget: close the Docs gap (`1cc8461`)
 
-(Continued below as each check completes — see the final summary at the end of this file.)
+A `docs` state added to the `frontend-rpc-diet` harness (disconnected visitor, v1 `DocsPage` vs v2 `DocsTabV2`):
+≤ 1 RPC call/min (the shared Footer's `eth_blockNumber` poll only — the same budget as `a0`/`a`), mount burst
+≤ 4, hidden = 0. Closes the gap flagged in P1's "Test gap" note with a real enforced guard, not a code-review claim.
+
+## Verification pass (evidence 1–6)
+
+### 1. Proxy / metadata tests
+- `src/proxy.test.ts`: new `describe('/docs, /terms, /privacy …')` block (12 cases) + updated matcher tests —
+  v1 untouched with no/forged/secret-less cookie, v2 rewrite to `/v2<path>` under `UI_V2_ENABLED=true` or a valid
+  cookie, and a direct `/v2/docs` hit is still a real 404 whatever the switch says.
+- `src/app/v2/docs-legal-metadata.test.ts`: `v2 === v1` by reference (`toBe`) for all three routes' `metadata` —
+  re-exported, not retyped, so title/description can never drift.
+
+### 2. Parity output ×3 + the one sentence before/after
+- `content-parity.legal.test.tsx` (privacy + terms) and `content-parity.docs.test.tsx`: all green, 0 missing
+  text, 0 missing hrefs, 0 stale allow-list entries. Docs needed **no allow-list at all** (see P3's Edge case —
+  the FlowDiagram arrow stays as plain text instead of being removed, after an allow-list collision bug).
+  Legal's allow-list is also empty (the one copy edit lands in v1 too).
+- The one approved copy change (`src/components/LegalPage.tsx:131`, lands in v1 AND is what v2 copies):
+  - Before: `However, no method of electronic transmission or storage is 100% secure. You are responsible for…`
+  - After:  `However, no system is completely secure. You are responsible for…`
+  - Explicit test: `content-parity.legal.test.tsx` asserts both versions say "no system is completely secure"
+    and neither says "100% secure".
+
+### 3. Claims-live test
+- `claims-live.docs.test.tsx`: all 29 `product-claims` symbols v1's DocsPage imports mocked to distinct,
+  obviously-fake values (e.g. `97`, `ZZFAKE proxy-claim sentinel`); every fake appears in v2's render. Proves
+  the slots are live reads, not strings that happen to match today's values.
+
+### 4. Screenshots 1440/375 ×3
+- `docs/feedback/feat-ui-v2-docs-legal/{docs,terms,privacy}-{375,1440}.jpg` — real Chromium (`src/ui/v2/__tests__/mobile/mobile.pw.ts`)
+  against `UI_V2_ENABLED=true next start`. 15/15 gate tests green (overflow, tap targets, reduced motion, footer
+  photo credits, screenshots) — after fixing a real 20px tap-target bug in the Docs Support section (P4).
+
+### 5. v1 proof + rpc-budget + CodeQL
+- **v1 module-identical**: `src/ui/v2/isolation.test.ts` passes — no source outside the switch / admin route /
+  v2 routes references `ui/v2`, so v1's `/docs`, `/terms`, `/privacy` pages (untouched except the one approved
+  LegalPage.tsx sentence) pull in zero v2 modules. `next build` route table confirms both routes are still
+  marked `○` (Static) pre- and post-branch — same type as `/swap`, `/status` — nothing about v1's render mode
+  changed. Build: `UI_V2_ENABLED=true NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=<32 chars> npm run build` — succeeds,
+  0 real errors (24 pre-existing "AVIF not supported" Turbopack warnings, unrelated to this branch — the same
+  warning class every tab's `PhotoBackground` already triggers).
+- **rpc-budget**: see P5 above — `docs` state green, ≤ 1 RPC/min, 0 while hidden.
+- **CodeQL** (`javascript-security-extended.qls`, full suite, `gh codeql` 2.27.2): base (`ff06085`) = 13
+  findings, head = 13 findings, **diff by ruleId:file:line = 0 new, 0 removed**. All 13 are pre-existing, in
+  files this branch never touches (`src/app/api/orders/route.ts`, `src/lib/auth.ts`, `src/lib/api-auth.ts`,
+  `src/lib/fingerprint-validator.ts`, `src/app/api/telegram/webhook/route.ts`, `scripts/capture-endpoint-baseline.ts`).
+
+### 6. Suite / lint / tsc / build + diff --stat + compare link
+- **Suite**: `npx vitest run` — 437 files / 7773 tests, **0 failures** (run twice: once after C1–C4, once after
+  the rpc-budget commit — both green).
+- **Lint**: `npm run lint` on head = 93 problems (0 errors, 93 warnings); on `ff06085` (base, throwaway
+  worktree) = 93 problems (0 errors, 93 warnings) — **delta 0**, and none of the 93 are in this branch's files.
+- **tsc**: `npx tsc --noEmit` clean after every commit.
+- **Build**: `UI_V2_ENABLED=true NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=<32 chars> npm run build` succeeds (run
+  twice — once before, once after the tap-target fix).
+- **diff --stat** (`ff06085..HEAD`): 37 files changed, 2285 insertions(+), 12 deletions(-).
+- **Commits** (5, all SSH-signed, noreply committer):
+  - `bd2b6d5` feat(ui-v2): route /docs, /terms, /privacy to the v2 shell
+  - `8542053` feat(ui-v2): restyle Terms and Privacy to round-7, one approved copy edit
+  - `471f75d` feat(ui-v2): full round-7 restyle of Docs, claims-live + a11y tests
+  - `ff4bde3` feat(ui-v2): mobile 375 for Docs/Terms/Privacy, TOC collapse, 44px fix
+  - `1cc8461` test(ui-v2): close the Docs rpc-budget gap (0 RPC of its own)
+- **Compare link**: https://github.com/TeraHashAlpha/teraswap/compare/main...feat/ui-v2-docs-legal
+
+## Content-map delta (vs recon/docs-v2's inventory)
+
+| Route | v1 containers | v2 treatment |
+|---|---|---|
+| /docs | 2 tables, sticky nav, FlowDiagram, SourceCard grid, ComingSoonBanner, Tag | hairline-row tables; TOC collapses to `<details>` below 1024px; FlowDiagram is a numbered 01-05 list; SourceCard is one hairline row; ComingSoonBanner is a strip+accent; Tag is mono-caps text |
+| /terms, /privacy | boxed `rounded-2xl` panel, no TOC | wrapper-only restyle (text unchanged + the one approved sentence); a TOC was ADDED (v1 had none) — container 2, same scroll-spy as Docs |
+| All three | reachable only from the v1 footer | ALSO reachable from the v2 help drawer ("Resources" block) — recon's reachability gap closed |
+
+No owner decision from recon/docs-v2's "Owner decision needed" table (items 1–6) was left unresolved — all six
+were answered in this goal's "Owner decisions (5 Nov)" section and implemented as specified (see P1–P4 above for
+how each landed).
