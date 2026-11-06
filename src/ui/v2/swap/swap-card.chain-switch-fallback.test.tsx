@@ -3,11 +3,13 @@
  * [fix/chain-switch-token-fallback] The v2 Swap card: a chain switch never leaves a foreign-chain token on screen. Same
  * module-edge mocks as swap-card.test.tsx; the token sheet is replaced by a button that "picks" a fixed token.
  */
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NO_ORACLE } from './test-fixtures'
 import { findToken, type Token } from '@/lib/tokens'
 import { getDefaultPair, findChainToken } from '@/lib/chains/tokens'
+import { CHAINS, chainWalks, fixturePairs, fixtureTokens, importFixtureToken, inCatalog, knownOnChain, removeFixtureToken } from '@/test-utils/chain-switch-fixture'
+import { NATIVE_ETH } from '@/lib/constants'
 
 const h = vi.hoisted(() => ({
   account: { address: undefined as string | undefined, isConnected: false, chain: undefined as { id: number } | undefined },
@@ -135,5 +137,60 @@ describe('v2 SwapCard — chain switch with a token that has no home on the targ
     pickFor('Sell', SNX)
     rerender(<SwapCard />)
     expect(lastQuotePair().tin).toBe(SNX.address.toLowerCase())
+  })
+})
+
+describe('v2 SwapCard — chain-switch GUARD: every walk × every pair of the 6-token fixture [fix/chain-switch-token-fallback]', () => {
+  beforeAll(importFixtureToken)
+  afterAll(removeFixtureToken)
+
+  it('after every switch, every rendered token is known on that chain and ⚠ appears only for imports', () => {
+    const tokens = fixtureTokens()
+    expect(tokens).toHaveLength(6)
+    const violations: string[] = []
+    let steps = 0
+    let scenarios = 0
+    for (const start of CHAINS) {
+      for (const [a, b] of fixturePairs(tokens)) {
+        for (const walk of chainWalks(start)) {
+          scenarios++
+          h.chainId = start
+          const { rerender, unmount } = render(<SwapCard />)
+          pickFor('Sell', a)
+          pickFor('Receive', b)
+          for (const at of walk) {
+            h.chainId = at
+            rerender(<SwapCard />)
+            steps++
+            const label = `${a.symbol}/${b.symbol} start ${start} walk ${[start, ...walk].join('→')} @${at}`
+            const q = lastQuotePair()
+            for (const addr of [q.tin, q.tout]) if (!addr || !knownOnChain(addr, at)) violations.push(`${label}: quote token ${addr} unknown on ${at}`)
+            // Every address the card prints (title="0x…" on the identity row) is known here; ⚠ appears exactly for the non-catalog ones.
+            const printed = Array.from(card().querySelectorAll('[title^="0x"]')).map((el) => (el.getAttribute('title') as string).toLowerCase())
+            for (const addr of printed) if (!knownOnChain(addr, at)) violations.push(`${label}: printed ${addr} unknown on ${at}`)
+            const expectWarn = printed.filter((addr) => addr !== NATIVE_ETH.toLowerCase() && !inCatalog(addr, at)).length
+            const warn = (card().textContent!.match(/⚠/g) ?? []).length
+            if (warn !== expectWarn) violations.push(`${label}: ⚠ count ${warn}, expected ${expectWarn}`)
+          }
+          unmount()
+        }
+      }
+    }
+    console.log(`GUARD v2: ${scenarios} scenarios, ${steps} chain switches checked, ${violations.length} violations`)
+    expect(violations).toEqual([])
+    expect(steps).toBeGreaterThan(500)
+  }, 120_000)
+
+  it('a token imported on Base stays on Base with the one ⚠, and is replaced by the default pair the moment the chain changes', () => {
+    const imp = fixtureTokens()[5]
+    h.chainId = BASE
+    const { rerender } = render(<SwapCard />)
+    pickFor('Sell', imp)
+    expect(lastQuotePair().tin).toBe(imp.address.toLowerCase())
+    expect((card().textContent!.match(/⚠/g) ?? []).length).toBe(1)
+    h.chainId = ARB
+    rerender(<SwapCard />)
+    expect(lastQuotePair().tin).not.toBe(imp.address.toLowerCase())
+    expect(card().textContent).not.toContain('⚠')
   })
 })

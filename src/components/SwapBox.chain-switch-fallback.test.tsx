@@ -9,7 +9,7 @@
  * already exercised by the per-hook tests.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest'
 
 // ─── Wagmi ───
 let mockIsConnected = true
@@ -20,11 +20,8 @@ vi.mock('wagmi', () => ({
     isConnected: mockIsConnected,
     chain: { id: mockChainId, name: 'chain' },
   })),
-  useBalance: vi.fn(() => ({
-    data: { value: 10n ** 18n, decimals: 18, symbol: 'ETH', formatted: '1.0' },
-    isLoading: false,
-    isError: false,
-  })),
+  // No balance: SwapBox renders the TokenAddressBadge (the ⚠ / ✓ under the sell token) only when there is no balance row.
+  useBalance: vi.fn(() => ({ data: undefined, isLoading: false, isError: false })),
 }))
 
 // ─── Hooks ───
@@ -124,6 +121,8 @@ import SwapBox from './SwapBox'
 import { findToken } from '@/lib/tokens'
 import { getDefaultPair, findChainToken } from '@/lib/chains/tokens'
 import { useDisconnectedChainSelection } from '@/hooks/useChainId'
+import { CHAINS, chainWalks, fixturePairs, fixtureTokens, importFixtureToken, inCatalog, knownOnChain, removeFixtureToken } from '@/test-utils/chain-switch-fixture'
+import { NATIVE_ETH } from '@/lib/constants'
 
 const ARB = 42161
 const BASE = 8453
@@ -174,6 +173,8 @@ describe('SwapBox — chain switch with a token that has no home on the target c
     const { rerender } = renderWithProviders(<SwapBox />)
     fireEvent.click(screen.getAllByTestId('token-selector')[0]) // sell SNX
     expect(shown().sell).toBe(SNX_MAINNET)
+    expect(screen.getByLabelText('Copy contract address')).toBeTruthy() // the badge is rendered (so the ⚠ assertions below can fail)
+    expect(screen.queryByTitle(IMPORTED_WARNING)).toBeNull() // SNX is a verified mainnet token
 
     useDisconnectedChainSelection.getState().setChainId(ARB)
     rerender(<SwapBox />)
@@ -211,5 +212,72 @@ describe('SwapBox — chain switch with a token that has no home on the target c
     fireEvent.click(screen.getAllByTestId('token-selector')[0])
     rerender(<SwapBox />)
     expect(shown().sell).toBe(SNX_MAINNET)
+  })
+})
+
+describe('SwapBox — chain-switch GUARD: every walk × every pair of the 6-token fixture [fix/chain-switch-token-fallback]', () => {
+  beforeAll(importFixtureToken)
+  afterAll(removeFixtureToken)
+
+  it('after every switch, every rendered token is known on that chain and ⚠ appears only for imports', () => {
+    const tokens = fixtureTokens()
+    expect(tokens).toHaveLength(6)
+    const violations: string[] = []
+    let steps = 0
+    let scenarios = 0
+    for (const start of CHAINS) {
+      for (const [a, b] of fixturePairs(tokens)) {
+        for (const walk of chainWalks(start)) {
+          scenarios++
+          vi.clearAllMocks()
+          setHookDefaults()
+          useDisconnectedChainSelection.getState().setChainId(start)
+          const { rerender, unmount } = renderWithProviders(<SwapBox />)
+          pick.token = a
+          fireEvent.click(screen.getAllByTestId('token-selector')[0])
+          pick.token = b
+          fireEvent.click(screen.getAllByTestId('token-selector')[1])
+          let at = start
+          for (const next of walk) {
+            at = next
+            useDisconnectedChainSelection.getState().setChainId(at)
+            rerender(<SwapBox />)
+            steps++
+            const { sell, receive } = shown()
+            const label = `${a.symbol}/${b.symbol} start ${start} walk ${[start, ...walk].join('→')} @${at}`
+            for (const addr of [sell, receive]) if (!knownOnChain(addr, at)) violations.push(`${label}: ${addr} unknown on ${at}`)
+            const q = lastQuotePair()
+            if (q.tin !== sell || q.tout !== receive) violations.push(`${label}: quote pair ${q.tin}/${q.tout} != shown ${sell}/${receive}`)
+            // ⚠ is for imports only: native + catalog tokens never get one (v1 renders the badge for the sell side).
+            const expectWarn = sell === NATIVE_ETH.toLowerCase() || inCatalog(sell, at) ? 0 : 1
+            const warn = screen.queryAllByTitle(IMPORTED_WARNING).length
+            if (warn !== expectWarn) violations.push(`${label}: ⚠ count ${warn}, expected ${expectWarn}`)
+          }
+          unmount()
+        }
+      }
+    }
+    console.log(`GUARD v1: ${scenarios} scenarios, ${steps} chain switches checked, ${violations.length} violations`)
+    expect(violations).toEqual([])
+    expect(steps).toBeGreaterThan(500)
+  }, 120_000)
+
+  it('a token imported on Base stays on Base (and is the one ⚠), and is replaced by the default pair the moment the chain changes', () => {
+    const imp = fixtureTokens()[5]
+    useDisconnectedChainSelection.getState().setChainId(BASE)
+    const { rerender } = renderWithProviders(<SwapBox />)
+    pick.token = imp
+    fireEvent.click(screen.getAllByTestId('token-selector')[0])
+    rerender(<SwapBox />)
+    expect(shown().sell).toBe(imp.address.toLowerCase())
+    expect(screen.queryAllByTitle(IMPORTED_WARNING)).toHaveLength(1)
+    useDisconnectedChainSelection.getState().setChainId(ARB)
+    rerender(<SwapBox />)
+    expect(shown().sell).not.toBe(imp.address.toLowerCase())
+    expect(screen.queryByTitle(IMPORTED_WARNING)).toBeNull()
+  })
+
+  it('the guard has teeth: CHAINS covers every live chain', () => {
+    expect([...CHAINS].sort((x, y) => x - y)).toEqual([1, 8453, 42161])
   })
 })
