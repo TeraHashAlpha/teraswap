@@ -57,6 +57,14 @@ self.addEventListener('fetch', (event) => {
     return // Let the browser handle it normally (network only)
   }
 
+  // [S-2, A75b] Everything below (the cache-first asset branch AND the HTML fallback) is for THIS origin only. The asset branch
+  // matched on pathname alone, so it also answered cross-origin token logos / CDN fonts / any host's `/_next/static/` path, and its
+  // fetch ran under the worker's connect-src (which omits those hosts) -> a synthetic 504 for an image the page may load itself.
+  // A cross-origin request is the browser's: no respondWith, no cache.
+  if (url.origin !== self.location.origin) {
+    return
+  }
+
   // Cache-first for static assets (fonts, images, JS/CSS bundles)
   if (
     url.pathname.startsWith('/icons/') ||

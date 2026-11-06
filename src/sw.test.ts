@@ -64,3 +64,38 @@ describe('sw.js fetch handler: same-origin navigations only (the final branch)',
     expect(event.respondWith).not.toHaveBeenCalled()
   })
 })
+
+// [S-2, A75b] The cache-first ASSET branch (above the navigation branch) matched on pathname alone, so it also answered
+// cross-origin requests: a token logo `https://tokens.1inch.io/0x…png`, a CDN `.svg` / `.woff2`, or ANY origin's `/_next/static/…`.
+// Its fetch then ran under the worker's connect-src (which omits those hosts), failed, and the catch synthesised a 504 for an
+// image the page itself was allowed to load. Scope: same-origin requests only; everything else is the browser's.
+describe('sw.js fetch handler: the cache-first asset branch is same-origin only', () => {
+  it.each([
+    ['a token-logo .png', 'https://tokens.1inch.io/0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.png'],
+    ['a CDN .svg', 'https://cdn.example.com/logo.svg'],
+    ['a CDN .ico', 'https://cdn.example.com/favicon.ico'],
+    ['a CDN .woff2 font', 'https://fonts.example.com/inter.woff2'],
+    ['a CDN .woff font', 'https://fonts.example.com/inter.woff'],
+    ["another origin's /_next/static/ path", 'https://evil.example.com/_next/static/chunks/main.js'],
+    ["another origin's /icons/ path", 'https://cdn.example.com/icons/eth.webp'],
+    ["another origin's /sounds/ path", 'https://cdn.example.com/sounds/click.mp3'],
+  ])('%s is left to the browser — never respondWith', (_n, url) => {
+    const { fetch: onFetch } = loadSw()
+    const event = fetchEvent(url, { mode: 'no-cors' })
+    onFetch(event)
+    expect(event.respondWith).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['/_next/static/chunks/main.js'],
+    ['/icons/eth.png'],
+    ['/sounds/click.mp3'],
+    ['/fonts/clash.woff2'],
+    ['/logo.svg'],
+  ])('same-origin %s is still served cache-first', (path) => {
+    const { fetch: onFetch } = loadSw()
+    const event = fetchEvent(`${ORIGIN}${path}`, { mode: 'no-cors' })
+    onFetch(event)
+    expect(event.respondWith).toHaveBeenCalledTimes(1)
+  })
+})
