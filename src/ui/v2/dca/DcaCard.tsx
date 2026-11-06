@@ -139,7 +139,6 @@ export function DcaCreate({ form, onReviewReady }: { form: DcaForm; onReviewRead
           {form.hasNativeOnly && <p className="mt-1 text-[12px] text-v2-muted">{WRAP_HINT}</p>}
           {form.hasImported && !form.routeBlock && (
             <p className="mt-1 text-[12px] text-v2-amber" data-testid="dca-imported-notice">
-              <span aria-hidden="true">⚠️ </span>
               {IMPORTED_NOTICE}
             </p>
           )}
@@ -169,19 +168,19 @@ export function DcaCreate({ form, onReviewReady }: { form: DcaForm; onReviewRead
         <div className="mt-3 flex flex-col gap-2">
           {form.depegHardBlocked && (
             <Notice tone="red" testId="dca-depeg-block">
-              <span className="font-semibold">&#9888; DCA blocked — {form.depegCheck.symbol} depeg.</span> {form.depegCheck.message}
+              <span className="font-semibold">DCA blocked — {form.depegCheck.symbol} depeg.</span> {form.depegCheck.message}
               <span className="mt-1 block text-v2-red/80">{DEPEG_BLOCK_TAIL}</span>
             </Notice>
           )}
           {form.depegUnverified && tokenIn && tokenOut && hasAmount && (
             <Notice tone="red" testId="dca-depeg-unverified">
-              <span className="font-semibold">&#9888; DCA paused — price not verified.</span> {form.depegCheck.message}
+              <span className="font-semibold">DCA paused — price not verified.</span> {form.depegCheck.message}
               <span className="mt-1 block text-v2-red/80">{DEPEG_UNVERIFIED_TAIL}</span>
             </Notice>
           )}
           {form.depegConsentNeeded && (
             <Notice tone="amber" testId="dca-depeg-consent">
-              <span className="font-semibold">&#9888; Possible depeg:</span> {form.depegCheck.message}
+              <span className="font-semibold">Possible depeg:</span> {form.depegCheck.message}
               <label className="mt-2 flex min-h-[44px] items-center gap-2 text-v2-amber/90">
                 <input
                   type="checkbox"
@@ -202,12 +201,12 @@ export function DcaCreate({ form, onReviewReady }: { form: DcaForm; onReviewRead
             <Notice tone="red" testId="dca-oracle-block">
               {oracleReason === 'extreme-deviation' ? (
                 <>
-                  <span className="font-semibold">&#9888; DCA blocked — price moved too far from the oracle.</span> {form.oracleGate.detail}
+                  <span className="font-semibold">DCA blocked — price moved too far from the oracle.</span> {form.oracleGate.detail}
                   <span className="mt-1 block text-v2-red/80">{ORACLE_DEVIATION_TAIL}</span>
                 </>
               ) : (
                 <>
-                  <span className="font-semibold">&#9888; DCA blocked — price could not be verified.</span> {form.oracleGate.detail}
+                  <span className="font-semibold">DCA blocked — price could not be verified.</span> {form.oracleGate.detail}
                   <span className="mt-1 block text-v2-red/80">{oracleIntegrityTail(buySymbol)}</span>
                 </>
               )}
@@ -215,7 +214,7 @@ export function DcaCreate({ form, onReviewReady }: { form: DcaForm; onReviewRead
           )}
           {form.submitBlock && (
             <Notice tone="red" testId="dca-submit-block">
-              <span className="font-semibold">&#9888; DCA not started.</span> {form.submitBlock}
+              <span className="font-semibold">DCA not started.</span> {form.submitBlock}
             </Notice>
           )}
         </div>

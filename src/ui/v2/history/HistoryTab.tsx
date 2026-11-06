@@ -112,7 +112,7 @@ export function HistoryView({ address, isConnected, swaps, total, loading, error
         </div>
       </div>
 
-      {error && <p className="mt-4 border-l-2 border-v2-red pl-3 text-[13px] text-v2-red" role="alert" data-testid="history-error">{error}</p>}
+      {error && <p className="mt-4 border-l-2 ts-v2-accent-stroke pl-3 text-[13px] text-v2-red" role="alert" data-testid="history-error">{error}</p>}
 
       {loading && empty && (
         <div className="mt-4" data-testid="history-loading">

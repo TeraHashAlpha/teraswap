@@ -19,7 +19,7 @@ export function Header({ onLogoClick }: { onLogoClick?: () => void }) {
           e.preventDefault()
           onLogoClick()
         }}
-        className="border-l-[3px] border-v2-cream pl-3 font-v2-display text-2xl uppercase tracking-[3px] text-v2-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v2-teal"
+        className="border-l-[3px] ts-v2-accent-stroke pl-3 font-v2-display text-2xl uppercase tracking-[3px] text-v2-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v2-teal"
       >
         TeraSwap
         <span className="sr-only"> Meta-Aggregator</span>

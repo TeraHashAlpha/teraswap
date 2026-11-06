@@ -165,6 +165,8 @@ const ON_PHOTO: { token: keyof typeof V2_COLORS; kind: 'body' | 'large'; need: n
 const PANELS = [
   { bg: 'surface', fg: 'text', need: 4.5, use: 'popover / help drawer title' },
   { bg: 'surface', fg: 'muted', need: 4.5, use: 'popover subtitle' },
+  // Design review 1: every vertical accent stroke is the platform green (--c-accent-green = --teal). A graphical object needs 3:1 (WCAG 1.4.11).
+  { token: 'teal', kind: 'large', need: 3, use: 'accent strokes (platform green, 1–3 px): chip separators, section-label bars, list + column rules', sections: ALL },
   { bg: 'surface', fg: 'cream', need: 4.5, use: 'popover action' },
   { bg: 'bg', fg: 'text', need: 4.5, use: 'flat mode: body' },
   { bg: 'bg', fg: 'muted', need: 4.5, use: 'flat mode: copy' },

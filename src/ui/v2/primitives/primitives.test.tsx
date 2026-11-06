@@ -39,7 +39,7 @@ describe('Surface', () => {
     expect(screen.getByTestId('l').className).toBe('ts-v2-rule-l')
     expect(screen.getByTestId('x').className).toBe('ts-v2-rule-t ts-v2-rule-b')
     expect(screen.getByTestId('r').className).toBe('ts-v2-rule-accent')
-    expect(CSS).toMatch(/\.ts-v2-rule-accent \{ border-left: 2px solid var\(--hairline-rule\);/)
+    expect(CSS).toMatch(/\.ts-v2-rule-accent \{ border-left: 2px solid var\(--c-accent-green\);/)
     expect(screen.getByTestId('r').className).not.toMatch(BOX)
   })
 
@@ -52,12 +52,13 @@ describe('Surface', () => {
     expect(screen.getByTestId('m').className).not.toMatch(/rounded|\bborder\b|shadow/)
   })
 
-  it('strip: solid --bg with a bottom hairline; an accent swaps it for a 2 px left bar in the status colour', () => {
+  it('strip: solid --bg with a bottom hairline; an accent swaps it for a 2 px left bar — always the platform green, whatever the status (design review 1)', () => {
     render(<><Surface variant="strip" data-testid="s" /><Surface variant="strip" accent="red" data-testid="a" /></>)
     expect(screen.getByTestId('s').className).toMatch(/bg-v2-bg.*ts-v2-rule-b/)
     const a = screen.getByTestId('a').className
     expect(a).toMatch(/\bborder-l-2\b/)
-    expect(a).toMatch(/\bborder-v2-red\b/)
+    expect(a).toMatch(/\bts-v2-accent-stroke\b/)
+    expect(a).not.toMatch(/border-v2-(red|amber|green|cream|teal)/)
     expect(a).not.toMatch(/ts-v2-rule/)
   })
 
@@ -299,11 +300,13 @@ describe('Toggle', () => {
 })
 
 describe('EyebrowLabel', () => {
-  it('renders mono uppercase text with a cream bar', () => {
+  it('renders mono uppercase text with a platform-green bar (text stays cream)', () => {
     render(<EyebrowLabel>label</EyebrowLabel>)
     const el = screen.getByText('label')
     expect(el.className).toMatch(/border-l-2/)
-    expect(el.className).toMatch(/border-v2-cream/)
+    expect(el.className).toMatch(/ts-v2-accent-stroke/)
+    expect(el.className).not.toMatch(/border-v2-cream/)
+    expect(el.className).toMatch(/text-v2-cream/)
     expect(el.className).toMatch(/font-v2-mono/)
     expect(el.className).toMatch(/uppercase/)
   })

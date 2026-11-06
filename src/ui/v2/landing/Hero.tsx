@@ -152,7 +152,7 @@ export function Hero({ onLaunchApp }: { onLaunchApp: () => void }) {
               'Powered by Chainlink',
               PRIVACY_BADGE,
             ].map((chip) => (
-              <span key={chip} className="border-l-2 border-v2-cream pl-2">
+              <span key={chip} className="border-l-2 ts-v2-accent-stroke pl-2">
                 {chip}
               </span>
             ))}

@@ -30,7 +30,7 @@ export function Mark({ children, tone = 'green' }: { children: ReactNode; tone?:
  */
 export function ConsentBlock({ values, checked, onChange, checkboxRef }: { values: ConsentValues; checked: boolean; onChange: (v: boolean) => void; checkboxRef?: Ref<HTMLInputElement> }) {
   return (
-    <section data-testid="unpriced-consent" aria-labelledby="v2-unpriced-consent-h" className="mt-4 border-l-2 border-v2-amber py-1 pl-4">
+    <section data-testid="unpriced-consent" aria-labelledby="v2-unpriced-consent-h" className="mt-4 border-l-2 ts-v2-accent-stroke py-1 pl-4">
       <h3 id="v2-unpriced-consent-h" data-testid="unpriced-consent-heading" className="text-[14px] font-semibold text-v2-text">
         {UNPRICED_CONSENT_HEADING}
       </h3>

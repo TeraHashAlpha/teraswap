@@ -18,7 +18,7 @@ describe('tier notice (24)', () => {
   })
   it('single-source → the amber notice, verbatim from v1 (#608), naming the vendor(s) in trust order', () => {
     expect(text(pair('single-source', leg('single-source', ['defillama'], 2490), leg('single-source', ['defillama'], 1)))).toBe(
-      `⚠ Price from one source only (DefiLlama). ${SINGLE_SOURCE_TAIL}`,
+      `Price from one source only (DefiLlama). ${SINGLE_SOURCE_TAIL}`,
     )
     expect(SINGLE_SOURCE_TAIL).toBe('Value-based limits use that price; double-check the rate before swapping.')
     expect(text(pair('single-source', leg('single-source', ['coingecko'], 1), leg('single-source', ['chainlink'], 1)))).toContain('(Chainlink / CoinGecko)')
@@ -29,8 +29,8 @@ describe('tier notice (24)', () => {
     expect(UNPRICED_LINE).toBe('No reference price — consent required before swapping')
     expect(c.querySelectorAll('button, input, [role="dialog"]').length).toBe(0)
   })
-  it('each notice is amber and carries the testid v1 uses', () => {
-    expect(render(<TierNotice tier={pair('single-source', leg('single-source', ['defillama'], 1), leg('single-source', ['defillama'], 1))} />).container.querySelector('[data-testid="price-tier-single-source"].border-v2-amber')).not.toBeNull()
-    expect(render(<TierNotice tier={pair('unpriced', leg('unpriced'), leg('unpriced'))} />).container.querySelector('[data-testid="price-tier-unpriced"].border-v2-amber')).not.toBeNull()
+  it('each notice keeps its amber tone (data-tone), its platform-green bar and the testid v1 uses', () => {
+    expect(render(<TierNotice tier={pair('single-source', leg('single-source', ['defillama'], 1), leg('single-source', ['defillama'], 1))} />).container.querySelector('[data-testid="price-tier-single-source"][data-tone="amber"].ts-v2-accent-stroke')).not.toBeNull()
+    expect(render(<TierNotice tier={pair('unpriced', leg('unpriced'), leg('unpriced'))} />).container.querySelector('[data-testid="price-tier-unpriced"][data-tone="amber"].ts-v2-accent-stroke')).not.toBeNull()
   })
 })
