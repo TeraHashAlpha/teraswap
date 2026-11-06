@@ -151,6 +151,8 @@ describe.each(DOCS)('Docs "Privacy" — %s', (_ui, mount) => {
     expect(p).toContain('There is no direct fallback: if the proxy is unreachable the read fails rather than going around it.')
     expect(p).toContain('Method Policy (Read-Only Allow-List)')
     expect(p).toContain('relays only a fixed list of read-only methods per chain')
+    // [A76 S-3] eth_getLogs is off the allow-list: Docs 03 no longer lists logs among the relayed reads.
+    expect(p).toContain('(balances, contract calls, receipts, blocks, fee data)')
     expect(p).toContain('Token logos are fetched by our server too and served from our own address.')
     // [A76 S-1] Docs 02: the signed CoW order and its tracking are relayed too.
     expect(p).toContain('and a CoW Protocol order you sign is submitted and tracked through /api/cow. Quote, swap and order requests do not go directly from your browser to these services.')

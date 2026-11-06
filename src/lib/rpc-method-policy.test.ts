@@ -22,10 +22,19 @@ describe('rpc-method-policy — one list per registry chain', () => {
     for (const m of [
       'eth_chainId', 'eth_blockNumber', 'eth_call', 'eth_getBalance', 'eth_estimateGas', 'eth_gasPrice',
       'eth_maxPriorityFeePerGas', 'eth_feeHistory', 'eth_getBlockByNumber', 'eth_getTransactionReceipt',
-      'eth_getTransactionByHash', 'eth_getCode', 'eth_getLogs', 'eth_getTransactionCount', 'net_version',
+      'eth_getTransactionByHash', 'eth_getCode', 'eth_getTransactionCount', 'net_version',
     ]) {
       expect([m, isAllowedReadMethod(chainId, m)]).toEqual([m, true])
     }
+  })
+
+  // [fix/user-ip-privacy A76 S-3] No browser path sends these, and each lets the caller size the work or the answer
+  // (the audit pulled 12 MB of eth_getLogs through a tag range). Off every chain's list.
+  it.each([1, 8453, 42161])('chain %i does NOT relay eth_getLogs, eth_simulateV1, eth_getProof, eth_createAccessList', (chainId) => {
+    for (const m of ['eth_getLogs', 'eth_simulateV1', 'eth_getProof', 'eth_createAccessList']) {
+      expect([m, isAllowedReadMethod(chainId, m)]).toEqual([m, false])
+    }
+    expect(allowedReadMethods(chainId).filter((m) => /logs|simulate|proof|accesslist/i.test(m))).toEqual([])
   })
 })
 

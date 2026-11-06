@@ -7,12 +7,15 @@
  * A method that is not listed is refused with 403 before anything reaches the upstream.
  *
  * What is listed: the reads this app's wagmi/viem surface makes (balances, eth_call / Multicall3,
- * receipts, blocks, fee data, logs, code, storage, proofs) and the handful of plain reads a
- * WalletConnect-connected wallet relays through the same URL (wagmi hands the provider our proxy URL as
- * its rpcMap). What is NOT listed, on any chain: anything that signs or broadcasts (`eth_send*`,
- * `eth_sign*`, `personal_*`, `wallet_*`), node-side filters and subscriptions (`eth_newFilter`,
- * `eth_getFilter*`, `eth_subscribe` — the app has no filter-based watcher, and a filter read would
- * bypass the eth_getLogs range clamp), and the archive namespaces (`debug_*`, `trace_*`).
+ * receipts, blocks, fee data, code, storage) and the handful of plain reads a WalletConnect-connected
+ * wallet relays through the same URL (wagmi hands the provider our proxy URL as its rpcMap). What is NOT
+ * listed, on any chain: anything that signs or broadcasts (`eth_send*`, `eth_sign*`, `personal_*`,
+ * `wallet_*`), node-side filters and subscriptions (`eth_newFilter`, `eth_getFilter*`, `eth_subscribe` —
+ * the app has no filter-based watcher), the archive namespaces (`debug_*`, `trace_*`), and — since A76
+ * S-3 — `eth_getLogs`, `eth_simulateV1`, `eth_getProof` and `eth_createAccessList`: no browser path sends
+ * them (the only log scan, on-chain-monitor.ts, runs on the server with its own client), and each is a
+ * read whose cost or answer size the caller controls (a 12 MB eth_getLogs over a tag range was measured
+ * through this proxy by the A76 audit).
  *
  * Per chain on purpose: the map is keyed by chain id and `rpc-method-policy.test.ts` fails when the
  * chain registry lists a chain with no entry here, so adding a chain forces this decision instead of
@@ -31,8 +34,6 @@ const COMMON_READ_METHODS = [
   // execution (no state change)
   'eth_call',
   'eth_estimateGas',
-  'eth_simulateV1',
-  'eth_createAccessList',
   // fees
   'eth_gasPrice',
   'eth_maxPriorityFeePerGas',
@@ -42,7 +43,6 @@ const COMMON_READ_METHODS = [
   'eth_getCode',
   'eth_getStorageAt',
   'eth_getTransactionCount',
-  'eth_getProof',
   // blocks
   'eth_getBlockByNumber',
   'eth_getBlockByHash',
@@ -53,8 +53,6 @@ const COMMON_READ_METHODS = [
   'eth_getTransactionByBlockHashAndIndex',
   'eth_getTransactionByBlockNumberAndIndex',
   'eth_getTransactionReceipt',
-  // logs (range clamped by rpc-cost-policy.ts)
-  'eth_getLogs',
 ] as const
 
 /** Ethereum only: the EIP-4844 blob fee market is an L1 concept; no L2 read in this app needs it. */

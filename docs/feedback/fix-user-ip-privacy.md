@@ -99,7 +99,7 @@ with a test that fails on `7eeefeb` (run in a detached worktree at that commit).
 - [x] S-1 (H) browser never calls api.cow.fi — `/api/cow/{quote,orders,order-status,trades}` behind the limiter; v1/v2
       submit + poll and the LimitOrderPanel price read through them; CI capture "CoW submit after signing"; copy fixed
 - [x] S-2 (H) Privacy §3.3 — Auditor's sentence, v1 == v2, content-map delta
-- [ ] S-3 (M) `/api/rpc` — drop eth_getLogs / eth_simulateV1 / eth_getProof / eth_createAccessList; 10 s upstream
+- [x] S-3 (M) `/api/rpc` — drop eth_getLogs / eth_simulateV1 / eth_getProof / eth_createAccessList; 10 s upstream
       timeout; byte-capped read, > 4 MB → 502
 - [ ] S-4 (M) IPv6 rate-limit keys hash the /64
 - [ ] S-5 (L) `/api/rpc` limiter bounded at 1 s
@@ -115,4 +115,5 @@ with a test that fails on `7eeefeb` (run in a detached worktree at that commit).
 | Docs · Privacy · 02 API Proxy Layer — S-1 | …proxied server-side through /api/quote and /api/swap. Quote and swap requests do not go directly from your browser to these services. … | …proxied server-side through /api/quote and /api/swap, **and a CoW Protocol order you sign is submitted and tracked through /api/cow. Quote, swap and order requests** do not go directly from your browser to these services. … |
 | Privacy §6 ¶1 — S-1 | When you request a swap quote, the Interface sends your wallet address and transaction parameters to the APIs of third-party aggregator and DEX protocols via our server-side proxy. Your IP address is not exposed to these services. … | When you request a swap quote, **or submit a CoW Protocol order you have signed,** the Interface sends your wallet address and transaction parameters **(for a CoW Protocol order, the signed order itself)** to the APIs of third-party aggregator and DEX protocols via our server-side proxy. Your IP address is not exposed to these services. … |
 | Privacy §3.3, last sentence — S-2 (`PRIVACY_LOCAL_COPIES_NOTE`) | This data remains exclusively on your device and is never transmitted to our servers. | These copies stay in your browser and are never uploaded as such; separately, every swap and order you make is sent to our server and stored with your wallet address (see 3.2) — that server record is what the History tab shows. |
+| Docs · Privacy · 03 Method Policy — S-3 | …read-only methods per chain (balances, contract calls, receipts, blocks, fee data, logs) and refuses everything else… | …read-only methods per chain (balances, contract calls, receipts, blocks, fee data) and refuses everything else… |
 | `csp-policy.js` header comment (not user-facing) — S-1 | Aggregator / DEX APIs (…CoW…): called by our API routes, never by the page. | + the signed order, its status and trades go to /api/cow/*, the limit price to /api/cow/quote; before A76 the page POSTed to api.cow.fi itself. |

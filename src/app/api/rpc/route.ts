@@ -4,7 +4,8 @@ import { checkRateLimit, RPC_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { resolveProxyChainId } from '@/lib/rpc-proxy-chain'
 import { serverRpcUrl } from '@/lib/rpc-env'
 import { clientIpKey } from '@/lib/client-ip-key'
-import { isExpensiveMethod, exceedsBatchLimit, clampGetLogsRange, rpcRateLimitUnits, MAX_RPC_BATCH_SIZE } from '@/lib/rpc-cost-policy'
+import { isExpensiveMethod, exceedsBatchLimit, rpcRateLimitUnits, MAX_RPC_BATCH_SIZE, RPC_MAX_RESPONSE_BYTES, RPC_UPSTREAM_TIMEOUT_MS } from '@/lib/rpc-cost-policy'
+import { readJsonCapped } from '@/lib/read-body-capped'
 import { isAllowedReadMethod } from '@/lib/rpc-method-policy'
 import { isShortCacheable, readShortCache, writeShortCache } from '@/lib/rpc-short-cache'
 import { assertChainIdentity, createJsonRpcChainIdProbe } from '@/lib/rpc-chain-identity'
@@ -28,10 +29,14 @@ import { assertChainIdentity, createJsonRpcChainIdProbe } from '@/lib/rpc-chain-
  *
  * [CHORE-API-HARDENING-2 / P3c CONFIRMED] Cost policy (rpc-cost-policy.ts): `debug_*`/`trace_*`
  * are archive-grade queries with no legitimate use in this app's read surface, so they are denied
- * outright. An `eth_getLogs` numeric block range is CLAMPED (not rejected) so the call still works,
- * just bounded. A request batch is capped at MAX_RPC_BATCH_SIZE (25), and the rate limit is charged
+ * outright. A request batch is capped at MAX_RPC_BATCH_SIZE (25), and the rate limit is charged
  * per JSON-RPC call, not per HTTP request. A lone `eth_chainId` / `eth_blockNumber` is answered from
  * a 1.5 s per-instance cache (rpc-short-cache.ts) — still charged against the rate limit.
+ *
+ * [fix/user-ip-privacy A76 S-3] Bounded upstream: AbortSignal.timeout(RPC_UPSTREAM_TIMEOUT_MS = 10 s) on the
+ * forward (an upstream that stalls is a 504, not a function held for its whole duration — the audit held one
+ * for 49 s), and the answer is read incrementally up to RPC_MAX_RESPONSE_BYTES (4 MB): larger is a 502 and is
+ * never buffered whole. eth_getLogs is off the allow-list, so its range clamp is gone with it.
  *
  * [FIX-RPC-CHAIN-IDENTITY-GUARD] The proxy also proves the upstream IS the chain the caller
  * asked for. `NEXT_PUBLIC_ARBITRUM_RPC_URL` held a BASE endpoint from 2026-08-05 to 2026-08-26,
@@ -64,6 +69,16 @@ const BLOCKED_METHODS = new Set([
   'wallet_requestPermissions',
   'wallet_watchAsset',
 ])
+
+function isTimeout(e: unknown): boolean {
+  const name = typeof e === 'object' && e !== null ? (e as { name?: unknown }).name : undefined
+  return name === 'TimeoutError' || name === 'AbortError'
+}
+
+/** [A76 S-3] A bounded-upstream failure: fixed message, never the upstream URL (provider keys live in RPC URL paths). */
+function upstreamError(status: 502 | 504, message: string) {
+  return NextResponse.json({ jsonrpc: '2.0', id: null, error: { code: -32603, message } }, { status, headers: { 'Cache-Control': 'no-store' } })
+}
 
 export async function POST(req: NextRequest) {
   // [AUDIT-W6 / W6-L-01] Oversized body -> 413 (256 KB: large eth_call payloads pass).
@@ -110,7 +125,7 @@ export async function POST(req: NextRequest) {
 
   try {
     // Support single and batch requests
-    let requests = Array.isArray(body) ? body : [body]
+    const requests = Array.isArray(body) ? body : [body]
 
     // [CHORE-API-HARDENING-2 / P3c] Cap batch size before any per-request work.
     if (exceedsBatchLimit(requests.length)) {
@@ -169,10 +184,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // [CHORE-API-HARDENING-2 / P3c] Clamp any oversized eth_getLogs block range
-    // (rewrites fromBlock so the call still succeeds, just bounded).
-    requests = requests.map((rpcReq: { method?: unknown; params?: unknown }) => clampGetLogsRange(rpcReq).request)
-
     // [fix/user-ip-privacy] The SERVER resolver for every chain (RPC_URL_<id> first — rpc-env.ts).
     const upstreamUrl = serverRpcUrl(chainId)
 
@@ -219,14 +230,34 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Forward to upstream RPC (without user's IP)
-    const upstream = await fetch(upstreamUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(Array.isArray(body) ? requests : requests[0]),
-    })
+    // Forward to upstream RPC (without user's IP). [A76 S-3] 10 s deadline (it also covers reading the body).
+    let upstream: Response
+    try {
+      upstream = await fetch(upstreamUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Array.isArray(body) ? requests : requests[0]),
+        signal: AbortSignal.timeout(RPC_UPSTREAM_TIMEOUT_MS),
+      })
+    } catch (e) {
+      if (isTimeout(e)) return upstreamError(504, 'Upstream RPC did not answer in time')
+      throw e
+    }
 
-    const data = await upstream.json()
+    // [A76 S-3] Read at most RPC_MAX_RESPONSE_BYTES; never `await upstream.json()` on an unbounded body.
+    let read: Awaited<ReturnType<typeof readJsonCapped>>
+    try {
+      read = await readJsonCapped(upstream, RPC_MAX_RESPONSE_BYTES)
+    } catch (e) {
+      if (isTimeout(e)) return upstreamError(504, 'Upstream RPC did not answer in time')
+      throw e
+    }
+    if (!read.ok) {
+      return read.reason === 'too_large'
+        ? upstreamError(502, 'Upstream RPC response too large')
+        : upstreamError(502, 'Upstream RPC returned an invalid response')
+    }
+    const data = read.json
 
     if (cacheable && upstream.ok && data && typeof data === 'object' && !('error' in data)) {
       writeShortCache(chainId, cacheable.method, (data as { result?: unknown }).result)

@@ -1,6 +1,7 @@
 /**
  * [CHORE-API-HARDENING-2 / P3c CONFIRMED] /api/rpc cost policy at the route
- * level: batch-size cap, debug_* / trace_* denial, eth_getLogs range clamping.
+ * level: batch-size cap, debug_* / trace_* denial (and, since A76 S-3, caller-sized reads refused and the
+ * upstream bounded at 10 s / 4 MB — the eth_getLogs range clamp is retired with eth_getLogs).
  * The blocked-signing-method behaviour is pre-existing and re-asserted here so
  * a future change can't silently regress it alongside the new checks.
  *
@@ -64,7 +65,8 @@ const methodOf = (init: RequestInit | undefined): string => {
 const forwardedCalls = () =>
   fetchMock.mock.calls.filter(([, init]) => methodOf(init as RequestInit) !== 'eth_chainId')
 
-const jsonOk = (body: unknown) => ({ ok: true, status: 200, json: async () => body })
+// [A76 S-3] Real Responses: the route reads the upstream body as a byte-capped stream, not via `.json()`.
+const jsonOk = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
 
 /** What the upstream answers `eth_chainId` with. Default: mainnet, matching the resolved chain. */
 let upstreamChainIdHex = '0x1'
@@ -131,27 +133,96 @@ describe('POST /api/rpc — debug_* / trace_* archive queries denied (P3c)', () 
   })
 })
 
-describe('POST /api/rpc — eth_getLogs range clamped, not rejected (P3c)', () => {
-  it('forwards a WIDE numeric eth_getLogs range with fromBlock clamped', async () => {
-    const res = await POST(
-      rpcReq({ jsonrpc: '2.0', id: 1, method: 'eth_getLogs', params: [{ fromBlock: '0x0', toBlock: '0x186a0' /* 100_000 */ }] }),
-    )
-    expect(res.status).toBe(200)
-    expect(forwardedCalls()).toHaveLength(1)
-    const forwardedBody = JSON.parse(forwardedCalls()[0][1].body)
-    expect(forwardedBody.params[0].toBlock).toBe('0x186a0') // untouched
-    expect(forwardedBody.params[0].fromBlock).not.toBe('0x0') // rewritten, narrower
-    const from = Number.parseInt(forwardedBody.params[0].fromBlock, 16)
-    expect(0x186a0 - from).toBe(2_000)
+// [fix/user-ip-privacy A76 S-3] Replaces "eth_getLogs range clamped, not rejected (P3c)": eth_getLogs, eth_simulateV1,
+// eth_getProof and eth_createAccessList are off every chain's allow-list (no browser path sends them; the audit pulled a
+// 12 MB eth_getLogs through a tag range the clamp could not bound). The upstream is bounded in time and in size.
+describe('POST /api/rpc — caller-sized reads refused, upstream bounded [A76 S-3]', () => {
+  it.each(['eth_getLogs', 'eth_simulateV1', 'eth_getProof', 'eth_createAccessList'])('%s is refused with 403 on every chain and nothing is forwarded', async (method) => {
+    for (const chainId of [1, 8453, 42161]) {
+      mocks.resolveProxyChainId.mockReturnValue({ chainId })
+      upstreamChainIdHex = `0x${chainId.toString(16)}`
+      fetchMock.mockClear()
+      const res = await POST(rpcReq({ jsonrpc: '2.0', id: 1, method, params: [{ fromBlock: 'earliest', toBlock: 'latest' }] }, {}, `http://localhost/api/rpc?chainId=${chainId}`))
+      expect([chainId, res.status]).toEqual([chainId, 403])
+      expect((await res.json()).error.code).toBe(-32601)
+      expect(fetchMock).not.toHaveBeenCalled()
+    }
   })
 
-  it('forwards a narrow eth_getLogs range unchanged', async () => {
-    const res = await POST(
-      rpcReq({ jsonrpc: '2.0', id: 1, method: 'eth_getLogs', params: [{ fromBlock: '0x1', toBlock: '0x2' }] }),
+  it('the forward carries AbortSignal.timeout(10_000); a stalled upstream is a 504 with no upstream URL in it', async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout')
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (methodOf(init) === 'eth_chainId') return jsonOk({ jsonrpc: '2.0', id: 1, result: '0x1' })
+      expect(init?.signal).toBeInstanceOf(AbortSignal)
+      throw Object.assign(new Error('The operation was aborted due to timeout http://upstream.test/rpc'), { name: 'TimeoutError' })
+    })
+    const res = await POST(rpcReq({ jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: ['0x' + '1'.repeat(40), 'latest'] }))
+    expect(timeoutSpy).toHaveBeenCalledWith(10_000)
+    expect(res.status).toBe(504)
+    const text = await res.text()
+    expect(text).not.toContain('upstream.test')
+    expect(JSON.parse(text).error.message).toBe('Upstream RPC did not answer in time')
+  })
+
+  it('a body that stalls mid-read (timeout while streaming) is a 504 too', async () => {
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (methodOf(init) === 'eth_chainId') return jsonOk({ jsonrpc: '2.0', id: 1, result: '0x1' })
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"jsonrpc":"2.0",'))
+        },
+        pull() {
+          throw Object.assign(new Error('aborted'), { name: 'TimeoutError' })
+        },
+      })
+      return new Response(stream, { status: 200 })
+    })
+    const res = await POST(rpcReq({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: '0x' + '1'.repeat(40), data: '0x' }, 'latest'] }))
+    expect(res.status).toBe(504)
+  })
+
+  it('an answer over 4 MB (chunked, no content-length) is a 502 and is not read to the end', async () => {
+    let pulled = 0
+    const chunk = new Uint8Array(256 * 1024).fill(0x20)
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (methodOf(init) === 'eth_chainId') return jsonOk({ jsonrpc: '2.0', id: 1, result: '0x1' })
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            pulled += chunk.byteLength
+            if (pulled > 48 * 1024 * 1024) controller.close()
+            else controller.enqueue(chunk)
+          },
+        }),
+        { status: 200 },
+      )
+    })
+    const res = await POST(rpcReq({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: '0x' + '1'.repeat(40), data: '0x' }, 'latest'] }))
+    expect(res.status).toBe(502)
+    expect((await res.json()).error.message).toBe('Upstream RPC response too large')
+    expect(pulled).toBeLessThan(4 * 1024 * 1024 + 3 * chunk.byteLength)
+  })
+
+  it('a declared content-length over 4 MB is a 502 before any read', async () => {
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) =>
+      methodOf(init) === 'eth_chainId'
+        ? jsonOk({ jsonrpc: '2.0', id: 1, result: '0x1' })
+        : new Response('{}', { status: 200, headers: { 'content-length': String(4 * 1024 * 1024 + 1) } }),
     )
+    const res = await POST(rpcReq({ jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: ['0x' + '1'.repeat(40), 'latest'] }))
+    expect(res.status).toBe(502)
+  })
+
+  it('exactly 4 MB still passes', async () => {
+    const result = '0x' + 'a'.repeat(4 * 1024 * 1024 - 64)
+    const body = JSON.stringify({ jsonrpc: '2.0', id: 1, result })
+    expect(body.length).toBeLessThanOrEqual(4 * 1024 * 1024)
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) =>
+      methodOf(init) === 'eth_chainId' ? jsonOk({ jsonrpc: '2.0', id: 1, result: '0x1' }) : new Response(body, { status: 200 }),
+    )
+    const res = await POST(rpcReq({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: '0x' + '1'.repeat(40), data: '0x' }, 'latest'] }))
     expect(res.status).toBe(200)
-    const forwardedBody = JSON.parse(forwardedCalls()[0][1].body)
-    expect(forwardedBody.params[0]).toEqual({ fromBlock: '0x1', toBlock: '0x2' })
+    expect((await res.json()).result).toHaveLength(result.length)
   })
 })
 
@@ -244,7 +315,7 @@ describe('POST /api/rpc — chain-identity guard: UNREACHABLE falls through [FIX
   it('still forwards when the probe gets a 5xx — that is an outage, not a lie', async () => {
     fetchMock.mockImplementation(async (_url: string, init?: RequestInit) =>
       methodOf(init) === 'eth_chainId'
-        ? { ok: false, status: 503, json: async () => ({}) }
+        ? new Response('{}', { status: 503 })
         : jsonOk({ jsonrpc: '2.0', id: 1, result: '0x1b4' }),
     )
 
