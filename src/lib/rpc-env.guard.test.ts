@@ -10,6 +10,12 @@
  *  - chains/registry.ts  shared registry; its `rpc.primary` is the browser value, the server
  *                        overrides it through rpc-env (clients.ts / adapters/shared.ts / api.ts)
  *  - wagmiConfig.ts      browser wagmi transports (polling budgets, #622)
+ *
+ * [fix/user-ip-privacy] Second guard, stricter and with NO allowlist: nothing under src/ may read
+ * NEXT_PUBLIC_BASE_RPC_URL or NEXT_PUBLIC_ARBITRUM_RPC_URL with a literal member access. Next inlines
+ * a literal `process.env.NEXT_PUBLIC_*` into every client chunk that can reach the module, which is
+ * how the L2 provider URL (key included) reached every visitor. The two names survive only as a
+ * server-side fallback, read through a computed lookup in rpc-env.ts (`readServerOnly`).
  */
 import { describe, it, expect } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
@@ -47,5 +53,47 @@ describe('no direct NEXT_PUBLIC_*RPC* env reads outside the allowlist', () => {
       .filter((rel) => !ALLOW.has(rel))
       .filter((rel) => READ.test(stripComments(readFileSync(join(SRC, rel), 'utf8'))))
     expect(offenders).toEqual([])
+  })
+})
+
+describe('[fix/user-ip-privacy] the deprecated L2 browser env names are never inlined', () => {
+  const L2_LITERAL = /process\.env\s*(?:\.\s*|\[\s*['"`])NEXT_PUBLIC_(?:BASE|ARBITRUM)_RPC_URL/
+  /** Every non-test source file under src/, including src/ui (which the guard above skips). */
+  const allSources = (dir: string): string[] =>
+    readdirSync(dir).flatMap((name) => {
+      const p = join(dir, name)
+      if (statSync(p).isDirectory()) return name === 'node_modules' ? [] : allSources(p)
+      return /\.(ts|tsx)$/.test(name) && !/\.(test|spec)\.tsx?$/.test(name) ? [p] : []
+    })
+
+  it('the pattern catches dot and literal-bracket reads, and not the computed server-only read', () => {
+    expect(L2_LITERAL.test('process.env.NEXT_PUBLIC_BASE_RPC_URL')).toBe(true)
+    expect(L2_LITERAL.test("process.env['NEXT_PUBLIC_ARBITRUM_RPC_URL']")).toBe(true)
+    expect(L2_LITERAL.test('process.env . NEXT_PUBLIC_BASE_RPC_URL')).toBe(true)
+    expect(L2_LITERAL.test('process.env[name]')).toBe(false)
+    expect(L2_LITERAL.test('process.env.NEXT_PUBLIC_RPC_URL')).toBe(false)
+  })
+
+  it('no source file under src/ reads either name literally', () => {
+    const files = allSources(SRC)
+    expect(files.length).toBeGreaterThan(300)
+    const offenders = files
+      .map((p) => relative(SRC, p))
+      .filter((rel) => L2_LITERAL.test(stripComments(readFileSync(join(SRC, rel), 'utf8'))))
+    expect(offenders).toEqual([])
+  })
+
+  it('rpc-env.ts still knows both names, as a server-only computed read', () => {
+    const src = stripComments(readFileSync(join(SRC, 'lib/rpc-env.ts'), 'utf8'))
+    expect(src).toContain("'NEXT_PUBLIC_BASE_RPC_URL'")
+    expect(src).toContain("'NEXT_PUBLIC_ARBITRUM_RPC_URL'")
+    expect(src).toMatch(/typeof window !== 'undefined'\) return undefined\s+return DEPRECATED_L2_PUBLIC_NAMES\.includes\(name\) \? process\.env\[name\]/)
+  })
+
+  it('wagmiConfig.ts and chains/registry.ts no longer mention either name in code', () => {
+    for (const rel of ['lib/wagmiConfig.ts', 'lib/chains/registry.ts', 'lib/chains/clients.ts', 'lib/adapters/shared.ts']) {
+      const src = stripComments(readFileSync(join(SRC, rel), 'utf8'))
+      expect([rel, /NEXT_PUBLIC_(?:BASE|ARBITRUM)_RPC_URL/.test(src)]).toEqual([rel, false])
+    }
   })
 })

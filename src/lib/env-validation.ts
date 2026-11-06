@@ -36,13 +36,13 @@ const RULES: EnvRule[] = [
     key: 'RPC_URL_8453',
     required: false,
     serverOnly: true,
-    label: 'Server-only Base RPC — falls back to NEXT_PUBLIC_BASE_RPC_URL, then the public default',
+    label: 'Server-only Base RPC (also the /api/rpc?chainId=8453 upstream) — falls back to the deprecated NEXT_PUBLIC_BASE_RPC_URL, then the public default',
   },
   {
     key: 'RPC_URL_42161',
     required: false,
     serverOnly: true,
-    label: 'Server-only Arbitrum RPC — falls back to NEXT_PUBLIC_ARBITRUM_RPC_URL, then the public default',
+    label: 'Server-only Arbitrum RPC (also the /api/rpc?chainId=42161 upstream) — falls back to the deprecated NEXT_PUBLIC_ARBITRUM_RPC_URL, then the public default',
   },
   // ── WalletConnect ──
   {

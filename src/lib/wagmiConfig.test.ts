@@ -156,24 +156,47 @@ describe('wagmiConfig — RPC chain-identity guard [FIX-RPC-CHAIN-IDENTITY-GUARD
     vi.restoreAllMocks()
   })
 
-  // Chain 1 is excluded from the wired-config cases below, and ONLY for an environment reason:
-  // in the browser its transport is the relative `/api/rpc`, and viem builds a `new Request(url)`
-  // before fetching, which no non-browser runtime can construct from a relative path. The
-  // mainnet transport is covered instead by wagmiConfig.server.test.ts (node env, absolute URL)
-  // and by rpc-guarded-transport.test.ts.
+  // [fix/user-ip-privacy] All three browser transports are now our own proxy, addressed absolutely
+  // (`<origin>/api/rpc[?chainId=<id>]`, see rpc-proxy-url.ts), so chain 1 is covered here too — it
+  // used to be excluded because its transport was the relative `/api/rpc`, which no non-browser
+  // runtime can turn into a `Request`. The endpoint a chain reads from is told apart by the
+  // `chainId` query param, not by a provider hostname (there is none in the browser any more).
   const WIRED_CHAINS = [
-    { id: 8453, urlHint: 'base', lie: '0x1', lieId: 1 },
-    { id: 42161, urlHint: 'arb', lie: BASE_CHAIN_ID_HEX, lieId: 8453 },
+    { id: 1, lie: '0xa4b1', lieId: 42161 },
+    { id: 8453, lie: '0x1', lieId: 1 },
+    { id: 42161, lie: BASE_CHAIN_ID_HEX, lieId: 8453 },
   ]
+  /** Which chain's proxy endpoint a fetch is addressed to. */
+  const proxiedChain = (url: unknown): number => Number(new URL(String(url)).searchParams.get('chainId') ?? 1)
+
+  it('every wired chain reads from our own origin’s /api/rpc', async () => {
+    const seen: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        seen.push(String(url))
+        return methodOf(init) === 'eth_chainId' ? jsonRpc(`0x${proxiedChain(url).toString(16)}`) : jsonRpc('0x1b4')
+      }),
+    )
+    for (const { id } of WIRED_CHAINS) {
+      await expect(config.getClient({ chainId: id as 8453 }).request({ method: 'eth_blockNumber' })).resolves.toBe('0x1b4')
+    }
+    expect(seen.length).toBeGreaterThanOrEqual(6)
+    for (const u of seen) {
+      expect(new URL(u).origin).toBe(window.location.origin)
+      expect(new URL(u).pathname).toBe('/api/rpc')
+    }
+    expect([...new Set(seen.map(proxiedChain))].sort((a, b) => a - b)).toEqual([1, 8453, 42161])
+  })
 
   it('refuses a read on a configured chain whose endpoint reports a different chain id', async () => {
     // Each endpoint answers eth_chainId with a chain that is NOT the one it is configured for —
-    // Arbitrum's answers Base (the real incident), Base's answers mainnet.
+    // Arbitrum's answers Base (the real incident), Base's answers mainnet, mainnet's answers Arbitrum.
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string, init?: RequestInit) => {
         if (methodOf(init) !== 'eth_chainId') return jsonRpc('0xdeadbeef')
-        return jsonRpc(String(url).includes('base') ? '0x1' : BASE_CHAIN_ID_HEX)
+        return jsonRpc(WIRED_CHAINS.find((c) => c.id === proxiedChain(url))!.lie)
       }),
     )
 

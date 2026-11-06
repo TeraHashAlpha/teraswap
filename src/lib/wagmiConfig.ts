@@ -11,6 +11,8 @@ import { mainnet, base, arbitrum } from 'wagmi/chains'
 import { fallback } from 'wagmi'
 import type { Transport } from 'viem'
 import { guardedHttp } from '@/lib/rpc-guarded-transport'
+import { proxyRpcUrl } from '@/lib/rpc-proxy-url'
+import { serverRpcUrl } from '@/lib/rpc-env'
 
 // ── RPC Configuration with Fallback ──────────────────────
 // Primary: user-configured RPC (e.g. Alchemy, Infura)
@@ -31,8 +33,12 @@ function buildMainnetTransport(): Transport {
   const transports: Transport[] = []
 
   // In browser: always use /api/rpc as primary (hides user IP, avoids CORS).
+  // [fix/user-ip-privacy] Absolute same-origin URL (proxyRpcUrl): wagmi's WalletConnect connector
+  // copies this transport URL into the provider's rpcMap, and WalletConnect refuses a relative one
+  // ("Provided URL is not compatible with HTTP connection: /api/rpc") while it builds the session's
+  // EVM provider. Same request as before, in a form the wallet SDK accepts.
   if (typeof window !== 'undefined') {
-    transports.push(guardedHttp('/api/rpc', mainnet.id, { timeout: 10_000 }))
+    transports.push(guardedHttp(proxyRpcUrl(mainnet.id), mainnet.id, { timeout: 10_000 }))
   } else if (primaryRpc) {
     // Server-only: hit the configured RPC directly (no IP to protect).
     transports.push(guardedHttp(primaryRpc, mainnet.id, { timeout: 10_000 }))
@@ -65,6 +71,24 @@ function buildMainnetTransport(): Transport {
   // rank:true also runs an unbounded background pinger against every
   // transport in the array for the client's lifetime.
   return fallback(transports, { retryCount: 2 })
+}
+
+/**
+ * [fix/user-ip-privacy] Base / Arbitrum transport.
+ *
+ * Browser: our own proxy and nothing else — `/api/rpc?chainId=<id>`, exactly like mainnet. It used to
+ * be the provider URL from NEXT_PUBLIC_{BASE,ARBITRUM}_RPC_URL (and a public endpoint behind it), so
+ * every L2 read handed the visitor's IP, and the key in that URL, to the provider. There is no direct
+ * fallback in the browser: a second entry here would be a third-party host again.
+ *
+ * Server (this module is evaluated once without `window` because of `ssr: true`): the server resolver,
+ * `serverRpcUrl` — RPC_URL_<id> first. The NEXT_PUBLIC_* L2 names are no longer read in this file.
+ */
+function buildL2Transport(chainId: number): Transport {
+  if (typeof window !== 'undefined') {
+    return guardedHttp(proxyRpcUrl(chainId), chainId, { timeout: 10_000 })
+  }
+  return guardedHttp(serverRpcUrl(chainId), chainId, { timeout: 10_000 })
 }
 
 // [BUGFIX] Validate WalletConnect projectId — empty string causes silent failures
@@ -114,7 +138,7 @@ export const WALLET_GROUPS = [
 // [P219] Multi-chain: mainnet stays the default (first in the array, so wallets
 // connect to it by default). Base is added so users can switch, but swaps stay
 // gated behind "Coming Soon" until a Base FeeCollector is deployed (ChainSelector).
-// Base uses the public RPC for now (NEXT_PUBLIC_BASE_RPC_URL overrides).
+// [fix/user-ip-privacy] Base and Arbitrum read through /api/rpc?chainId=<id> (buildL2Transport).
 //
 // `config` is a MODULE SINGLETON — created exactly once per runtime so there is a
 // single WalletConnect Core/provider instance. Do NOT recreate it per-render
@@ -127,13 +151,8 @@ export const config = getDefaultConfig({
   wallets: WALLET_GROUPS,
   transports: {
     [mainnet.id]: buildMainnetTransport(),
-    [base.id]: fallback([
-      guardedHttp(process.env.NEXT_PUBLIC_BASE_RPC_URL || 'https://mainnet.base.org', base.id, { timeout: 10_000 }),
-    ]),
-    [arbitrum.id]: fallback([
-      guardedHttp(process.env.NEXT_PUBLIC_ARBITRUM_RPC_URL || 'https://arb1.arbitrum.io/rpc', arbitrum.id, { timeout: 10_000 }),
-      guardedHttp('https://arb1.arbitrum.io/rpc', arbitrum.id),
-    ]),
+    [base.id]: buildL2Transport(base.id),
+    [arbitrum.id]: buildL2Transport(arbitrum.id),
   },
   // [feat/frontend-rpc-diet] viem splits a Multicall3 into calldata chunks of `batchSize` bytes — default 1 024, i.e.
   // ~5 balanceOf reads per eth_call — so refreshing a 30-token balance list cost ~6 provider calls instead of 1.
