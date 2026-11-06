@@ -66,3 +66,15 @@ the item then falls to the rule's no-patch branch (allowlist). The owner can sti
 - **Premise check:** expiry is enforced by `scripts/audit-gate-lib.mjs` (true). The root `hono` override was itself inside the advisory range before this change.
 - **Major-bump STOPs (not applied):** minimatch → 11.0.1 (glob@13 and typescript-estree need `^10.2.2`); glob → 14.0.2 (rimraf@6 `^13.0.3`, sentry `^13.0.6`); uuid → 11.1.1 (`@metamask/utils@9`, `@metamask/sdk`, `xcode`). Owner decides.
 - **Capacitor #142 critical:** `ios/` is a Capacitor iOS shell; no CI builds it; pinned `capacitor-swift-pm` 8.2.0; no patch; not in npm audit. Owner decides whether `ios/` stays.
+
+## Feedback — ios/ archive (mobile-prototype-2026)
+
+### Edge case
+- Dependabot `dependabot.yml` `ignore` filters by dependency name/version only, not by path. Alert #142 comes from the dependency graph (SwiftPM `Package.resolved`; no `swift` ecosystem is configured), so moving the manifest under `archive/` is not expected to dismiss it. Not changed; dismissal is an owner decision.
+- `eslint.config.mjs`: removed `ios/**` and `android/**` ignores (paths no longer exist).
+
+### Concern
+- `.github/workflows/codeql.yml` header says Swift/iOS scaffolding "has been removed" — now inaccurate (archived, not removed). Left unchanged.
+- Root `.gitignore` lines 78–84 (Capacitor native-build paths) no longer match anything. Inert; left in place.
+- `npm run check:...` audit gate (`scripts/audit-gate.mjs`) fails on the base commit too: HIGH `decode-uri-component` (GHSA-qr28-fpjm-wq7f), HIGH `follow-redirects` (GHSA-mrwp-f3q8-3g9p). Pre-existing, not caused by this change. Fix branches already exist: `chore/audit-gate-decode-uri-component`, `chore/audit-gate-follow-redirects`.
+- `@capacitor/*` dependencies and `cap:init:android` / `cap:open:android` / `cap:sync` scripts intentionally kept (owner asked only for the iOS scripts to go).
