@@ -31,8 +31,8 @@ const COMMON_READ_METHODS = [
   // execution (no state change)
   'eth_call',
   'eth_estimateGas',
-  'eth_createAccessList',
   'eth_simulateV1',
+  'eth_createAccessList',
   // fees
   'eth_gasPrice',
   'eth_maxPriorityFeePerGas',
