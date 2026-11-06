@@ -119,9 +119,13 @@ export class Capture {
         const perChain = this.rpc.get(chain) ?? new Map<string, number>()
         for (const m of methods) perChain.set(m, (perChain.get(m) ?? 0) + 1)
         this.rpc.set(chain, perChain)
-        const response = await route.fetch()
-        if (response.status() !== 200) this.refusals.push(`chain ${chain} ${methods.join(',')} → ${response.status()}`)
-        return route.fulfill({ response })
+        try {
+          const response = await route.fetch()
+          if (response.status() !== 200) this.refusals.push(`chain ${chain} ${methods.join(',')} → ${response.status()}`)
+          return await route.fulfill({ response })
+        } catch {
+          return // the context was closed while this read was in flight (end of a scenario): nothing to answer
+        }
       }
 
       // Every other API route: answered here, so the Next server makes no outbound call during the capture.
@@ -130,15 +134,59 @@ export class Capture {
     })
   }
 
-  /** Install on a page: WebSockets are per page in Playwright. */
+  /** JSON-RPC methods the page sent to the (mock) WalletConnect relay. */
+  readonly relayMethods: string[] = []
+  /** Uncaught page errors (an exception a blocked request turned into a crash would show here). */
+  readonly pageErrors: string[] = []
+
+  /**
+   * Install on a page: WebSockets are per page in Playwright. Every off-origin socket is recorded and none reaches the
+   * network. The WalletConnect relay is answered by a few lines of mock (subscribe / publish acknowledgements) so a
+   * pairing can get as far as showing its QR code; any other socket is closed at once.
+   */
   async installPage(page: Page) {
+    page.on('pageerror', (error) => void this.pageErrors.push(String(error).slice(0, 200)))
     await page.routeWebSocket(/.*/, (ws) => {
+      let url: URL
       try {
-        const url = new URL(ws.url())
-        if (url.host !== new URL(this.origin).host) this.record(url, 'WS', 'ws')
-      } catch {}
-      ws.close()
+        url = new URL(ws.url())
+      } catch {
+        return void ws.close()
+      }
+      if (url.host === new URL(this.origin).host) return void ws.connectToServer()
+      this.record(url, 'WS', 'ws')
+      if (url.host !== WALLETCONNECT_RELAY_HOST) return void ws.close()
+      ws.onMessage((message) => {
+        let rpc: { id?: unknown; method?: string; params?: { topics?: unknown[] } }
+        try {
+          rpc = JSON.parse(String(message))
+        } catch {
+          return
+        }
+        if (!rpc.method || rpc.id === undefined) return
+        this.relayMethods.push(rpc.method)
+        const result =
+          rpc.method === 'irn_subscribe'
+            ? 'a'.repeat(64)
+            : rpc.method === 'irn_batchSubscribe'
+              ? (rpc.params?.topics ?? []).map(() => 'b'.repeat(64))
+              : rpc.method === 'irn_batchFetchMessages'
+                ? { messages: [], hasMore: false }
+                : true
+        ws.send(JSON.stringify({ id: rpc.id, jsonrpc: '2.0', result }))
+      })
     })
+  }
+
+  /** End of a scenario: stop routing (in-flight handlers are let go) and close the context. */
+  async close(context: BrowserContext) {
+    await context.unrouteAll({ behavior: 'ignoreErrors' })
+    await context.close()
+  }
+
+  /** Hosts recorded so far (http and ws), de-duplicated. */
+  seenHosts(): string[] {
+    return [...new Set([...this.hosts.keys()].map((key) => key.slice(key.indexOf(':') + 1)))]
   }
 
   result(): CaptureResult {
@@ -159,7 +207,71 @@ export class Capture {
   }
 }
 
+export const WALLETCONNECT_RELAY_HOST = 'relay.walletconnect.org'
+
 export const settle = (page: Page, ms: number) => page.waitForTimeout(ms)
+
+export const MOCK_WALLET_ADDRESS = '0x000000000000000000000000000000000000dEaD'
+
+/**
+ * A browser-extension wallet that signs nothing: announced over EIP-6963 (as "MetaMask") and as `window.ethereum`, it
+ * answers account / chain questions and follows `wallet_switchEthereumChain`. Install BEFORE the first navigation.
+ * `reconnect` makes wagmi restore it on load, like a returning visitor.
+ */
+export async function installMockWallet(context: BrowserContext, { reconnect = true }: { reconnect?: boolean } = {}) {
+  await context.addInitScript(
+    ({ address, reconnect }) => {
+      let chain = '0x1'
+      const listeners: Record<string, Array<(...a: unknown[]) => void>> = {}
+      const provider = {
+        isMetaMask: true,
+        request: async ({ method, params }: { method: string; params?: unknown[] }) => {
+          switch (method) {
+            case 'eth_accounts':
+            case 'eth_requestAccounts':
+              return [address]
+            case 'eth_chainId':
+              return chain
+            case 'net_version':
+              return String(parseInt(chain, 16))
+            case 'wallet_switchEthereumChain':
+              chain = (params?.[0] as { chainId: string }).chainId
+              for (const l of listeners.chainChanged ?? []) l(chain)
+              return null
+            case 'wallet_getPermissions':
+            case 'wallet_requestPermissions':
+              return [{ parentCapability: 'eth_accounts' }]
+            default:
+              return null
+          }
+        },
+        on: (event: string, l: (...a: unknown[]) => void) => void (listeners[event] ??= []).push(l),
+        removeListener: (event: string, l: (...a: unknown[]) => void) => void (listeners[event] = (listeners[event] ?? []).filter((x) => x !== l)),
+      }
+      const info = { uuid: '00000000-0000-4000-8000-0000000000aa', name: 'MetaMask', icon: 'data:image/svg+xml;base64,PHN2Zy8+', rdns: 'io.metamask' }
+      const announce = () => window.dispatchEvent(new CustomEvent('eip6963:announceProvider', { detail: Object.freeze({ info, provider }) }))
+      window.addEventListener('eip6963:requestProvider', announce)
+      announce()
+      ;(window as unknown as { ethereum: unknown }).ethereum = provider
+      if (reconnect) {
+        try {
+          localStorage.setItem('wagmi.recentConnectorId', '"io.metamask"')
+          localStorage.setItem('wagmi.io.metamask.connected', 'true')
+        } catch {}
+      }
+    },
+    { address: MOCK_WALLET_ADDRESS, reconnect },
+  )
+}
+
+/** The account label the header shows once connected: v1 `0x00…dEaD`, v2 `0x0000…dEaD` (any case, either ellipsis). */
+export const CONNECTED_LABEL = /0x0{2,4}(…|\.\.\.)dead/i
+
+/** Open the wallet picker (RainbowKit's modal in both UIs). */
+export async function openConnectModal(page: Page) {
+  await page.getByRole('button', { name: /connect wallet/i }).first().click({ timeout: 8_000 })
+  await page.locator('[role=dialog]').first().waitFor({ state: 'visible', timeout: 8_000 })
+}
 
 /** Landing → app (both UIs open on a landing page for a first-time visitor). Best effort: a UI without one is already in the app. */
 export async function launchApp(page: Page) {

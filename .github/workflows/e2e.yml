@@ -88,3 +88,43 @@ jobs:
           NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR: ${{ vars.NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR }}
       - name: Run v2 mobile-parity Playwright suite
         run: npx playwright test --config src/ui/v2/__tests__/mobile/playwright.config.ts
+
+  third-party-hosts:
+    # [fix/user-ip-privacy] "This site never sends the visitor's IP to a third party" — measured on every PR.
+    # Real Chromium, the site's REAL Content-Security-Policy, a PRODUCTION build, v1 and v2 (one build, two `next start`
+    # servers: UI_V2_ENABLED is read per request), Ethereum / Base / Arbitrum. Every request to another origin is
+    # recorded and answered locally (nothing leaves the runner; the proxy's upstream is a local JSON-RPC stub) and the
+    # job FAILS on any host outside the allow-list — which with no wallet is empty. It also runs the wallet-connected
+    # scenarios (extension wallet: still no host; WalletConnect: only its own hosts, telemetry refused) and checks that
+    # the marker values below never reach a client chunk.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: "npm"
+      - name: Install deps
+        run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Build (provider / database / Sentry env set to marker values)
+        run: npm run build
+        env:
+          NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: "00000000000000000000000000000000"
+          # Base and Arbitrum must be selectable for the capture to read them. Public contract addresses, kept in
+          # repository VARIABLES like the v2-mobile-parity job above (names only in this file).
+          NEXT_PUBLIC_BASE_FEE_COLLECTOR: ${{ vars.NEXT_PUBLIC_BASE_FEE_COLLECTOR }}
+          NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR: ${{ vars.NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR }}
+          # MARKERS: values a visitor's browser must never receive. They are deliberately SET here so the bundle
+          # check below can prove they are absent from every client chunk. `.invalid` never resolves.
+          NEXT_PUBLIC_BASE_RPC_URL: "https://base-provider.invalid/v2/CAPTURE-MARKER-BASE-RPC-KEY"
+          NEXT_PUBLIC_ARBITRUM_RPC_URL: "https://arbitrum-provider.invalid/v2/CAPTURE-MARKER-ARBITRUM-RPC-KEY"
+          NEXT_PUBLIC_SUPABASE_URL: "https://capture-marker-project.supabase.co"
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: "CAPTURE-MARKER-SUPABASE-ANON-KEY"
+          NEXT_PUBLIC_SENTRY_DSN: "https://capturemarkerdsn@o0.ingest.sentry.io/0"
+      - name: Run the third-party-host capture (v1 + v2, 3 chains, no wallet; then wallets; then the bundle)
+        run: npx playwright test --config e2e/third-party-hosts/playwright.config.ts
+        env:
+          CAPTURE_BUNDLE_MARKERS: "CAPTURE-MARKER-BASE-RPC-KEY,CAPTURE-MARKER-ARBITRUM-RPC-KEY,base-provider.invalid,arbitrum-provider.invalid,capture-marker-project.supabase.co,CAPTURE-MARKER-SUPABASE-ANON-KEY,capturemarkerdsn@o0.ingest.sentry.io"
+

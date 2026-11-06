@@ -61,7 +61,7 @@ export type { MinAmountOutSource, DeriveSigningMinParams, DeriveSigningMinResult
 // [SPRINT-V3-P3] Pure Permit2-style bitmap math for v3 mass-cancel (invalidateUnorderedNonces).
 export { bitmapPositions, computeInvalidationBatches, isNonceInBatch } from './v3-nonce-bitmap'
 export type { BitmapPosition, InvalidationBatch } from './v3-nonce-bitmap'
-export { createOrderInSupabase, fetchUserOrders, fetchActiveOrders, cancelOrderInSupabase, subscribeToOrders } from './supabase'
+export { createOrderInSupabase, fetchUserOrders, fetchActiveOrders, cancelOrderInSupabase } from './supabase'
 export type { OrderRow } from './supabase'
 // [AUDIT-W6 / W6-M-01] Per-session proof-of-ownership for active-order reads.
 export {

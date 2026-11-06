@@ -55,7 +55,7 @@ for (const { ui, baseURL } of UIS) {
         mkdirSync(process.env.CAPTURE_OUT, { recursive: true })
         writeFileSync(join(process.env.CAPTURE_OUT, `no-wallet-${ui}-${chain.id}.json`), `${JSON.stringify(report, null, 1)}\n`)
       }
-      await context.close()
+      await capture.close(context)
 
       // The run really exercised the app on the chain under test (not a blank page that trivially contacts nobody).
       const rpcKey = chain.id === 1 ? '/api/rpc' : `/api/rpc?chainId=${chain.id}`

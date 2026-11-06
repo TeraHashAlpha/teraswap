@@ -31,6 +31,7 @@ interface FakeInner {
   getProvider: Spy
   isAuthorized: Spy
   connect: Spy
+  getChainId: Spy
   setupReachedProvider: Spy
 }
 
@@ -40,6 +41,7 @@ function fakeWalletConnect(): { create: CreateConnectorFn; inner: FakeInner } {
     getProvider: vi.fn(async (..._args: unknown[]): Promise<unknown> => ({ provider: 'real' })),
     isAuthorized: vi.fn(async (..._args: unknown[]): Promise<unknown> => true),
     connect: vi.fn(async (..._args: unknown[]): Promise<unknown> => ({ accounts: ['0x1'], chainId: 1 })),
+    getChainId: vi.fn(async (..._args: unknown[]): Promise<unknown> => 1),
     setupReachedProvider: vi.fn(async (..._args: unknown[]): Promise<unknown> => undefined),
   }
   const create = (() => ({
@@ -62,6 +64,11 @@ function fakeWalletConnect(): { create: CreateConnectorFn; inner: FakeInner } {
     connect(this: unknown, ...args: unknown[]) {
       return inner.connect.call(this, ...args)
     },
+    // wagmi's own shape: `const provider = await this.getProvider(); return provider.chainId`
+    async getChainId(this: { getProvider: () => Promise<unknown> }) {
+      await this.getProvider()
+      return inner.getChainId.call(this)
+    },
   })) as unknown as CreateConnectorFn
   return { create, inner }
 }
@@ -74,6 +81,7 @@ function wagmiSetup(create: CreateConnectorFn, recentConnectorId: unknown = null
     getProvider: (p?: unknown) => Promise<unknown>
     isAuthorized: () => Promise<boolean>
     connect: (p?: unknown) => Promise<unknown>
+    getChainId: () => Promise<unknown>
     rkDetails: unknown
     uid: string
   }
@@ -144,6 +152,20 @@ describe('lazyConnector — armed by choosing WalletConnect', () => {
     expect(inner.getProvider).toHaveBeenCalledWith({ chainId: 1 })
     expect((inner.getProvider.mock.contexts[0] as { uid: string }).uid).toBe('uid-1')
     await expect(connector.isAuthorized()).resolves.toBe(true)
+  })
+
+  // Found in real Chromium: RainbowKit's connectWallet() awaits `connector.getChainId()` BEFORE `connectAsync`, and
+  // it calls both on a COPY of the connector (`{ ...connector, ...connector.rkDetails }`). A lazy connector that only
+  // armed on connect() threw there, and "open the official WalletConnect modal" did nothing.
+  it('RainbowKit’s real order — getChainId() first, on a spread copy, then connect() — works from cold', async () => {
+    const { create, inner } = fakeWalletConnect()
+    const { connector } = wagmiSetup(lazyConnector(create))
+    const copy = { ...connector, ...(connector.rkDetails as object) } as typeof connector
+    await expect(copy.getChainId()).resolves.toBe(1)
+    expect(inner.getProvider).toHaveBeenCalledTimes(1) // wagmi's getChainId reached the real provider
+    await expect(copy.connect({ chainId: 1 })).resolves.toEqual({ accounts: ['0x1'], chainId: 1 })
+    // and the ORIGINAL object is armed too: the state is the connector's, not the copy's
+    await expect(connector.getProvider()).resolves.toEqual({ provider: 'real' })
   })
 
   it('a connect() that fails still leaves the connector usable for a retry', async () => {

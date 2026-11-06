@@ -21,7 +21,10 @@
  * which is exactly what wagmi's `setup()` and `reconnect()` already tolerate (`.catch(() => …)`): they
  * skip the connector, the provider is never initialised, AppKit is never created, nothing is fetched.
  * It is armed by:
- *   - `connect()` — the user chose "open the official WalletConnect modal"; or
+ *   - `getChainId()` / `connect()` — the user chose "open the official WalletConnect modal". RainbowKit
+ *     calls them in that order (`connectWallet`: `await connector.getChainId()`, then `connectAsync`), and
+ *     neither wagmi nor RainbowKit calls either on a connector that is not connected or being connected;
+ *     or
  *   - a returning visitor whose last connector was WalletConnect (wagmi's own `recentConnectorId`), so
  *     their session is restored on reload exactly as before.
  * Both are "a WalletConnect wallet was chosen", which is the point at which the site says the wallet's
@@ -67,6 +70,12 @@ export function lazyConnector(create: CreateConnectorFn): CreateConnectorFn {
       async isAuthorized() {
         if (!(await isArmed())) return false
         return inner.isAuthorized.call(this)
+      },
+      // The two calls a user's choice starts with (see the header). They arm the connector; `getProvider`
+      // and `isAuthorized` above are what wagmi probes on page load, and they never do.
+      async getChainId() {
+        armed = true
+        return inner.getChainId.call(this)
       },
       async connect(parameters) {
         armed = true

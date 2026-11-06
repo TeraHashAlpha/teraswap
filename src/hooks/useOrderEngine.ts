@@ -35,7 +35,6 @@ import {
   fetchUserOrders,
   fetchActiveOrders,
   cancelOrderInSupabase,
-  subscribeToOrders,
   ensureOrdersReadAuth,
   retryOrdersReadAuth,
   ReadAuthRequiredError,
@@ -643,11 +642,26 @@ export function useOrderEngine() {
           for (const row of rows) {
             const idx = updated.findIndex(o => o.orderHash === row.order_hash)
             if (idx >= 0) {
+              const current = updated[idx]
               const newStatus = mapDbStatus(row.status as string)
-              if (updated[idx].status !== newStatus) {
-                updated[idx] = { ...updated[idx], status: newStatus, dcaExecuted: row.dca_executed, txHash: row.tx_hash, amountOut: row.amount_out, error: row.error }
+              const executedAt = row.executed_at ? new Date(row.executed_at).getTime() : current.executedAt
+              const statusChanged = current.status !== newStatus
+              // [fix/user-ip-privacy] The poll is now the ONLY source of order updates (the browser-side
+              // Supabase realtime socket is gone), so it applies every field that socket used to push —
+              // not just on a status change. A DCA stays 'partially_filled' from its 2nd fill to its
+              // last one; without this its fill count and tx hash would freeze between those two.
+              const changed =
+                statusChanged ||
+                current.dcaExecuted !== row.dca_executed ||
+                current.txHash !== row.tx_hash ||
+                current.amountOut !== row.amount_out ||
+                current.error !== row.error ||
+                current.executedAt !== executedAt
+              if (changed) {
+                updated[idx] = { ...current, status: newStatus, dcaExecuted: row.dca_executed, txHash: row.tx_hash, amountOut: row.amount_out, error: row.error, executedAt }
 
-                if (newStatus === 'filled') {
+                // The fill event still fires once, on the transition into 'filled'.
+                if (statusChanged && newStatus === 'filled') {
                   setLatestEvent({ type: 'order_filled', orderId: updated[idx].id, txHash: row.tx_hash ?? '', chainId: updated[idx].chainId })
                 }
               }
@@ -662,21 +676,6 @@ export function useOrderEngine() {
     pollRef.current = setInterval(pollStatus, ORDER_POLL_INTERVAL_MS)
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [address, activeCount])
-
-  // ── Real-time Supabase subscription ────────────────────
-  useEffect(() => {
-    if (!address) return
-
-    const unsub = subscribeToOrders(address, (row: OrderRow) => {
-      setOrders(prev => prev.map(o =>
-        o.orderHash === row.order_hash
-          ? { ...o, status: mapDbStatus(row.status as string), dcaExecuted: row.dca_executed, txHash: row.tx_hash, amountOut: row.amount_out, error: row.error, executedAt: row.executed_at ? new Date(row.executed_at).getTime() : o.executedAt }
-          : o
-      ))
-    })
-
-    return unsub
-  }, [address])
 
   // ── [SPRINT-9U U2] Create order = Phase A: build + FREEZE for review (NO signature here) ────────
   const createOrder = useCallback(async (config: CreateOrderConfig) => {

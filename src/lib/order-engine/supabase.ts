@@ -1,31 +1,18 @@
 /**
- * TeraSwapOrderExecutor v2 — Supabase order management
+ * TeraSwapOrderExecutor v2 — order management, browser side.
  *
- * Client-side Supabase client for order CRUD.
- * Uses the public anon key (RLS enforces wallet-based access).
+ * Every call here goes to OUR API (`/api/orders…`); the database is only ever reached by the server.
+ *
+ * [fix/user-ip-privacy] There is no Supabase client in the browser any more. This module used to
+ * create one with the public anon key and open a Realtime WebSocket (`subscribeToOrders`) straight to
+ * `<project>.supabase.co`, filtered by the connected wallet address — so with a wallet connected the
+ * database provider saw the visitor's IP and wallet address directly. Order status now comes only from
+ * the poll in useOrderEngine (`fetchActiveOrders`, every ORDER_POLL_INTERVAL_MS), which was always the
+ * source of truth for transitions and now also carries the DCA fill count and tx hash between them.
  */
 
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { SUPABASE_ORDERS_TABLE } from './config'
 import { ordersReadHeaders, ReadAuthRequiredError } from './read-auth'
 import type { AutonomousOrderStatus } from './types'
-
-// ── Client singleton ─────────────────────────────────────
-let _client: SupabaseClient | null = null
-
-function getClient(): SupabaseClient | null {
-  if (_client) return _client
-
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-
-  if (!url || !key) return null
-
-  _client = createClient(url, key, {
-    auth: { persistSession: false },
-  })
-  return _client
-}
 
 // ── Supabase order row type ──────────────────────────────
 export interface OrderRow {
@@ -245,31 +232,4 @@ export async function cancelOrderInSupabase(
     console.error('[OrderEngine] cancelOrder failed')
     return false
   }
-}
-
-// ── Subscribe to order status changes ────────────────────
-export function subscribeToOrders(
-  wallet: string,
-  onUpdate: (order: OrderRow) => void,
-): (() => void) {
-  const client = getClient()
-  if (!client) return () => {}
-
-  const channel = client
-    .channel(`orders:${wallet.toLowerCase()}`)
-    .on(
-      'postgres_changes',
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: SUPABASE_ORDERS_TABLE,
-        filter: `wallet=eq.${wallet.toLowerCase()}`,
-      },
-      (payload) => {
-        onUpdate(payload.new as OrderRow)
-      },
-    )
-    .subscribe()
-
-  return () => { client.removeChannel(channel) }
 }
