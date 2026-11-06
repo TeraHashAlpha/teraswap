@@ -618,14 +618,19 @@ export function useOrderEngine() {
   }, [currentNonce])
 
   // ── Poll active orders ─────────────────────────────────
-  // [BUGFIX] Compute count outside useEffect to avoid inline .filter() in deps
-  const activeCount = orders.filter(o =>
-    o.status === 'active' || o.status === 'executing' || o.status === 'partially_filled'
-  ).length
+  // [BUGFIX] Compute outside useEffect to avoid inline .filter() in deps
+  // [fix/user-ip-privacy A76 S-6] The poll asks the server for THESE orders, by hash (fetchActiveOrders) — not for
+  // the wallet's 50 newest rows. A stable, sorted key so the effect restarts only when the tracked set changes.
+  const activeHashesKey = orders
+    .filter(o => o.status === 'active' || o.status === 'executing' || o.status === 'partially_filled')
+    .map(o => o.orderHash)
+    .sort()
+    .join(',')
   useEffect(() => {
     if (!address) return
+    const activeHashes = activeHashesKey ? activeHashesKey.split(',') : []
 
-    if (activeCount === 0) {
+    if (activeHashes.length === 0) {
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
       return
     }
@@ -634,7 +639,7 @@ export function useOrderEngine() {
       if (!address) return
       try {
         // [W6-M-01] Uses the cached session signature; signs once if missing.
-        const rows = await withReadAuthRef.current(() => fetchActiveOrders(address!))
+        const rows = await withReadAuthRef.current(() => fetchActiveOrders(address!, activeHashes))
         if (rows.length === 0) return
 
         setOrders(prev => {
@@ -675,7 +680,7 @@ export function useOrderEngine() {
     pollStatus()
     pollRef.current = setInterval(pollStatus, ORDER_POLL_INTERVAL_MS)
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [address, activeCount])
+  }, [address, activeHashesKey])
 
   // ── [SPRINT-9U U2] Create order = Phase A: build + FREEZE for review (NO signature here) ────────
   const createOrder = useCallback(async (config: CreateOrderConfig) => {

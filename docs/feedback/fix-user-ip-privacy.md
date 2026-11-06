@@ -103,7 +103,7 @@ with a test that fails on `7eeefeb` (run in a detached worktree at that commit).
       timeout; byte-capped read, > 4 MB → 502
 - [x] S-4 (M) IPv6 rate-limit keys hash the /64
 - [x] S-5 (L) `/api/rpc` limiter bounded at 1 s
-- [ ] S-6 (L) order poll by the locally active order hashes, not the 50 newest rows
+- [x] S-6 (L) order poll by the locally active order hashes, not the 50 newest rows
 - [ ] S-7 (L) empty JSON-RPC batch → −32600
 - [ ] Verify: suite, lint delta 0, tsc, build, host capture incl. CoW, rpc-budget, CodeQL 0 new, gitleaks
 

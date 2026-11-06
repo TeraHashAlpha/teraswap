@@ -11,7 +11,7 @@
  * source of truth for transitions and now also carries the DCA fill count and tx hash between them.
  */
 
-import { ordersReadHeaders, ReadAuthRequiredError } from './read-auth'
+import { ordersReadHeaders, ReadAuthRequiredError, ORDER_POLL_MAX_HASHES } from './read-auth'
 import type { AutonomousOrderStatus } from './types'
 
 // ── Supabase order row type ──────────────────────────────
@@ -168,27 +168,34 @@ export async function fetchUserOrders(wallet: string): Promise<OrderRow[]> {
   }
 }
 
-// ── Fetch orders the poll tracks (live + terminal) for a wallet ──────────────
-// [CHORE-DCA-UX-FIXES] Bug 3b: this feeds useOrderEngine's poll. It MUST include the terminal
-// statuses, not just the live ones — otherwise, when the keeper marks an order 'failed' (or
-// 'executed'/'cancelled'/'expired'), the poll never sees the transition and the order stays "active"
-// in the UI forever / silently vanishes from where the user expected it. Including the terminal
-// statuses lets the poll move a failed order to "Failed" so it never vanishes.
-const POLL_STATUSES = 'active,executing,partially_filled,executed,failed,cancelled,expired'
-export async function fetchActiveOrders(wallet: string): Promise<OrderRow[]> {
+// ── Fetch the orders the poll tracks, by order hash ──────────────────────────────────
+// [CHORE-DCA-UX-FIXES] Bug 3b: the poll must see an order's TERMINAL transition too ('failed', 'executed',
+// 'cancelled', 'expired'), or a failed order stays "active" in the UI forever.
+// [fix/user-ip-privacy A76 S-6] It asks for exactly the orders the browser is tracking — the hashes of its locally
+// live orders — whatever their status now (so Bug 3b stays fixed). It used to ask for the wallet's 50 newest rows in
+// seven statuses: an order older than those 50 never got its update, and every tick re-read up to 50 terminal rows.
+// A list longer than ORDER_POLL_MAX_HASHES is split into several requests.
+const ORDER_HASH_RE = /^0x[0-9a-fA-F]{64}$/
+export async function fetchActiveOrders(wallet: string, orderHashes: readonly string[]): Promise<OrderRow[]> {
+  const hashes = [...new Set(orderHashes)].filter((h) => ORDER_HASH_RE.test(h))
+  if (hashes.length === 0) return []
+  const rows: OrderRow[] = []
   try {
-    // [W6-M-01] The poll includes live statuses → same session signature.
-    const res = await fetch(`/api/orders?wallet=${wallet}&status=${POLL_STATUSES}`, {
-      headers: ordersReadHeaders(wallet) ?? undefined,
-    })
-    if (res.status === 401) throw new ReadAuthRequiredError()
-    if (!res.ok) return []
-    const json = await res.json()
-    return json.orders ?? []
+    for (let i = 0; i < hashes.length; i += ORDER_POLL_MAX_HASHES) {
+      // [W6-M-01] By-hash reads can include live strategy → same session signature.
+      const res = await fetch(`/api/orders?wallet=${wallet}&hashes=${hashes.slice(i, i + ORDER_POLL_MAX_HASHES).join(',')}`, {
+        headers: ordersReadHeaders(wallet) ?? undefined,
+      })
+      if (res.status === 401) throw new ReadAuthRequiredError()
+      if (!res.ok) continue
+      const json = await res.json()
+      rows.push(...(json.orders ?? []))
+    }
+    return rows
   } catch (err) {
     if (err instanceof ReadAuthRequiredError) throw err
     console.error('[OrderEngine] fetchActiveOrders failed')
-    return []
+    return rows
   }
 }
 
