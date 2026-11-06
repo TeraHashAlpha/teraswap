@@ -63,28 +63,45 @@ const LINK = 'ts-v2-underline text-v2-cream font-medium transition hover:text-v2
    Round-7 wrapper primitives (container 2 TOC + container 3 prose). Text content below is byte-identical to v1.
    ──────────────────────────────────────────────────────────────── */
 
+function TocList({ sections, activeId }: { sections: readonly TocSection[]; activeId: string }) {
+  return (
+    <ol className="mt-4 space-y-0">
+      {sections.map((s) => {
+        const active = activeId === s.id
+        return (
+          <li key={s.id} className="ts-v2-rule-t">
+            <button
+              type="button"
+              onClick={() => scrollToSection(s.id)}
+              aria-current={active ? 'true' : undefined}
+              className={`block w-full py-2 text-left text-[13px] leading-snug transition-colors ${active ? 'text-v2-cream' : 'text-v2-muted hover:text-v2-text'}`}
+            >
+              {s.title}
+            </button>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+/** Desktop (>= 1024): sticky sidebar. */
 function Toc({ sections, activeId }: { sections: readonly TocSection[]; activeId: string }) {
   return (
     <nav aria-label="Table of contents" className="sticky top-24 hidden h-fit w-60 shrink-0 lg:block">
       <EyebrowLabel>On this page</EyebrowLabel>
-      <ol className="mt-4 space-y-0">
-        {sections.map((s) => {
-          const active = activeId === s.id
-          return (
-            <li key={s.id} className="ts-v2-rule-t">
-              <button
-                type="button"
-                onClick={() => scrollToSection(s.id)}
-                aria-current={active ? 'true' : undefined}
-                className={`block w-full py-2 text-left text-[13px] leading-snug transition-colors ${active ? 'text-v2-cream' : 'text-v2-muted hover:text-v2-text'}`}
-              >
-                {s.title}
-              </button>
-            </li>
-          )
-        })}
-      </ol>
+      <TocList sections={sections} activeId={activeId} />
     </nav>
+  )
+}
+
+/** Below 1024: the TOC collapses to an in-page list (a <details>, not sticky, not a sidebar). */
+function MobileToc({ sections, activeId }: { sections: readonly TocSection[]; activeId: string }) {
+  return (
+    <details className="ts-v2-rule-t mb-8 pb-2 lg:hidden">
+      <summary className="cursor-pointer py-2 font-v2-mono text-[11px] font-bold uppercase tracking-[2px] text-v2-cream">On this page</summary>
+      <TocList sections={sections} activeId={activeId} />
+    </details>
   )
 }
 
@@ -512,6 +529,7 @@ export function LegalPageV2({ type }: { type: LegalType }) {
             <h1 className="mt-3 font-v2-display text-3xl uppercase leading-none text-v2-text sm:text-4xl">{title}</h1>
             <p className="mt-2 text-sm text-v2-dim">Last updated: {LAST_UPDATED}</p>
           </div>
+          <MobileToc sections={sections} activeId={activeId} />
           {type === 'privacy' ? <PrivacyPolicy /> : <TermsOfService />}
         </div>
       </div>

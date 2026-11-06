@@ -81,6 +81,17 @@ describe('TOC anchors + focus', () => {
     expect(buttons).toHaveLength(20) // Terms has 20 sections
     for (const b of buttons) expect(b.tabIndex).not.toBe(-1)
   })
+
+  it.each([
+    ['Docs', () => <DocsTabV2 />, 16],
+    ['Legal (terms)', () => <LegalPageV2 type="terms" />, 20],
+  ] as const)('%s: below 1024 the TOC collapses to an in-page <details> list (lg:hidden), not just disappears', (_label, Page, count) => {
+    const { container } = render(Page())
+    const mobile = container.querySelector('details.lg\\:hidden')
+    expect(mobile, 'no mobile TOC <details> found').not.toBeNull()
+    expect(mobile!.querySelector('summary')).not.toBeNull()
+    expect(mobile!.querySelectorAll('button')).toHaveLength(count)
+  })
 })
 
 describe('reduced motion: scrollToSection', () => {

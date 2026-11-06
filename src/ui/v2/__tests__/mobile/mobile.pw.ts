@@ -47,6 +47,10 @@ const ROUTES: Route[] = [
   { id: 'orders', path: '/orders', s: { chainId: 8453, connected: true } },
   { id: 'history', path: '/history', s: { chainId: 8453, connected: true } },
   { id: 'analytics', path: '/analytics', s: { chainId: 1, connected: true } },
+  // [feat/ui-v2-docs-legal] not app tabs (no wallet needed): same gates (overflow, tap targets, screenshots) apply.
+  { id: 'docs', path: '/docs', s: { chainId: 1, connected: false } },
+  { id: 'terms', path: '/terms', s: { chainId: 1, connected: false } },
+  { id: 'privacy', path: '/privacy', s: { chainId: 1, connected: false } },
 ]
 
 async function open(page: Page, r: Route, viewport: { width: number; height: number }, reduced = false) {

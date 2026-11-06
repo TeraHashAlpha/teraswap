@@ -211,29 +211,34 @@ export function DocsTabV2() {
   const feedCount = chainlinkFeedCountFor(chainId)
   const activeId = useScrollSpy(SECTIONS.map((s) => s.id))
 
+  const tocList = (
+    <ol className="mt-4 space-y-0">
+      {SECTIONS.map((s) => {
+        const active = activeId === s.id
+        return (
+          <li key={s.id} className="ts-v2-rule-t">
+            <button
+              type="button"
+              onClick={() => scrollToSection(s.id)}
+              aria-current={active ? 'true' : undefined}
+              className={`flex w-full items-center gap-2 py-2 text-left text-[13px] transition-colors ${active ? 'text-v2-cream' : 'text-v2-muted hover:text-v2-text'}`}
+            >
+              <span className="text-xs">{s.icon}</span>
+              {s.title}
+            </button>
+          </li>
+        )
+      })}
+    </ol>
+  )
+
   return (
     <div className="relative mx-auto flex max-w-6xl gap-10 lg:gap-14">
-      {/* Container 2: sticky TOC / scroll-spy — a text list, one hairline per item, active item cream. */}
+      {/* Container 2: sticky TOC / scroll-spy — a text list, one hairline per item, active item cream. Desktop
+          (>= 1024) only; below that it collapses to an in-page list (MobileToc, further down). */}
       <nav aria-label="Table of contents" className="sticky top-24 hidden h-fit w-56 shrink-0 lg:block">
         <EyebrowLabel>Documentation</EyebrowLabel>
-        <ol className="mt-4 space-y-0">
-          {SECTIONS.map((s) => {
-            const active = activeId === s.id
-            return (
-              <li key={s.id} className="ts-v2-rule-t">
-                <button
-                  type="button"
-                  onClick={() => scrollToSection(s.id)}
-                  aria-current={active ? 'true' : undefined}
-                  className={`flex w-full items-center gap-2 py-2 text-left text-[13px] transition-colors ${active ? 'text-v2-cream' : 'text-v2-muted hover:text-v2-text'}`}
-                >
-                  <span className="text-xs">{s.icon}</span>
-                  {s.title}
-                </button>
-              </li>
-            )
-          })}
-        </ol>
+        {tocList}
         <div className="ts-v2-rule-t mt-6 py-3 text-center text-[10px] text-v2-dim">
           TeraSwap Protocol v1.0
           <br />
@@ -254,6 +259,12 @@ export function DocsTabV2() {
               <span className="font-v2-mono text-[11px] font-semibold uppercase tracking-[1.5px] text-v2-muted">Live on {SWAP_CHAIN_LIST_LABEL}</span>
             </div>
           </div>
+
+          {/* Below 1024: the TOC collapses to an in-page list (a <details>, not sticky, not a sidebar). */}
+          <details className="ts-v2-rule-t mb-8 pb-2 lg:hidden">
+            <summary className="cursor-pointer py-2 font-v2-mono text-[11px] font-bold uppercase tracking-[2px] text-v2-cream">Documentation</summary>
+            {tocList}
+          </details>
 
           {/* ═══ OVERVIEW ═══ */}
           <section id="overview" className="scroll-mt-28">
@@ -795,10 +806,17 @@ export function DocsTabV2() {
             <div className="text-sm text-v2-muted">
               <p>Questions, bug reports, or feedback? Reach us on X or by email:</p>
               <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2">
-                <a href="https://x.com/TeraHash" target="_blank" rel="noopener noreferrer" className="ts-v2-underline font-medium text-v2-cream hover:text-v2-text">
+                {/* min-h-[44px]: these are standalone links (not inline in running text), so the WCAG 2.5.8
+                    inline exception does not apply — a real 375 Playwright gate caught the 20 px row height. */}
+                <a
+                  href="https://x.com/TeraHash"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ts-v2-underline inline-flex min-h-[44px] items-center font-medium text-v2-cream hover:text-v2-text"
+                >
                   @TeraHash on X
                 </a>
-                <a href={`mailto:${SUPPORT_EMAIL}`} className="ts-v2-underline font-medium text-v2-cream hover:text-v2-text">
+                <a href={`mailto:${SUPPORT_EMAIL}`} className="ts-v2-underline inline-flex min-h-[44px] items-center font-medium text-v2-cream hover:text-v2-text">
                   {SUPPORT_EMAIL}
                 </a>
               </div>

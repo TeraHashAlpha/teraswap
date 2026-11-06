@@ -8,7 +8,7 @@ Base: origin/main after feat/ui-v2-mobile-parity (#660), verified merged at `ff0
 - [x] C1: `/v2/docs|terms|privacy` pages + proxy matcher + metadata + v2 help drawer links
 - [x] C2: Legal pages — wrapper-only restyle + the one approved copy change + parity test
 - [x] C3: Docs page — full restyle (six containers) + scroll-spy + tables + claims-live + a11y
-- [ ] C4: Mobile 375 (overflow test, TOC collapse) + screenshots 375/1440
+- [x] C4: Mobile 375 (overflow test, TOC collapse) + screenshots 375/1440
 - [ ] Verify: suite vs origin/main, lint delta 0, tsc clean, build, v1 module-identical, rpc-budget, CodeQL 0 new
 - [ ] Evidence 1–6 in this file, branch pushed, compare link reported
 
@@ -120,3 +120,32 @@ Base: origin/main after feat/ui-v2-mobile-parity (#660), verified merged at `ff0
 ### Concern
 - `DocsTabV2` duplicates v1's prose (same risk noted for Legal in P2) — guarded by the parity test, which just
   proved its worth by catching a real drift risk (above), not a hypothetical one.
+
+## P4 — C4: mobile 375, TOC collapse, screenshots (commit TBD)
+
+### What shipped
+- `src/ui/v2/docs-legal/LegalPageV2.tsx` + `DocsTabV2.tsx`: below 1024 px the sticky sidebar TOC is NOT just
+  hidden — it collapses to an in-page `<details>` list (summary "On this page" / "Documentation", same hairline
+  rows, same `scrollToSection`), so mobile users still get a TOC. Covered by `docs-legal-a11y.test.tsx`.
+- `src/ui/v2/__tests__/mobile/mobile.pw.ts`: added `docs`/`terms`/`privacy` to `ROUTES` (disconnected, chainId 1
+  — these pages need no wallet). They get the SAME gates every other v2 route gets for free: no horizontal
+  overflow, tap targets ≥ 44 px, reduced-motion (nothing animates forever), photo credit confined to the footer
+  band, and `V2_SHOTS_DIR` screenshots.
+- `scripts/e2e-mobile-parity-ci.test.mjs` needed no change — it checks the suite runs in CI generically, not a
+  per-route count.
+
+### Real bug found and fixed by the gate (not a design choice)
+- First real-Chromium run: `375 · docs › tap targets are at least 44 px` FAILED — the Support section's two
+  standalone links ("@TeraHash on X", the support email) were ~20 px tall. Legal's equivalent links are inside
+  running prose, so the WCAG 2.5.8 inline-text exception covers them; Docs' are their own row, outside running
+  text, so the exception does not apply and the 20 px row was a real violation. Fixed: `inline-flex min-h-[44px]
+  items-center` on both links (commit lands this before the evidence screenshots, so the shipped build is the
+  fixed one). Rebuilt and reran: 15/15 pass.
+
+### Evidence (screenshots)
+- `docs/feedback/feat-ui-v2-docs-legal/{docs,terms,privacy}-{375,1440}.jpg` — real Chromium renders against
+  `UI_V2_ENABLED=true next start`, from the SAME build the mobile gate ran green against (post tap-target fix).
+
+## Verification pass (full suite, lint, tsc, build, v1 module-identity, rpc-budget, CodeQL)
+
+(Continued below as each check completes — see the final summary at the end of this file.)
