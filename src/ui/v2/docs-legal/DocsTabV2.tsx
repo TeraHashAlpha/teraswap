@@ -416,7 +416,7 @@ export function DocsTabV2() {
 
             <h3 className="mb-2 mt-8 font-v2-display text-[18px] font-semibold text-v2-text">CoW Protocol is an ordinary source</h3>
             <p className="mb-4 text-[15px] leading-relaxed text-v2-muted">
-              CoW Protocol is one of the liquidity sources TeraSwap compares on every quote. It is used only when it answers and its quote
+              CoW Protocol is among the liquidity sources TeraSwap compares on every quote. It is used only when it answers and its quote
               ranks best, exactly like any other source. When it does:
             </p>
             <ul className="mb-6 list-disc space-y-2 pl-5 text-[15px] leading-relaxed text-v2-muted marker:text-v2-dim">
@@ -510,8 +510,8 @@ export function DocsTabV2() {
               <span className="font-v2-mono text-[13px] text-v2-text">TeraSwapOrderExecutor</span> version 2). You place an order by signing it{' '}
               <strong className="text-v2-text">off-chain with EIP-712</strong> — there is no on-chain transaction to create an order — and an
               autonomous keeper later executes it on-chain when its conditions are met. Conditional orders are{' '}
-              <strong className="text-v2-text">not</strong> routed through CoW Protocol; CoW is only used for instant swaps, as one of the
-              compared liquidity sources.
+              <strong className="text-v2-text">not</strong> routed through CoW Protocol; CoW is only used for instant swaps, where it is compared like
+              any other liquidity source.
             </p>
             <p className="mb-2 text-[15px] leading-relaxed text-v2-muted">
               There are three order types: <strong className="text-v2-text">LIMIT</strong>, <strong className="text-v2-text">STOP_LOSS</strong>,
