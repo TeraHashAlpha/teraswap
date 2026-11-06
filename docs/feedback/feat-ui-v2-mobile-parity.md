@@ -163,7 +163,15 @@ Plus 5f937ac / c10729a: an unused helper (lint) and a regex-built selector escap
   `…_ARBITRUM` (Production) decrypt to exactly the values set as repository variables. Not comparable: `NEXT_PUBLIC_BASE_FEE_COLLECTOR` and `NEXT_PUBLIC_DCA_ENABLED` are `sensitive`
   (write-only), so those two stay doc-sourced / literal. Note both V3 executor names exist on Vercel only for Production (+ Development for Arbitrum) — no Preview-targeted entry was listed.
   (c) S-1 consolidated: the chrome and Share sweeps now live in `shell-surfaces-sweep.test.tsx` itself (12 tests, one mock set; `useSwapHistory` left real for the Recent swaps half);
-  the two interim files were folded in and removed (history keeps them).
+  the two interim files were folded in and then archived verbatim under `archive/src/ui/v2/__tests__/shell-surfaces-sweep.{shell,share}.test.tsx.txt` (CLAUDE.md rule 4; stored as .txt so tsc/eslint/vitest ignore them; outside vitest's
+  `include` globs, so they do not run).
+- **L-8 cannot be a byte-for-byte mirror of Vercel Preview — owner decision needed.** Listing the Vercel project's env (names/targets only): the **Preview** target holds
+  `NEXT_PUBLIC_DCA_ENABLED` (sensitive), `NEXT_PUBLIC_BASE_FEE_COLLECTOR` (sensitive) and `NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR`; it holds **no** `NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE`/`_ARBITRUM`
+  (those exist for Production, and Arbitrum also Development). So a Preview build is not DCA-live on either L2 today, while the audit rig (and this suite's `dca` route) needs the V3 executors.
+  CI therefore sets a SUPERSET of Preview — the Production values for the executors — which is the env the A75b rig measured 47/47 on. `sensitive` values (DCA flag, Base fee
+  collector) are write-only on Vercel and cannot be read by anyone; CI's `"true"` is the only meaningful DCA value, and the Base fee collector value was cross-checked ON-CHAIN instead:
+  `0xeFC3…f130` on Base answers `TIMELOCK_DELAY()` = 0x2a300 (172800 s), i.e. a live FeeCollector. If you want Preview DCA-live, add the two V3 names to the Preview target in Vercel
+  (owner action; not done here).
 - The Playwright geometry block was verified green on the fixed build only (52/52 locally on the CI env); the old centred-modal build was not rebuilt to watch
   it go red — the red evidence is the vitest CSS guard.
 - Local mobile run used Playwright's `PW_CHROMIUM` override (this Mac has Chromium build 1243, Playwright 1.64.1 wants 1248).
