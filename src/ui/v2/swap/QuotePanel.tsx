@@ -55,7 +55,9 @@ export interface QuotePanelProps {
   gasless: MetaQuoteResult['gasless']
   lowConfidence: boolean
   sourceCount: number
-  onUseGasless: () => void
+  /** @deprecated [feat/retire-force-mev, owner 2026-11-06] Ignored — the "Use Gasless Route" CTA it drove switched on the
+   *  retired force filter; the gasless card is now information only (v1 QuoteBreakdown, same change). */
+  onUseGasless?: () => void
   /** Tier notice (commit 2) — rendered with the other price notices, above the breakdown. */
   tierNotice?: ReactNode
 }
@@ -114,12 +116,6 @@ export function QuotePanel(p: QuotePanelProps) {
             {p.gasless.gasSavingsUsd >= 0.5 ? `Save ~${fmtUsd(p.gasless.gasSavingsUsd)} in gas fees by using CoW Protocol.` : 'Use CoW Protocol for a fully gasless swap.'}{' '}
             Your swap is fully MEV-protected.
           </p>
-          <div className="mt-1 flex items-center gap-3">
-            <Button variant="text" onClick={p.onUseGasless} aria-label="Switch to the gasless CoW Protocol route">
-              Use Gasless Route
-            </Button>
-            <span className="text-[12px] text-v2-muted">or keep current</span>
-          </div>
         </section>
       )}
       {p.gasless?.recommended && v.intentBased && (
