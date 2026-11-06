@@ -27,6 +27,8 @@ interface PublicSourceStatus {
   p95LatencyMs: number | null
   uptimePercent: number | null
   lastChecked: string | null
+  /** [feat/retire-force-mev C3] First 429 of the current rate-limit episode (ISO), or null. Read by the daily report. */
+  rateLimitedSince: string | null
 }
 
 interface StatusResponse {
@@ -73,6 +75,9 @@ export async function GET(): Promise<NextResponse<StatusResponse | { error: stri
           : null,
         lastChecked: s.lastCheckAt > 0
           ? new Date(s.lastCheckAt).toISOString()
+          : null,
+        rateLimitedSince: s.rateLimit && Number.isFinite(s.rateLimit.since)
+          ? new Date(s.rateLimit.since).toISOString()
           : null,
       }
     })

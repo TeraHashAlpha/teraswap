@@ -51,6 +51,7 @@ import {
   type OnChainScanResult,
 } from './on-chain-monitor'
 import { maybeSendWeeklyReport } from './surplus-report'
+import { runRateLimitWatch } from './rate-limit-watch'
 import {
   checkAllKeeperChains,
   alertOnKeeperTrouble,
@@ -136,6 +137,11 @@ export interface MonitoringTickResult {
   keeperHealth?: KeeperChainHealth[]
   /** False when NO alert delivery channel is configured (every alert is then dropped). */
   alertsConfigured?: boolean
+  /**
+   * [feat/retire-force-mev C3] One `[SOURCE] <id>: rate-limited (429) since <first seen>` line per source answering 429
+   * (H1 probe and/or the real quote path). Absent when none.
+   */
+  rateLimited?: string[]
   /** True when tick was flagged as cold-start warmup (latency discarded). */
   warmup?: boolean
   /** True when tick was skipped due to concurrent lock. */
@@ -332,6 +338,14 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
     }
   }
 
+  // ── [feat/retire-force-mev C3] Rate-limited (429) sources: line every tick, alert after 30 min (1 h cooldown), recovery ──
+  let rateLimitedLines: string[] = []
+  try {
+    rateLimitedLines = (await runRateLimitWatch(allBefore, allAfter)).lines
+  } catch (err) {
+    console.warn('[MONITOR] Rate-limit watch failed:', err instanceof Error ? err.message : err)
+  }
+
   // Check for auto-recovery of non-critical disabled sources
   const recovered = await checkAutoRecovery()
 
@@ -401,6 +415,7 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
     ...(onChainScanResult ? { onChainScan: onChainScanResult } : {}),
     ...(keeperHealth ? { keeperHealth } : {}),
     alertsConfigured: alertChannels.anyConfigured,
+    ...(rateLimitedLines.length ? { rateLimited: rateLimitedLines } : {}),
     ...(warmup ? { warmup: true } : {}),
     ...(supabaseKeepalivePinged ? { supabaseKeepalive: true } : {}),
     ...(h2Status ? { h2Status, h2Reason } : {}),

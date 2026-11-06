@@ -978,3 +978,33 @@ describe('runMonitoringTick — alert delivery sanity (once per run)', () => {
     err.mockRestore()
   })
 })
+
+describe('[feat/retire-force-mev C3] a 429 is visible in the tick, never green', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    kvStore.clear()
+    kvSets.clear()
+    beginTick()
+    mockShouldRunQuorum.mockResolvedValue(false)
+    mockKvSet.mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+      if (opts?.nx && kvStore.has(key)) return null
+      kvStore.set(key, value)
+      return 'OK'
+    })
+  })
+
+  it('a probe 429 → the source is degraded (not active) and the tick carries the [SOURCE] line', async () => {
+    vi.mocked(runHealthCheck).mockResolvedValueOnce({ ok: false, latencyMs: 40, error: 'HTTP 429 (rate-limited)', kind: 'rate-limited' } as never)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const r = await runMonitoringTick()
+    expect(r.rateLimited).toEqual([expect.stringMatching(/^\[SOURCE\] 1inch: rate-limited \(429\) since \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/)])
+    expect(r.statuses.find((s) => s.id === '1inch')?.state).toBe('degraded')
+    expect(warn.mock.calls.some((c) => String(c[0]).startsWith('[SOURCE] 1inch: rate-limited (429) since'))).toBe(true)
+    warn.mockRestore()
+  })
+
+  it('no 429 → no rateLimited field', async () => {
+    const r = await runMonitoringTick()
+    expect(r).not.toHaveProperty('rateLimited')
+  })
+})
