@@ -80,7 +80,7 @@ export function HelpDrawer({ open, onClose }: { open: boolean; onClose: () => vo
                 </button>
                 {expanded ? (
                   // Round 7 D3 item 17: the open group is indented under a single hairline, no surrounding box
-                  <div className="ts-v2-rule-l mb-2 ml-1 pl-3">
+                  <div className="ts-v2-rule-list mb-2 ml-1 pl-3">
                     {section.items.map((item) => {
                       const itemOpen = openItem === item.key
                       return (

@@ -106,7 +106,7 @@ export function DcaSignSheet({
       </div>
 
       {phase === 'frozen' && (
-        <p data-testid="dca-sign-note" className="mt-4 border-l-2 border-v2-cream pl-4 text-[13px] leading-relaxed text-v2-text/90">
+        <p data-testid="dca-sign-note" className="mt-4 border-l-2 ts-v2-accent-stroke pl-4 text-[13px] leading-relaxed text-v2-text/90">
           {approval.needsApproval
             ? `Two steps: first approve the exact ${total} on-chain (one-time, no infinite approvals), then sign the order. The executor then runs it autonomously — output is protected by the on-chain minimum received above.`
             : 'Approved on-chain — now sign the order. The executor runs it autonomously when your condition is met; output is protected by the on-chain minimum received above. No funds move until then.'}

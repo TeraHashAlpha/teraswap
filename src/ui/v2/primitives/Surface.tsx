@@ -36,12 +36,14 @@ const EDGE: Record<SurfaceEdge, string> = {
   rule: 'ts-v2-rule-accent',
 }
 
+/** Design review 1 (owner): one platform green for every vertical accent stroke. The `accent` prop stays (it names the kind of
+ *  strip), but it no longer picks a colour — severity is the text, not the bar. */
 const ACCENT: Record<SurfaceAccent, string> = {
-  cream: 'border-v2-cream',
-  teal: 'border-v2-teal',
-  red: 'border-v2-red',
-  green: 'border-v2-green',
-  amber: 'border-v2-amber',
+  cream: 'ts-v2-accent-stroke',
+  teal: 'ts-v2-accent-stroke',
+  red: 'ts-v2-accent-stroke',
+  green: 'ts-v2-accent-stroke',
+  amber: 'ts-v2-accent-stroke',
 }
 
 /** No radius anywhere (square is the language). Layout and padding are the caller's, via className. */

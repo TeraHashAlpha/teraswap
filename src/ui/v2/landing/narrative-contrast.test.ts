@@ -42,9 +42,14 @@ function scrimFor(section: NarrativeSectionId, vp: 'desktop' | 'mobile'): { toke
   return { token, alpha: weakestStop(token) }
 }
 
-/** The scrim Performance (`--race`) and the bottom CTA (`--center`) paint — landing.css; ≤ 600 px both are the vertical `--scrim-down`. */
+/**
+ * The scrim each baked-still section paints (Sections.tsx / Hero.tsx class names → landing.css). Design review 1 added the hero
+ * (`ts-v2-scrim`: the left gradient) and "Why" (`--center`: the vertical pair) — both used to be solid `--bg` bands / a near-black
+ * CSS-graded raster, so they are checked here like Performance (`--race`) and the CTA (`--center`). ≤ 600 px every one is `--scrim-down`.
+ */
+const STILL_SCRIM_DESKTOP: Record<keyof typeof STILL_PHOTO, string> = { hero: '--scrim-left', performance: '--scrim-left-race', why: '--scrim-down', cta: '--scrim-down' }
 function stillScrim(section: keyof typeof STILL_PHOTO, vp: 'desktop' | 'mobile'): { token: string; alpha: number } {
-  const token = vp === 'mobile' || section === 'cta' ? '--scrim-down' : '--scrim-left-race'
+  const token = vp === 'mobile' ? '--scrim-down' : STILL_SCRIM_DESKTOP[section]
   return { token, alpha: weakestStop(token) }
 }
 
@@ -160,6 +165,8 @@ const ON_PHOTO: { token: keyof typeof V2_COLORS; kind: 'body' | 'large'; need: n
   { token: 'cream', kind: 'body', need: 4.5, use: 'eyebrow / badge / mono link 10–12 px', sections: ALL },
   { token: 'text', kind: 'large', need: 3, use: 'h2 headline 44–80 px', sections: ALL },
   { token: 'cream', kind: 'large', need: 3, use: 'h2 second line / h3 lead / numerals 24–56 px', sections: ALL },
+  // Design review 1: every vertical accent stroke is the platform green (--c-accent-green = --teal). A graphical object needs 3:1 (WCAG 1.4.11).
+  { token: 'teal', kind: 'large', need: 3, use: 'accent strokes (platform green, 1–3 px): chip separators, section-label bars, list + column rules', sections: ALL },
 ]
 
 const PANELS = [
@@ -222,11 +229,13 @@ describe('scroll-narrative contrast (WCAG AA, 95th-percentile backdrop)', async 
     expect(bez(0, 1, (lo + hi) / 2)).toBeCloseTo(0.5, 6)
   })
 
-  it.each(Object.entries(STILL_PHOTO))('still section "%s" (baked %s photo, static): h2 text ≥ 3 and cream second line ≥ 3 on the veiled photo, both sizes', (_section, photo) => {
-    const own = states.filter((st) => st.name.includes(` ${photo} (also: reduced motion)`))
-    expect(own.length).toBeGreaterThan(0)
+  it.each(Object.entries(STILL_PHOTO))('still section "%s" (baked %s photo, static): h2 text ≥ 3 and cream second line ≥ 3 on the veiled photo, both sizes', async (_section, photo) => {
+    // A still is not a stack layer (the hero's overpass and "Why"'s zakim are in no `states` entry), so its own files are decoded here.
+    const own: number[] = []
+    for (const vp of ['desktop', 'mobile'] as const) for (const ext of ['avif', 'webp'] as const) own.push(p95(veiledLuminances(await pixels(photo as NarrativePhotoId, vp, ext))))
+    expect(own).toHaveLength(4)
     for (const token of ['text', 'cream'] as const) {
-      const worst = Math.min(...own.map((st) => ratioOnLuminance(tok(token), st.p95)))
+      const worst = Math.min(...own.map((l) => ratioOnLuminance(tok(token), l)))
       report.push(`still ${_section.padEnd(11)} ${token.padEnd(5)} need 3  worst ${worst.toFixed(2)}  (large, on ${photo})`)
       expect(worst).toBeGreaterThanOrEqual(3)
     }

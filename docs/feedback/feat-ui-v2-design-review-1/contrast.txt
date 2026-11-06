@@ -1,0 +1,48 @@
+states 52; veil rgba(11,13,15, 0.176); brightest veiled photo pixel L=0.0915; P95 backdrop L: min 0.0095, max 0.0658
+on photo+scrim  muted need 4.5  worst 5.25  @ desktop avif underpass (also: reduced motion) · docs · --scrim-left α0.3
+on photo+scrim  text  need 4.5  worst 11.29  @ desktop avif underpass (also: reduced motion) · docs · --scrim-left α0.3
+on photo+scrim  cream need 4.5  worst 9.80  @ desktop avif underpass (also: reduced motion) · docs · --scrim-left α0.3
+on photo+scrim  text  need 3  worst 11.29  @ desktop avif underpass (also: reduced motion) · docs · --scrim-left α0.3
+on photo+scrim  cream need 3  worst 9.80  @ desktop avif underpass (also: reduced motion) · docs · --scrim-left α0.3
+on photo+scrim  teal  need 3  worst 4.20  @ desktop avif underpass (also: reduced motion) · docs · --scrim-left α0.3
+muted worst: veil only 3.64 → with scrim 5.25
+still hero        text  need 3  worst 12.90  (large, on overpass)
+still hero        cream need 3  worst 11.20  (large, on overpass)
+still performance text  need 3  worst 13.78  (large, on tunnel)
+still performance cream need 3  worst 11.97  (large, on tunnel)
+still why         text  need 3  worst 11.96  (large, on zakim)
+still why         cream need 3  worst 10.39  (large, on zakim)
+still cta         text  need 3  worst 12.93  (large, on highway)
+still cta         cream need 3  worst 11.23  (large, on highway)
+still+scrim hero        muted need 4.5  worst 6.62  @ desktop avif overpass · --scrim-left α0.3
+still+scrim hero        text  need 4.5  worst 14.22  @ desktop avif overpass · --scrim-left α0.3
+still+scrim hero        cream need 4.5  worst 12.35  @ desktop avif overpass · --scrim-left α0.3
+still+scrim hero        text  need 3  worst 14.22  @ desktop avif overpass · --scrim-left α0.3
+still+scrim hero        cream need 3  worst 12.35  @ desktop avif overpass · --scrim-left α0.3
+still+scrim hero        teal  need 3  worst 5.29  @ desktop avif overpass · --scrim-left α0.3
+still+scrim performance muted need 4.5  worst 6.95  @ desktop avif tunnel · --scrim-left-race α0.2
+still+scrim performance text  need 4.5  worst 14.94  @ desktop avif tunnel · --scrim-left-race α0.2
+still+scrim performance cream need 4.5  worst 12.98  @ desktop avif tunnel · --scrim-left-race α0.2
+still+scrim performance text  need 3  worst 14.94  @ desktop avif tunnel · --scrim-left-race α0.2
+still+scrim performance cream need 3  worst 12.98  @ desktop avif tunnel · --scrim-left-race α0.2
+still+scrim performance teal  need 3  worst 5.56  @ desktop avif tunnel · --scrim-left-race α0.2
+still+scrim why         muted need 4.5  worst 6.66  @ mobile avif zakim · --scrim-down α0.45
+still+scrim why         text  need 4.5  worst 14.31  @ mobile avif zakim · --scrim-down α0.45
+still+scrim why         cream need 4.5  worst 12.42  @ mobile avif zakim · --scrim-down α0.45
+still+scrim why         text  need 3  worst 14.31  @ mobile avif zakim · --scrim-down α0.45
+still+scrim why         cream need 3  worst 12.42  @ mobile avif zakim · --scrim-down α0.45
+still+scrim why         teal  need 3  worst 5.32  @ mobile avif zakim · --scrim-down α0.45
+still+scrim cta         muted need 4.5  worst 6.93  @ mobile avif highway · --scrim-down α0.45
+still+scrim cta         text  need 4.5  worst 14.89  @ mobile avif highway · --scrim-down α0.45
+still+scrim cta         cream need 4.5  worst 12.93  @ mobile avif highway · --scrim-down α0.45
+still+scrim cta         text  need 3  worst 14.89  @ mobile avif highway · --scrim-down α0.45
+still+scrim cta         cream need 3  worst 12.93  @ mobile avif highway · --scrim-down α0.45
+still+scrim cta         teal  need 3  worst 5.54  @ mobile avif highway · --scrim-down α0.45
+credit    dim   need 4.5  plate/white 4.61  plate/brightest-pixel 5.18 (L=0.0915)
+panel     text  on surface  need 4.5  15.49  (popover / help drawer title)
+panel     muted on surface  need 4.5  7.21  (popover subtitle)
+panel     cream on surface  need 4.5  13.45  (popover action)
+panel     text  on bg       need 4.5  16.79  (flat mode: body)
+panel     muted on bg       need 4.5  7.81  (flat mode: copy)
+panel     cream on bg       need 4.5  14.58  (flat mode: eyebrow)
+panel     dim   on bg       need 4.5  5.51  (flat mode: footer credit)

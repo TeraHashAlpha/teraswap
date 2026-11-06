@@ -7,7 +7,7 @@ import { NARRATIVE_PHOTOS } from '../photos/narrative'
  * the round-4/5 CSS grade, duotone or halftone. Native lazy loading (an `<img>` in a `<picture>`), AVIF first, portrait
  * file at ≤ 600 px — like the stack. Static: nothing animates.
  */
-export function NarrativeStill({ photoId }: { photoId: NarrativePhotoId }) {
+export function NarrativeStill({ photoId, eager = false }: { photoId: NarrativePhotoId; /** the hero: above the fold, so eager + high priority (it is the LCP image) */ eager?: boolean }) {
   const photo = NARRATIVE_PHOTOS[photoId]
   return (
     <div aria-hidden="true" data-photo={photoId} data-ts-narrative-still="" className="ts-v2-nar-still">
@@ -15,7 +15,7 @@ export function NarrativeStill({ photoId }: { photoId: NarrativePhotoId }) {
         <source type="image/avif" media="(max-width: 600px)" srcSet={photo.avif.w1080} />
         <source type="image/avif" srcSet={photo.avif.w1920} />
         <source type="image/webp" media="(max-width: 600px)" srcSet={photo.webp.w1080} />
-        <img src={photo.webp.w1920} alt="" loading="lazy" decoding="async" className="ts-v2-nar-still__img" />
+        <img src={photo.webp.w1920} alt="" loading={eager ? 'eager' : 'lazy'} fetchPriority={eager ? 'high' : 'auto'} decoding="async" className="ts-v2-nar-still__img" />
       </picture>
       <div className="ts-v2-nar-still__veil" />
     </div>

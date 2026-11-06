@@ -42,7 +42,7 @@
 .ts-swap-val { text-align: right; min-width: 0; }
 .ts-swap-route { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
 .ts-rule-t { border-top: 1px solid var(--hairline); padding-top: 8px; }
-.ts-rule-l { border-left: 1px solid var(--hairline); }
+.ts-rule-l { border-left: 1px solid var(--c-accent-green); } /* a list rule: platform green (design review 1) */
 
 /* Compare disclosure: the rows sit indented under ONE hairline. */
 .ts-swap-compare-list { margin: 0 0 0 4px; padding: 0 0 0 16px; list-style: none; }

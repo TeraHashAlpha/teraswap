@@ -11,7 +11,7 @@
   background: var(--surface-2); color: var(--cream); font-size: 12px; font-weight: 700; object-fit: cover;
 }
 .ts-pf-empty { padding: 40px 0; text-align: center; }
-.ts-pf-error { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 20px; padding-left: 14px; border-left: 2px solid var(--red); }
+.ts-pf-error { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 20px; padding-left: 14px; border-left: 2px solid var(--c-accent-green); }
 .ts-pf-spin { animation: ts-pf-spin 1s linear infinite; }
 @keyframes ts-pf-spin { to { transform: rotate(360deg); } }
 .ts-pf-link:focus-visible, .ts-pf-row button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }

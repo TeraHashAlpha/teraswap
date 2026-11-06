@@ -161,20 +161,26 @@ describe('Swap: v1 SwapBox + QuoteBreakdown → v2 SwapCard, quote state', () =>
       h.quote = { meta: taggedFixture(m, '0.1'), loading: false, error: null, countdown: 12, refresh: noop }
       h.oracle = { ...NO_ORACLE, chainlinkPrice: null, oracleUnavailable: true, oracleReadFailed: true }
     }, '0.1')
-    const r = compareContent(v1, v2, ALLOW)
+    // Design review 1 (owner): the ⚠ glyph is gone from every notice — the title text stays verbatim (asserted below).
+    const r = compareContent(v1, v2, [...ALLOW, { text: '⚠ price not verified', reason: 'design review 1: warning glyph removed from notices; the title words are kept' }])
     report('notices', r)
     expect(r.missingText).toEqual([])
+    expect(r.staleAllow).toEqual([])
+    expect(v2.textContent).toContain('Price not verified')
   })
 
-  it('tier: single-source — the amber notice is v1\'s, verbatim (0 missing, no allow entry)', () => {
+  it('tier: single-source — the amber notice is v1\'s, verbatim, minus the ⚠ glyph the owner removed (design review 1)', () => {
     const { v1, v2 } = renderBoth(() => {
       h.account = { address: addr, isConnected: true, chain: { id: 1 } }
       h.tier = { data: { tier: 'single-source', legs: { in: { tier: 'single-source', sources: ['defillama'], usd: 2490 }, out: { tier: 'single-source', sources: ['defillama'], usd: 1 } } }, loading: false }
     })
-    const r = compareContent(v1, v2, ALLOW)
+    // Design review 1 (owner): the ⚠ glyph is gone; the sentence is still v1's, word for word (asserted on both sides below).
+    const r = compareContent(v1, v2, [...ALLOW, { text: '⚠ price from one source only (', reason: 'design review 1: warning glyph removed from notices; the sentence is kept' }])
     report('single-source', r)
     expect(r.missingText).toEqual([])
+    expect(r.staleAllow).toEqual([])
     expect(v1.textContent).toContain('Price from one source only (DefiLlama).')
+    expect(v2.textContent).toContain('Price from one source only (DefiLlama). Value-based limits use that price; double-check the rate before swapping.')
   })
 
   it('tier: unpriced — v1\'s three-sentence notice becomes the owner\'s one line; ONLY those sentences are allowed to go', () => {

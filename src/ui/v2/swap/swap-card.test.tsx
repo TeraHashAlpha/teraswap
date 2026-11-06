@@ -289,7 +289,7 @@ describe('24 — tier notices (the quote panel, as v1 QuoteBreakdown)', () => {
   it('single-source → the verbatim amber notice', () => {
     quoteWithTier(TIER.single)
     expect(document.querySelector('[data-testid="price-tier-single-source"]')?.textContent).toBe(
-      '⚠ Price from one source only (DefiLlama). Value-based limits use that price; double-check the rate before swapping.',
+      'Price from one source only (DefiLlama). Value-based limits use that price; double-check the rate before swapping.',
     )
   })
   it('unpriced → the one-line notice, and the CTA still reads Review swap (its click opens the consent in the review sheet — see 26)', () => {

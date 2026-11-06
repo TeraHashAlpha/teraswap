@@ -174,7 +174,7 @@ export function ExecutionPanel(p: ExecutionPanelProps) {
         )}
         {p.simulation.skipped && (
           <p className="mt-2 text-[12px] text-v2-amber">
-            <span aria-hidden="true">⚠</span> Simulation unavailable — proceed with caution
+            Simulation unavailable — proceed with caution
           </p>
         )}
         {p.fallback && (

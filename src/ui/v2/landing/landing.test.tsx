@@ -117,8 +117,10 @@ describe('structure: ten sections in the pack order', () => {
     const footer = document.querySelector('[data-ts-footer]')!
     const desktop = footer.querySelector('.ts-v2-photo-credit--desktop')!
     const mobile = footer.querySelector('.ts-v2-photo-credit--mobile')!
-    expect(desktop.textContent).toBe('Photo Yakup Gökdeniz · Владимир Николаевич · Oleksiy Yeshtokyn / Pexels') // hero raster · the two stills
-    expect(mobile.textContent).toBe('Photo Yakup Gökdeniz · Владимир Николаевич · Oleksiy Yeshtokyn · Willbone Gallery / Pexels')
+    // design review 1: the hero's still is the overpass (MAG Photography) — light-trails (Yakup Gökdeniz) is gone — and "Why" paints Zakim
+    expect(desktop.textContent).toBe('Photo MAG Photography · Владимир Николаевич · Phil Evenden · Oleksiy Yeshtokyn / Pexels') // hero · §2 · §3 · §8 stills
+    expect(mobile.textContent).toBe('Photo MAG Photography · Владимир Николаевич · Phil Evenden · Oleksiy Yeshtokyn · Willbone Gallery / Pexels')
+    expect(desktop.textContent).not.toMatch(/Yakup/)
     // the mobile map's three photos only: Footbridge and Arch-in-light never show at ≤ 600 px, so they are not named there
     expect(mobile.textContent).not.toMatch(/Erik Mclean|wal_/)
     // the fixed narrative credit is the only other credit element, and it is not in the footer
@@ -129,40 +131,49 @@ describe('structure: ten sections in the pack order', () => {
     expect(css).toMatch(/@media \(max-width: 600px\)\s*\{\s*\.ts-v2-photo-credit--desktop\s*\{\s*display:\s*none;\s*\}\s*\.ts-v2-photo-credit--mobile\s*\{\s*display:\s*inline-block;/)
   })
 
-  it('one grade: Performance and the bottom CTA paint a baked bg-* still (lazy, veiled); only the hero keeps a round-4/5 raster', () => {
+  it('one grade, no bands: the hero, Performance, Why and the bottom CTA each paint a baked bg-* still (veiled); no round-4/5 raster is left on the landing', () => {
     mount()
     const still = (host: Element | null) => host?.querySelector<HTMLElement>('[data-ts-narrative-still]') ?? null
-    const perf = still(document.querySelector('#performance'))
-    const cta = still(document.querySelector('#performance ~ section:not([id]), section.ts-v2-opaque:not([id])'))
-    expect(perf?.dataset.photo).toBe('tunnel')
-    expect(cta?.dataset.photo).toBe('highway')
-    for (const el of [perf!, cta!]) {
-      const id = el.dataset.photo!
-      const srcs = Array.from(el.querySelectorAll('source, img'), (n) => n.getAttribute('srcset') ?? n.getAttribute('src'))
+    const stills = {
+      hero: still(document.querySelector('#hero')),
+      perf: still(document.querySelector('#performance')),
+      why: still(document.querySelector('#why-teraswap')),
+      cta: still(document.querySelector('main > section.ts-v2-opaque:not([id])')),
+    }
+    expect(stills.hero?.dataset.photo).toBe('overpass') // the pack's hero photo (MOTION-SPEC §2 "the overpass (hero and §8)"; round-8 hero credit MAG Photography)
+    expect(stills.perf?.dataset.photo).toBe('tunnel')
+    expect(stills.why?.dataset.photo).toBe('zakim') // the pack's P4 proposal
+    expect(stills.cta?.dataset.photo).toBe('highway')
+    for (const [name, el] of Object.entries(stills)) {
+      const id = el!.dataset.photo!
+      const srcs = Array.from(el!.querySelectorAll('source, img'), (n) => n.getAttribute('srcset') ?? n.getAttribute('src'))
       expect(srcs).toHaveLength(4)
       for (const u of srcs) expect(u).toContain(`bg-${id}-`)
-      expect(el.querySelector('img')!.getAttribute('loading')).toBe('lazy')
-      expect(el.querySelector('.ts-v2-nar-still__veil')).not.toBeNull()
+      // the hero is the LCP image (eager, high priority); the others are below the fold (lazy)
+      expect(el!.querySelector('img')!.getAttribute('loading'), name).toBe(name === 'hero' ? 'eager' : 'lazy')
+      expect(el!.querySelector('.ts-v2-nar-still__veil')).not.toBeNull()
     }
-    // no round-4/5 PhotoBackground (grade + halftone layers) anywhere but the hero
-    const old = Array.from(document.querySelectorAll('.ts-v2-photo'))
-    expect(old).toHaveLength(1)
-    expect(document.querySelector('#hero')!.contains(old[0])).toBe(true)
-    expect(document.querySelectorAll('.ts-v2-photo__dots')).toHaveLength(1)
+    // no round-4/5 PhotoBackground (CSS grade, fades, halftone) anywhere on the landing: the hero's near-black raster + its dark fades are gone
+    expect(document.querySelectorAll('.ts-v2-photo')).toHaveLength(0)
+    expect(document.querySelectorAll('.ts-v2-photo__dots, .ts-v2-photo__fade, [data-photo="trails"]')).toHaveLength(0)
+    // owner, design review 1: no section is a solid band — every section that hides the fixed stack paints a photo of its own
+    for (const s of Array.from(document.querySelectorAll('main > section.ts-v2-opaque'))) {
+      expect(s.querySelector('[data-ts-narrative-still]'), `${s.id || s.className} is an opaque band with no photo`).not.toBeNull()
+    }
   })
 
   it('the shell footer closes the page and carries every still-photo author, in the footer container only', () => {
     mount()
     const footer = document.querySelector('[data-ts-footer]')!
-    expect(footer.textContent).toContain('Photo Yakup Gökdeniz · Владимир Николаевич · Oleksiy Yeshtokyn / Pexels')
+    expect(footer.textContent).toContain('Photo MAG Photography · Владимир Николаевич · Phil Evenden · Oleksiy Yeshtokyn / Pexels')
     expect(footer.textContent).toContain('Smart contracts have not been externally audited. Use at your own risk.')
     expect(footer.textContent).toContain('Fee 0.7%')
     for (const fab of [screen.getByRole('button', { name: /music/i }), screen.getByRole('button', { name: 'Open help' })]) {
       expect(footer.contains(fab)).toBe(false)
     }
-    // photos sit inside their sections (absolute), not as a second fixed layer: the hero raster + the two baked stills
-    expect(document.querySelectorAll('.ts-v2-photo--section')).toHaveLength(1)
-    expect(document.querySelectorAll('.ts-v2-nar-still')).toHaveLength(2)
+    // photos sit inside their sections (absolute), not as a second fixed layer: the four baked stills (hero · §2 · §3 · §8)
+    expect(document.querySelectorAll('.ts-v2-photo--section')).toHaveLength(0)
+    expect(document.querySelectorAll('.ts-v2-nar-still')).toHaveLength(4)
     expect(document.querySelectorAll('.ts-v2-photo:not(.ts-v2-photo--section)')).toHaveLength(0)
   })
 })
@@ -475,16 +486,17 @@ describe('Round 7 language (D2–D4) on the mounted landing', () => {
     expect(document.getElementById('roadmap')).toBeNull()
   })
 
-  it('every photo section has a local scrim: hero, §2 (race), §8 (centred) and the five narrative sections', () => {
+  it('every photo section has a local scrim: hero, §2 (race), §3 and §8 (centred) and the five narrative sections', () => {
     mount()
     const hero = document.getElementById('hero')!
     const perf = document.getElementById('performance')!
-    const cta = document.querySelector('main > section.ts-v2-scrim--center')!
+    const centred = Array.from(document.querySelectorAll('main > section.ts-v2-scrim--center'))
     expect(hero.classList.contains('ts-v2-scrim')).toBe(true)
     expect(perf.classList.contains('ts-v2-scrim--race')).toBe(true)
-    expect(cta).not.toBeNull()
-    // the opaque "why" section sits on --bg, with no photo: it needs no scrim
-    expect(document.getElementById('why-teraswap')!.classList.contains('ts-v2-scrim')).toBe(false)
+    // design review 1: "Why" is no longer a solid --bg band — it paints a photo (Zakim) under the same centred scrim as the §8 CTA
+    expect(centred).toHaveLength(2)
+    expect(centred[0]).toBe(document.getElementById('why-teraswap'))
+    expect(document.getElementById('why-teraswap')!.classList.contains('ts-v2-scrim')).toBe(true)
   })
 
   it('ONE solid cream square CTA per screen: the header has none, the hero has one, the bottom CTA has one', () => {
