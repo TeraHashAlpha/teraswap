@@ -7,6 +7,7 @@ import {
   INTEGRATED_DEX_SOURCE_LABELS,
   PRIVACY_DIRECT_NOTE,
   PRIVACY_IP_STORAGE_NOTE,
+  PRIVACY_LOCAL_COPIES_NOTE,
   PRIVACY_PROXY_CLAIM,
   PRIVACY_WALLET_ADVICE,
   PRIVACY_WALLET_STORAGE_NOTE,
@@ -71,7 +72,7 @@ function PrivacyPolicy() {
       <P>
         The Interface uses your browser&rsquo;s local storage to remember your preferences, such as
         imported tokens, slippage settings, swap history, theme preferences, and active approvals.
-        This data remains exclusively on your device and is never transmitted to our servers.
+        {PRIVACY_LOCAL_COPIES_NOTE}
       </P>
 
       <SectionTitle id="pp-use">4. How We Use Your Information</SectionTitle>

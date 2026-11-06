@@ -141,6 +141,12 @@ export const PRIVACY_WALLET_ADVICE = 'Use a privacy RPC in your wallet settings 
 export const PRIVACY_IP_STORAGE_NOTE =
   'We do not store IP addresses in our database; our hosting and rate-limiting layers process them transiently, and our rate limiter only ever sees a one-way hash.'
 export const PRIVACY_WALLET_STORAGE_NOTE = 'We do store wallet addresses for orders, swap history and activity.'
+// [fix/user-ip-privacy A76 S-2] Privacy §3.3 (v1 == v2), the Auditor's wording. It replaces "This data remains
+// exclusively on your device and is never transmitted to our servers", which was true of the localStorage COPY of the
+// swap history but read as "your swaps never reach our server" — while every swap is POSTed to /api/log-swap and every
+// order to /api/orders, stored with the wallet address, and read back by /api/history for the History tab.
+export const PRIVACY_LOCAL_COPIES_NOTE =
+  'These copies stay in your browser and are never uploaded as such; separately, every swap and order you make is sent to our server and stored with your wallet address (see 3.2) — that server record is what the History tab shows.'
 export const PRIVACY_BADGE = 'Proxied RPC & quotes'
 
 export const SITE_META_DESCRIPTION =

@@ -92,6 +92,30 @@ describe.each(LEGAL)('Privacy Policy — %s', (_ui, mount) => {
   })
 })
 
+// [fix/user-ip-privacy A76 S-2] §3.3 said the local data "is never transmitted to our servers" — true of the browser's
+// copy, false of the swaps and orders themselves (POSTed to /api/log-swap and /api/orders, read back by /api/history).
+describe.each(LEGAL)('Privacy Policy §3.3 — %s', (_ui, mount) => {
+  it("says the local copies stay local AND that every swap and order is stored server-side (the Auditor's wording)", () => {
+    const collect = section(mount(), 'pp-collect')
+    expect(collect).toContain(
+      'These copies stay in your browser and are never uploaded as such; separately, every swap and order you make is sent to our server and stored with your wallet address (see 3.2) — that server record is what the History tab shows.',
+    )
+    expect(collect).not.toMatch(/never transmitted to our servers|remains exclusively on your device/i)
+  })
+})
+
+describe('§3.3 is backed by the code: swaps and orders reach our server, and the History tab reads it back', () => {
+  it('v1 and v2 History read /api/history; swaps are logged to /api/log-swap; orders are created at /api/orders', async () => {
+    const { readFileSync } = await import('node:fs')
+    const read = (f: string) => readFileSync(f, 'utf8')
+    // Real calls, not comments: a `fetch(` of the route.
+    expect(read('src/components/WalletHistory.tsx')).toMatch(/fetch\(\s*[`'"]\/api\/history/)
+    expect(read('src/ui/v2/history/use-wallet-history.ts')).toMatch(/fetch\(\s*[`'"]\/api\/history/)
+    expect(read('src/lib/analytics.ts')).toMatch(/fetch\(\s*'\/api\/log-swap'/)
+    expect(read('src/lib/order-engine/supabase.ts')).toMatch(/fetch\(\s*'\/api\/orders'/)
+  })
+})
+
 // [fix/user-ip-privacy A76 S-1] §6 said quotes go "via our server-side proxy" while the signed CoW order went from the
 // browser to api.cow.fi. Both now go through our server; §6 says so for the signed order too.
 describe.each(LEGAL)('Privacy Policy §6 — %s', (_ui, mount) => {
