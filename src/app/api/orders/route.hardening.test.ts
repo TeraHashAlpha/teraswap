@@ -60,6 +60,7 @@ vi.mock('@/lib/dca-freeze', () => ({
 
 import { GET, POST } from './route'
 import { GET as GET_BY_ID } from './[id]/route'
+import { hashClientIp } from '@/lib/client-ip-key'
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 // Published Anvil/Hardhat default account #0 key — a throwaway local-dev
@@ -206,7 +207,7 @@ describe('POST /api/orders — per-IP rate limit + body cap', () => {
   it('keys the limit by IP with the orders: prefix', async () => {
     mockCheckRateLimit.mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60_000 })
     await POST(postReq('{}', { 'x-forwarded-for': '9.9.9.9, 10.0.0.1' }))
-    expect(mockCheckRateLimit).toHaveBeenCalledWith('orders:10.0.0.1', expect.any(Number), expect.any(Number))
+    expect(mockCheckRateLimit).toHaveBeenCalledWith(`orders:${hashClientIp('10.0.0.1')}`, expect.any(Number), expect.any(Number))
   })
 
   // [CHORE-API-HARDENING-2 / P3a] clientIp() (body-limit.ts) now delegates to
@@ -219,7 +220,7 @@ describe('POST /api/orders — per-IP rate limit + body cap', () => {
     await POST(postReq('{}', { 'x-forwarded-for': 'attacker-controlled-spoof, 203.0.113.5' }))
     const key = mockCheckRateLimit.mock.calls.at(-1)?.[0]
     expect(key).not.toBe('orders:attacker-controlled-spoof')
-    expect(key).toBe('orders:203.0.113.5')
+    expect(key).toBe(`orders:${hashClientIp('203.0.113.5')}`)
   })
 
   it('returns 413 for an oversized body (content-length) [W6-L-01]', async () => {

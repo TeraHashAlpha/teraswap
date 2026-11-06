@@ -7,6 +7,7 @@ import { getChainlinkFeed, getComposedFeed } from '@/lib/chains/chainlink-feeds'
 import { probeDefiLlamaCoverage } from '@/lib/defillama'
 import { resolveOracleCoverage } from '@/lib/order-engine/oracle-coverage'
 import { withTimeout } from '@/lib/adapters/shared'
+import { clientIpKey } from '@/lib/client-ip-key'
 
 /**
  * [chore/oracle-less-advisory] Read-only oracle-coverage probe for the DCA/order
@@ -25,7 +26,9 @@ const KV_GATE_TIMEOUT_MS = 3_000
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     // Light rate limit (shares the quote budget shape). KV timeout → fail-open allow.
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+    // [fix/user-ip-privacy] Was the raw LEFT-MOST x-forwarded-for token (client-writable, and a raw IP in the key).
+    // Now the keyed hash of the TRUSTED client IP (trusted-ip.ts / client-ip-key.ts).
+    const ip = clientIpKey(req)
     const rate = await withTimeout(
       checkRateLimit(`oracle:${ip}`, QUOTE_RATE_LIMIT.limit, QUOTE_RATE_LIMIT.windowMs),
       KV_GATE_TIMEOUT_MS,

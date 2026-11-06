@@ -3,7 +3,7 @@ import { bodySizeGuard, RPC_MAX_BODY_BYTES } from '@/lib/body-limit'
 import { checkRateLimit, RPC_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { resolveProxyChainId } from '@/lib/rpc-proxy-chain'
 import { serverRpcUrl } from '@/lib/rpc-env'
-import { trustedClientIp } from '@/lib/trusted-ip'
+import { clientIpKey } from '@/lib/client-ip-key'
 import { isExpensiveMethod, exceedsBatchLimit, clampGetLogsRange, rpcRateLimitUnits, MAX_RPC_BATCH_SIZE } from '@/lib/rpc-cost-policy'
 import { isAllowedReadMethod } from '@/lib/rpc-method-policy'
 import { isShortCacheable, readShortCache, writeShortCache } from '@/lib/rpc-short-cache'
@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
   if (tooLarge) return tooLarge
   // [B-06] Rate limiting by IP — persistent via Vercel KV
   // [CHORE-API-HARDENING-2 / P3a] Trusted IP — see trusted-ip.ts.
-  const ip = trustedClientIp(req)
+  const ip = clientIpKey(req)
   // [FEAT-SERVER-RPC-ENV-SPLIT] Parse BEFORE limiting: the budget is charged per JSON-RPC call in
   // a batch (rpcRateLimitUnits), not per HTTP request. Same per-IP key/limit/window as before; a
   // body that does not parse still costs 1 and still ends in the 500 below.

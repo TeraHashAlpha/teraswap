@@ -106,6 +106,17 @@ const RULES: EnvRule[] = [
       'Alchemy API key (server-only — must be app-scoped to BOTH eth-mainnet ' +
       'AND base-mainnet; a mainnet-only key degrades Base portfolio discovery to 503)',
   },
+  // [fix/user-ip-privacy] Secret behind the hashed per-client rate-limit keys (client-ip-key.ts).
+  // Warning-only: unset degrades to a per-instance random salt — limits still work inside one
+  // instance but are not shared across instances.
+  {
+    key: 'RATE_LIMIT_SALT',
+    required: false,
+    serverOnly: true,
+    label:
+      'Rate-limit salt (server-only, 32+ random characters) — when absent, per-IP limits are enforced ' +
+      'per function instance instead of across instances',
+  },
   // ── Supabase (server-only) ──
   {
     key: 'SUPABASE_URL',

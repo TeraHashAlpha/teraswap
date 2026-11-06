@@ -47,6 +47,7 @@ import { POST as postLogEvent } from './log-event/route'
 import { POST as postLogActivity } from './log-activity/route'
 import { POST as postLogQuote } from './log-quote/route'
 import { POST as postLogSwap } from './log-swap/route'
+import { hashClientIp } from '@/lib/client-ip-key'
 
 const ROUTES: Array<[string, (req: NextRequest) => Promise<Response>]> = [
   ['log-event', postLogEvent as (req: NextRequest) => Promise<Response>],
@@ -80,7 +81,7 @@ describe.each(ROUTES)('POST /api/%s — W6-M-02 + W6-L-01', (name, handler) => {
   it('shares one per-IP budget across the log routes (key = log:<ip>)', async () => {
     mockCheckRateLimit.mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60_000 })
     await handler(makeReq(name, '{}', { 'x-forwarded-for': '7.7.7.7' }))
-    expect(mockCheckRateLimit).toHaveBeenCalledWith('log:7.7.7.7', expect.any(Number), expect.any(Number))
+    expect(mockCheckRateLimit).toHaveBeenCalledWith(`log:${hashClientIp('7.7.7.7')}`, expect.any(Number), expect.any(Number))
   })
 
   it('refuses an oversized body with 413 before any parsing', async () => {
