@@ -28,7 +28,7 @@ import { playQuoteReceived, playTouchMP3 } from '@/lib/sounds'
 import { CHAIN_ID } from '@/lib/constants'
 import { isVerifiedToken } from '@/lib/chains/tokens'
 import { safeBigInt } from '@/lib/utils'
-import { Button, Input, Skeleton, Surface, Toggle } from '../primitives'
+import { Button, Input, Skeleton, Surface } from '../primitives'
 import { CtaButton } from './CtaButton'
 import { shortAddress } from '../shell/format-address'
 import './swap.css'
@@ -37,7 +37,6 @@ import { buildQuoteView, buildShareText, quoteIsForAmount } from './quote-model'
 import { QuotePanel, Notice } from './QuotePanel'
 import { TierNotice } from './TierNotice'
 import { SourcesMenu } from './SourcesMenu'
-import { Tip } from './Tip'
 import { TokenButton } from './TokenButton'
 import { SlippageSheet } from '../modals/SlippageSheet'
 import { TokenSheet } from '../modals/TokenSheet'
@@ -56,7 +55,6 @@ import { useSwapGates } from './lifecycle/use-swap-gates'
 import { useSwapLifecycle } from './lifecycle/use-swap-lifecycle'
 import { buildTimeline, confirmButtonState, SIGNING_STATUSES } from './lifecycle/lifecycle-view'
 
-const MEV_HINT_KEY = 'teraswap:mev-hint-dismissed' // v1's key: one dismissal across v1 and v2
 
 /** README §3: the thousands separator is a thin space. v1's `formatWithSeparator` groups with U+0020 (and `stripSeparator` eats `\s`, thin space included). */
 const thin = (s: string) => s.replace(/ /g, ' ')
@@ -102,15 +100,8 @@ export function SwapCard() {
   const [selectedOut, setSelectedOut] = useState<Token | null>(findToken('USDC') ?? null)
   const [displayAmountIn, setDisplayAmountIn] = useState('')
   const [spenderAnswer, setSpenderAnswer] = useState<{ key: string; spender: `0x${string}` | undefined } | null>(null)
-  const [mevProtected, setMevProtected] = useState(false)
-  // The exposure hint is only ever shown next to a quote (client state), so reading storage in the initialiser cannot mismatch SSR.
-  const [mevHintDismissed, setMevHintDismissed] = useState(() => {
-    try {
-      return localStorage.getItem(MEV_HINT_KEY) === '1'
-    } catch {
-      return false // storage disabled — treat as not dismissed
-    }
-  })
+  // [feat/retire-force-mev, owner 2026-11-06] v1's Force MEV Protection toggle, its notice and the "CoW Protocol available…
+  // Enable" strip (with the shared localStorage dismissal) are retired in both UIs. CoW stays an ordinary source.
   const [excludedSources, setExcludedSources] = useState<Set<string>>(new Set())
   // v1's SwapBox state, same names and defaults: slippage is Auto until the user picks otherwise (frame 22).
   const [manualSlippage, setManualSlippage] = useState(DEFAULT_SLIPPAGE)
@@ -124,14 +115,6 @@ export function SwapCard() {
   const { openConnectModal } = useConnectModal()
   const { switchChain } = useSwitchChain()
 
-  const dismissMevHint = useCallback(() => {
-    setMevHintDismissed(true)
-    try {
-      localStorage.setItem(MEV_HINT_KEY, '1')
-    } catch {
-      /* session-only dismissal is still useful */
-    }
-  }, [])
   const toggleSource = useCallback((source: string) => {
     setExcludedSources((prev) => {
       const next = new Set(prev)
@@ -173,9 +156,10 @@ export function SwapCard() {
     () => (rawMeta && quoteMatchesSelection(rawMeta.identity, { chainId: activeChainId, tokenIn, tokenOut }) ? rawMeta : null),
     [rawMeta, activeChainId, tokenIn, tokenOut],
   )
-  const { meta: pickedMeta, smartMevApplied, mevExposedBest } = useMemo(
-    () => selectBestWithMevPreference(scopeToExecutable(matchedRawMeta, activeChainId), mevProtected, AGGREGATOR_META, MEV_PREFERENCE_THRESHOLD),
-    [matchedRawMeta, mevProtected, activeChainId],
+  // The 2nd argument (the retired force toggle) is deprecated and ignored; `false` was its default.
+  const { meta: pickedMeta, smartMevApplied } = useMemo(
+    () => selectBestWithMevPreference(scopeToExecutable(matchedRawMeta, activeChainId), false, AGGREGATOR_META, MEV_PREFERENCE_THRESHOLD),
+    [matchedRawMeta, activeChainId],
   )
   // …and, new in v2, only while it answers the amount that is in the field (see quoteIsForAmount).
   const quoteCurrent = !!pickedMeta && !!tokenIn && quoteIsForAmount(matchedRawMeta?.identity.amountRaw, amountIn, tokenIn.decimals)
@@ -529,44 +513,12 @@ export function SwapCard() {
           )}
         </div>
 
-        <Toggle
-          className="mt-3"
-          checked={mevProtected}
-          onChange={setMevProtected}
-          label={
-            <span className="inline-flex items-center gap-2">
-              Force MEV Protection
-              <Tip
-                label="MEV protection info"
-                content="Always route through CoW Protocol regardless of price. When off, TeraSwap automatically prefers MEV-protected routes when pricing is competitive."
-              />
-            </span>
-          }
-        />
-
-        {mevProtected && !meta && matchedRawMeta && !quoteLoading && (
-          <div className="mt-3">
-            <Notice tone="amber">No MEV-protected quote available. CoW Protocol may be temporarily unavailable. Try disabling Force MEV Protection or wait a moment.</Notice>
-          </div>
-        )}
-
         {quoteError && (
           <div className="mt-3">
             <Notice tone="red">{quoteError}</Notice>
           </div>
         )}
 
-        {meta && mevExposedBest && !mevHintDismissed && (
-          <div className="mt-2 flex items-center gap-2 text-[13px] text-v2-muted">
-            <span>CoW Protocol available for MEV protection.</span>
-            <Button variant="text" onClick={() => setMevProtected(true)}>
-              Enable
-            </Button>
-            <Button variant="icon" onClick={dismissMevHint} aria-label="Dismiss MEV protection hint">
-              <span aria-hidden="true">×</span>
-            </Button>
-          </div>
-        )}
       </Surface>
 
       <Surface edge="top" className="ts-swap-quote" aria-busy={quoting || undefined}>
@@ -605,7 +557,6 @@ export function SwapCard() {
             gasless={meta.gasless}
             lowConfidence={!!meta.lowConfidence}
             sourceCount={meta.all.length}
-            onUseGasless={() => setMevProtected(true)}
             tierNotice={<TierNotice tier={priceTier} />}
           />
         ) : (

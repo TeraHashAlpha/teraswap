@@ -175,7 +175,7 @@ export default function SwapButton({
 
       {swapStatus === 'cow_pending' && (
         <p className="mt-1.5 text-center text-[10px] text-cream-gold/60">
-          Your order is MEV-protected. Solvers are competing to fill it at the best price.
+          Your order is in CoW Protocol&apos;s batch auction. Solvers are competing to fill it at the best price.
         </p>
       )}
 

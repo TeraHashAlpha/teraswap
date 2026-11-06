@@ -115,7 +115,7 @@ export function ExecutionPanel(p: ExecutionPanelProps) {
         {p.phase === 'pending' && (
           <>
             {p.txHash && <p data-testid="exec-sent">{link(<>Transaction sent — track on {explorerName(p.explorerUrl)} ↗</>)}</p>}
-            {p.cowPending && <p className="text-v2-muted">Your order is MEV-protected. Solvers are competing to fill it at the best price.</p>}
+            {p.cowPending && <p className="text-v2-muted">Your order is in CoW Protocol&apos;s batch auction. Solvers are competing to fill it at the best price.</p>}
           </>
         )}
         {p.phase === 'success' && (

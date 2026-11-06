@@ -72,7 +72,7 @@ const SECTIONS: DocSection[] = [
   { id: 'liquidity-sources', title: 'Liquidity Sources', icon: '◉' },
   { id: 'smart-routing', title: 'Smart Routing', icon: '⟁' },
   { id: 'security', title: 'Security', icon: '⬢' },
-  { id: 'mev-protection', title: 'MEV Protection', icon: '⌬' },
+  { id: 'mev', title: 'MEV & CoW Protocol', icon: '⌬' },
   { id: 'privacy', title: 'Privacy', icon: '◍' },
   { id: 'fee-structure', title: 'Fee Structure', icon: '◇' },
   { id: 'order-engine', title: 'Order Engine', icon: '⊞' },
@@ -291,8 +291,7 @@ export default function DocsPage() {
           </p>
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
             Every swap is validated against <strong className="text-cream">Chainlink price oracles</strong> and{' '}
-            <strong className="text-cream">DefiLlama</strong> to protect against price manipulation, and intent-based
-            execution via CoW Protocol provides <strong className="text-cream">MEV protection</strong> out of the box.
+            <strong className="text-cream">DefiLlama</strong> to protect against price manipulation.{' '}
             {PRIVACY_PROXY_CLAIM} See <em>Privacy</em> for what is not proxied.
           </p>
           <div className="flex flex-wrap gap-2">
@@ -300,7 +299,6 @@ export default function DocsPage() {
             <Tag>Permissionless · no KYC</Tag>
             <Tag>{INTEGRATED_DEX_SOURCES_CLAIM}</Tag>
             <Tag>Multi-oracle verified</Tag>
-            <Tag>MEV protection on CoW routes</Tag>
             <Tag>{PRIVACY_BADGE}</Tag>
             <Tag>Not externally audited</Tag>
           </div>
@@ -360,7 +358,7 @@ export default function DocsPage() {
           <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }}
             variants={stagger} className="grid gap-3 sm:grid-cols-2"
           >
-            <SourceCard name="CoW Protocol" type="Intent" desc="Batch auction system where solvers compete to fill your order — the MEV-protected route, with no gas paid by the user at execution." />
+            <SourceCard name="CoW Protocol" type="Intent" desc="Batch auction system where solvers compete to fill your order, with no gas paid by the user at execution." />
             <SourceCard name="Bebop" type="Disabled" desc={`Request-for-quote market makers via JAM settlement. Disabled: ${DISABLED_SOURCES.bebop}.`} />
           </motion.div>
         </AnimatedSection>
@@ -418,7 +416,6 @@ export default function DocsPage() {
               { title: 'DefiLlama Server-Side Check', desc: `A second independent oracle validates swap output on the server before returning calldata. Blocks swaps where output is >${DEFILLAMA_BLOCK_PCT} below fair market value. If this secondary oracle is unreachable, swaps estimated above ${DEFILLAMA_HIGH_VALUE_USD_LABEL} are blocked while small swaps fail open.`, badge: 'Oracle' },
               { title: 'Cross-Quote Consensus', desc: `The winning quote is validated against the median of all aggregator responses. Deviations >${CROSS_QUOTE_WARN_PCT} are flagged; quotes >${OUTLIER_MEDIAN_MULTIPLE}× above median are removed automatically.`, badge: 'Safety' },
               { title: 'Privacy Proxy', desc: `${PRIVACY_PROXY_CLAIM} ${PRIVACY_DIRECT_NOTE}`, badge: 'Privacy' },
-              { title: 'MEV Protection', desc: 'CoW Protocol routes execute via batch auctions where solvers compete, with no in-block ordering window for a sandwich bot to exploit. Other routes use the public mempool.', badge: 'MEV' },
               { title: 'Exact-Amount Approvals', desc: 'Approvals are always scoped to the exact amount needed and granted directly to the actual spender, which is checked against a trusted allowlist — never an infinite/max-uint approval. (The 0x source uses Permit2\'s pull model, which still requires an on-chain approve to the Permit2 contract — TeraSwap does not ship gasless off-chain signature approvals as the general path.)', badge: 'Approval' },
               { title: 'Non-Custodial', desc: 'TeraSwap never takes custody of your tokens. The fee-collector contract pulls funds, takes the fee, forwards the net to the DEX router, and atomically refunds any leftovers in the same transaction — it never holds user funds between transactions.', badge: 'Trust' },
               { title: 'Permissionless · No KYC', desc: 'There is no sign-up, no account, and no identity check. You connect a wallet and trade directly with on-chain contracts.', badge: 'Access' },
@@ -443,14 +440,13 @@ export default function DocsPage() {
 
         <Divider />
 
-        {/* ═══ MEV PROTECTION ═══ */}
-        <AnimatedSection id="mev-protection">
-          <SectionTitle icon="⌬" title="MEV Protection" />
+        {/* ═══ MEV & COW PROTOCOL ═══ [feat/retire-force-mev, owner 2026-11-06] Was "MEV Protection": TeraSwap makes no MEV-related promise; CoW is an ordinary source. */}
+        <AnimatedSection id="mev">
+          <SectionTitle icon="⌬" title="MEV & CoW Protocol" />
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
-            Most DEX trades on Ethereum settle on a public mempool, which is where searchers and block
-            builders extract value from regular users. TeraSwap reduces that exposure by routing through
-            CoW Protocol whenever it offers the better price-and-MEV outcome — and by always letting the
-            user see the trade-off before they sign.
+            Most DEX trades on Ethereum settle on a public mempool, which is where searchers and block builders extract value from regular
+            users. TeraSwap does not claim to prevent MEV: it compares quotes and routes each swap through the source with the best net
+            output, and the transaction-preview screen shows the route and the on-chain-enforced minimum output before you sign.
           </p>
 
           <h3 className="mt-8 mb-2 font-display text-[18px] font-semibold text-cream">
@@ -466,62 +462,23 @@ export default function DocsPage() {
             cumulative MEV extracted from Ethereum users in the billions of USD since 2020.
           </p>
 
-          <h3 className="mt-8 mb-2 font-display text-[18px] font-semibold text-cream">
-            How TeraSwap protects you
-          </h3>
+          <h3 className="mt-8 mb-2 font-display text-[18px] font-semibold text-cream">CoW Protocol is an ordinary source</h3>
           <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
-            For every swap, TeraSwap evaluates CoW Protocol alongside its other liquidity sources.
-            When CoW wins, the swap follows an MEV-protected path:
+            CoW Protocol is among the liquidity sources TeraSwap compares on every quote. It is used only when it answers and its quote
+            ranks best, exactly like any other source. When it does:
           </p>
           <ul className="mb-6 list-disc space-y-2 pl-5 text-[15px] leading-relaxed text-cream-65 marker:text-cream-35">
             <li>
-              You sign an <strong className="text-cream">off-chain EIP-712 order</strong>, not a
-              transaction. Nothing hits the public mempool.
+              You sign an <strong className="text-cream">off-chain EIP-712 order</strong>, not a transaction, and pay no gas to submit it.
             </li>
             <li>
-              Professional solvers compete in a <strong className="text-cream">batch auction</strong> to
-              fill the order. The auction picks the best execution across multiple venues at the same
-              block, so there&apos;s no in-block reordering window for a sandwicher to exploit.
-            </li>
-            <li>
-              <strong className="text-cream">Conditional orders</strong> (limit, stop-loss / take-profit, DCA)
-              are signed off-chain on the order engine, so the trigger price isn&apos;t observable in a public
-              mempool until the keeper executes — unlike on-chain conditional orders whose target price is
-              public. Note: conditional orders are settled by the keeper through whitelisted DEX routers via
-              the OrderExecutor contract, not through CoW&apos;s solver auction.
+              Professional solvers compete in a <strong className="text-cream">batch auction</strong> to fill the order. How that auction treats
+              MEV is part of CoW Protocol&apos;s own design, described in its documentation — not a TeraSwap guarantee.
             </li>
           </ul>
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
-            For direct on-chain swaps (Uniswap V3, Curve, SushiSwap), the trade does pass through
-            the public mempool and isn&apos;t MEV-protected — that&apos;s why the price comparison
-            explicitly accounts for the MEV-protected vs. public-mempool trade-off, and why CoW gets
-            evaluated on every quote.
-          </p>
-
-          <h3 className="mt-8 mb-2 font-display text-[18px] font-semibold text-cream">
-            Why meta-aggregation matters
-          </h3>
-          <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
-            Most MEV-protected venues quote against their own internal liquidity. That solves the MEV
-            problem but caps the trade to a single source&apos;s pricing. Most general-purpose aggregators
-            do the opposite — they query several venues for the best public price but route through the
-            public mempool, accepting the MEV exposure as the cost of cheaper execution.
-          </p>
-          <p className="mb-4 text-[15px] leading-relaxed text-cream-65">
-            TeraSwap compares <strong className="text-cream">every source, including CoW</strong>, on
-            every quote. When CoW&apos;s batch-auction price (net of solver competition) beats the
-            public-mempool venues by more than the gas savings, the swap auto-routes through CoW — best
-            price <em>and</em> MEV protection, picked algorithmically. When a public-mempool venue
-            quotes materially better and the trade is small enough that MEV exposure is bounded by your
-            slippage tolerance, you keep the option to take the faster path. Either way, the
-            transaction-preview screen shows the route and the on-chain-enforced minimum output before
-            you sign.
-          </p>
-          <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
-            We don&apos;t claim &ldquo;zero MEV&rdquo; — we claim significantly reduced MEV exposure on
-            the paths that flow through CoW, a hard on-chain minimum-output floor that bounds any sandwich
-            on conditional and DCA orders, and an algorithmic choice on every other swap that takes both
-            price and MEV cost into account.
+            Every other route — aggregator APIs and direct on-chain swaps (Uniswap V3, Curve, SushiSwap) — is a public-mempool transaction.
+            To reduce mempool exposure in general, you can configure a privacy-focused RPC in your wallet settings (see <em>Privacy</em>).
           </p>
         </AnimatedSection>
 
@@ -652,8 +609,8 @@ export default function DocsPage() {
             (EIP-712 domain <span className="font-mono text-[13px] text-cream">TeraSwapOrderExecutor</span> version 2). You place
             an order by signing it <strong className="text-cream">off-chain with EIP-712</strong> — there is no on-chain
             transaction to create an order — and an autonomous keeper later executes it on-chain when its conditions are met.
-            Conditional orders are <strong className="text-cream">not</strong> routed through CoW Protocol; CoW is only used on
-            the instant-swap MEV-protection path.
+            Conditional orders are <strong className="text-cream">not</strong> routed through CoW Protocol; CoW is only used for
+            instant swaps, where it is compared like any other liquidity source.
           </p>
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
             There are three order types: <strong className="text-cream">LIMIT</strong>, <strong className="text-cream">STOP_LOSS</strong>,
@@ -936,7 +893,6 @@ export default function DocsPage() {
                 'DefiLlama server-side oracle validation',
                 'Cross-quote median consensus validation',
                 'Privacy proxy for RPC reads and aggregator quote / swap requests',
-                'MEV protection via CoW Protocol',
                 'Exact-amount approvals (no infinite approvals)',
                 'Active approvals manager with revoke',
                 'Curve Finance on-chain routing',

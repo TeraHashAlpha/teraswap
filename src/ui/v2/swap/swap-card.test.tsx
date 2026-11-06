@@ -256,11 +256,12 @@ describe('20 — quote', () => {
     expect(screen.getByRole('button', { name: /Receive token: USDT/ })).toBeTruthy()
   })
 
-  it('MEV: the row is a switch; v1\'s exposure hint offers Enable, which flips it', () => {
+  it('MEV (retired, owner 2026-11-06): no Force MEV switch and no "CoW Protocol available… Enable" hint — see retire-force-mev.swap.test', () => {
     withQuote()
-    expect(screen.getByText('CoW Protocol available for MEV protection.')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Enable' }))
-    expect(screen.getByRole('switch', { name: /Force MEV Protection/ }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.queryByRole('switch')).toBeNull()
+    expect(screen.queryByText(/Force MEV Protection/)).toBeNull()
+    expect(screen.queryByText('CoW Protocol available for MEV protection.')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Enable' })).toBeNull()
   })
 })
 

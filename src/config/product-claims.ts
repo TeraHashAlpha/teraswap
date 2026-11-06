@@ -25,6 +25,7 @@ import {
   DISABLED_SOURCES,
   FEE_BPS,
   FEE_PERCENT,
+  MEV_PREFERENCE_THRESHOLD,
   PERMIT2_MAX_DEADLINE_SEC,
   PERMIT2_MAX_EXPIRATION_SEC,
   PRICE_DEVIATION_BLOCK,
@@ -131,7 +132,20 @@ export const PRIVACY_DIRECT_NOTE =
 export const PRIVACY_BADGE = 'Proxied RPC & quotes'
 
 export const SITE_META_DESCRIPTION =
-  `Maximum liquidity. Verified prices. TeraSwap is an EVM meta-aggregator on ${SWAP_CHAIN_LIST_LABEL} that compares quotes across ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources — with multi-oracle price protection (Chainlink + DefiLlama), MEV-protected routing via CoW Protocol, and a server-side proxy for RPC and quote requests.`
+  `Maximum liquidity. Verified prices. TeraSwap is an EVM meta-aggregator on ${SWAP_CHAIN_LIST_LABEL} that compares quotes across ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources — with multi-oracle price protection (Chainlink + DefiLlama) and a server-side proxy for RPC and quote requests.`
+
+// ── MEV / CoW protection: RETIRED claim ──────────────────────────────────────
+/**
+ * [feat/retire-force-mev] TeraSwap makes NO MEV-related promise. CoW Protocol is an ordinary liquidity source (queried, ranked,
+ * selected when it answers and wins); its batch auction may be described neutrally as CoW's own mechanism, never as a TeraSwap
+ * guarantee. `retired-claims.test.ts` greps every user-facing string in src/ and fails on a protection claim.
+ */
+export const MEV_PROTECTION_CLAIM = {
+  live: false,
+  retiredOn: '2026-11-06',
+  reason:
+    "CoW Protocol's free quote API has answered 429 to TeraSwap's servers since 2026-10-29 (a paid tier is required) and the owner decided not to pay; the Force MEV toggle and every MEV-related promise were removed.",
+} as const
 
 export type OrderTypeId = 'instant' | 'dca' | 'limit' | 'takeProfit' | 'stopLoss'
 
@@ -238,6 +252,24 @@ export const UNVERIFIED_SWAP_WARN_USD_LABEL = `$${UNVERIFIED_SWAP_WARN_USD.toLoc
 export const UNVERIFIED_SWAP_BLOCK_USD_LABEL = `$${UNVERIFIED_SWAP_BLOCK_USD.toLocaleString('en-US')}`
 export const PERMIT2_MAX_DEADLINE_MIN = PERMIT2_MAX_DEADLINE_SEC / 60
 export const PERMIT2_MAX_EXPIRATION_HOURS = PERMIT2_MAX_EXPIRATION_SEC / 3600
+
+/**
+ * [feat/retire-force-mev, owner 2026-11-06] Landing §3 "What Makes TeraSwap Different" item 03 (replaces the retired MEV item).
+ * Enforced by v1 SwapBox (`oracleWarnThreshold` / `oracleBlocked`) and v2 `lifecycle/gates.ts`, same two constants.
+ */
+export const UNVERIFIED_SWAP_GATE_TITLE = 'Unverified-Swap Size Gate'
+export const UNVERIFIED_SWAP_GATE_CLAIM =
+  `When no Chainlink feed can verify a token's price, swaps above ${UNVERIFIED_SWAP_WARN_USD_LABEL} show a strong warning and swaps above ${UNVERIFIED_SWAP_BLOCK_USD_LABEL} are blocked.`
+
+/**
+ * Smart CoW promotion (a ranking rule, src/lib/mev-preference.ts): CoW is selected when within MEV_PREFERENCE_THRESHOLD of the
+ * best output AND the gasless engine recommends it. The quote-card annotation reads the threshold from the constant (it used to
+ * say a stale "0.3%").
+ */
+export const SMART_COW_THRESHOLD_PCT = formatPercent(MEV_PREFERENCE_THRESHOLD)
+export const SMART_COW_SELECTED_LABEL = '· auto-selected (gasless)'
+export const SMART_COW_SELECTED_TITLE =
+  `CoW Protocol's quote was within ${SMART_COW_THRESHOLD_PCT} of the highest quote and its gasless route was recommended, so TeraSwap selected it.`
 
 /** "Prices older than 60 min are rejected" — a limit, not a polling cadence. */
 export const CHAINLINK_STALENESS_CLAIM =

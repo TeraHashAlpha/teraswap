@@ -46,6 +46,27 @@ export interface SourceStatus {
   lastInfraAt?: number
   /** 'health' when the disable came from consecutive probe failures — eligible for probe-verified recovery. */
   disabledBy?: 'health'
+  /**
+   * [feat/retire-force-mev C3] Present while the source answers HTTP 429. `via` = which signals currently see the 429: the
+   * H1 probe and/or the real quote path (H5 quorum). Cleared per signal on clean evidence; gone when `via` is empty.
+   * While present the source is `degraded` (never `active`) and the 429 never counts toward `disabled`.
+   */
+  rateLimit?: RateLimitEpisode
+  /** True while the current `degraded` came from a 429 nobody was alerted about yet (a blip stays silent end to end). */
+  quietDegrade?: boolean
+}
+
+export type RateLimitSignal = 'probe' | 'quote'
+
+export interface RateLimitEpisode {
+  /** First 429 of this episode (ms). */
+  since: number
+  lastSeenAt: number
+  via: RateLimitSignal[]
+  /** Last "[SOURCE] … rate-limited" alert (ms); the alert repeats at most once per cooldown. */
+  alertedAt?: number
+  /** Upstream Retry-After (s) from the last 429 that carried one. */
+  retryAfterSec?: number
 }
 
 export interface HealthCheckResult {
@@ -55,8 +76,12 @@ export interface HealthCheckResult {
   /**
    * 'infra' = the probe itself could not complete (transport/timeout on the probe path), which says
    * nothing about the source's health. Recorded separately; never counts as a source failure.
+   * 'rate-limited' = the source answered HTTP 429 [feat/retire-force-mev C3]: `degraded`, never healthy, never a failure
+   * toward `disabled` (a disabled source would stop being called; CoW stays an ordinary, called source).
    */
-  kind?: 'infra'
+  kind?: 'infra' | 'rate-limited'
+  /** Seconds from a 429's Retry-After header, when numeric. */
+  retryAfterSec?: number
 }
 
 // ── Per-source thresholds ───────────────────────────────
@@ -264,12 +289,14 @@ function calcP95(history: number[]): number {
 
 // ── State transition logic ──────────────────────────────
 
-function transition(status: SourceStatus, newState: SourceState, reason: string): void {
+function transition(status: SourceStatus, newState: SourceState, reason: string, opts?: { alert?: boolean }): void {
   const from = status.state
   if (from === newState) return
   status.state = newState
   status.lastTransitionAt = Date.now()
   console.log(`[STATE] ${forLog(status.id)}: ${from} → ${newState} (${forLog(reason)})`)
+  // [feat/retire-force-mev C3] A 429 degrade is quiet: its own alert fires after RATE_LIMIT_ALERT_AFTER_MS (rate-limit-watch.ts).
+  if (opts?.alert === false) return
 
   // Sole alert path — fans out to Telegram/Email/Discord via alert-wrapper
   // with dedup, grace period, and HTML escaping. Fire-and-forget to never block.
@@ -330,6 +357,14 @@ export async function recordHealthCheck(
   }
   if (s.infraFailures) s.infraFailures = 0
 
+  if (!result.ok && result.kind === 'rate-limited') {
+    applyRateLimited(s, 'probe', now, result.retryAfterSec)
+    await saveToKV(s)
+    return
+  }
+  // A probe that answered without a 429 clears the probe's share of a rate-limit episode (the quote path may still see one).
+  if (s.rateLimit) clearRateLimitSignal(s, 'probe')
+
   // [WARMUP] Skip latency recording on cold-start ticks — inflated measurements
   // would push p95 above threshold and cause false degradation alerts.
   if (!options?.skipLatency) {
@@ -351,10 +386,13 @@ export async function recordHealthCheck(
       s.disabledReason = undefined
       s.disabledBy = undefined
       transition(s, 'degraded', 'probe recovered after disable')
-    } else if (s.state === 'degraded') {
+    } else if (s.state === 'degraded' && !s.rateLimit) {
+      // [feat/retire-force-mev C3] Never `active` while any signal still sees a 429.
       const p95 = calcP95(s.latencyHistory)
       if (s.successCount >= t.successesToActive && p95 < P95_RECOVERY_THRESHOLD) {
-        transition(s, 'active', `${t.successesToActive} consecutive successes, p95=${Math.round(p95)}ms`)
+        const quiet = s.quietDegrade === true
+        s.quietDegrade = undefined
+        transition(s, 'active', `${t.successesToActive} consecutive successes, p95=${Math.round(p95)}ms`, { alert: !quiet })
       }
     }
   } else {
@@ -383,6 +421,60 @@ export async function recordHealthCheck(
     }
   }
 
+  await saveToKV(s)
+}
+
+// ── [feat/retire-force-mev C3] HTTP 429 = rate-limited: degraded, never healthy, never disabled ──
+
+function applyRateLimited(s: SourceStatus, via: RateLimitSignal, now: number, retryAfterSec?: number): void {
+  s.successCount = 0 // a 429 is never evidence of health
+  if (!s.rateLimit) {
+    s.rateLimit = { since: now, lastSeenAt: now, via: [via] }
+    console.warn(`[STATE] ${forLog(s.id)}: rate-limited (429) via ${via}`)
+  } else {
+    s.rateLimit.lastSeenAt = now
+    if (!s.rateLimit.via.includes(via)) s.rateLimit.via = [...s.rateLimit.via, via]
+  }
+  if (retryAfterSec !== undefined) s.rateLimit.retryAfterSec = retryAfterSec
+  // failureCount / failingSince are untouched: a 429 never moves a source toward `disabled`.
+  if (s.state === 'active') {
+    s.quietDegrade = true
+    transition(s, 'degraded', 'rate-limited (429)', { alert: false })
+  }
+}
+
+function clearRateLimitSignal(s: SourceStatus, via: RateLimitSignal): void {
+  if (!s.rateLimit) return
+  const rest = s.rateLimit.via.filter((v) => v !== via)
+  if (rest.length > 0) {
+    s.rateLimit.via = rest
+    return
+  }
+  console.log(`[STATE] ${forLog(s.id)}: no longer rate-limited (429 since ${new Date(s.rateLimit.since).toISOString()})`)
+  s.rateLimit = undefined
+}
+
+/** H5 quorum saw a 429 on the real quote path for this source. Same rules as a probe 429. */
+export async function recordRateLimited(sourceId: string, via: RateLimitSignal, retryAfterSec?: number, now: number = Date.now()): Promise<void> {
+  const s = await loadFromKV(sourceId)
+  applyRateLimited(s, via, now, retryAfterSec)
+  await saveToKV(s)
+}
+
+/** Clean evidence from one signal (e.g. the real quote path returned a quote). No-op without an episode. */
+export async function clearRateLimited(sourceId: string, via: RateLimitSignal): Promise<void> {
+  const s = await loadFromKV(sourceId)
+  if (!s.rateLimit) return
+  clearRateLimitSignal(s, via)
+  await saveToKV(s)
+}
+
+/** The "[SOURCE] … rate-limited" alert was sent: remember when (cooldown), and the degrade is no longer quiet. */
+export async function markRateLimitAlerted(sourceId: string, now: number = Date.now()): Promise<void> {
+  const s = await loadFromKV(sourceId)
+  if (!s.rateLimit) return
+  s.rateLimit.alertedAt = now
+  s.quietDegrade = undefined
   await saveToKV(s)
 }
 

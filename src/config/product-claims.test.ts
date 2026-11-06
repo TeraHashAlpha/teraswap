@@ -378,8 +378,10 @@ describe('[fix/functional-chain-ui C9] meta description claims only what the cod
     expect(SITE_META_DESCRIPTION).not.toMatch(/MEV-free/i)
   })
 
-  it('says it compares quotes across the derived source count, with MEV-protected routing via CoW', () => {
+  it('says it compares quotes across the derived source count, and makes no MEV-related promise (retired 2026-11-06)', () => {
     expect(SITE_META_DESCRIPTION).toContain(`compares quotes across ${QUOTING_COUNT} liquidity sources`)
-    expect(SITE_META_DESCRIPTION).toContain('MEV-protected routing via CoW Protocol')
+    // [feat/retire-force-mev, owner 2026-11-06] "MEV-protected routing via CoW Protocol" is a retired claim.
+    expect(SITE_META_DESCRIPTION).not.toMatch(/MEV/)
+    expect(SITE_META_DESCRIPTION).toContain('multi-oracle price protection (Chainlink + DefiLlama) and a server-side proxy for RPC and quote requests.')
   })
 })

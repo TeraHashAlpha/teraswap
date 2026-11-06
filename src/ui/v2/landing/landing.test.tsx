@@ -224,6 +224,7 @@ describe('numbers are slots', () => {
       '0.5', '266.3420', // LANDING_PREVIEW_AMOUNT_IN and the quote shown ("1 266.3420", thin-space thousands → "1" + "266.3420")
       '01', '02', '03', // list indices of "What makes TeraSwap different"
       '60', '48', // CHAINLINK_STALENESS_CLAIM and ADMIN_TIMELOCK_HOURS (claims slots, real values)
+      '10', '000', // UNVERIFIED_SWAP_GATE_CLAIM "$1,000" / "$10,000" (claims slot, real values — §3 item 03 since feat/retire-force-mev)
     ])
     // The only numerals that are part of v1's own sentences, copied verbatim: "P0 alert", "2-way and 3-way", the "1" of 1 266:
     const verbatim = new Set(['0', '1', '2', '3'])
