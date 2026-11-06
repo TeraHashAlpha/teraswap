@@ -5,6 +5,7 @@
  *   (5b) the sounds table: the same sounds.ts calls as v1's DCAPanel for the same actions and the same engine events (v1 vs v2, one harness);
  *   a11y: names, groups, pressed state, tabs; the review sheet's focus trap / Esc is asserted in dca-review.test.tsx (B4 Sheet).
  */
+import { useEffect } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor, act } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BASE, h, offchainInfo, resetHarness } from './dca-harness'
@@ -95,6 +96,9 @@ import { getChainConfig } from '@/lib/chains/registry'
 import { DcaCard } from './DcaCard'
 import type { AutonomousOrder } from '@/lib/order-engine'
 import { OrderType } from '@/lib/order-engine'
+
+// The file mocks '../shell/toasts' for the sound tables; the explorer-link assertions need the REAL provider.
+const { V2ToastProvider, useV2Toast: useActualV2Toast } = await vi.importActual<typeof import('../shell/toasts')>('../shell/toasts')
 
 const weth = () => findChainToken(getWrappedNative(BASE), BASE)!
 
@@ -287,6 +291,41 @@ describe('(5b) sounds: the same sounds.ts calls as v1 for the same actions', () 
     expect(h.soundLog).toEqual(v1Sounds)
     expect(v1Toast.chainId).toBeUndefined()
     expect(v2Toast).toEqual({ ...v1Toast, chainId: BASE })
+  })
+
+  // [L-3, A75b] The event ALREADY carries the filled order's own chain (types.ts order_filled.chainId; GET /api/orders is
+  // wallet-wide, so a fill on the OTHER L2 does reach a card scoped to this one). The card's selected chain is only the
+  // fallback for a legacy event with none. Run through the REAL v2 toast so the assertion is the link's hostname.
+  describe('order_filled explorer link follows the filled order\'s chain, not the card\'s', () => {
+    const linkFor = (toastArg: Record<string, unknown>) => {
+      const Fire = () => {
+        const { toast } = useActualV2Toast()
+        useEffect(() => void toast(toastArg as never), []) // eslint-disable-line react-hooks/exhaustive-deps
+        return null
+      }
+      render(<V2ToastProvider><Fire /></V2ToastProvider>)
+      return new URL(screen.getByText('View on explorer ↗').getAttribute('href')!).hostname
+    }
+    const fillToast = (cardChain: number, event: Record<string, unknown>) => {
+      h.engine.latestEvent = event
+      render(<DcaCard chainId={cardChain} />)
+      const [t] = h.toast.mock.calls.map((c) => c[0]) as [Record<string, unknown>]
+      cleanup()
+      return t
+    }
+    it.each([
+      ['Arbitrum fill on a Base card', BASE, 42161, 'arbiscan.io'],
+      ['Base fill on an Arbitrum card', 42161, BASE, 'basescan.org'],
+    ])('%s', (_n, cardChain, orderChain, host) => {
+      const t = fillToast(cardChain, { type: 'order_filled', orderId: 'o', txHash: '0xabc', chainId: orderChain })
+      expect(t.chainId).toBe(orderChain)
+      expect(linkFor(t)).toBe(host)
+    })
+    it('a legacy event with no chainId falls back to the card\'s chain', () => {
+      const t = fillToast(BASE, { type: 'order_filled', orderId: 'o', txHash: '0xabc' })
+      expect(t.chainId).toBe(BASE)
+      expect(linkFor(t)).toBe('basescan.org')
+    })
   })
 
   it('Cancel / Remove rows → playClick, as v1\'s dashboard', () => {
