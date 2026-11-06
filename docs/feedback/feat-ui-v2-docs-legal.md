@@ -6,7 +6,7 @@ Base: origin/main after feat/ui-v2-mobile-parity (#660), verified merged at `ff0
 ## Task checklist
 
 - [x] C1: `/v2/docs|terms|privacy` pages + proxy matcher + metadata + v2 help drawer links
-- [ ] C2: Legal pages — wrapper-only restyle + the one approved copy change + parity test
+- [x] C2: Legal pages — wrapper-only restyle + the one approved copy change + parity test
 - [ ] C3: Docs page — full restyle (six containers) + scroll-spy + tables + claims-live + a11y
 - [ ] C4: Mobile 375 (overflow test, TOC collapse) + screenshots 375/1440
 - [ ] Verify: suite vs origin/main, lint delta 0, tsc clean, build, v1 module-identical, rpc-budget, CodeQL 0 new
@@ -43,3 +43,36 @@ Base: origin/main after feat/ui-v2-mobile-parity (#660), verified merged at `ff0
 - No rpc-budget scenario yet for a Docs/Terms/Privacy page load (goal evidence #5 "docs make 0 RPC calls") — the
   only RPC call any v2 shell page makes is the Footer's `eth_blockNumber` poll (shared, already budgeted
   elsewhere); a dedicated scenario is planned for the verification pass, not deferred indefinitely.
+
+## P2 — C2: Legal pages restyle + the one copy change (commit TBD)
+
+### What shipped
+- `src/components/LegalPage.tsx:131` (v1, the one approved edit): "However, no method of electronic transmission
+  or storage is 100% secure." → "However, no system is completely secure." Rest of the sentence/paragraph
+  untouched. Before/after:
+  - Before: `However, no method of electronic transmission or storage is 100% secure. You are responsible for…`
+  - After:  `However, no system is completely secure. You are responsible for…`
+- `src/ui/v2/docs-legal/LegalPageV2.tsx` (new): Terms (20 sections) and Privacy (14 sections), text copied
+  byte-for-byte from v1's `PrivacyPolicy()`/`TermsOfService()` (including the one edit above) — only the wrapper
+  (`SectionTitle`/`SubTitle`/`P`/`UL`, container) is restyled: no box (local prose scrim, hairlines, round-7
+  typography) in place of v1's `rounded-2xl` bordered panel. Container 2 (sticky TOC / scroll-spy): a text list
+  with one hairline per item, active item cream, same IntersectionObserver rule as v1's DocsPage
+  (`use-scroll-spy.ts`, shared with Docs in C3). Container 3 (local prose scrim): `docs-legal.css`'s
+  `.ts-v2-prose-scrim`, the same `--scrim-left`/`--scrim-down` tokens the landing's `ts-v2-scrim` uses.
+- `ContentShell.tsx` no longer passes `appScrim` to `PhotoBackground` (see judgement call below).
+- `src/ui/v2/docs-legal/content-parity.legal.test.tsx` (new): v1 `LegalPage` vs v2 `LegalPageV2`, both types,
+  `compareContent` with an EMPTY allow-list (the one copy change lands in v1 too, so nothing needs allowing) —
+  green on the first run, plus an explicit assertion that neither version still says "100% secure".
+
+### Judgement call
+- Goal's container-3 decision says "local scrim, not the uniform app scrim" — I dropped `appScrim` entirely from
+  `ContentShell` (not just added a local one on top). This is safe, not a contrast gamble: `photo-scrim.ts` gives
+  all three reused photos (overpass, archnight, footbridge) a measured `photoScrim` of **0** — the baked
+  grade + veil alone already clears AA for them — so `appScrim` was already a visual no-op on these three pages;
+  removing it changes nothing measurable.
+
+### Concern
+- Duplicating ~2,230 words of legal prose into a second component (rather than having v2 import v1's content
+  functions) is the same drift-risk pattern this codebase already accepts for Swap/DCA/Orders/etc. — guarded by
+  the parity test, not by single-sourcing. `LegalPage.tsx` is marked read-only-source-of-copy in this goal, so
+  refactoring it to export shared data was out of scope; flagging the tradeoff rather than silently taking it.

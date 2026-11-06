@@ -6,7 +6,7 @@ import { cleanup, render } from '@testing-library/react'
 const h = vi.hoisted(() => ({ version: 'v2' as 'v1' | 'v2' }))
 vi.mock('@/ui/v2/version', () => ({ getUiVersion: async () => h.version }))
 vi.mock('@/ui/v2/shell/ContentShell', () => ({ ContentShell: ({ page, children }: { page: string; children: React.ReactNode }) => <div data-shell-page={page}>{children}</div> }))
-vi.mock('@/ui/v2/shell/ContentPane', () => ({ ContentPane: () => <div data-content-pane="" /> }))
+vi.mock('@/ui/v2/docs-legal/LegalPageV2', () => ({ LegalPageV2: ({ type }: { type: string }) => <div data-legal-page={type} /> }))
 vi.mock('next/navigation', () => ({
   notFound: () => {
     throw new Error('NEXT_NOT_FOUND')
@@ -22,6 +22,7 @@ describe('/v2/privacy', () => {
     h.version = 'v2'
     const { container } = render(await V2PrivacyPage())
     expect(container.querySelector('[data-shell-page="privacy"]')).not.toBeNull()
+    expect(container.querySelector('[data-legal-page="privacy"]')).not.toBeNull()
   })
 
   it('v1 (switch off) → notFound()', async () => {
