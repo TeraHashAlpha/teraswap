@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { isV2EnableEnabled, isV2KitEnabled } from '@/ui/v2/kit-gate'
-import { V2_TAB_PATHS } from '@/ui/v2/shell/tab-paths'
+import { V2_TAB_PATHS, V2_ONLY_TAB_PATHS } from '@/ui/v2/shell/tab-paths'
 import { UI_COOKIE_NAME, resolveUiVersion } from '@/ui/v2/ui-cookie'
 
 /**
@@ -8,9 +8,14 @@ import { UI_COOKIE_NAME, resolveUiVersion } from '@/ui/v2/ui-cookie'
  * client modules in the SAME chunk set as v1 (Turbopack bundles a page's whole client graph), so v2 would
  * ship to v1 visitors. v2 therefore lives on its own route (/v2) and is reached by rewriting here.
  *   `/`      v2 → rewrite to /v2 (URL unchanged; the Swap tab, or the landing before the app is launched); v1 → untouched (static v1 page, byte-identical)
- *   `/<tab>` the 8 app tabs (`V2_TAB_PATHS`): ONE generic rule — v2 → rewrite to `/v2/<tab>` (URL unchanged); v1 → untouched
- *            (`/swap` and `/analytics` are v1 pages today and stay exactly as they are for v1 visitors)
- *   `/v2/*`  only when the switch says v2; otherwise a REAL 404 (rewrite to a path that does not exist)
+ *   `/<tab>` the 8 app tabs (`V2_TAB_PATHS`): ONE generic rule — v2 → rewrite to `/v2/<tab>` (URL unchanged); v1 →
+ *            untouched for `/swap` and `/analytics` (real v1 pages, stay exactly as they are) — [L-5, A75] the
+ *            other 6 (`V2_ONLY_TAB_PATHS`) have no v1 page at all, so v1 redirects them to `/` instead of falling
+ *            through to Next's generic 404
+ *   `/v2/*`  NEVER reachable by a direct hit — [L-4, A75] fixed: it used to pass through once the switch said v2.
+ *            A request that reaches this function with a `/v2/*` path IS a direct hit (the tab rewrite above
+ *            returns its own response before this would ever re-run on the rewritten path), so it is always a
+ *            REAL 404 (rewrite to a path that does not exist)
  *   `/v2/_kit` the dev kit: Preview/`next dev` only, independent of the switch (a prod owner cookie does not open it)
  *   `/v2/_enable` the preview opt-in form (POSTs the admin secret, sets the signed cookie): same gate as the kit — it must
  *            be reachable BEFORE the cookie exists, so it cannot depend on the switch
@@ -31,10 +36,12 @@ export function proxy(req: NextRequest) {
     return v2 ? NextResponse.rewrite(new URL('/v2', req.url)) : NextResponse.next()
   }
   if (V2_TAB_PATHS.includes(req.nextUrl.pathname)) {
-    return v2 ? NextResponse.rewrite(new URL(`/v2${req.nextUrl.pathname}`, req.url)) : NextResponse.next()
+    if (v2) return NextResponse.rewrite(new URL(`/v2${req.nextUrl.pathname}`, req.url))
+    return V2_ONLY_TAB_PATHS.includes(req.nextUrl.pathname) ? NextResponse.redirect(new URL('/', req.url)) : NextResponse.next()
   }
   const path = req.nextUrl.pathname
-  const allowed = path === '/v2/_kit' ? isV2KitEnabled() : path === '/v2/_enable' ? isV2EnableEnabled() : v2
+  const inV2Tree = path === '/v2' || path.startsWith('/v2/')
+  const allowed = path === '/v2/_kit' ? isV2KitEnabled() : path === '/v2/_enable' ? isV2EnableEnabled() : inV2Tree ? false : v2
   return allowed ? NextResponse.next() : NextResponse.rewrite(new URL(NOT_FOUND_PATH, req.url))
 }
 

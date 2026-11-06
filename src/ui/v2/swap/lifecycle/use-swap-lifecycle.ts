@@ -182,7 +182,9 @@ export function useSwapLifecycle(a: LifecycleArgs) {
         title: 'Swap confirmed!',
         description: `${amountIn} ${tokenIn.symbol} → ${summary.outDisplay} ${tokenOut.symbol}${summary.savingsLine ? ` · ${summary.savingsLine}` : ''}`,
         txHash: swap.txHash,
-        chainId: activeChainId,
+        // [L-3, A75b] the chain the tx was SENT on (v1 SwapBox.tsx:412 passes txChainId): the wallet may have switched network while
+        // it confirmed, and the link must still open the explorer that has the tx. activeChainId only when useSwap reports none.
+        chainId: swap.txChainId ?? activeChainId,
         duration: 10000,
       })
       swapToastId.current = null

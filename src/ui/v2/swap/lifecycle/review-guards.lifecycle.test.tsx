@@ -18,10 +18,12 @@ const h = vi.hoisted(() => ({
   depeg: {} as Record<string, unknown>,
   swap: {} as Record<string, unknown>,
   startWaiting: vi.fn(),
+  /** [A69b S-2] what the wallet says: its chain and the sell-token balance (the review opens with 3 ETH on Ethereum) */
+  wallet: { chainId: 1, balance: 3n * 10n ** 18n },
 }))
 vi.mock('wagmi', () => ({
-  useAccount: () => ({ address: '0xd44d00000000000000000000000000000000962d', isConnected: true, chain: { id: 1 } }),
-  useBalance: () => ({ data: { value: 3n * 10n ** 18n, decimals: 18 } }),
+  useAccount: () => ({ address: '0xd44d00000000000000000000000000000000962d', isConnected: true, chain: { id: h.wallet.chainId } }),
+  useBalance: () => ({ data: { value: h.wallet.balance, decimals: 18 } }),
   useChains: () => [{ id: 1, name: 'Ethereum' }],
   useSwitchChain: () => ({ switchChain: () => {} }),
 }))
@@ -74,6 +76,7 @@ beforeEach(() => {
   h.approval = { ...READY, approve: vi.fn(async () => {}), confirmPermit2Education: vi.fn(), cancelPermit2Education: vi.fn() }
   h.swap = swapHook()
   h.startWaiting.mockClear()
+  h.wallet = { chainId: 1, balance: 3n * 10n ** 18n }
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ json: () => Promise.resolve({}) })))
 })
 afterEach(() => {
@@ -118,6 +121,26 @@ describe('L-1 — Confirm is gated like the CTA, never a silent no-op', () => {
     await flush()
     expect(h.startWaiting).not.toHaveBeenCalled()
     expect(execute()).not.toHaveBeenCalled()
+  })
+
+  // [A69b S-2] `ctaFor` ranks wrong-network and insufficient-balance AHEAD of `blocked`, so a gate block hidden behind one of them left
+  // Confirm enabled as "Confirm & Sign" while the press did nothing (use-swap-lifecycle's `confirm` returns on `anyBlocked`).
+  it.each([
+    ['the balance drops below the amount (an external transfer)', () => { h.wallet = { chainId: 1, balance: 10n ** 17n } }, 'Insufficient balance'],
+    ['the wallet moves to another network', () => { h.wallet = { chainId: 8453, balance: 3n * 10n ** 18n } }, 'Switch to Ethereum'],
+  ])('a hard block is active behind a CTA that outranks it — %s: Confirm is disabled with the CTA\'s own words, never a silent no-op', async (_why, change, label) => {
+    openReview()
+    expect(confirm().disabled).toBe(false)
+    h.depeg = { mode: 'block', divergence: 0.12, symbol: 'cbETH', message: 'x' } // the gate block that ranks behind the CTA state below
+    change()
+    rerender()
+    expect(screen.getByRole('dialog', { name: REVIEW })).toBeTruthy()
+    expect(confirm().disabled).toBe(true)
+    expect(confirm().textContent).toBe(label)
+    fireEvent.click(confirm())
+    await flush()
+    expect(execute()).not.toHaveBeenCalled()
+    expect(h.startWaiting).not.toHaveBeenCalled()
   })
 
   it('a hook that is already working keeps its in-flight words (the gate does not overwrite them)', () => {

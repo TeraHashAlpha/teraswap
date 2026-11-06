@@ -56,3 +56,35 @@ jobs:
         run: node e2e/mobile/build.mjs
       - name: Run real-render Playwright tests (mobile viewports)
         run: npx playwright test --config playwright.mobile.config.ts
+
+  v2-mobile-parity:
+    # [feat/ui-v2-mobile-parity, L-8/A75] Separate job: unlike category-scroll above, this suite needs a real
+    # PRODUCTION build + `next start` server (UI_V2_ENABLED=true), not the isolated file:// harness — keeping it
+    # out of that job preserves its documented "no server/no env" invariant.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: "npm"
+      - name: Install deps
+        run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Build (v2 enabled)
+        run: npm run build
+        env:
+          UI_V2_ENABLED: "true"
+          NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: "00000000000000000000000000000000"
+          # [L-8, A75b] Same PUBLIC build env as the Vercel Preview build — without it no chain is DCA-live and the suite's
+          # `dca` route renders the plain pane (CI 42 pass / 5 fail). Names only here: the values are public contract
+          # addresses kept in repository VARIABLES (Settings > Secrets and variables > Actions > Variables), never typed in
+          # this file. Pinned by scripts/e2e-mobile-parity-ci.test.mjs.
+          NEXT_PUBLIC_DCA_ENABLED: "true"
+          NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE: ${{ vars.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE }}
+          NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM: ${{ vars.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM }}
+          NEXT_PUBLIC_BASE_FEE_COLLECTOR: ${{ vars.NEXT_PUBLIC_BASE_FEE_COLLECTOR }}
+          NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR: ${{ vars.NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR }}
+      - name: Run v2 mobile-parity Playwright suite
+        run: npx playwright test --config src/ui/v2/__tests__/mobile/playwright.config.ts

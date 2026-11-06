@@ -380,6 +380,20 @@ describe('A70 M-1 · Retry and Create build the draft afresh', () => {
     expect(screen.getByTestId('dca-oracle-block')).toBeTruthy()
   })
 
+  // [A70b S-1] The oracle test above never presses Create: the price-feed STATUS is inside the draft key, so the review closes first and the
+  // `if (create)` branch is skipped. A gate that is in NO key (the depeg mode) leaves the review up, so the press itself is what is proven.
+  it('Create, a gate that is in no key closed since the review opened (depeg block): the review is still up, the press reaches the gate and stops — createOrder never called', async () => {
+    const view = await v2ToReview()
+    h.depeg = { mode: 'block', divergence: 12, symbol: 'WETH', message: 'WETH trades 12% off its exchange rate.' }
+    view.rerender(<DcaCard chainId={BASE} />)
+    const create = screen.getByTestId('dca-review-create') // throws when the review closed: the press below MUST happen
+    fireEvent.click(create)
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(fake.seq.filter((c) => c[0] === 'createOrder')).toEqual([])
+    expect(fake.seq).toEqual([])
+    expect(screen.getByTestId('dca-depeg-block').textContent).toContain('DCA blocked — WETH depeg.')
+  })
+
   it('Create, the pair\'s tier moved since the review opened (on-chain → unpriced): no createOrder; the review asks for the consent, box unticked', async () => {
     await v2ToReview()
     expect(screen.queryByTestId('dca-consent')).toBeNull()
@@ -394,6 +408,42 @@ describe('A70 M-1 · Retry and Create build the draft afresh', () => {
     fireEvent.click(screen.getByTestId('dca-review-create'))
     await screen.findByTestId('dca-sign-body')
     expect(config(0).floorAck?.tier).toBe('unpriced')
+  })
+
+  // [A70b S-2] A price move while the order is frozen / signing does not close anything (the sign sheet prints the exact struct the wallet signs).
+  // If the server then answers 409, the review reopens — and used to print the floor derived from the OLD price.
+  it('a price moves while the wallet prompt is open, then the server answers 409: the review that would reopen on the old floor closes instead', async () => {
+    const d = deferred<SignOutcome>()
+    fake.sign = () => d.promise
+    const view = await v2ToSheet(false)
+    fireEvent.click(screen.getByTestId('dca-sign-confirm'))
+    await screen.findByRole('button', { name: 'Signing order...' })
+    h.oracle = oracle(2600) // 2500 → 2600 under the open prompt
+    view.rerender(<DcaCard chainId={BASE} />)
+    expect(screen.getByTestId('dca-sign-body')).toBeTruthy() // the order with the wallet is left alone
+    await act(async () => { d.resolve(SERVER_409('unpriced')) })
+    expect(screen.queryByTestId('dca-review-create')).toBeNull() // no review printing the floor of 2500
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  // [A70b S-3] v1 never consults a cached tier once the user acknowledged one (`tier = ack`, DCAPanel.tsx:890). v2's Create used the tier cached when
+  // the pair was selected: a failed lookup there classifies as 'unpriced', so a user who ticked the (milder) tier the review showed was sent back
+  // to a stricter consent they were never shown.
+  it('with an acknowledgement, Create judges the draft by the tier the review showed and the user ticked — not the tier cached when the pair was selected', async () => {
+    h.floor = unpricedInfo() // the lookup at selection failed: cached tier 'unpriced'
+    const view = render(<DcaCard chainId={BASE} />)
+    await act(async () => {})
+    h.floor = offchainInfo() // the server, asked afresh by the review: 'offchain-price'
+    typeAmount(view.container, '0.5')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Review DCA' })).toHaveProperty('disabled', false))
+    fireEvent.click(screen.getByRole('button', { name: 'Review DCA' }))
+    const consent = await screen.findByTestId('dca-consent')
+    expect(consent.getAttribute('data-tier')).toBe('offchain-price')
+    fireEvent.click(screen.getByTestId('dca-consent-checkbox'))
+    fireEvent.click(screen.getByTestId('dca-review-create'))
+    await screen.findByTestId('dca-sign-body') // on origin/main the consent reopens at 'unpriced' instead
+    expect(screen.queryByTestId('dca-consent')).toBeNull()
+    expect(config(0).floorAck?.tier).toBe('offchain-price')
   })
 
   it('a price moves while the review is open: the review closes (the draft key holds the prices prepare() reads)', async () => {

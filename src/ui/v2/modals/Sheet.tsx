@@ -17,6 +17,13 @@ export interface SheetProps {
   /** Optional line under the heading (the dialog's description). */
   subtitle?: ReactNode
   size?: SheetSize
+  /** [L-6, A75] Which hairline the panel carries — default 'top' (every swap modal); the help drawer overrides to 'left'. */
+  edge?: 'top' | 'left'
+  /**
+   * [S-3, A75b] 'center' (default: every swap modal — centred panel, bottom sheet on a phone) or 'drawer' (the Help Center: a right-edge
+   * full-height drawer from 1024 px up, a bottom sheet below — v1's HelpDrawer geometry). Geometry lives in modals.css.
+   */
+  placement?: 'center' | 'drawer'
   /** Focus lands here on open; default is the first focusable control. */
   initialFocusRef?: RefObject<HTMLElement | null>
   /** Show the ✕ in the header (token selector). */
@@ -36,7 +43,7 @@ export interface SheetProps {
  * closes it, and focus returns to whatever opened it. One component for every v2 swap modal so none of them re-implements
  * the keyboard contract (v1's modals each carry their own copy, and the slippage / token / review ones have no trap at all).
  */
-export function Sheet({ onClose, title, subtitle, size = 'md', initialFocusRef, closeButton = false, dismissOnBackdrop = true, dismissOnEscape = true, name, children }: SheetProps) {
+export function Sheet({ onClose, title, subtitle, size = 'md', edge = 'top', placement = 'center', initialFocusRef, closeButton = false, dismissOnBackdrop = true, dismissOnEscape = true, name, children }: SheetProps) {
   const panelRef = useRef<HTMLDivElement>(null)
   const closeRef = useRef(onClose)
   const escRef = useRef(dismissOnEscape)
@@ -93,12 +100,12 @@ export function Sheet({ onClose, title, subtitle, size = 'md', initialFocusRef, 
   }, [])
 
   return (
-    <div data-sheet-root="" className="ts-sheet-root">
+    <div data-sheet-root="" data-placement={placement === 'drawer' ? 'drawer' : undefined} className="ts-sheet-root">
       <div aria-hidden="true" data-sheet-backdrop="" className="ts-sheet-backdrop" onClick={dismissOnBackdrop && dismissOnEscape ? onClose : undefined} />
       <Surface
         ref={panelRef}
         variant="sheet"
-        edge="top"
+        edge={edge}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

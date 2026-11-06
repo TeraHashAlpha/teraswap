@@ -40,6 +40,29 @@ describe('Sheet', () => {
     expect(dlg.className).not.toMatch(/rounded|border-(?!t)|shadow|ring/) // no radius, outline or shadow classes
   })
 
+  // [L-6, A75] The help drawer builds on Sheet but keeps its own left-hairline identity (round7.test.tsx), so Sheet
+  // needs an `edge` override — default stays 'top' for every other v2 modal.
+  it('edge="left" overrides the default top hairline', () => {
+    function LeftHarness() {
+      const [open, setOpen] = useState(false)
+      return (
+        <div>
+          <button onClick={() => setOpen(true)}>opener</button>
+          {open && (
+            <Sheet title="Side" onClose={() => setOpen(false)} edge="left" name="side">
+              <button>only</button>
+            </Sheet>
+          )}
+        </div>
+      )
+    }
+    render(<LeftHarness />)
+    fireEvent.click(screen.getByText('opener'))
+    const dlg = screen.getByRole('dialog', { name: 'Side' })
+    expect(dlg.className).toContain('ts-v2-rule-l')
+    expect(dlg.className).not.toMatch(/ts-v2-rule-t\b/)
+  })
+
   it('moves focus into the sheet on open', () => {
     render(<Harness />)
     fireEvent.click(screen.getByText('opener'))

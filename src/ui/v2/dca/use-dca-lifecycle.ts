@@ -101,7 +101,8 @@ export function useDcaLifecycle(engine: DcaEngineSlice) {
     setCreating(true)
     let result: Awaited<ReturnType<PrepareFn>> = { ok: false }
     try {
-      result = await prepare(opts)
+      // [A70b S-3] with an acknowledgement the tier is the one on the review the user ticked (any 409 tier is merged into `due` below)
+      result = await prepare(opts.ack ? { ...opts, info: review?.info } : opts)
     } catch {
       result = { ok: false }
     }
@@ -150,7 +151,7 @@ export function useDcaLifecycle(engine: DcaEngineSlice) {
       await run(prepare, { ack, startSound: !!ack })
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `engine` is a fresh object each render; its fields are what matter
-    [creating, engine.createOrder, engine.pendingOrder, engine.isSubmitting, conflictTier],
+    [creating, engine.createOrder, engine.pendingOrder, engine.isSubmitting, conflictTier, review],
   )
 
   /**
@@ -164,7 +165,7 @@ export function useDcaLifecycle(engine: DcaEngineSlice) {
       await run(prepare, { startSound: true })
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- as above
-    [creating, engine.createOrder, engine.pendingOrder, engine.isSubmitting, conflictTier],
+    [creating, engine.createOrder, engine.pendingOrder, engine.isSubmitting, conflictTier, review],
   )
 
   /** v1's OrderReviewModal `onConfirm={confirmOrder}` (DCAPanel.tsx:255): sign the FROZEN order, then POST. */

@@ -2,24 +2,22 @@
 
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useQuoteChainId } from '@/hooks/useChainId'
 import { playTouchMP3 } from '@/lib/sounds'
-import { isLimitLive } from '@/lib/order-engine'
 import { Tabs, type TabItem } from '../primitives'
 import { V2_TABS, type V2TabId } from './tab-paths'
 
 /**
  * [ADR-025] Tab strip (pack 01): Swap · Portfolio · DCA · Limit · SL/TP · Orders · History · Analytics.
- * "Soon" lives ONLY on Limit and SL/TP, and only while `isLimitLive` (v1's gate) is false; DCA is never "Soon"
- * (the DCA pane explains where it runs). Selecting a tab navigates to its path (proxy rewrites it under the gate).
+ * "Soon" lives ONLY on Limit and SL/TP; DCA is never "Soon" (the DCA pane explains where it runs).
+ * Owner decision (feat/ui-v2-mobile-parity, asked in-session): v2 has NO Limit / SL/TP pane yet (`AppShell` would mount the
+ * skeleton), so those two tabs stay disabled "Soon" even when v1's `isLimitLive` says the feature is live. They return, driven by
+ * `isLimitLive`, in the slice that ports LimitOrderPanel / ConditionalOrderPanel. Selecting a tab navigates to its path (proxy rewrites it under the gate).
  */
 export function TabBar({ active }: { active: V2TabId }) {
   const router = useRouter()
-  const chainId = useQuoteChainId()
-  const limitLive = isLimitLive(chainId)
 
   const tabs: TabItem[] = V2_TABS.map((t) => {
-    const soon = (t.id === 'limit' || t.id === 'sltp') && !limitLive
+    const soon = t.id === 'limit' || t.id === 'sltp'
     return { id: t.id, label: t.label, disabled: soon, badge: soon ? 'Soon' : undefined }
   })
 
