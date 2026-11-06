@@ -35,5 +35,34 @@ the item then falls to the rule's no-patch branch (allowlist). The owner can sti
 - `npm audit` for keeper reports hardhat-verify `invalid` peer under legacy-peer-deps — pre-existing.
 - Root `.npmrc` `min-release-age=7` and `audit-gate-lib.mjs` expiry enforcement confirmed present (premise holds).
 
-## Commit 2 — apply (see below)
-(filled in next commit)
+## Commit 2 — apply
+
+### 2. Exact diffs
+- `package.json` overrides: `"hono": "4.13.7"` → `"4.13.11"` (#123; 4.13.7 sat inside the advisory range).
+- `contracts/order-engine/package.json` overrides: `"tmp": "0.2.6"` → `"0.2.7"` (#116; published 2026-05-27).
+- `audit-allowlist.json` — 5 entries added, all `added: 2026-11-06`, `expires: 2026-12-06`:
+  GHSA-g3hv-75wg-m249 minimatch (#146) · GHSA-3g3m-2fjr-6pw4 glob (#144) · GHSA-w5hq-g745-h8pq uuid (#33) · GHSA-848j-6mx2-7j84 elliptic (#3) · GHSA-gcqx-w48m-w2h4 deepmerge (#139).
+- Lockfiles regenerated only via `npm install --package-lock-only` (root; keeper with `--legacy-peer-deps`). Root lock: hono 4.13.7→4.13.11, plus 4 dropped `libc` fields on `@next/swc-linux-*` (npm drift, see Findings). Keeper lock: tmp 0.2.6→0.2.7 only.
+
+### 3. Gate + npm ls
+- `node scripts/audit-gate.mjs` → exit 0:
+  `audit-gate: 1 high/critical advisory present, 1 allowlisted, 0 blocking.` · `ALLOWLISTED HIGH zod (GHSA-mrhx-c7xc-m3w5) … expires 2026-11-22` · `audit-gate PASSED`.
+  Also prints `ⓘ RESOLVED` for my 5 moderate/low entries (gate tracks only high/critical) — see Findings.
+- Root `npm ls hono --all` → `hono@4.13.11 overridden` (porto). Keeper `npm ls tmp --all` → `tmp@0.2.7 overridden` (solc).
+- Unchanged, still vulnerable (rule: stop or allowlist): minimatch 10.2.5, glob 13.0.6, uuid 9.0.1/8.3.2/7.0.3, elliptic 6.6.1, deepmerge 4.3.1.
+
+### 4. Suites / build / lint
+- Real `npm ci`: root (exit 0), keeper `--legacy-peer-deps --ignore-scripts` (exit 0), executor `--ignore-scripts` (exit 0).
+- Root `npx vitest run`: 7843 / 7843 passed, exit 0.
+- Keeper `node --test` in `contracts/order-engine/executor` (CI path): Node 20.20.2 — 1240/1240 (two runs); Node 22.23.4 — 1240/1240.
+  One earlier run failed one wall-clock assertion (`chain-verify` RATIO_BOUND, 47x vs 30x) while vitest ran concurrently; quiet reruns pass. origin/main baseline (Node 20.20.2): 1240/1240.
+- `npm run build`: exit 0.
+- `npm run lint`: 0 errors, 93 warnings (cap 94). Lint delta 0: branch changes no `.ts/.tsx/.js/.mjs` vs origin/main (json/md/lock only).
+
+### Findings
+- **Gate noise:** `audit-gate.mjs` prints `RESOLVED — delete this allowlist entry` for any allowlisted advisory that is not high/critical, so the moderate/low entries will always warn. Gate not changed; Architect to decide.
+- **Keeper bare `npm ci` ERESOLVE** in `contracts/order-engine` (hardhat-toolbox ↔ chai peer): root `.npmrc` `legacy-peer-deps` does not reach the subdirectory and the keeper has no `.npmrc`. Not changed; CI never runs that path (it installs `executor/`).
+- **npm lock churn:** regenerating the root lock on npm 11.10.1 dropped `libc` on four `@next/swc-linux-*` optional entries. Runtime-harmless (Next picks the matching binary) but churn; reverting by hand is not allowed.
+- **Premise check:** expiry is enforced by `scripts/audit-gate-lib.mjs` (true). The root `hono` override was itself inside the advisory range before this change.
+- **Major-bump STOPs (not applied):** minimatch → 11.0.1 (glob@13 and typescript-estree need `^10.2.2`); glob → 14.0.2 (rimraf@6 `^13.0.3`, sentry `^13.0.6`); uuid → 11.1.1 (`@metamask/utils@9`, `@metamask/sdk`, `xcode`). Owner decides.
+- **Capacitor #142 critical:** `ios/` is a Capacitor iOS shell; no CI builds it; pinned `capacitor-swift-pm` 8.2.0; no patch; not in npm audit. Owner decides whether `ios/` stays.
