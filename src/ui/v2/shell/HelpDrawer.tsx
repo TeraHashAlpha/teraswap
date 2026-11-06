@@ -14,7 +14,7 @@ const HELP_LINK =
   'ts-v2-underline inline-flex min-h-[44px] items-center justify-center bg-transparent px-1 font-v2-mono text-[12px] font-medium uppercase tracking-[1.5px] text-v2-cream hover:text-v2-text'
 
 /**
- * [ADR-025, L-6/A75] Help Center drawer (pack 03), built on modals/Sheet: Esc, the overlay, ✕ and Sheet's own Tab
+ * [ADR-025, L-6/A75, S-3/A75b] Help Center drawer (pack 03), built on modals/Sheet (placement="drawer": right edge from 1024 px, bottom sheet below): Esc, the overlay, ✕ and Sheet's own Tab
  * trap + focus-restore-on-close, none of which the drawer used to have (one focus-on-open call, a window Esc
  * listener, no trap). Content is v1's `helpSections` (same module — no copy is retyped here), with the pack's
  * search field filtering it, and the v1 "need more help" links (X, support e-mail).
@@ -42,7 +42,7 @@ export function HelpDrawer({ open, onClose }: { open: boolean; onClose: () => vo
   if (!open) return null
 
   return (
-    <Sheet onClose={onClose} title="How can we help?" size="md" edge="left" name="help">
+    <Sheet onClose={onClose} title="How can we help?" size="md" edge="left" placement="drawer" name="help">
       <button
         type="button"
         onClick={onClose}

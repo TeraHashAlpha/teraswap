@@ -231,6 +231,39 @@ test.describe('375 · bottom sheets (frames m03 / m08)', () => {
   })
 })
 
+test.describe('help drawer geometry (S-3, A75b)', () => {
+  // v1 / round 7 item 7: a right-edge drawer with a left hairline at >= 1024, a bottom sheet only below.
+  const helpBox = async (page: Page, viewport: { width: number; height: number }) => {
+    await open(page, ROUTES[1], viewport)
+    await page.getByRole('button', { name: 'Open help' }).click()
+    const dlg = page.getByRole('dialog', { name: 'How can we help?' })
+    await expect(dlg).toBeVisible()
+    const box = (await dlg.boundingBox())!
+    return { left: box.x, right: box.x + box.width, top: box.y, bottom: box.y + box.height, width: box.width, vw: viewport.width, vh: viewport.height }
+  }
+
+  for (const width of [1024, 1440]) {
+    test(`${width}: flush to the right edge, full height, 420 px wide`, async ({ page }) => {
+      const g = await helpBox(page, { width, height: 900 })
+      expect(g.right, 'right edge').toBeGreaterThanOrEqual(g.vw - 0.5)
+      expect(g.top, 'top').toBeLessThanOrEqual(0.5)
+      expect(g.bottom, 'bottom').toBeGreaterThanOrEqual(g.vh - 0.5)
+      expect(g.width, 'width').toBeLessThanOrEqual(420.5)
+      expect(g.left, 'left').toBeGreaterThan(0)
+    })
+  }
+
+  for (const width of [375, 768, 1023]) {
+    test(`${width}: a bottom sheet, full width`, async ({ page }) => {
+      const g = await helpBox(page, { width, height: 812 })
+      expect(g.left, 'left').toBeLessThanOrEqual(0.5)
+      expect(g.right, 'right').toBeGreaterThanOrEqual(g.vw - 0.5)
+      expect(g.bottom, 'bottom').toBeGreaterThanOrEqual(g.vh - 1)
+      expect(g.top, 'not full height').toBeGreaterThan(0)
+    })
+  }
+})
+
 test.describe('375 · photo credits live in the footer band only (frame m09)', () => {
   for (const r of ROUTES) {
     test(r.id, async ({ page }) => {
