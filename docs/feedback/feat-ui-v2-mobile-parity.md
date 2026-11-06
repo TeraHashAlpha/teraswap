@@ -128,3 +128,36 @@ code reaches v1 visitors; the 100 B is bundler chunk-boundary churn, not a funct
 **Concern for the Auditor:** L-3's v1-side DCAPanel/ToastProvider omission (hard `?? 1` fallback, always
 Etherscan for a Base/Arbitrum DCA fill toast) is real but out of this PR's scope — v2 is now strictly better than
 v1 here, not merely at parity.
+
+## Feedback — A75b fixes (PR #660, head after d4a1ed3…c10729a) — blocked 0C/1H → all fixed
+
+Auditor A75b verdict: blocked 0C/1H (L-8 ruled H by the owner). One commit per id, each test failing on the commit before it
+(S-1 excepted: it is new coverage, see below).
+
+| id | sev | commit | fix | test that failed on 8a77ebd |
+|---|---|---|---|---|
+| L-8 | H | d4a1ed3 | `e2e.yml` v2-mobile-parity build step: `NEXT_PUBLIC_DCA_ENABLED=true` + `NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_{BASE,ARBITRUM}` + `NEXT_PUBLIC_{BASE,ARBITRUM}_FEE_COLLECTOR`, each `${{ vars.<same name> }}` (names only, no hex) | `e2e-mobile-parity-ci.test.mjs` 5 of 9 red (DCA flag + 4 names); also forbids any 20-byte hex in the workflow |
+| L-3 | L | b7d249f | "Swap confirmed!" → `swap.txChainId ?? activeChainId`; `order_filled` → `latestEvent.chainId ?? card chain` | `swap-toast-chain.lifecycle.test.tsx` (sent on Base/Arbitrum, wallet switched to Ethereum → link must be basescan/arbiscan; was etherscan.io); `dca-gate-sounds.test.tsx` (Arbitrum fill on a Base card and vice versa; was the card's host). Real `V2ToastProvider`, assertion = link hostname |
+| S-3 | L | 8067115 | `Sheet placement="drawer"` + `modals.css`: right-edge, full height, 420 px, left hairline at ≥ 1024; bottom sheet (grab bar, top hairline) below; HelpDrawer opts in; content-map row | `sheet-drawer.test.tsx` 4 red (marker + stylesheet rules); Playwright `help drawer geometry` at 375/768/1023/1024/1440 |
+| S-1 | L | 576a7a5 | sweep extended to header, footer, Help/Music fabs, open Help drawer (text, hrefs, accessible names) and Share (label + tweet through the SwapBox mock rig) | new coverage. Its first run, before any allow-list, failed 4 of 5 — those are the gaps below. Remove an allow-list entry and it fails again |
+| S-2 | L | 2458bc6 | `public/sw.js`: cross-origin requests return before BOTH the asset and the HTML branch | `sw.test.ts` 8 red (token-logo png, svg/ico/woff/woff2 on a CDN, another origin's `/_next/static/`, `/icons/`, `/sounds/`); same-origin assets still cache-first |
+| `%` note | — | 39b0ac3 | content-map row: v1 prints `%%` (SwapBox.tsx:1234), v2 keeps one `%`, tweet text byte-identical | `shell-surfaces-sweep.test.tsx` row pin red without the row |
+
+Plus 5f937ac / c10729a: an unused helper (lint) and a regex-built selector escape (CodeQL `js/incomplete-sanitization`) in my own new tests.
+
+### Edge case
+- **The `%%` label is the Share button, not RecentSwaps.** The task text says "RecentSwaps label"; RecentSwaps prints no percentage. The only `%%` in v1 is
+  `Share — saved ${savedDisplay}%` (SwapBox.tsx:1234), which is what the sweep compares and what the row records.
+- **S-1 found three differences nobody had recorded** (now content-map rows, marked *flagged, not owner-ruled*): footer `Fee: 0.1%` → `Fee 0.1%`
+  (colon dropped); Help links `𝕏 Follow on X` / `✉ Contact support` → `@TeraHash on X` / `Email support` (same targets, pack-03 wording pinned by
+  shell.test.tsx). They are allow-listed with that reason rather than given an invented owner ruling. **Owner: confirm, or ask for v1's wording back.**
+
+### Concern
+- **L-8 repository variables were created by me.** `gh variable set` ×4 (`NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE`, `…_ARBITRUM`, `NEXT_PUBLIC_BASE_FEE_COLLECTOR`,
+  `NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR`), values = the public addresses in `docs/DEPLOYMENTS.md`. The Vercel Preview values are `encrypted`/`sensitive` and
+  were deliberately not decrypted, so the Preview env was matched by NAME, not by value. If the Preview env ever diverges from DEPLOYMENTS.md the CI job
+  keeps testing the documented addresses. Reversible: `gh variable delete <name>`.
+- Vercel's `NEXT_PUBLIC_DCA_ENABLED` is `sensitive` on Preview/Production; CI sets the literal `"true"`.
+- The Playwright geometry block was verified green on the fixed build only (52/52 locally on the CI env); the old centred-modal build was not rebuilt to watch
+  it go red — the red evidence is the vitest CSS guard.
+- Local mobile run used Playwright's `PW_CHROMIUM` override (this Mac has Chromium build 1243, Playwright 1.64.1 wants 1248).
