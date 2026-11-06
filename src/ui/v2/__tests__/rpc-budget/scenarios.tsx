@@ -65,8 +65,8 @@ export function installHarnessGlobals(): void {
   )
 }
 
-/** a0 landing visitor · a swap visitor, no amount · b visitor + amount · c wallet + amount (ETH→USDC) · c20 wallet + amount, ERC-20 sell (USDC→ETH) · p wallet on the Portfolio tab (B8) · an wallet on the Analytics tab (B9) */
-export type State = 'a0' | 'a' | 'b' | 'c' | 'c20' | 'p' | 'an'
+/** a0 landing visitor · a swap visitor, no amount · b visitor + amount · c wallet + amount (ETH→USDC) · c20 wallet + amount, ERC-20 sell (USDC→ETH) · p wallet on the Portfolio tab (B8) · an wallet on the Analytics tab (B9) · docs visitor on /docs (feat/ui-v2-docs-legal) */
+export type State = 'a0' | 'a' | 'b' | 'c' | 'c20' | 'p' | 'an' | 'docs'
 
 export interface ScenarioResult {
   ui: Ui
@@ -146,6 +146,30 @@ export async function runScenario(opts: { ui: Ui; state: State; hide?: boolean }
     } else {
       const { LandingV2 } = await import('@/ui/v2/landing')
       tree = <LandingV2 onLaunchApp={() => {}} />
+    }
+  } else if (state === 'docs') {
+    // [feat/ui-v2-docs-legal] A disconnected visitor on /docs: the page reads no wallet/chain RPC of its own
+    // (product-claims are pure functions), so the only RPC is the footer's block poll — same budget as a0/a.
+    if (ui === 'v1') {
+      const [{ default: DocsPage }, { default: Footer }] = await Promise.all([import('@/components/DocsPage'), import('@/components/Footer')])
+      tree = (
+        <>
+          <DocsPage />
+          <Footer />
+        </>
+      )
+    } else {
+      const [{ DocsTabV2 }, { Footer }, { V2ToastProvider }] = await Promise.all([
+        import('@/ui/v2/docs-legal/DocsTabV2'),
+        import('@/ui/v2/shell/Footer'),
+        import('@/ui/v2/shell/toasts'),
+      ])
+      tree = (
+        <V2ToastProvider>
+          <DocsTabV2 />
+          <Footer />
+        </V2ToastProvider>
+      )
     }
   } else if (state === 'an') {
     // [B9] The Analytics tab with a connected wallet. v1 = its three Analytics components in the order the tab + /analytics page show them

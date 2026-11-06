@@ -9,6 +9,7 @@
  *   c  wallet, pair + amount (ETH→USDC)    ≤ 12   c20 the same with an ERC-20 sell (USDC→ETH)
  *   p  wallet on the Portfolio tab (B8)    ≤ 6    (measured 4 for v1 and v2: the footer block + 3 wallet reads; the holdings add none of their own)
  *   an wallet on the Analytics tab (B9)   ≤ 6    (the same reads as `p`: the footer block + the wallet's own; the three Analytics reads are HTTP, not RPC)
+ *   docs disconnected visitor on /docs (feat/ui-v2-docs-legal)  ≤ 1   (no wallet/chain reads of its own — product-claims are pure functions — same budget as a0/a)
  *   d  hidden tab                          = 0, and returning to visible refreshes each source once (0 < n ≤ mount burst)
  * The page-load burst is reported by the harness table, not budgeted per minute; it is capped here so it cannot grow unnoticed.
  */
@@ -31,9 +32,9 @@ import { installHarnessGlobals, runScenario, sum, type State, type Ui } from './
 
 beforeAll(() => installHarnessGlobals())
 
-const BUDGET_PER_MIN: Record<State, number> = { a0: 1, a: 1, b: 6, c: 12, c20: 12, p: 6, an: 6 }
+const BUDGET_PER_MIN: Record<State, number> = { a0: 1, a: 1, b: 6, c: 12, c20: 12, p: 6, an: 6, docs: 1 }
 /** One-time page-load burst ceilings (block + 2 fee reads + Chainlink/gas multicall, plus wallet reads). */
-const MOUNT_CEILING: Record<State, number> = { a0: 4, a: 4, b: 4, c: 12, c20: 12, p: 12, an: 12 }
+const MOUNT_CEILING: Record<State, number> = { a0: 4, a: 4, b: 4, c: 12, c20: 12, p: 12, an: 12, docs: 4 }
 
 describe.each(['v1', 'v2'] as Ui[])('browser RPC budgets — %s', (ui) => {
   it.each(Object.keys(BUDGET_PER_MIN) as State[])('state %s: visible ≤ budget, hidden = 0, return refreshes once', async (state) => {
@@ -50,7 +51,7 @@ describe.each(['v1', 'v2'] as Ui[])('browser RPC budgets — %s', (ui) => {
   }, 60_000)
 
   it('the only wallet-less poll is eth_blockNumber (the footer)', async () => {
-    for (const state of ['a0', 'a', 'b'] as State[]) {
+    for (const state of ['a0', 'a', 'b', 'docs'] as State[]) {
       const r = await runScenario({ ui, state })
       expect(Object.keys(r.steady).filter((m) => m !== 'eth_blockNumber'), `${state}: ${JSON.stringify(r.steady)}`).toEqual([])
     }
