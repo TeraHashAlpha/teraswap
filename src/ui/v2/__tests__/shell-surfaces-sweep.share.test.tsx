@@ -82,10 +82,6 @@ const swapHook = (over: Record<string, unknown> = {}) => ({
 const splitHook = (over: Record<string, unknown> = {}) => ({
   status: 'idle', legs: [], completedLegs: 0, totalLegs: 0, errorMessage: null, plannedLegs: [], unpricedAckRequired: false, execute: vi.fn(), confirmPlan: vi.fn(), reset: vi.fn(), ...over,
 })
-const noChain = (t: Record<string, unknown>) => {
-  const { chain: _chain, ...rest } = t
-  return rest
-}
 const TX = '0x8c1f000000000000000000000000000000000000000000000000000000c44b0'
 
 beforeEach(() => {
