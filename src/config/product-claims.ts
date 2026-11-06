@@ -122,7 +122,8 @@ export const SWAP_CHAIN_LIST_LABEL = formatChainList(SWAP_CHAIN_NAMES)
 // — Help, Docs, the Privacy Policy, the landing pages, v1 and v2 — says the SAME thing. What backs each:
 //   RELAY (PRIVACY_PROXY_CLAIM): browser RPC reads on every chain go to /api/rpc[?chainId=] (wagmi
 //     transports, chains/clients.ts; wagmiConfig.browser-transports.test.ts), quotes and swaps to
-//     /api/quote and /api/swap, token logos to /api/token-logo and /api/proxy/logo. The CSP allows
+//     /api/quote and /api/swap, a signed CoW order and its status/trades to /api/cow/* (A76 S-1:
+//     adapters/cow.ts, limit-order-api.ts → cow-proxy.ts), token logos to /api/token-logo and /api/proxy/logo. The CSP allows
 //     no other host without a wallet (csp-policy.js) and CI measures it (e2e/third-party-hosts).
 //   WALLET (PRIVACY_DIRECT_NOTE / PRIVACY_WALLET_ADVICE): the wallet's own RPC and broadcast never
 //     touch our origin; the WalletConnect relay is the first wallet host in the CSP.
@@ -133,7 +134,7 @@ export const SWAP_CHAIN_LIST_LABEL = formatChainList(SWAP_CHAIN_NAMES)
 // The chain names in the first sentence are typed (owner wording); product-claims.test.ts fails if
 // the chain registry and that sentence ever disagree.
 export const PRIVACY_PROXY_CLAIM =
-  "TeraSwap's server relays all RPC reads on Ethereum, Base and Arbitrum, every aggregator quote and swap request, and token logos, so those providers see our server's IP address, not yours."
+  "TeraSwap's server relays all RPC reads on Ethereum, Base and Arbitrum, every aggregator quote and swap request, every CoW Protocol order you sign and its status checks, and token logos, so those providers see our server's IP address, not yours."
 export const PRIVACY_DIRECT_NOTE =
   "Your wallet's own RPC connection and the transactions it broadcasts are outside our control; the WalletConnect relay sees your connection once you choose a WalletConnect wallet."
 export const PRIVACY_WALLET_ADVICE = 'Use a privacy RPC in your wallet settings if that matters to you.'

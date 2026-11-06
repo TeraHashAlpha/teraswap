@@ -96,7 +96,7 @@ keys + logs = HMAC(IP, daily salt), four raw-XFF routes, Sentry stated off (ahea
 Merged `origin/main` first: already up to date at `7eeefeb` (main `838628c`), no merge commit. One commit per id, each
 with a test that fails on `7eeefeb` (run in a detached worktree at that commit). #668 stays a draft.
 
-- [ ] S-1 (H) browser never calls api.cow.fi — `/api/cow/{quote,orders,order-status,trades}` behind the limiter; v1/v2
+- [x] S-1 (H) browser never calls api.cow.fi — `/api/cow/{quote,orders,order-status,trades}` behind the limiter; v1/v2
       submit + poll and the LimitOrderPanel price read through them; CI capture "CoW submit after signing"; copy fixed
 - [ ] S-2 (H) Privacy §3.3 — Auditor's sentence, v1 == v2, content-map delta
 - [ ] S-3 (M) `/api/rpc` — drop eth_getLogs / eth_simulateV1 / eth_getProof / eth_createAccessList; 10 s upstream

@@ -40,7 +40,18 @@ const scrub = (pathname: string) =>
     .replace(/\/v2\/[^/]+/, '/v2/<key>')
     .slice(0, 70)
 
+/** A scenario's own answer for a same-origin `/api/*` call (see `Capture.apiOverride`); null = default handling. */
+export type ApiOverride = (url: URL, request: { method: string; json: () => unknown }) => { status: number; json: unknown } | null
+
 export class Capture {
+  /**
+   * [A76 S-1] Lets a scenario answer chosen same-origin API calls itself — the CoW scenario answers /api/rpc with an
+   * ABI-aware stub (balances, allowances, Chainlink) and /api/quote, /api/swap, /api/cow/* with a CoW order's
+   * lifecycle — so the app can be driven to a signed CoW order without anything leaving the machine.
+   */
+  apiOverride: ApiOverride | null = null
+  /** Bodies the page POSTed to same-origin `/api/*`, by path (for asserting what a route was sent). */
+  readonly apiBodies = new Map<string, unknown[]>()
   private hosts = new Map<string, { kind: 'http' | 'ws'; count: number; methods: Set<string>; paths: Set<string>; phases: Set<string> }>()
   private csp = new Map<string, number>()
   private api = new Map<string, number>()
@@ -108,6 +119,31 @@ export class Capture {
 
       const apiKey = url.pathname === '/api/rpc' ? `/api/rpc${url.search}` : url.pathname
       this.api.set(apiKey, (this.api.get(apiKey) ?? 0) + 1)
+
+      if (request.method() !== 'GET' && url.pathname !== '/api/rpc') {
+        let posted: unknown
+        try {
+          posted = request.postDataJSON()
+        } catch {}
+        this.apiBodies.set(url.pathname, [...(this.apiBodies.get(url.pathname) ?? []), posted])
+      }
+      const override = this.apiOverride?.(url, {
+        method: request.method(),
+        json: () => {
+          try {
+            return request.postDataJSON()
+          } catch {
+            return undefined
+          }
+        },
+      })
+      if (override) {
+        try {
+          return await route.fulfill({ status: override.status, contentType: 'application/json', body: JSON.stringify(override.json) })
+        } catch {
+          return
+        }
+      }
 
       if (url.pathname === '/api/rpc') {
         const chain = url.searchParams.get('chainId') ?? '1'
@@ -212,15 +248,18 @@ export const WALLETCONNECT_RELAY_HOST = 'relay.walletconnect.org'
 export const settle = (page: Page, ms: number) => page.waitForTimeout(ms)
 
 export const MOCK_WALLET_ADDRESS = '0x000000000000000000000000000000000000dEaD'
+/** What the mock wallet answers to eth_signTypedData_v4: shaped like an ECDSA signature (r ‖ s ‖ v), signs nothing. */
+export const MOCK_SIGNATURE = `0x${'ab'.repeat(64)}1b`
 
 /**
- * A browser-extension wallet that signs nothing: announced over EIP-6963 (as "MetaMask") and as `window.ethereum`, it
- * answers account / chain questions and follows `wallet_switchEthereumChain`. Install BEFORE the first navigation.
+ * A browser-extension wallet that holds no key: announced over EIP-6963 (as "MetaMask") and as `window.ethereum`, it
+ * answers account / chain questions, follows `wallet_switchEthereumChain` and answers `eth_signTypedData_v4` with
+ * MOCK_SIGNATURE. Install BEFORE the first navigation.
  * `reconnect` makes wagmi restore it on load, like a returning visitor.
  */
 export async function installMockWallet(context: BrowserContext, { reconnect = true }: { reconnect?: boolean } = {}) {
   await context.addInitScript(
-    ({ address, reconnect }) => {
+    ({ address, reconnect, signature }) => {
       let chain = '0x1'
       const listeners: Record<string, Array<(...a: unknown[]) => void>> = {}
       const provider = {
@@ -241,6 +280,10 @@ export async function installMockWallet(context: BrowserContext, { reconnect = t
             case 'wallet_getPermissions':
             case 'wallet_requestPermissions':
               return [{ parentCapability: 'eth_accounts' }]
+            case 'eth_signTypedData_v4':
+              // [A76 S-1] A MOCK signature (65 bytes): the CoW scenario needs the app to get past "sign"; nothing
+              // that receives it ever reaches CoW (the capture answers /api/cow/* itself).
+              return signature
             default:
               return null
           }
@@ -260,7 +303,7 @@ export async function installMockWallet(context: BrowserContext, { reconnect = t
         } catch {}
       }
     },
-    { address: MOCK_WALLET_ADDRESS, reconnect },
+    { address: MOCK_WALLET_ADDRESS, reconnect, signature: MOCK_SIGNATURE },
   )
 }
 

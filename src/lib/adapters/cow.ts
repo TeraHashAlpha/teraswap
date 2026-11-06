@@ -6,6 +6,7 @@ import {
   getCowApiBase,
 } from '@/lib/constants'
 import { getWrappedNative } from '@/lib/chains/registry'
+import { COW_PROXY_PATHS, cowProxyUrl } from '@/lib/cow-proxy-paths'
 import { clampSlippage, withTimeout } from './shared'
 import { safeBigInt } from '@/lib/utils'
 import type {
@@ -370,15 +371,17 @@ async function fetchCowSwapOrder(
  * [10-L-02] orderParams is typed via CowOrderParams so any caller passing
  * a misshapen object fails at compile time. The validator in
  * fetchCowSwapOrder guarantees the runtime shape for the happy path.
+ *
+ * [fix/user-ip-privacy A76 S-1] Runs in the BROWSER (useSwap, after the wallet signed), so it posts to our own
+ * origin — /api/cow/orders relays the order to CoW's orderbook for `chainId` (cow-proxy.ts). It used to post to
+ * api.cow.fi directly, which handed CoW the visitor's IP and is refused by the site's CSP.
  */
 export async function submitCowOrder(
   orderParams: CowOrderParams,
   signature: string,
   chainId: number = CHAIN_ID,
 ): Promise<string> {
-  const base = getCowApiBase(chainId)
-
-  const res = await fetch(`${base}/orders`, {
+  const res = await fetch(cowProxyUrl(COW_PROXY_PATHS.orders, chainId), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({
@@ -411,6 +414,9 @@ export async function submitCowOrder(
 
 /**
  * Poll CoW order status until filled or expired.
+ *
+ * [fix/user-ip-privacy A76 S-1] Browser-side, like submitCowOrder: the status and the settlement are read through
+ * /api/cow/order-status and /api/cow/trades on our own origin, never from api.cow.fi.
  */
 export async function pollCowOrderStatus(
   orderUid: string,
@@ -424,7 +430,6 @@ export async function pollCowOrderStatus(
    *  without touching the post-execution validator. */
   executedBuyAmount?: string
 }> {
-  const base = getCowApiBase(chainId)
   const start = Date.now()
   const pollInterval = 3000
   // [RQ-2026-06-11] Bound each poll request — a stalled connection used to hang
@@ -433,11 +438,11 @@ export async function pollCowOrderStatus(
 
   while (Date.now() - start < maxWaitMs) {
     try {
-      const res = await withTimeout(fetch(`${base}/orders/${orderUid}`), pollFetchTimeoutMs)
+      const res = await withTimeout(fetch(cowProxyUrl(COW_PROXY_PATHS.orderStatus, chainId, { uid: orderUid })), pollFetchTimeoutMs)
       if (res.ok) {
         const order = await res.json()
         if (order.status === 'fulfilled') {
-          const tradesRes = await withTimeout(fetch(`${base}/trades?orderUid=${orderUid}`), pollFetchTimeoutMs)
+          const tradesRes = await withTimeout(fetch(cowProxyUrl(COW_PROXY_PATHS.trades, chainId, { orderUid })), pollFetchTimeoutMs)
           const trades = tradesRes.ok ? await tradesRes.json() : []
           return {
             status: 'fulfilled',

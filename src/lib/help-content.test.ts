@@ -84,7 +84,7 @@ describe('help-content — privacy answers say what is relayed and what the wall
 
   it('"How does TeraSwap protect my privacy?" is the owner wording, sentence for sentence', () => {
     expect(privacy()).toBe(
-      "TeraSwap's server relays all RPC reads on Ethereum, Base and Arbitrum, every aggregator quote and swap request, and token logos, so those providers see our server's IP address, not yours. " +
+      "TeraSwap's server relays all RPC reads on Ethereum, Base and Arbitrum, every aggregator quote and swap request, every CoW Protocol order you sign and its status checks, and token logos, so those providers see our server's IP address, not yours. " +
         "Your wallet's own RPC connection and the transactions it broadcasts are outside our control; the WalletConnect relay sees your connection once you choose a WalletConnect wallet. " +
         'Use a privacy RPC in your wallet settings if that matters to you.',
     )

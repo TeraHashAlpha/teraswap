@@ -9,15 +9,18 @@
  * this list, the tests read the same list (src/lib/security-headers.test.ts), and so does the headless
  * capture that runs in CI (e2e/third-party-hosts).
  *
- * THE RULE. `connect-src` is 'self' plus the wallet hosts below and nothing else. Every read the site
- * makes — RPC on all three chains, quotes, swaps, prices, token logos, order status — goes to our own
- * origin. A wallet host is contacted only AFTER the visitor chooses that wallet (or returns with a
+ * THE RULE. `connect-src` is 'self' plus the wallet hosts below and nothing else. Every call the site
+ * makes — RPC on all three chains, quotes, swaps, prices, token logos, order status, and a CoW Protocol
+ * order the visitor signed — goes to our own origin. A wallet host is contacted only AFTER the visitor chooses that wallet (or returns with a
  * session of it); with no wallet chosen the browser talks to our origin only.
  *
  * NOT LISTED, ON PURPOSE (each was allowed before; none is needed by the browser):
  *  - RPC providers (Alchemy, Infura, llamarpc, Ankr, publicnode, merkle): all reads go through /api/rpc.
  *  - Aggregator / DEX APIs (1inch, 0x, ParaSwap, KyberSwap, CoW, OpenOcean, Sushi, Balancer) and
- *    Etherscan: called by our API routes, never by the page.
+ *    Etherscan: called by our API routes, never by the page. That includes the CoW calls made AFTER the
+ *    visitor signs: the signed order, its status and its trades go to /api/cow/{orders,order-status,trades}
+ *    and the limit-order price to /api/cow/quote (src/lib/cow-proxy.ts). Before A76 S-1 the page POSTed the
+ *    signed order to api.cow.fi itself — which this policy refused, and which handed CoW the visitor's IP.
  *  - Supabase: order status is polled through /api/orders; the browser-side realtime socket is gone.
  *  - Sentry ingest: the SDK is not initialised in the browser (see docs/security/SENTRY-STATUS.md).
  *  - pulse.walletconnect.org: Reown / WalletConnect TELEMETRY. Refused here because the SDK offers no

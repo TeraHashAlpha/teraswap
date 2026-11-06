@@ -213,8 +213,9 @@ function PrivacyPolicy() {
 
       <SectionTitle id="pp-sharing">6. Data Sharing &amp; Third Parties</SectionTitle>
       <P>
-        When you request a swap quote, the Interface sends your wallet address and transaction
-        parameters to the APIs of third-party aggregator and DEX protocols via our server-side
+        When you request a swap quote, or submit a CoW Protocol order you have signed, the Interface
+        sends your wallet address and transaction parameters (for a CoW Protocol order, the signed
+        order itself) to the APIs of third-party aggregator and DEX protocols via our server-side
         proxy. Your IP address is not exposed to these services. Each protocol has its own privacy
         policy. We encourage you to review them.
       </P>

@@ -92,10 +92,21 @@ describe.each(LEGAL)('Privacy Policy — %s', (_ui, mount) => {
   })
 })
 
-describe('Privacy Policy — v1 and v2 carry the same three sections, word for word', () => {
+// [fix/user-ip-privacy A76 S-1] §6 said quotes go "via our server-side proxy" while the signed CoW order went from the
+// browser to api.cow.fi. Both now go through our server; §6 says so for the signed order too.
+describe.each(LEGAL)('Privacy Policy §6 — %s', (_ui, mount) => {
+  it('names the signed CoW Protocol order among what our server relays', () => {
+    const sharing = section(mount(), 'pp-sharing')
+    expect(sharing).toContain(
+      'When you request a swap quote, or submit a CoW Protocol order you have signed, the Interface sends your wallet address and transaction parameters (for a CoW Protocol order, the signed order itself) to the APIs of third-party aggregator and DEX protocols via our server-side proxy. Your IP address is not exposed to these services.',
+    )
+  })
+})
+
+describe('Privacy Policy — v1 and v2 carry the same sections, word for word', () => {
   // One UI mounted at a time: with both in the document the section ids exist twice, and jsdom's `#id` lookup inside
   // the second container then finds nothing.
-  it.each(['pp-collect', 'pp-proxy', 'pp-cookies'])('%s', (id) => {
+  it.each(['pp-collect', 'pp-proxy', 'pp-sharing', 'pp-cookies'])('%s', (id) => {
     const v1 = section(render(<LegalPage type="privacy" />).container, id)
     cleanup()
     const v2 = section(render(<LegalPageV2 type="privacy" />).container, id)
@@ -117,6 +128,8 @@ describe.each(DOCS)('Docs "Privacy" — %s', (_ui, mount) => {
     expect(p).toContain('Method Policy (Read-Only Allow-List)')
     expect(p).toContain('relays only a fixed list of read-only methods per chain')
     expect(p).toContain('Token logos are fetched by our server too and served from our own address.')
+    // [A76 S-1] Docs 02: the signed CoW order and its tracking are relayed too.
+    expect(p).toContain('and a CoW Protocol order you sign is submitted and tracked through /api/cow. Quote, swap and order requests do not go directly from your browser to these services.')
     expect(p).toContain(PRIVACY_IP_STORAGE_NOTE)
     expect(p).toContain('/api/token-logo')
   })

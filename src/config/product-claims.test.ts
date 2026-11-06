@@ -384,7 +384,7 @@ describe('[fix/functional-chain-ui C8] PRIVACY_DIRECT_NOTE matches what the brow
 describe('[fix/user-ip-privacy] privacy claims — the owner wording, each sentence backed by the code', () => {
   it('the five sentences are exactly the owner’s (2026-11-06)', () => {
     expect([PRIVACY_PROXY_CLAIM, PRIVACY_DIRECT_NOTE, PRIVACY_WALLET_ADVICE, PRIVACY_IP_STORAGE_NOTE, PRIVACY_WALLET_STORAGE_NOTE].join(' ')).toBe(
-      "TeraSwap's server relays all RPC reads on Ethereum, Base and Arbitrum, every aggregator quote and swap request, and token logos, so those providers see our server's IP address, not yours. " +
+      "TeraSwap's server relays all RPC reads on Ethereum, Base and Arbitrum, every aggregator quote and swap request, every CoW Protocol order you sign and its status checks, and token logos, so those providers see our server's IP address, not yours. " +
         "Your wallet's own RPC connection and the transactions it broadcasts are outside our control; the WalletConnect relay sees your connection once you choose a WalletConnect wallet. " +
         'Use a privacy RPC in your wallet settings if that matters to you. ' +
         'We do not store IP addresses in our database; our hosting and rate-limiting layers process them transiently, and our rate limiter only ever sees a one-way hash. ' +
@@ -401,6 +401,16 @@ describe('[fix/user-ip-privacy] privacy claims — the owner wording, each sente
     // … and the sentence names no chain the registry does not have: its list is "on A, B and C,".
     const listed = /RPC reads on (.+?), every aggregator/.exec(PRIVACY_PROXY_CLAIM)![1].split(/, | and /)
     expect(listed).toEqual(SWAP_CHAIN_NAMES.map((n) => n.split(' ')[0]))
+  })
+
+  // [fix/user-ip-privacy A76 S-1] "every CoW Protocol order you sign and its status checks": the browser submits and
+  // polls through our origin, and the CSP gives the page no CoW host to reach even if a caller tried.
+  it('"every CoW Protocol order you sign and its status checks" — /api/cow/* only, and no CoW host in connect-src', async () => {
+    expect(PRIVACY_PROXY_CLAIM).toContain('every CoW Protocol order you sign and its status checks')
+    const { COW_PROXY_PATHS } = await import('@/lib/cow-proxy-paths')
+    for (const path of Object.values(COW_PROXY_PATHS)) expect(path).toMatch(/^\/api\/cow\/[a-z-]+$/)
+    const { CONNECT_SRC } = require('../../csp-policy') as { CONNECT_SRC: readonly string[] }
+    expect(CONNECT_SRC.filter((src) => /cow/i.test(src))).toEqual([])
   })
 
   it('the browser really has one RPC address per chain, ours — the claim is "all RPC reads", so no chain may be direct', async () => {
