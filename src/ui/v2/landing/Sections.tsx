@@ -89,7 +89,8 @@ export function DifferentSection() {
     },
   ]
   return (
-    <section id="why-teraswap" className={`ts-v2-opaque ${SECTION}`}>
+    <section id="why-teraswap" className={`ts-v2-opaque ts-v2-scrim ts-v2-scrim--center ${SECTION} overflow-hidden`}>
+      <NarrativeStill photoId={STILL_PHOTO.why} />
       <div className={WRAP}>
         <SectionHead eyebrow="Why TeraSwap">
           What Makes TeraSwap <HandUnderline className="text-v2-cream">Different</HandUnderline>

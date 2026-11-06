@@ -40,8 +40,8 @@
 .ts-an-action { display: inline-flex; min-height: 44px; align-items: center; font-family: var(--font-mono); font-size: 12px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; text-decoration: underline; text-decoration-color: var(--hairline-underline); text-underline-offset: 6px; }
 
 .ts-an-empty { padding: 32px 0; text-align: center; }
-.ts-an-note { border-left: 2px solid var(--cream); padding-left: 14px; }
-.ts-an-error { border-left: 2px solid var(--red); padding-left: 14px; color: var(--red); font-size: 13px; }
+.ts-an-note { border-left: 2px solid var(--c-accent-green); padding-left: 14px; }
+.ts-an-error { border-left: 2px solid var(--c-accent-green); padding-left: 14px; color: var(--red); font-size: 13px; }
 .ts-an-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 @media (max-width: 900px) {

@@ -70,7 +70,7 @@ export function CowOrderReviewSheet({ order, onConfirm, onCancel }: { order: Pic
         </ReviewRow>
       </div>
 
-      <p data-testid="cow-explanation" className="mt-4 border-l-2 border-v2-green pl-4 text-[13px] leading-relaxed text-v2-green">
+      <p data-testid="cow-explanation" className="mt-4 border-l-2 ts-v2-accent-stroke pl-4 text-[13px] leading-relaxed text-v2-green">
         ✓ MEV-protected via CoW Protocol — solvers compete in a batch auction; you&apos;re shielded from frontrunning/sandwich attacks. Your wallet signs this order off-chain; no gas to submit.
       </p>
 

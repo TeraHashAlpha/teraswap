@@ -51,7 +51,7 @@ export function DcaCancelSheet({ review, onConfirm, onCancel }: { review: Pendin
             <ReviewRow label="Expires" testId="dca-cancel-expiry">{fmtTime(review.orderStruct.expiry)}</ReviewRow>
             {/* The orderHash binds the off-chain removal signature to exactly this order's row. */}
             <ReviewRow label="Order hash" testId="dca-cancel-orderhash">{truncAddr(review.order.orderHash)}</ReviewRow>
-            <p className="mt-4 border-l-2 border-v2-cream pl-4 text-[13px] leading-relaxed text-v2-text/90">
+            <p className="mt-4 border-l-2 ts-v2-accent-stroke pl-4 text-[13px] leading-relaxed text-v2-text/90">
               After the on-chain cancel confirms, this order can never execute — the contract marks
               its hash cancelled. No funds move.
             </p>
@@ -74,13 +74,13 @@ export function DcaCancelSheet({ review, onConfirm, onCancel }: { review: Pendin
               ))}
             </ul>
             {review.skippedOrders.length > 0 && (
-              <p data-testid="dca-invalidate-skipped" className="mt-3 border-l-2 border-v2-amber pl-4 text-[13px] leading-relaxed text-v2-amber">
+              <p data-testid="dca-invalidate-skipped" className="mt-3 border-l-2 ts-v2-accent-stroke pl-4 text-[13px] leading-relaxed text-v2-amber">
                 {review.skippedOrders.length} order{review.skippedOrders.length > 1 ? 's' : ''} on other
                 chains ({[...new Set(review.skippedOrders.map((o) => getChainName(o.chainId ?? DEFAULT_CHAIN_ID)))].join(', ')}) were
                 NOT included — switch your wallet to that chain and run Cancel All again to cancel them.
               </p>
             )}
-            <p className="mt-4 border-l-2 border-v2-cream pl-4 text-[13px] leading-relaxed text-v2-text/90">
+            <p className="mt-4 border-l-2 ts-v2-accent-stroke pl-4 text-[13px] leading-relaxed text-v2-text/90">
               {cancelTxCount > 0 ? (
                 <>Non-DCA orders above are cancelled by the nonce invalidation; each DCA order needs its
                 own on-chain cancelOrder call (the contract never checks the nonce for DCA) — expect{' '}

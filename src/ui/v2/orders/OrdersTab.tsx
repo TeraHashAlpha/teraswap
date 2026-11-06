@@ -156,7 +156,7 @@ export function OrderRow({ order, expanded, onToggle, onCancel, onRemove, connec
           </dl>
 
           {(order.error || order.status === 'error') && (
-            <p className="mt-3 border-l-2 border-v2-red pl-3 text-[13px] text-v2-red" data-testid="order-error">{failedOrderReason(order.error)}</p>
+            <p className="mt-3 border-l-2 ts-v2-accent-stroke pl-3 text-[13px] text-v2-red" data-testid="order-error">{failedOrderReason(order.error)}</p>
           )}
 
           {order.txHash && (

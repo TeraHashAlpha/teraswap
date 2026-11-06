@@ -117,12 +117,12 @@ describe('floating buttons (D3 item 12)', () => {
 })
 
 describe('banner, toasts, drawer (D3 items 14, 16)', () => {
-  it('the notice banner is a strip with a 2 px accent: no border, no radius', () => {
+  it('the notice banner is a strip with a 2 px platform-green accent: no border, no radius', () => {
     render(<AppShell />)
     const banner = screen.getByRole('region', { name: 'Notice' })
     expect(banner.getAttribute('data-surface')).toBe('strip')
     expect(banner.className).toMatch(/\bborder-l-2\b/)
-    expect(banner.className).toMatch(/\bborder-v2-teal\b/)
+    expect(banner.className).toMatch(/\bts-v2-accent-stroke\b/)
     expect(banner.className).not.toMatch(BOX)
     expect(banner.className).not.toMatch(/rounded|\bborder\b(?!-)/)
     fireEvent.click(within(banner).getByRole('button', { name: 'Enable' }))
@@ -130,12 +130,13 @@ describe('banner, toasts, drawer (D3 items 14, 16)', () => {
     expect(within(banner).getByRole('button', { name: 'Enable' }).className).toMatch(/ts-v2-underline/)
   })
 
+  // Design review 1 (owner): the bar is the platform green for EVERY type — the severity is the title text, not the colour.
   it.each([
-    ['success', 'border-v2-green'],
-    ['error', 'border-v2-red'],
-    ['warning', 'border-v2-amber'],
-    ['info', 'border-v2-teal'],
-    ['loading', 'border-v2-cream'],
+    ['success', 'ts-v2-accent-stroke'],
+    ['error', 'ts-v2-accent-stroke'],
+    ['warning', 'ts-v2-accent-stroke'],
+    ['info', 'ts-v2-accent-stroke'],
+    ['loading', 'ts-v2-accent-stroke'],
   ] as const)('a %s toast is a solid strip with a 2 px %s accent — same surface for all', (type: ToastType, accent) => {
     function Fire() {
       const { toast } = useV2Toast()
@@ -147,6 +148,7 @@ describe('banner, toasts, drawer (D3 items 14, 16)', () => {
     expect(el.getAttribute('data-surface')).toBe('strip')
     expect(el.className).toMatch(/\bborder-l-2\b/)
     expect(el.className).toMatch(new RegExp(`\\b${accent}\\b`))
+    expect(el.className).not.toMatch(/border-v2-(green|red|amber|teal|cream)/)
     expect(el.className).not.toMatch(BOX)
     expect(el.className).not.toMatch(/rounded|overflow-hidden/)
     expect(el.querySelector('.absolute')).toBeNull() // the old absolutely-positioned bar is gone
@@ -166,7 +168,7 @@ describe('banner, toasts, drawer (D3 items 14, 16)', () => {
     // an open group is indented under one hairline; an open answer has no surrounding box
     const section = within(drawer).getAllByRole('button', { expanded: true })[0]
     expect(section).toBeTruthy()
-    const group = drawer.querySelector('.ts-v2-rule-l.pl-3')
+    const group = drawer.querySelector('.ts-v2-rule-list.pl-3')
     expect(group).not.toBeNull()
     fireEvent.click(within(group as HTMLElement).getAllByRole('button')[0])
     const answer = (group as HTMLElement).querySelector('p')!

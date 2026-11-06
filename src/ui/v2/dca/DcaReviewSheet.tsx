@@ -32,7 +32,7 @@ export interface DcaReviewView {
  */
 export function DcaConsentBlock({ tier, body, checked, onChange, checkboxRef }: { tier: WeakerTier; body: string; checked: boolean; onChange: (v: boolean) => void; checkboxRef?: Ref<HTMLInputElement> }) {
   return (
-    <section data-testid="dca-consent" data-tier={tier} aria-labelledby="v2-dca-consent-h" className="mt-4 border-l-2 border-v2-amber py-1 pl-4">
+    <section data-testid="dca-consent" data-tier={tier} aria-labelledby="v2-dca-consent-h" className="mt-4 border-l-2 ts-v2-accent-stroke py-1 pl-4">
       <h3 id="v2-dca-consent-h" data-testid="dca-consent-heading" className="text-[14px] font-semibold text-v2-text">
         {FLOOR_CONSENT_HEADING}
       </h3>

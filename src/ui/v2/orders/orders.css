@@ -12,7 +12,7 @@
 .ts-orders-exec { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--hairline); }
 .ts-orders-exec-row { display: flex; align-items: flex-start; gap: 12px; padding: 6px 0; }
 .ts-orders-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 48px 0; text-align: center; }
-.ts-orders-notice { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; padding-left: 14px; border-left: 2px solid var(--cream); }
+.ts-orders-notice { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; padding-left: 14px; border-left: 2px solid var(--c-accent-green); }
 @media (max-width: 600px) {
   .ts-orders-detail { padding-left: 0; }
   /* m07: three filters must fit 343 px — smaller mono, tighter tracking, no wrap */

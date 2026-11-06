@@ -21,9 +21,10 @@ function readInverted(): boolean {
 
 /** A calm text notice: 2 px accent rule on the left, no fill, no border (round 7: boxes are gone). */
 export function Notice({ tone, testId, children }: { tone: 'amber' | 'red' | 'cream' | 'green' | 'teal'; testId?: string; children: ReactNode }) {
-  const rule = { amber: 'border-v2-amber', red: 'border-v2-red', cream: 'border-v2-cream', green: 'border-v2-green', teal: 'border-v2-teal' }[tone]
+  // Design review 1 (owner): every notice bar is the platform green whatever the tone; the severity is the title text. `tone` stays
+  // on the node (data-tone) so callers, tests and assistive tooling still know which kind of notice this is.
   return (
-    <Surface data-testid={testId} className={`border-l-2 ${rule} py-1 pl-3 text-[13px] leading-snug text-v2-text/90`}>
+    <Surface data-testid={testId} data-tone={tone} className="border-l-2 ts-v2-accent-stroke py-1 pl-3 text-[13px] leading-snug text-v2-text/90">
       {children}
     </Surface>
   )
@@ -94,7 +95,7 @@ export function QuotePanel(p: QuotePanelProps) {
       {priceCheck.level === 'warn' && !priceCheck.oracleUnavailable && priceCheck.message && <Notice tone="amber">{priceCheck.message}</Notice>}
       {priceCheck.oracleUnavailable && priceCheck.oracleReadFailed && (
         <Notice tone="amber" testId="oracle-read-failed-notice">
-          <span className="font-semibold">&#9888; Price not verified</span> — the Chainlink feed could not be read right now. This is not a problem with the
+          <span className="font-semibold">Price not verified</span> — the Chainlink feed could not be read right now. This is not a problem with the
           token: we simply could not reach the oracle, so this price has not been independently verified. It clears as soon as the feed responds.
         </Notice>
       )}
@@ -107,7 +108,7 @@ export function QuotePanel(p: QuotePanelProps) {
         </Notice>
       )}
       {p.gasless?.recommended && !v.intentBased && (
-        <section aria-label="Gasless route recommendation" className="border-l-2 border-v2-teal py-1 pl-3">
+        <section aria-label="Gasless route recommendation" className="border-l-2 ts-v2-accent-stroke py-1 pl-3">
           <p className="text-[14px] font-semibold text-v2-text">&#9889; Zero Gas Available</p>
           <p className="mt-0.5 text-[13px] text-v2-text/90">
             {p.gasless.gasSavingsUsd >= 0.5 ? `Save ~${fmtUsd(p.gasless.gasSavingsUsd)} in gas fees by using CoW Protocol.` : 'Use CoW Protocol for a fully gasless swap.'}{' '}

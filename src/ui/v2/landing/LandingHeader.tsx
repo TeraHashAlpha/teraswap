@@ -49,7 +49,7 @@ export function LandingHeader({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
     <header className="relative z-20 flex items-center justify-between gap-3 px-4 py-4 sm:px-8">
       <div className="flex flex-col">
-        <span className="border-l-[3px] border-v2-cream pl-3 font-v2-display text-2xl uppercase tracking-[3px] text-v2-text">TeraSwap</span>
+        <span className="border-l-[3px] ts-v2-accent-stroke pl-3 font-v2-display text-2xl uppercase tracking-[3px] text-v2-text">TeraSwap</span>
         <span className="sr-only">Meta-Aggregator</span>
       </div>
       <nav aria-label="Sections" className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-8 md:flex">

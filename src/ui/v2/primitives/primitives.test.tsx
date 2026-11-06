@@ -39,7 +39,7 @@ describe('Surface', () => {
     expect(screen.getByTestId('l').className).toBe('ts-v2-rule-l')
     expect(screen.getByTestId('x').className).toBe('ts-v2-rule-t ts-v2-rule-b')
     expect(screen.getByTestId('r').className).toBe('ts-v2-rule-accent')
-    expect(CSS).toMatch(/\.ts-v2-rule-accent \{ border-left: 2px solid var\(--hairline-rule\);/)
+    expect(CSS).toMatch(/\.ts-v2-rule-accent \{ border-left: 2px solid var\(--c-accent-green\);/)
     expect(screen.getByTestId('r').className).not.toMatch(BOX)
   })
 
@@ -52,12 +52,13 @@ describe('Surface', () => {
     expect(screen.getByTestId('m').className).not.toMatch(/rounded|\bborder\b|shadow/)
   })
 
-  it('strip: solid --bg with a bottom hairline; an accent swaps it for a 2 px left bar in the status colour', () => {
+  it('strip: solid --bg with a bottom hairline; an accent swaps it for a 2 px left bar — always the platform green, whatever the status (design review 1)', () => {
     render(<><Surface variant="strip" data-testid="s" /><Surface variant="strip" accent="red" data-testid="a" /></>)
     expect(screen.getByTestId('s').className).toMatch(/bg-v2-bg.*ts-v2-rule-b/)
     const a = screen.getByTestId('a').className
     expect(a).toMatch(/\bborder-l-2\b/)
-    expect(a).toMatch(/\bborder-v2-red\b/)
+    expect(a).toMatch(/\bts-v2-accent-stroke\b/)
+    expect(a).not.toMatch(/border-v2-(red|amber|green|cream|teal)/)
     expect(a).not.toMatch(/ts-v2-rule/)
   })
 
@@ -299,11 +300,13 @@ describe('Toggle', () => {
 })
 
 describe('EyebrowLabel', () => {
-  it('renders mono uppercase text with a cream bar', () => {
+  it('renders mono uppercase text with a platform-green bar (text stays cream)', () => {
     render(<EyebrowLabel>label</EyebrowLabel>)
     const el = screen.getByText('label')
     expect(el.className).toMatch(/border-l-2/)
-    expect(el.className).toMatch(/border-v2-cream/)
+    expect(el.className).toMatch(/ts-v2-accent-stroke/)
+    expect(el.className).not.toMatch(/border-v2-cream/)
+    expect(el.className).toMatch(/text-v2-cream/)
     expect(el.className).toMatch(/font-v2-mono/)
     expect(el.className).toMatch(/uppercase/)
   })
@@ -319,6 +322,24 @@ describe('HandUnderline', () => {
     expect(svg?.getAttribute('aria-hidden')).toBe('true')
     expect(svg?.querySelectorAll('path').length).toBeGreaterThanOrEqual(1)
     expect(svg?.getAttribute('class')).toMatch(/text-v2-cream/)
+  })
+
+  // Design review 1 (owner): the §2 underline clipped into the glyphs on a two-line title. Headings carrying it are set at
+  // line-height ≤ .98, so the box is ~.98em tall with the baseline ~.89em from its top (Barlow Condensed: ascent 1.0 / descent .2 →
+  // half-leading (lh − 1.2)/2). The next line's cap tops sit at lh + .89 − .70 ≈ 1.17em. The stroke must live in the band between.
+  it('sits in the free band under the baseline and above the next line (never hanging off the box through the glyphs)', () => {
+    render(<HandUnderline data-testid="h">word</HandUnderline>)
+    const cls = screen.getByTestId('h').querySelector('svg')!.getAttribute('class')!
+    expect(cls).not.toMatch(/\btop-/) // bottom-anchored: a wrapped phrase is underlined under its LAST line
+    const overhang = Number(/-bottom-\[([\d.]+)em\]/.exec(cls)![1]) // how far the stroke box hangs below the line box
+    const height = Number(/\bh-\[([\d.]+)em\]/.exec(cls)![1])
+    for (const lh of [0.95, 0.98]) {
+      const baseline = (lh - 1.2) / 2 + 1.0
+      const nextCapTop = lh + baseline - 0.7
+      const top = lh + overhang - height // measured from the top of the last line box
+      expect(top, `line-height ${lh}: starts below the baseline`).toBeGreaterThan(baseline)
+      expect(top + height, `line-height ${lh}: ends above the next line's caps`).toBeLessThan(nextCapTop)
+    }
   })
 })
 

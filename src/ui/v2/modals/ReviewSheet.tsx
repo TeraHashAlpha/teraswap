@@ -119,7 +119,7 @@ export function ReviewSheet({
 
   return (
     <Sheet name="review" size="md" title="Review Transaction" subtitle="Verify the details before signing" onClose={onCancel} initialFocusRef={cancelRef} dismissOnEscape={!confirmBusy}>
-      {decodeFailed && <p className="mt-4 border-l-2 border-v2-amber pl-3 text-[13px] text-v2-amber">Could not decode transaction details. Verify in your wallet before signing.</p>}
+      {decodeFailed && <p className="mt-4 border-l-2 ts-v2-accent-stroke pl-3 text-[13px] text-v2-amber">Could not decode transaction details. Verify in your wallet before signing.</p>}
 
       <div className="mt-4">
         <ReviewRow label="Source" testId="review-source">

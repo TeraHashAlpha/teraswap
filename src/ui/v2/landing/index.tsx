@@ -3,7 +3,6 @@
 import './landing.css'
 import { v2FontClassNames } from '../font-loader'
 import { NARRATIVE_PHOTOS } from '../photos/narrative'
-import { PHOTOS } from '../photos/photos'
 import { HelpFab, MusicToggle } from '../shell/Fabs'
 import { Footer } from '../shell/Footer'
 import { V2ToastProvider } from '../shell/toasts'
@@ -13,8 +12,8 @@ import { NarrativeStack } from './NarrativeStack'
 import { STILL_PHOTO, photosFor } from './narrative'
 import { BottomCtaSection, DifferentSection, DocsSection, ExperienceSection, FeaturesSection, PerformanceSection, SecuritySection } from './Sections'
 
-/** The landing's photos outside the stack, in page order — the footer names each author once (hero raster, then the two stills). */
-const LANDING_PHOTOS = [PHOTOS.trails, NARRATIVE_PHOTOS[STILL_PHOTO.performance], NARRATIVE_PHOTOS[STILL_PHOTO.cta]] as const
+/** The landing's photos outside the stack, in page order — the footer names each author once (the hero still, then the other stills). */
+const LANDING_PHOTOS = [NARRATIVE_PHOTOS[STILL_PHOTO.hero], NARRATIVE_PHOTOS[STILL_PHOTO.performance], NARRATIVE_PHOTOS[STILL_PHOTO.why], NARRATIVE_PHOTOS[STILL_PHOTO.cta]] as const
 /** The narrative photos a ≤ 600 px viewport shows: the footer band is the only place their credit appears there. */
 const MOBILE_NARRATIVE_PHOTOS = photosFor(true).map((id) => NARRATIVE_PHOTOS[id])
 

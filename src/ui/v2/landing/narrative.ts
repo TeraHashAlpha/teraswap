@@ -20,9 +20,12 @@ export const SECTION_PHOTO: Record<NarrativeSectionId, { desktop: NarrativePhoto
 /**
  * The opaque sections that paint their own photo (they hide the fixed stack). Owner review 26 Oct: one grade, so these use
  * the baked `bg-*` set too — the round-4/5 `arch-night` / `trails` files carried a halftone the narrative photos do not.
- * The hero keeps its own raster (round 7 replaces it).
+ * Design review 1 (owner, 5 Nov): no section is a dark band. The hero now paints the pack's own hero photo — the overpass (MAG
+ * Photography, Pexels 37644721: round-6 MOTION-SPEC §2 "the overpass (hero and §8)", and the credit on the round-8 hero render)
+ * instead of the owner-rejected light-trails; "Why" paints the pack's P4 proposal, Zakim (round-7 `p4-why-zakim`). Neither
+ * neighbour shares its photo (hero overpass · §2 tunnel · §3 zakim · §4 highway).
  */
-export const STILL_PHOTO = { performance: 'tunnel', cta: 'highway' } as const satisfies Record<string, NarrativePhotoId>
+export const STILL_PHOTO = { hero: 'overpass', performance: 'tunnel', why: 'zakim', cta: 'highway' } as const satisfies Record<string, NarrativePhotoId>
 
 /** The viewport width at and below which the mobile map, the portrait files and the footer-only credit apply. */
 export const MOBILE_MAX_WIDTH = 600

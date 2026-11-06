@@ -42,7 +42,7 @@ export function SplitRoutePanel({ splitResult, tokenOut, useSplit, onToggle, ana
       {useSplit && (
         <div className="mt-2">
           <Notice tone="amber" testId="split-non-atomic">
-            <span className="font-semibold">⚠️ Non-atomic execution:</span> Split routes execute as separate transactions. If one leg fails, you may end up with a partial swap. Each leg is independently visible to MEV searchers.
+            <span className="font-semibold">Non-atomic execution:</span> Split routes execute as separate transactions. If one leg fails, you may end up with a partial swap. Each leg is independently visible to MEV searchers.
           </Notice>
         </div>
       )}
