@@ -200,11 +200,10 @@ function AnimatedCounter({
  * findToken() result (that's always the mainnet entry, see src/lib/chains/tokens.ts:310-312
  * for the "mainnet USDC on Base" failure class this exists to avoid).
  *
- * remapTokenToChain alone is not enough here: on a genuine catalog miss (no entry for
- * this symbol on this chain) it falls BACK to the token it was given — the exact
- * stale-address behaviour this fix removes — so we additionally confirm the chain's own
- * catalog actually lists the symbol before trusting the result. No match → null, and the
- * caller must not quote.
+ * [fix/chain-switch-token-fallback] remapTokenToChain now returns null on a catalog miss (it
+ * used to fall BACK to the token it was given — the stale-address behaviour this fix removed),
+ * so the explicit symbol check below is belt-and-braces; it is kept so the outcome is
+ * unchanged. No match → null, and the caller must not quote.
  */
 function resolvePreviewToken(symbol: string, chainId: number): Token | null {
   const base = findToken(symbol)

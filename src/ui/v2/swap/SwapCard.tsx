@@ -19,7 +19,7 @@ import { selectBestWithMevPreference } from '@/lib/mev-preference'
 import { shouldShowSourceToggle } from '@/lib/ui/source-toggle-visibility'
 import { evaluatePairOracle } from '@/lib/chainlink'
 import { isUsdStablecoin } from '@/lib/chains/stablecoins'
-import { isChainActive, getChainConfig, remapTokenToChain } from '@/lib/chains'
+import { isChainActive, getChainConfig, remapPairToChain } from '@/lib/chains'
 import { isTrustedSpender } from '@/lib/trusted-addresses'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
 import { AGGREGATOR_META, DEFAULT_SLIPPAGE, MEV_PREFERENCE_THRESHOLD } from '@/lib/constants'
@@ -150,8 +150,9 @@ export function SwapCard() {
 
   // v1 re-resolves the selected tokens to the ACTIVE chain's addresses in an effect (the defaults are mainnet's); here the
   // selection is state and the chain's token is derived, so there is never a render with a Base pair on mainnet addresses.
-  const tokenIn = useMemo(() => remapTokenToChain(selectedIn, activeChainId), [selectedIn, activeChainId])
-  const tokenOut = useMemo(() => remapTokenToChain(selectedOut, activeChainId), [selectedOut, activeChainId])
+  // [fix/chain-switch-token-fallback] One pair-level derivation: a leg with no home on the chain (mainnet SNX on Arbitrum) turns
+  // the whole pair into the chain's default pair — the same rule as v1's effect — never a foreign-chain address.
+  const { tokenIn, tokenOut } = useMemo(() => remapPairToChain(selectedIn, selectedOut, activeChainId), [selectedIn, selectedOut, activeChainId])
   // v1 re-runs calculateAutoSlippage in an effect whenever the pair/chain changes while Auto is on; here Auto is derived, so there
   // is never a render where the pair has changed and the value has not.
   const autoSlippage = tokenIn && tokenOut ? calculateAutoSlippage(tokenIn.symbol, tokenOut.symbol, activeChainId) : DEFAULT_SLIPPAGE

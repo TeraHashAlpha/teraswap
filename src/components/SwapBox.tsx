@@ -43,7 +43,7 @@ import { findToken, isNativeETH, type Token } from '@/lib/tokens'
 import { DEFAULT_SLIPPAGE, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD, PRICE_IMPACT_CONSENT_TOLERANCE, DEPEG_CONSENT_TOLERANCE } from '@/lib/constants'
 import { isTrustedSpender } from '@/lib/trusted-addresses'
 import { useQuoteChainId } from '@/hooks/useChainId'
-import { isChainActive, getChainConfig, remapTokenToChain } from '@/lib/chains'
+import { isChainActive, getChainConfig, remapPairToChain } from '@/lib/chains'
 import { isUsdStablecoin } from '@/lib/chains/stablecoins'
 import { explorerTxUrl } from '@/lib/chains/tokens'
 import { estimateSwapUsd } from '@/lib/swap-usd-estimate'
@@ -210,10 +210,15 @@ export default function SwapBox() {
   // whenever the chain changes. The defaults (findToken) are mainnet addresses;
   // without this, Base would quote e.g. MAINNET USDC (0xA0b8…) on chainId 8453 →
   // every source rejects it ("1inch 400: not valid token") → "No valid quotes".
-  // remapTokenToChain is a no-op on mainnet (same address) so mainnet is unchanged.
+  // remapPairToChain is a no-op on mainnet (same address) so mainnet is unchanged.
+  // [fix/chain-switch-token-fallback] A leg with no home on the new chain (mainnet SNX → Arbitrum) used to be
+  // KEPT, address and all; now the pair falls back to the chain's default pair — never a foreign address.
+  const pairRef = useRef({ tokenIn, tokenOut })
+  pairRef.current = { tokenIn, tokenOut }
   useEffect(() => {
-    setTokenIn((t) => remapTokenToChain(t, activeChainId))
-    setTokenOut((t) => remapTokenToChain(t, activeChainId))
+    const next = remapPairToChain(pairRef.current.tokenIn, pairRef.current.tokenOut, activeChainId)
+    setTokenIn(next.tokenIn)
+    setTokenOut(next.tokenOut)
     // [review F1] A chain switch is a new trade — drop any prior price-impact consent.
     setAcceptedDeviation(null)
     setAcceptedDepeg(null) // [SPRINT-9W-oracle] drop depeg consent too
