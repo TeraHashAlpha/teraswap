@@ -130,6 +130,15 @@ export async function POST(req: NextRequest) {
     // Support single and batch requests
     const requests = Array.isArray(body) ? body : [body]
 
+    // [fix/user-ip-privacy A76 S-7] An empty batch is an Invalid Request (JSON-RPC 2.0 §6: one error object, id null),
+    // answered here — it used to be forwarded upstream as `[]`.
+    if (requests.length === 0) {
+      return NextResponse.json(
+        { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid request: empty batch' } },
+        { status: 400 },
+      )
+    }
+
     // [CHORE-API-HARDENING-2 / P3c] Cap batch size before any per-request work.
     if (exceedsBatchLimit(requests.length)) {
       return NextResponse.json(

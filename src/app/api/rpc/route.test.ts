@@ -121,6 +121,23 @@ describe('POST /api/rpc — batch size cap (P3c)', () => {
   })
 })
 
+// [fix/user-ip-privacy A76 S-7] JSON-RPC 2.0 §6: an empty batch is one Invalid Request error with id null. It used to be
+// forwarded upstream as `[]` (after the identity probe).
+describe('POST /api/rpc — empty batch [A76 S-7]', () => {
+  it('answers -32600 (id null, 400) and forwards nothing — not even the identity probe', async () => {
+    const res = await POST(rpcReq([]))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid request: empty batch' } })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('is still charged one rate-limit unit, like any other refused body', async () => {
+    await POST(rpcReq([]))
+    expect(mocks.checkRateLimit).toHaveBeenCalledTimes(1)
+    expect(mocks.checkRateLimit.mock.calls[0][3]).toBe(1)
+  })
+})
+
 describe('POST /api/rpc — debug_* / trace_* archive queries denied (P3c)', () => {
   it('refuses debug_traceBlockByNumber with 403, no upstream call', async () => {
     const res = await POST(rpcReq({ jsonrpc: '2.0', id: 1, method: 'debug_traceBlockByNumber', params: ['latest'] }))
