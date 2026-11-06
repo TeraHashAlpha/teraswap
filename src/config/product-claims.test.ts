@@ -28,6 +28,11 @@ import {
   INTEGRATED_DEX_SOURCE_COUNT_WORDS,
   SITE_META_DESCRIPTION,
   PRIVACY_DIRECT_NOTE,
+  PRIVACY_PROXY_CLAIM,
+  PRIVACY_WALLET_ADVICE,
+  PRIVACY_IP_STORAGE_NOTE,
+  PRIVACY_WALLET_STORAGE_NOTE,
+  PRIVACY_BADGE,
   SWAP_CHAIN_IDS,
   SWAP_CHAIN_NAMES,
   SWAP_CHAIN_LIST_LABEL,
@@ -366,8 +371,52 @@ describe('[fix/functional-chain-ui C8] PRIVACY_DIRECT_NOTE matches what the brow
     expect(PRIVACY_DIRECT_NOTE).not.toMatch(/defillama/i)
   })
 
-  it('still discloses token logos and the wallet connection, which remain browser-direct', () => {
-    expect(PRIVACY_DIRECT_NOTE).toMatch(/^Token logos and your wallet's own connection are requested directly by your browser/)
+  // [fix/user-ip-privacy] Supersedes "token logos … remain browser-direct": logos are relayed now (the note used to
+  // open with them), and the client has no direct-RPC fallback, so neither may be disclosed as direct any more.
+  it('names only what is really outside our control: the wallet’s RPC and broadcast, and the WalletConnect relay', () => {
+    expect(PRIVACY_DIRECT_NOTE).toBe(
+      "Your wallet's own RPC connection and the transactions it broadcasts are outside our control; the WalletConnect relay sees your connection once you choose a WalletConnect wallet.",
+    )
+    expect(PRIVACY_DIRECT_NOTE).not.toMatch(/token logos|falls back to direct RPC/i)
+  })
+})
+
+describe('[fix/user-ip-privacy] privacy claims — the owner wording, each sentence backed by the code', () => {
+  it('the five sentences are exactly the owner’s (2026-11-06)', () => {
+    expect([PRIVACY_PROXY_CLAIM, PRIVACY_DIRECT_NOTE, PRIVACY_WALLET_ADVICE, PRIVACY_IP_STORAGE_NOTE, PRIVACY_WALLET_STORAGE_NOTE].join(' ')).toBe(
+      "TeraSwap's server relays all RPC reads on Ethereum, Base and Arbitrum, every aggregator quote and swap request, and token logos, so those providers see our server's IP address, not yours. " +
+        "Your wallet's own RPC connection and the transactions it broadcasts are outside our control; the WalletConnect relay sees your connection once you choose a WalletConnect wallet. " +
+        'Use a privacy RPC in your wallet settings if that matters to you. ' +
+        'We do not store IP addresses in our database; our hosting and rate-limiting layers process them transiently, and our rate limiter only ever sees a one-way hash. ' +
+        'We do store wallet addresses for orders, swap history and activity.',
+    )
+  })
+
+  it('"all RPC reads on Ethereum, Base and Arbitrum" names exactly the chains the registry — and the proxy allow-list — cover', async () => {
+    const { RPC_POLICY_CHAIN_IDS } = await import('@/lib/rpc-method-policy')
+    const sorted = (xs: readonly number[]) => [...xs].sort((a, b) => a - b)
+    expect(sorted(RPC_POLICY_CHAIN_IDS)).toEqual(sorted(SWAP_CHAIN_IDS))
+    // every registry chain is named in the sentence by the first word of its name ("Arbitrum One" → "Arbitrum") …
+    for (const name of SWAP_CHAIN_NAMES) expect(PRIVACY_PROXY_CLAIM).toContain(name.split(' ')[0])
+    // … and the sentence names no chain the registry does not have: its list is "on A, B and C,".
+    const listed = /RPC reads on (.+?), every aggregator/.exec(PRIVACY_PROXY_CLAIM)![1].split(/, | and /)
+    expect(listed).toEqual(SWAP_CHAIN_NAMES.map((n) => n.split(' ')[0]))
+  })
+
+  it('the browser really has one RPC address per chain, ours — the claim is "all RPC reads", so no chain may be direct', async () => {
+    const { proxyRpcPath } = await import('@/lib/rpc-proxy-url')
+    for (const id of SWAP_CHAIN_IDS) expect(proxyRpcPath(id)).toMatch(/^\/api\/rpc(\?chainId=\d+)?$/)
+  })
+
+  it('"our rate limiter only ever sees a one-way hash" — the limiter key is 32 hex characters, not an address', async () => {
+    const { hashClientIp } = await import('@/lib/client-ip-key')
+    expect(hashClientIp('203.0.113.7')).toMatch(/^[0-9a-f]{32}$/)
+  })
+
+  it('no claim constant uses an absolute the code cannot keep', () => {
+    for (const claim of [PRIVACY_PROXY_CLAIM, PRIVACY_DIRECT_NOTE, PRIVACY_WALLET_ADVICE, PRIVACY_IP_STORAGE_NOTE, PRIVACY_WALLET_STORAGE_NOTE, PRIVACY_BADGE, SITE_META_DESCRIPTION]) {
+      expect(claim).not.toMatch(/never exposed|zero (data )?leaks|anonymous|untraceable|hides your IP|no tracking/i)
+    }
   })
 })
 

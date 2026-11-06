@@ -20,7 +20,10 @@ import {
   PLATFORM_FEE_LABEL,
   PRIVACY_BADGE,
   PRIVACY_DIRECT_NOTE,
+  PRIVACY_IP_STORAGE_NOTE,
   PRIVACY_PROXY_CLAIM,
+  PRIVACY_WALLET_ADVICE,
+  PRIVACY_WALLET_STORAGE_NOTE,
   PRICE_DEVIATION_BLOCK_PCT,
   PRICE_DEVIATION_WARN_PCT,
   QUOTE_TIMEOUT_SEC,
@@ -531,19 +534,18 @@ export default function DocsPage() {
         <AnimatedSection id="privacy">
           <SectionTitle icon="◍" title="Privacy" />
           <p className="mb-6 text-[15px] leading-relaxed text-cream-65">
-            TeraSwap implements a privacy-preserving architecture that protects users&apos; IP addresses
-            from external blockchain infrastructure providers and aggregator APIs.
+            {PRIVACY_PROXY_CLAIM}
           </p>
 
           <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }}
             variants={stagger} className="space-y-4"
           >
             {[
-              { num: '01', title: 'RPC Privacy Proxy', desc: 'All on-chain read operations from the browser are routed through a server-side proxy (/api/rpc) instead of directly calling RPC providers. Only our server\'s IP is visible to the third-party RPC providers while the proxy is reachable (see Graceful Degradation).' },
-              { num: '02', title: 'API Proxy Layer', desc: `All external aggregator API calls (${INTEGRATED_DEX_SOURCE_LABELS.join(', ')}) are also proxied server-side through /api/quote and /api/swap. Quote and swap requests do not go directly from your browser to these services.` },
-              { num: '03', title: 'Method Policy (Blacklist)', desc: 'The RPC proxy relays every read method by default and explicitly blocks only signing/transaction methods (eth_sendRawTransaction, eth_sendTransaction, eth_signTransaction, eth_sign, personal_sign and the eth_signTypedData variants). A blacklist is used deliberately — a method whitelist devolves into whack-a-mole. Your wallet still signs and broadcasts transactions itself; the proxy never sees your keys.' },
-              { num: '04', title: 'Rate Limiting', desc: '300 requests per IP per minute on the RPC proxy to prevent abuse. The swap endpoint is limited to 20 requests per minute.' },
-              { num: '05', title: 'Graceful Degradation', desc: 'If the privacy proxy is unreachable, the client falls back to direct RPC. Privacy is never a single point of failure — connectivity takes priority.' },
+              { num: '01', title: 'RPC Privacy Proxy', desc: `All on-chain read operations from the browser, on ${SWAP_CHAIN_LIST_LABEL}, are routed through a server-side proxy (/api/rpc) instead of directly calling RPC providers. The RPC provider sees our server's IP address, not yours. There is no direct fallback: if the proxy is unreachable the read fails rather than going around it.` },
+              { num: '02', title: 'API Proxy Layer', desc: `All external aggregator API calls (${INTEGRATED_DEX_SOURCE_LABELS.join(', ')}) are also proxied server-side through /api/quote and /api/swap. Quote and swap requests do not go directly from your browser to these services. Token logos are fetched by our server too and served from our own address.` },
+              { num: '03', title: 'Method Policy (Read-Only Allow-List)', desc: 'The RPC proxy relays only a fixed list of read-only methods per chain (balances, contract calls, receipts, blocks, fee data, logs) and refuses everything else, including every signing or transaction method (eth_sendRawTransaction, eth_sendTransaction, eth_signTransaction, eth_sign, personal_sign and the eth_signTypedData variants). Your wallet still signs and broadcasts transactions itself; the proxy never sees your keys.' },
+              { num: '04', title: 'Rate Limiting', desc: `300 requests per IP per minute on the RPC proxy to prevent abuse. The swap endpoint is limited to 20 requests per minute. ${PRIVACY_IP_STORAGE_NOTE}` },
+              { num: '05', title: 'What We Cannot Relay', desc: `${PRIVACY_DIRECT_NOTE} ${PRIVACY_WALLET_ADVICE}` },
             ].map((step) => (
               <motion.div key={step.num} variants={childFade}
                 className="flex gap-4 rounded-xl border p-5"
@@ -572,6 +574,7 @@ export default function DocsPage() {
                   ['All DEX aggregator quotes', '/api/quote', 'Yes'],
                   ['Swap calldata from all aggregators', '/api/swap', 'Yes'],
                   ['RPC reads (eth_call, receipts, etc.)', '/api/rpc', 'Yes'],
+                  ['Token logos', '/api/token-logo', 'Yes'],
                   ['Conditional-order create / read', '/api/orders', 'Yes'],
                   ['Spender addresses', '/api/spender', 'Yes'],
                 ].map(([service, endpoint, hidden], i) => (
@@ -586,9 +589,7 @@ export default function DocsPage() {
           </div>
 
           <div className="mt-4 rounded-lg border border-cream-08 bg-surface-secondary p-3 text-xs text-cream-50">
-            <span className="font-semibold text-cream-65">Note:</span> Your wallet&apos;s own RPC connection (MetaMask, Coinbase Wallet, etc.)
-            and transaction signing are handled by your wallet directly and are not proxied. For maximum privacy,
-            configure a privacy-focused RPC in your wallet settings (e.g., MEV Blocker, Flashbots Protect). {PRIVACY_DIRECT_NOTE}
+            <span className="font-semibold text-cream-65">Note:</span> {PRIVACY_DIRECT_NOTE} {PRIVACY_WALLET_ADVICE} {PRIVACY_WALLET_STORAGE_NOTE}
           </div>
         </AnimatedSection>
 
