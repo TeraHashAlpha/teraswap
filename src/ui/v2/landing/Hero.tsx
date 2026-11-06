@@ -125,8 +125,8 @@ export function Hero({ onLaunchApp }: { onLaunchApp: () => void }) {
             </span>
           </h1>
           <p className="mt-8 max-w-xl text-[16px] leading-relaxed text-v2-muted sm:text-[18px]">
-            TeraSwap compares {INTEGRATED_DEX_SOURCE_COUNT_WORDS} liquidity sources for every trade, verifies the price against
-            Chainlink oracles, and offers MEV-protected routes via CoW Protocol.
+            TeraSwap compares {INTEGRATED_DEX_SOURCE_COUNT_WORDS} liquidity sources for every trade and verifies the price against
+            Chainlink oracles.
           </p>
           <div className="mt-8 flex flex-col items-stretch gap-4 sm:flex-row sm:items-center sm:gap-6">
             <Button

@@ -24,7 +24,7 @@ function fmtDeadline(validTo: number): string {
 }
 
 /**
- * [ADR-025] Round 7 frame 27 (right) — "Review MEV-Protected Order". A CoW swap signs an EIP-712 ORDER, not a transaction; this
+ * [ADR-025] Round 7 frame 27 (right) — the CoW order review ("Review CoW Protocol Order" since feat/retire-force-mev). A CoW swap signs an EIP-712 ORDER, not a transaction; this
  * renders EXCLUSIVELY the frozen `order.message` (what `confirmCowOrder` signs 1:1), with v1's wording and v1's explanation box
  * (the frame's "Solvers compete in a batch auction…" is a re-write; v1's sentence is used). Confirm is a stub — B5 wires it.
  */
@@ -37,7 +37,7 @@ export function CowOrderReviewSheet({ order, onConfirm, onCancel }: { order: Pic
     <Sheet
       name="cow-review"
       size="lg"
-      title="Review MEV-Protected Order"
+      title="Review CoW Protocol Order"
       subtitle={
         <>
           You&apos;re about to <strong className="font-semibold text-v2-text">sign a CoW Protocol order</strong> (no on-chain transaction). Verify the exact terms below — this is precisely what your wallet will sign.
@@ -71,7 +71,7 @@ export function CowOrderReviewSheet({ order, onConfirm, onCancel }: { order: Pic
       </div>
 
       <p data-testid="cow-explanation" className="mt-4 border-l-2 ts-v2-accent-stroke pl-4 text-[13px] leading-relaxed text-v2-green">
-        ✓ MEV-protected via CoW Protocol — solvers compete in a batch auction; you&apos;re shielded from frontrunning/sandwich attacks. Your wallet signs this order off-chain; no gas to submit.
+        ✓ Settled via CoW Protocol — solvers compete in a batch auction. Your wallet signs this order off-chain; no gas to submit.
       </p>
 
       <div className="mt-6 flex flex-col gap-1">

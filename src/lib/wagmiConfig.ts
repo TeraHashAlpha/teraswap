@@ -112,7 +112,9 @@ if (!walletConnectProjectId && typeof window !== 'undefined') {
 // in Reown. See FEEDBACK.
 export const WALLETCONNECT_METADATA = {
   appName: 'TeraSwap',
-  appDescription: 'Ethereum & Base meta-aggregator — best swap price across 11 liquidity sources, with MEV protection.',
+  // [feat/retire-force-mev, owner 2026-11-06] ", with MEV protection" removed (retired claim). The stale "Ethereum & Base" /
+  // "11" are pre-existing and out of this change's scope — see docs/feedback/feat-retire-force-mev.md.
+  appDescription: 'Ethereum & Base meta-aggregator — best swap price across 11 liquidity sources.',
   appUrl: 'https://www.teraswap.app',
   appIcon: 'https://www.teraswap.app/apple-touch-icon.png',
 } as const

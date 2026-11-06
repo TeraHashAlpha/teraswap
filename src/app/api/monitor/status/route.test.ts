@@ -283,3 +283,26 @@ describe('GET /api/monitor/status', () => {
     })
   })
 })
+
+describe('GET /api/monitor/status — rateLimitedSince [feat/retire-force-mev C3]', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    kvStore.clear()
+    kvSets.clear()
+    beginTick()
+  })
+
+  it('a source in a 429 episode reports the first-seen time (ISO); others report null', async () => {
+    seedSource('cowswap', 'degraded')
+    seedSource('1inch', 'active')
+    const since = Date.parse('2026-10-29T14:02:00Z')
+    const cow = kvStore.get('teraswap:source-state:cowswap') as Record<string, unknown>
+    kvStore.set('teraswap:source-state:cowswap', { ...cow, rateLimit: { since, lastSeenAt: since, via: ['probe'] } })
+    const body = await (await GET()).json()
+    const byId = Object.fromEntries(body.sources.map((s: { id: string }) => [s.id, s]))
+    expect(byId.cowswap.rateLimitedSince).toBe('2026-10-29T14:02:00.000Z')
+    expect(byId['1inch'].rateLimitedSince).toBeNull()
+    expect(byId.cowswap).not.toHaveProperty('rateLimit') // only the sanitised field leaves the server
+  })
+})
+

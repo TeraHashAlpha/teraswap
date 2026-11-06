@@ -26,6 +26,6 @@ export default [
     },
   },
   {
-    ignores: ['contracts/**', 'ios/**', 'android/**', 'public/sw.js'],
+    ignores: ['contracts/**', 'public/sw.js'],
   },
 ]

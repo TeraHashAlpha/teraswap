@@ -181,7 +181,7 @@ describe('quote-received sound: v2 = v1', () => {
 })
 
 describe('everything else in the card is silent in v1, so silent in v2', () => {
-  it('⇅, MEV switch, sources menu, Compare, ⇄, ✎, tooltips, refresh, 50% / MAX: no audio', async () => {
+  it('⇅, sources menu, Compare, ⇄, ✎, tooltips, refresh, 50% / MAX: no audio', async () => {
     const { SwapCard } = await freshPage()
     const { rerender } = render(<SwapCard />)
     type('1')
@@ -198,7 +198,7 @@ describe('everything else in the card is silent in v1, so silent in v2', () => {
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
     fireEvent.click(screen.getByRole('button', { name: '50%' })) // these two change the amount: the panel goes stale, so they come after the panel's controls
     fireEvent.click(screen.getByRole('button', { name: 'MAX' }))
-    fireEvent.click(screen.getByRole('switch', { name: /Force MEV Protection/ })) // last: forcing MEV hides non-CoW quotes
+    // [feat/retire-force-mev] The Force MEV switch that used to be clicked last here is retired (owner 2026-11-06).
     expect(log).toEqual([])
   })
 })

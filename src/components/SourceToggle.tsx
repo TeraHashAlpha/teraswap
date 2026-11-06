@@ -96,9 +96,6 @@ export default function SourceToggle({ excludedSources, onToggle }: SourceToggle
                     </div>
                     <span className="flex-1 text-xs">{meta.label}</span>
                     <div className="flex gap-1">
-                      {meta.mevProtected && (
-                        <span className="rounded bg-emerald-500/15 px-1 text-[9px] text-emerald-400">MEV</span>
-                      )}
                       {meta.isDirect && (
                         <span className="rounded bg-blue-500/15 px-1 text-[9px] text-blue-400">Direct</span>
                       )}

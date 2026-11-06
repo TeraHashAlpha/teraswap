@@ -156,12 +156,12 @@ describe('CowOrderReviewSheet (27, right)', () => {
     expect(result.staleAllow).toEqual([])
   })
 
-  it("v1's CoW explanation, verbatim", () => {
+  it("v1's CoW explanation, verbatim (no MEV promise since feat/retire-force-mev, same words in v1's modal)", () => {
     render(<CowOrderReviewSheet order={order} onConfirm={() => {}} onCancel={() => {}} />)
     expect(norm(screen.getByTestId('cow-explanation').textContent)).toBe(
-      "✓ MEV-protected via CoW Protocol — solvers compete in a batch auction; you're shielded from frontrunning/sandwich attacks. Your wallet signs this order off-chain; no gas to submit.",
+      '✓ Settled via CoW Protocol — solvers compete in a batch auction. Your wallet signs this order off-chain; no gas to submit.',
     )
-    expect(screen.getByRole('dialog', { name: 'Review MEV-Protected Order' })).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: 'Review CoW Protocol Order' })).toBeTruthy()
   })
 
   it('every field is the frozen order.message, formatted by format.ts', () => {

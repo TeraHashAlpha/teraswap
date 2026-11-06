@@ -30,6 +30,51 @@
       "added": "2026-10-23",
       "expires": "2026-11-22",
       "reason": "Two transitive 3.x copies under @coinbase/cdp-sdk (^3.25.76) and @reown/appkit-wallet (3.22.4, exact) have no patched 3.x release; moving them to zod 4 is a breaking major for those packages. Reachability: both validate wallet/SDK messages with fixed-shape schemas, not attacker-sized collections; the root app copy is 4.6.6. Re-check weekly for a 3.x patch or upstream bumps of cdp-sdk/appkit; delete on first fix."
+    },
+    {
+      "id": "GHSA-g3hv-75wg-m249",
+      "package": "minimatch",
+      "vulnerableRange": ">=7.0.0 <11.0.1 (10.2.5 via glob@13 and typescript-estree, dev)",
+      "fixedIn": "11.0.1 (major only; no 10.x patch)",
+      "added": "2026-11-06",
+      "expires": "2026-12-06",
+      "reason": "Moderate, dev-only (build/lint tooling). Patch 11.0.1 is a major bump that glob@13.0.6 and @typescript-eslint/typescript-estree (both ^10.2.2) cannot take without a breaking upgrade; not overridden per sweep rule. Owner decision: upgrade the chain or accept. Delete when fixed."
+    },
+    {
+      "id": "GHSA-3g3m-2fjr-6pw4",
+      "package": "glob",
+      "vulnerableRange": ">=9.0.0 <=14.0.1 (13.0.6 via rimraf@6 and @sentry/bundler-plugins, dev/build)",
+      "fixedIn": "14.0.2 (major only; advisory lists no 13.x fix)",
+      "added": "2026-11-06",
+      "expires": "2026-12-06",
+      "reason": "Moderate, build-time only. Patch 14.0.2 is a major bump that rimraf@6 (^13.0.3) and @sentry/bundler-plugins (^13.0.6) cannot take without breaking upgrades; not overridden per sweep rule. Owner decision. Delete when fixed."
+    },
+    {
+      "id": "GHSA-w5hq-g745-h8pq",
+      "package": "uuid",
+      "vulnerableRange": "<11.1.1 (9.0.1 via @metamask/utils, 8.3.2 via @metamask/sdk, 7.0.3 via xcode)",
+      "fixedIn": "11.1.1 (major for all copies; advisory lists no 8.x/9.x fix)",
+      "added": "2026-11-06",
+      "expires": "2026-12-06",
+      "reason": "Moderate, runtime via wallet connectors. Only fix is a major bump that @metamask/utils@9 (^9.0.1), @metamask/sdk (^8.3.2) and xcode (^7.0.3) cannot take. Bug is missing buffer bounds check when buf is passed to v3/v5/v6. Reachability in the app is NOT yet verified (grep for uuid v3/v5/v6 with a buf argument before renewal). Owner decision. Delete when fixed."
+    },
+    {
+      "id": "GHSA-848j-6mx2-7j84",
+      "package": "elliptic",
+      "vulnerableRange": "<=6.6.1 (keeper, dev via @ethersproject/signing-key ← hardhat-verify)",
+      "fixedIn": "none",
+      "added": "2026-11-06",
+      "expires": "2026-12-06",
+      "reason": "Low, dev-only (hardhat tooling under contracts/order-engine; not in the executor runtime). No upstream patch exists. Re-check on the 2026-12-06 expiry; delete if a fix lands or the @ethersproject chain is removed."
+    },
+    {
+      "id": "GHSA-gcqx-w48m-w2h4",
+      "package": "deepmerge",
+      "vulnerableRange": ">=4.2.0 <=4.3.1 (root, runtime via @vanilla-extract/css ← rainbowkit)",
+      "fixedIn": "none (4.3.1 is latest)",
+      "added": "2026-11-06",
+      "expires": "2026-12-06",
+      "reason": "Low, inside rainbowkit's vanilla-extract/css chain (build-time CSS helper). No upstream patch exists. Reachability of mergeObject() with untrusted input NOT verified. Re-check on the 2026-12-06 expiry."
     }
   ]
 }
