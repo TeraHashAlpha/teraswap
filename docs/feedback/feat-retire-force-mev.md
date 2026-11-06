@@ -1,6 +1,6 @@
 # feat/retire-force-mev — retire Force MEV, CoW stays an ordinary source (base origin/main 0e0334b, 2026-11-06)
 
-- [x] C0 premise check  - [ ] C1 toggle out, source stays  - [ ] C2 claims + copy  - [ ] C3 monitor sees CoW  - [ ] verify + push
+- [x] C0 premise check  - [x] C1 toggle out, source stays (6f0d95a)  - [ ] C2 claims + copy  - [ ] C3 monitor sees CoW  - [ ] verify + push
 
 ## 1 · Commit-0 finding — PREMISE HOLDS (toggle only biases selection toward CoW)
 - Toggle state `mevProtected` (v1 `SwapBox.tsx:79`, v2 `SwapCard.tsx:105`) is read ONLY by `selectBestWithMevPreference`
@@ -10,3 +10,8 @@
 - Smart path 2 (CoW promoted within `MEV_PREFERENCE_THRESHOLD` 15 bps when `gasless.recommended`) is a ranking rule -> kept unchanged.
 - Not in the goal text: the "Use Gasless Route" CTA (v1 `QuoteBreakdown.tsx:281`, v2 `SwapCard.tsx:608` -> `QuotePanel`) and v1's
   ENABLE strip both call `setMevProtected(true)` — the same hidden CoW-only filter. Asked owner (see Owner answers).
+
+## Owner answers (in-session, 2026-11-06) — supersede the goal text
+- Gasless CTA: **remove the "Use Gasless Route" button** (v1+v2); the gasless card stays as information only.
+- Landing: the MEV item is **§3 "What Makes TeraSwap Different" item 03** (not §6 — §6 Features item 03 is "Statistical Outlier
+  Detection", no MEV). Replace it with the **unverified-swap size gate** (`UNVERIFIED_SWAP_WARN/BLOCK_USD_LABEL`); §6 01–09 untouched.

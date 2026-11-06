@@ -16,6 +16,8 @@ import {
   PRIVACY_DIRECT_NOTE,
   PRIVACY_PROXY_CLAIM,
   SWAP_CHAIN_LIST_LABEL,
+  UNVERIFIED_SWAP_GATE_CLAIM,
+  UNVERIFIED_SWAP_GATE_TITLE,
   chainNameFor,
   chainlinkFeedCountFor,
   dcaFeatureTitle,
@@ -83,10 +85,8 @@ export function DifferentSection() {
       title: 'Oracle-Verified Execution',
       desc: `Every quote is checked against Chainlink price feeds before execution. Deviations above ${PRICE_DEVIATION_BLOCK_PCT} are blocked automatically — before your trade happens, not after.`,
     },
-    {
-      title: 'MEV Protection on CoW Routes',
-      desc: 'When a swap routes through CoW Protocol, execution is an intent-based batch auction — solvers compete to give you the best outcome, with no in-block ordering window for a front-running or sandwich bot to exploit.',
-    },
+    // [feat/retire-force-mev, owner 2026-11-06] Replaces "MEV Protection on CoW Routes" (retired claim) — same slot as v1.
+    { title: UNVERIFIED_SWAP_GATE_TITLE, desc: UNVERIFIED_SWAP_GATE_CLAIM },
   ]
   return (
     <section id="why-teraswap" className={`ts-v2-opaque ts-v2-scrim ts-v2-scrim--center ${SECTION} overflow-hidden`}>
@@ -141,14 +141,13 @@ export function SecuritySection() {
             <h3 className="font-v2-display text-3xl text-v2-cream sm:text-4xl">Your Capital, Protected.</h3>
             <div className={`${BODY} mt-5 flex flex-col gap-4`}>
               <p>
-                MEV bots never sleep — but neither does our protection. Through our native integration with CoW Protocol, real-time Chainlink
-                price validation, and an independent DefiLlama oracle layer, swaps that route through CoW execute via batch auctions that remove
-                the in-block ordering window front-running and sandwich attacks depend on.
+                Every quote is checked before you sign: real-time Chainlink price validation and an independent DefiLlama oracle layer flag or
+                block prices that stray from the market, and swaps no Chainlink feed can verify are size-gated.
               </p>
               <p>
                 Your privacy matters too. {PRIVACY_PROXY_CLAIM} {PRIVACY_DIRECT_NOTE}
               </p>
-              <p className="font-semibold text-v2-text">MEV-protected CoW routes. Proxied RPC and quote requests.</p>
+              <p className="font-semibold text-v2-text">Oracle-checked quotes. Proxied RPC and quote requests.</p>
               <p>
                 TeraSwap was built around one non-negotiable principle: <span className="font-semibold">your profitability and privacy come first.</span>
               </p>

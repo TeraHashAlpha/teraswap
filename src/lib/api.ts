@@ -159,7 +159,7 @@ export async function fetchMetaQuote(
   })
 
   // NOTE: FEE_INCOMPATIBLE_SOURCES (0x, CoW) are NOT filtered from quotes.
-  // They still appear so users can choose them (e.g. MEV Protection via CoW).
+  // They still appear so users can choose them (e.g. CoW, an ordinary source since feat/retire-force-mev).
   // Fee collection is skipped at execution time via usesFeeCollector() check.
   const excludeSet = excludeSources ? new Set(excludeSources.map(s => s.toLowerCase())) : null
   const activeSources = excludeSet

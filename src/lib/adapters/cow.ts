@@ -228,7 +228,7 @@ async function fetchCowSwapQuote(
     toAmount: quote.buyAmount,
     estimatedGas: 0,
     gasUsd: 0,
-    routes: ['CoW Protocol (MEV Protected)'],
+    routes: ['CoW Protocol'],
   }
 }
 
@@ -306,7 +306,7 @@ async function fetchCowSwapOrder(
     toAmount: quote.buyAmount,
     estimatedGas: 0,
     gasUsd: 0,
-    routes: ['CoW Protocol (MEV Protected)'],
+    routes: ['CoW Protocol'],
     cowOrderParams: { ...cowOrderParams, buyAmount: minBuyAmount },
   }
 }

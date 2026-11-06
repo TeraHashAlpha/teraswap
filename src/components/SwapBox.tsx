@@ -833,7 +833,7 @@ export default function SwapBox() {
                 ✦ Smart-routed via CoW{' '}
                 {meta.gasless && meta.gasless.gasSavingsUsd >= 0.5
                   ? `(gasless, ~${fmtUsd(meta.gasless.gasSavingsUsd)} saved)`
-                  : '(MEV protected)'}
+                  : '(gasless)'}
               </p>
             )}
             <QuoteBreakdown meta={meta} chainId={activeChainId} tokenIn={tokenIn} tokenOut={tokenOut} amountIn={amountIn} slippage={slippage} countdown={countdown} priceCheck={pairCheck} priceTier={priceTier} tokenInUsdPrice={priceCheck.chainlinkPrice} tokenOutUsdPrice={tokenOutPriceCheck.chainlinkPrice} approvalPlan={approvalPlan} onEditSlippage={() => setShowSlippage(true)} gasEstimate={gasEstimateFn} smartMevApplied={smartMevApplied} onRefresh={refreshQuote} refreshing={quoteLoading} />

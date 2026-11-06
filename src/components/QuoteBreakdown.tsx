@@ -11,6 +11,7 @@ import { feeMode, isFeeCollected } from '@/lib/fee-mode'
 import { isExecutableSource } from '@/lib/executable-sources'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { estimateMevSavings } from '@/lib/mev-savings'
+import { SMART_COW_SELECTED_LABEL, SMART_COW_SELECTED_TITLE } from '@/config/product-claims'
 import { swapNotionalUsd, feeUsd } from '@/lib/fee-usd'
 import { safeBigInt } from '@/lib/utils'
 import { formatUnits, isAddress } from 'viem'
@@ -61,10 +62,6 @@ function sourceLabel(source: AggregatorName): string {
 /** [fix/functional-chain-ui F2] A route hop is shown by name — a raw pool address falls back to the source label. */
 function routeLabel(label: string, source: AggregatorName): string {
   return isAddress(label, { strict: false }) ? sourceLabel(source) : label
-}
-
-function isMevProtected(source: AggregatorName): boolean {
-  return AGGREGATOR_META[source]?.mevProtected ?? false
 }
 
 function isIntentBased(source: AggregatorName): boolean {
@@ -155,7 +152,6 @@ export default function QuoteBreakdown({
     }
   }
 
-  const bestIsMevProtected = isMevProtected(best.source)
   const bestIsIntent = isIntentBased(best.source)
   const bestTime = estimatedTime(best.source)
   const bestIsDirect = AGGREGATOR_META[best.source]?.isDirect ?? false
@@ -272,7 +268,6 @@ export default function QuoteBreakdown({
                 {gasless.gasSavingsUsd >= 0.5
                   ? `Save ~${fmtUsd(gasless.gasSavingsUsd)} in gas fees by using CoW Protocol.`
                   : 'Use CoW Protocol for a fully gasless swap.'}
-                {' '}Your swap is fully MEV-protected.
               </p>
             </div>
           </div>
@@ -307,11 +302,8 @@ export default function QuoteBreakdown({
             <span className="text-xs font-medium text-success">Best via {sourceLabel(best.source)}</span>
             {/* [LP-04] Annotate when CoW was auto-promoted (not strictly highest output) */}
             {smartMevApplied && (
-              <span
-                className="text-[10px] font-medium text-cream-50"
-                title="CoW Protocol's price was within 0.3% of the highest quote, so TeraSwap routed through it for MEV protection."
-              >
-                · auto-selected for MEV protection
+              <span className="text-[10px] font-medium text-cream-50" title={SMART_COW_SELECTED_TITLE}>
+                {SMART_COW_SELECTED_LABEL}
               </span>
             )}
           </span>
@@ -334,17 +326,12 @@ export default function QuoteBreakdown({
         </div>
 
         {/* Feature badges */}
-        {(bestIsMevProtected || bestIsIntent || bestIsDirect) && (
+        {/* [feat/retire-force-mev] The "MEV Protected" badge is retired (owner 2026-11-06): no MEV-related promise. */}
+        {(bestIsIntent || bestIsDirect) && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {bestIsDirect && (
               <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/15 px-2 py-0.5 text-[10px] font-semibold text-orange-400">
                 Direct DEX
-              </span>
-            )}
-            {bestIsMevProtected && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-cream-gold/15 px-2 py-0.5 text-[10px] font-semibold text-cream-gold">
-                <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none"><path d="M8 1l6 3v4c0 3.5-2.5 6.5-6 7.5C4.5 14.5 2 11.5 2 8V4l6-3z" fill="currentColor" fillOpacity="0.3" stroke="currentColor" strokeWidth="1.5"/><path d="M5.5 8l2 2 3.5-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                MEV Protected
               </span>
             )}
             {bestIsIntent && (
@@ -364,7 +351,7 @@ export default function QuoteBreakdown({
         {bestIsIntent && bestTime && (
           <div className="mb-2 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-xs text-blue-300">
             <span className="font-medium">Execution time: ~{bestTime}s</span>
-            <span className="text-blue-300/70"> — Solvers compete in batch auctions for the best fill. Your trade is fully protected from MEV (frontrunning, sandwich attacks).</span>
+            <span className="text-blue-300/70"> — Solvers compete in batch auctions for the best fill.</span>
           </div>
         )}
 
@@ -402,13 +389,13 @@ export default function QuoteBreakdown({
           </button>
         </div>
 
-        {/* [LP-05] Estimated MEV savings vs non-CoW median (CoW-only, positive only) */}
+        {/* [LP-05] CoW's quote vs the non-CoW median (CoW-only, positive only). [feat/retire-force-mev] Relabelled from "Est. MEV savings": a price difference, not a protection claim. */}
         {mevSavings && (
           <div
             className="mb-2 flex items-center justify-between text-[11px] text-emerald-400/80"
-            title="Difference between CoW Protocol's quote and the median of the non-CoW (public-mempool) quotes for this pair. A rough lower-bound estimate of what MEV bots could have extracted on a non-protected route."
+            title="Difference between CoW Protocol's quote and the median of the other sources' quotes for this pair."
           >
-            <span className="text-cream-35">Est. MEV savings</span>
+            <span className="text-cream-35">Vs. median quote</span>
             <span className="font-mono tabular-nums">
               +{fmtToken(mevSavings.amount)} {tokenOut.symbol} ({fmtPct(mevSavings.pct)})
             </span>
@@ -586,11 +573,6 @@ export default function QuoteBreakdown({
                   {q.source === 'uniswapv3' && q.meta?.uniswapV3Fee != null && (
                     <span className="text-[9px] text-orange-400/70" title={`Pool fee: ${q.meta.uniswapV3Fee / 10000}%`}>
                       {q.meta.uniswapV3Fee / 10000}%
-                    </span>
-                  )}
-                  {qMeta?.mevProtected && (
-                    <span className="inline-flex items-center rounded bg-cream-gold/20 px-1 py-0 text-[9px] font-bold text-cream-gold" title="MEV Protected — no frontrunning or sandwich attacks">
-                      MEV
                     </span>
                   )}
                   {qMeta?.intentBased && qMeta.estimatedTime && (

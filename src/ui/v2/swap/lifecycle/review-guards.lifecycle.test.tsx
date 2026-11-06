@@ -185,7 +185,7 @@ describe('L-2 — Cancel on the CoW order sheet does not bring the single-route 
     const reset = vi.fn()
     h.swap = swapHook({ status: 'cow_awaiting_review', pendingCowOrder: order, reset })
     rerender()
-    expect(dialogNames()).toEqual(['Review MEV-Protected Order'])
+    expect(dialogNames()).toEqual(['Review CoW Protocol Order'])
 
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
     expect(reset).toHaveBeenCalledTimes(1)

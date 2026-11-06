@@ -44,7 +44,7 @@ export const metadata: Metadata = {
   keywords: [
     'DeFi', 'DEX aggregator', 'meta-aggregator', 'Ethereum', 'swap',
     'TeraSwap', '1inch', '0x', 'CoW Protocol', 'Uniswap', 'ParaSwap',
-    'KyberSwap', 'Chainlink', 'MEV protection', 'best rate',
+    'KyberSwap', 'Chainlink', 'best rate',
     'privacy', 'IP protection', 'DefiLlama', 'non-custodial',
   ],
   authors: [{ name: 'TeraSwap' }],
