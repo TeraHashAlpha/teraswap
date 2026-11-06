@@ -77,5 +77,14 @@ jobs:
         env:
           UI_V2_ENABLED: "true"
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: "00000000000000000000000000000000"
+          # [L-8, A75b] Same PUBLIC build env as the Vercel Preview build — without it no chain is DCA-live and the suite's
+          # `dca` route renders the plain pane (CI 42 pass / 5 fail). Names only here: the values are public contract
+          # addresses kept in repository VARIABLES (Settings > Secrets and variables > Actions > Variables), never typed in
+          # this file. Pinned by scripts/e2e-mobile-parity-ci.test.mjs.
+          NEXT_PUBLIC_DCA_ENABLED: "true"
+          NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE: ${{ vars.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE }}
+          NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM: ${{ vars.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM }}
+          NEXT_PUBLIC_BASE_FEE_COLLECTOR: ${{ vars.NEXT_PUBLIC_BASE_FEE_COLLECTOR }}
+          NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR: ${{ vars.NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR }}
       - name: Run v2 mobile-parity Playwright suite
         run: npx playwright test --config src/ui/v2/__tests__/mobile/playwright.config.ts
