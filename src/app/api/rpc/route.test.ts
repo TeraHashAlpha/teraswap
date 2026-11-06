@@ -29,6 +29,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/kv-rate-limiter', () => ({
   checkRateLimit: mocks.checkRateLimit,
+  // [A76 S-5] the route calls the bounded variant; same arguments, same answer shape.
+  checkRateLimitWithin: mocks.checkRateLimit,
   RPC_RATE_LIMIT: { limit: 300, windowMs: 60_000 },
 }))
 

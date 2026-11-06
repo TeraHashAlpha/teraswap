@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { bodySizeGuard, RPC_MAX_BODY_BYTES } from '@/lib/body-limit'
-import { checkRateLimit, RPC_RATE_LIMIT } from '@/lib/kv-rate-limiter'
+import { checkRateLimitWithin, RPC_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { resolveProxyChainId } from '@/lib/rpc-proxy-chain'
 import { serverRpcUrl } from '@/lib/rpc-env'
 import { clientIpKey } from '@/lib/client-ip-key'
@@ -97,7 +97,10 @@ export async function POST(req: NextRequest) {
   } catch {
     parseFailed = true
   }
-  const rateCheck = await checkRateLimit(
+  // [fix/user-ip-privacy A76 S-5] Bounded at 1 s (RATE_LIMIT_GATE_TIMEOUT_MS), as /api/quote bounds its KV gate: with
+  // Redis unreachable the Upstash client retried for ~4.3 s on EVERY proxied read. Past the deadline the request is
+  // decided by the in-memory fallback (half the limit, per instance) — degraded, never unlimited.
+  const rateCheck = await checkRateLimitWithin(
     `rpc:${ip}`,
     RPC_RATE_LIMIT.limit,
     RPC_RATE_LIMIT.windowMs,

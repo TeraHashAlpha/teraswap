@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({ rate: vi.fn() }))
 
 vi.mock('@/lib/kv-rate-limiter', () => ({
   checkRateLimit: mocks.rate,
+  checkRateLimitWithin: mocks.rate, // [A76 S-5] the route calls the bounded variant
   RPC_RATE_LIMIT: { limit: 300, windowMs: 60_000 },
 }))
 vi.mock('@/lib/rpc-proxy-chain', () => ({ resolveProxyChainId: () => ({ chainId: 1 }) }))

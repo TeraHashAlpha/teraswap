@@ -15,7 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
-const redis = vi.hoisted(() => ({ keys: [] as string[], fail: false }))
+const redis = vi.hoisted(() => ({ keys: [] as string[], fail: false, hang: false }))
 vi.mock('@/lib/kv', () => {
   const pipeline = () => {
     const p = {
@@ -24,6 +24,7 @@ vi.mock('@/lib/kv', () => {
       zadd: (key: string) => (redis.keys.push(key), p),
       expire: (key: string) => (redis.keys.push(key), p),
       exec: async () => {
+        if (redis.hang) return new Promise<never>(() => {}) // [A76 S-5] Upstash retrying against an unreachable Redis
         if (redis.fail) throw new Error('KV unreachable')
         return [0, 0, 1, 1]
       },
@@ -63,6 +64,7 @@ let logged: string[] = []
 beforeEach(() => {
   redis.keys.length = 0
   redis.fail = false
+  redis.hang = false
   limiter.reset()
   killSwitchInternal.rateLimitMap.clear()
   logged = []
@@ -131,6 +133,31 @@ describe('IPv6: one bucket per /64 [A76 S-4]', () => {
     await rpcFrom('2001:db8:1:3::1')
     expect([...new Set(redis.keys)]).toEqual([`ratelimit:rpc:${hashClientIp('2001:db8:1:3::/64')}`])
   })
+})
+
+// [fix/user-ip-privacy A76 S-5] With Redis unreachable, Upstash retried a pipeline for ~4.3 s before checkRateLimit's
+// catch path ran — added to every proxied read. The rpc limiter call is now bounded at 1 s, then decided by the
+// in-memory fallback (degraded, never unlimited).
+describe('/api/rpc: a hung rate limiter costs at most 1 s [A76 S-5]', () => {
+  const rpcCall = () =>
+    rpc(new NextRequest('http://localhost/api/rpc', { method: 'POST', headers: { ...headers('6.6.6.6'), 'content-type': 'application/json' }, body: '{"jsonrpc":"2.0","id":1,"method":"eth_newFilter"}' }))
+
+  it('answers within ~1 s with KV hanging, decided by the fallback (here: the method check → 403)', async () => {
+    redis.hang = true
+    const t0 = Date.now()
+    const res = await rpcCall()
+    const elapsed = Date.now() - t0
+    expect(res.status).toBe(403)
+    expect(elapsed).toBeGreaterThanOrEqual(900)
+    expect(elapsed).toBeLessThan(2_500)
+  }, 5_000)
+
+  it('still limits while KV hangs: past half the budget the fallback answers 429', async () => {
+    redis.hang = true
+    limiter.getFallbackMap().set(`rpc:${hashClientIp(TRUSTED)}`, { count: 150, windowStart: Date.now() })
+    const res = await rpcCall()
+    expect(res.status).toBe(429)
+  }, 5_000)
 })
 
 describe('no raw IP in a log line (Redis outage → the in-memory fallback logs every request)', () => {
