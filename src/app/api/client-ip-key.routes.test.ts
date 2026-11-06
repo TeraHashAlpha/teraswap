@@ -117,6 +117,22 @@ describe('no raw IP in a Redis key', () => {
   })
 })
 
+// [fix/user-ip-privacy A76 S-4] The audit got 300/min from EACH of three addresses of one /64 — one subscriber, three
+// budgets. An IPv6 client is now one bucket per /64 at every per-IP limiter (they all go through clientIpKey).
+describe('IPv6: one bucket per /64 [A76 S-4]', () => {
+  const rpcFrom = (ip: string) =>
+    rpc(new NextRequest('http://localhost/api/rpc', { method: 'POST', headers: { 'x-vercel-forwarded-for': ip, 'content-type': 'application/json' }, body: '{"jsonrpc":"2.0","id":1,"method":"eth_newFilter"}' }))
+
+  it('three addresses of one /64 (any spelling) share ONE rpc bucket; the next /64 is another', async () => {
+    for (const ip of ['2001:db8:1:2::1', '2001:0db8:0001:0002:aaaa:bbbb:cccc:dddd', '2001:DB8:1:2:FFFF:FFFF:FFFF:FFFF']) await rpcFrom(ip)
+    const sameSlash64 = [...new Set(redis.keys)]
+    expect(sameSlash64).toEqual([`ratelimit:rpc:${hashClientIp('2001:db8:1:2::/64')}`])
+    redis.keys.length = 0
+    await rpcFrom('2001:db8:1:3::1')
+    expect([...new Set(redis.keys)]).toEqual([`ratelimit:rpc:${hashClientIp('2001:db8:1:3::/64')}`])
+  })
+})
+
 describe('no raw IP in a log line (Redis outage → the in-memory fallback logs every request)', () => {
   it('the fallback warning names the hashed bucket, never the address', async () => {
     redis.fail = true

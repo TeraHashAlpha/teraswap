@@ -23,9 +23,16 @@
  * DAY BOUNDARY. At 00:00 UTC every bucket name changes, so a client's sliding window restarts once a
  * day (at most one extra window of requests in the minute, or the hour, that straddles midnight).
  *
+ * IPv6: ONE BUCKET PER /64. [fix/user-ip-privacy A76 S-4] A /64 is the smallest block an ISP assigns to one
+ * subscriber, and every address in it is that subscriber's to use (SLAAC privacy addresses rotate inside it). Keying
+ * by the full address gave one client 2^64 buckets — the audit got 300/min from each of three addresses of one /64.
+ * So an IPv6 client is keyed by its /64 prefix (`2001:db8:1:2::/64`), an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`)
+ * by the IPv4 address it carries, and IPv4 by the address. See {@link rateLimitSubject}.
+ *
  * Server-only (node:crypto). Imported by API routes and body-limit.ts; never by client code.
  */
 import { createHmac, randomBytes } from 'node:crypto'
+import { isIP } from 'node:net'
 import { trustedClientIp } from './trusted-ip'
 
 /** Name of the server env var holding the secret. */
@@ -78,12 +85,35 @@ export function hashClientIp(ip: string, now: number = Date.now()): string {
 }
 
 /**
+ * [A76 S-4] What a client is keyed by: an IPv4 address as-is; an IPv6 address as its /64 prefix, canonical
+ * (lower-case, no leading zeros, `::/64`), so every spelling and every interface id of one /64 is one subject; an
+ * IPv4-mapped IPv6 address as the IPv4 it carries. A zone id (`%eth0`) or brackets are ignored. Anything that is
+ * not an IP (`'unknown'`, a malformed header) is returned unchanged — it is hashed like before.
+ */
+export function rateLimitSubject(ip: string): string {
+  const bare = ip.trim().replace(/^\[|\]$/g, '').replace(/%.*$/, '')
+  if (isIP(bare) !== 6) return ip
+  // Expand to 8 hextets (numbers): an embedded dotted quad at the end counts as two.
+  const hexOnly = bare.replace(/(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/, (_m, a, b, c, d) =>
+    `${((Number(a) << 8) | Number(b)).toString(16)}:${((Number(c) << 8) | Number(d)).toString(16)}`,
+  )
+  const [head, tail] = hexOnly.split('::') as [string, string | undefined]
+  const left = head ? head.split(':') : []
+  const right = tail ? tail.split(':') : []
+  const parts = tail === undefined ? left : [...left, ...Array<string>(8 - left.length - right.length).fill('0'), ...right]
+  const h = parts.map((x) => parseInt(x, 16))
+  // ::ffff:a.b.c.d (in either spelling) is an IPv4 client: key it exactly as that IPv4 address.
+  if (h.slice(0, 5).every((x) => x === 0) && h[5] === 0xffff) return [h[6] >> 8, h[6] & 0xff, h[7] >> 8, h[7] & 0xff].join('.')
+  return `${h.slice(0, 4).map((x) => x.toString(16)).join(':')}::/64`
+}
+
+/**
  * The per-client bucket name for rate-limit keys and log lines: the hash of the TRUSTED client IP
- * (see trusted-ip.ts for how that is established). Use this — never `trustedClientIp` — anywhere a
- * value is stored, keyed or logged.
+ * (see trusted-ip.ts for how that is established) — of its /64 for IPv6 ({@link rateLimitSubject}). Use this —
+ * never `trustedClientIp` — anywhere a value is stored, keyed or logged.
  */
 export function clientIpKey(req: Request, now: number = Date.now()): string {
-  return hashClientIp(trustedClientIp(req), now)
+  return hashClientIp(rateLimitSubject(trustedClientIp(req)), now)
 }
 
 /** Test-only: forget the per-process salt, the cached daily key and the warning latch. */

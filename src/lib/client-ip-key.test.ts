@@ -11,6 +11,7 @@ import {
   hashClientIp,
   RATE_LIMIT_SALT_ENV,
   RATE_LIMIT_SALT_MIN_LENGTH,
+  rateLimitSubject,
 } from './client-ip-key'
 
 const SALT = 'unit-test-salt-0123456789abcdef-0123456789abcdef'
@@ -152,5 +153,49 @@ describe('clientIpKey — hash of the TRUSTED client IP', () => {
     const key = clientIpKey(reqFrom({}), DAY1)
     expect(key).toBe(hashClientIp('unknown', DAY1))
     expect(key).not.toContain('unknown')
+  })
+})
+
+// [fix/user-ip-privacy A76 S-4] IPv6 rate-limit keys hash the /64 prefix: one ISP subscriber gets a whole /64 and every
+// address in it, so keying the full address gave one client 2^64 buckets.
+describe('rateLimitSubject — what a client is keyed by [A76 S-4]', () => {
+  it.each([
+    ['2001:db8:1:2::1', '2001:db8:1:2::/64'],
+    ['2001:0DB8:0001:0002:aaaa:bbbb:cccc:dddd', '2001:db8:1:2::/64'],
+    ['2001:db8:1:2:ffff:ffff:ffff:ffff', '2001:db8:1:2::/64'],
+    ['[2001:db8:1:2::9]', '2001:db8:1:2::/64'],
+    ['fe80::1%eth0', 'fe80:0:0:0::/64'],
+    ['2001:db8::', '2001:db8:0:0::/64'],
+    ['1:2:3:4:5:6:7:8', '1:2:3:4::/64'],
+    ['::1', '0:0:0:0::/64'],
+    ['::ffff:203.0.113.7', '203.0.113.7'],
+    ['::ffff:cb00:7107', '203.0.113.7'],
+    ['0:0:0:0:0:ffff:203.0.113.7', '203.0.113.7'],
+    ['203.0.113.7', '203.0.113.7'],
+    ['unknown', 'unknown'],
+    ['not:an:ip', 'not:an:ip'],
+  ])('%s → %s', (ip, subject) => {
+    expect(rateLimitSubject(ip)).toBe(subject)
+  })
+})
+
+describe('clientIpKey — IPv6 is keyed by its /64 [A76 S-4]', () => {
+  beforeEach(() => vi.stubEnv(RATE_LIMIT_SALT_ENV, SALT))
+  const keyOf = (ip: string) => clientIpKey(reqFrom({ 'x-vercel-forwarded-for': ip }), DAY1)
+
+  it('every address of one /64 is one bucket: the hash of the /64, not of the address', () => {
+    const keys = ['2001:db8:1:2::1', '2001:db8:1:2::2', '2001:db8:1:2:dead:beef:0:1'].map(keyOf)
+    expect(new Set(keys).size).toBe(1)
+    expect(keys[0]).toBe(hashClientIp('2001:db8:1:2::/64', DAY1))
+    expect(keys[0]).not.toBe(hashClientIp('2001:db8:1:2::1', DAY1))
+  })
+
+  it('a neighbouring /64 is another bucket', () => {
+    expect(keyOf('2001:db8:1:2::1')).not.toBe(keyOf('2001:db8:1:3::1'))
+  })
+
+  it('an IPv4-mapped IPv6 client shares the bucket of the IPv4 address; IPv4 keys are unchanged', () => {
+    expect(keyOf('::ffff:203.0.113.7')).toBe(keyOf('203.0.113.7'))
+    expect(keyOf('203.0.113.7')).toBe(hashClientIp('203.0.113.7', DAY1))
   })
 })

@@ -101,7 +101,7 @@ with a test that fails on `7eeefeb` (run in a detached worktree at that commit).
 - [x] S-2 (H) Privacy §3.3 — Auditor's sentence, v1 == v2, content-map delta
 - [x] S-3 (M) `/api/rpc` — drop eth_getLogs / eth_simulateV1 / eth_getProof / eth_createAccessList; 10 s upstream
       timeout; byte-capped read, > 4 MB → 502
-- [ ] S-4 (M) IPv6 rate-limit keys hash the /64
+- [x] S-4 (M) IPv6 rate-limit keys hash the /64
 - [ ] S-5 (L) `/api/rpc` limiter bounded at 1 s
 - [ ] S-6 (L) order poll by the locally active order hashes, not the 50 newest rows
 - [ ] S-7 (L) empty JSON-RPC batch → −32600
