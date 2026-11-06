@@ -20,10 +20,8 @@
     "fork": "./scripts/fork-test.sh",
     "deal": "./scripts/deal-tokens.sh",
     "check:fee": "./scripts/check-fee.sh",
-    "cap:init:ios": "npx cap add ios",
     "cap:init:android": "npx cap add android",
     "cap:sync": "npx cap sync",
-    "cap:open:ios": "npx cap open ios",
     "cap:open:android": "npx cap open android",
     "tokens:sync": "npx --yes tsx --tsconfig tsconfig.json scripts/token-catalog/build.ts",
     "baseline:capture": "tsx scripts/capture-endpoint-baseline.ts",
@@ -95,7 +93,7 @@
     "@walletconnect/sign-client": "2.21.1",
     "@walletconnect/universal-provider": "2.21.1",
     "qr": "0.5.5",
-    "hono": "4.13.7",
+    "hono": "4.13.11",
     "@babel/core": "7.29.6",
     "@walletconnect/jsonrpc-ws-connection": {
       "ws": "7.5.11"
