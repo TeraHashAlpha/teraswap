@@ -1,6 +1,6 @@
 # Feedback — fix/user-ip-privacy
 
-Base origin/main `fabaa30` · 7 signed commits · DRAFT PR, Auditor required (RPC proxy + rate limiting)
+Base origin/main `fabaa30` · signed commits, one per goal commit + this file · DRAFT PR, Auditor required (RPC proxy + rate limiting)
 Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/user-ip-privacy
 
 **Checklist** — [x] C1 `3ec1c04` L2 reads → `/api/rpc?chainId=`, per-chain read allow-list, 1.5 s cache, upstream
@@ -60,7 +60,7 @@ keys + logs = HMAC(IP, daily salt), four raw-XFF routes, Sentry stated off (ahea
    line; spoofed XFF keeps the bucket), a static guard. Sentry: `docs/security/SENTRY-STATUS.md` + test.
 5. Copy: delta below; `privacy-copy.test.tsx` — v1 and v2 §3.2/§5/§8 and Docs Privacy identical; claims checker green.
 6. Suite 440 files / 7843 → **452 / 8079**, 0 failures · lint 0 errors / 93 warnings both, per-rule delta none · `tsc`
-   clean · build green (34/34) · CodeQL security-extended 13 → 13, **0 new** · `diff --stat`: 81 files, +3773 / −366.
+   clean · build green (34/34) · CodeQL security-extended 13 → 13, **0 new** · `diff --stat`: 81 files, +3765 / −366.
 
 ## Content-map delta (every sentence; owner wording = O1–O5, verbatim)
 - **O1** TeraSwap's server relays all RPC reads on Ethereum, Base and Arbitrum, every aggregator quote and swap request, and token logos, so those providers see our server's IP address, not yours.
