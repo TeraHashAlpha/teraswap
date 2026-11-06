@@ -53,12 +53,15 @@ describe('sweep · Swap · shell surfaces (v1 page.tsx siblings of SwapBox, not 
   })
 })
 
-describe('shell surfaces ruled NOT to build (theme toggle, landing dot-nav): recorded, not silently dropped', () => {
+describe('shell surfaces ruled NOT to build (theme toggle, landing dot-nav) and the v1 typo v2 does not copy: recorded, not silently dropped', () => {
   const contentMap = readFileSync(join(process.cwd(), 'docs/feedback/feat-ui-v2-mobile-parity.md'), 'utf8')
 
   it.each([
     ['Theme toggle', /\|\s*Theme toggle\s*\|.*NOT built/],
     ['landing dot-nav', /\|\s*Desktop dot-nav.*\|.*NOT built/],
+    // [A75b] v1 prints `Share — saved 0.27%%` (SwapBox.tsx: fmtPct() already ends in %, the label template adds another).
+    // v2 keeps ONE % and does not copy the typo; the content-map names it a v1 typo.
+    ['Share label %', /\|\s*Share label `%%`.*\|.*v1 typo.*\|/],
   ])('%s has a ruled delta row in the content-map', (_label, pattern) => {
     expect(contentMap).toMatch(pattern)
   })
