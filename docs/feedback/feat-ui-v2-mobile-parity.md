@@ -55,6 +55,9 @@ Concerns for the Auditor:
 | Share button ("Share — saved X%" / "Share swap") | Swap | v1's tweet-intent Share (SwapBox.tsx), from the live quote/tokenIn/tokenOut, once the swap succeeds | owner, A75 L-1: BUILD |
 | Theme toggle | Header | v2 is dark-only (no light mode); the control has no v2 counterpart | owner, A75 L-1: NOT built |
 | Desktop dot-nav (landing `ScrollSpy`) | landing | v1's `lg`-only section dots; v2's scroll narrative (photo sections) replaces the need for a jump-nav | owner, A75 L-1: NOT built |
+| Footer `Fee: 0.1%` → `Fee 0.1%` | Footer | found by the A75b S-1 sweep: v1 prints the colon, v2 does not. Punctuation only | **flagged, not owner-ruled** — owner to confirm or ask for the colon back |
+| Help Center links `𝕏 Follow on X` / `✉ Contact support` → `@TeraHash on X` / `Email support` | Help drawer | found by the A75b S-1 sweep: same targets (x.com/TeraHash, mailto:), reworded in pack 03 (pinned by shell.test.tsx); no ruling on record | **flagged, not owner-ruled** — owner to confirm or ask for v1's wording back |
+| Footer `\|` separators, drawer `▾ ▸ 𝕏 ✉` glyphs | Footer, Help drawer | v1 prints them as text; v2 draws them aria-hidden (same rule as the first row) | round 7 item 11 |
 | Help Center geometry | all tabs (header/fab) | v1 `HelpDrawer`: fixed right-edge drawer, `max-w-[420px]`, left hairline; round 7 item 7 keeps it. A75's rebuild on `Sheet` (L-6) centred a 440 px modal at 1440 and a bottom sheet only ≤ 600. Restored: right-edge full-height drawer + left hairline at ≥ 1024, bottom sheet (top hairline, grab bar) below — `Sheet placement="drawer"`, pinned by `sheet-drawer.test.tsx` and the `help drawer geometry` Playwright block | owner, A75b S-3: RESTORE |
 
 ## Feedback — A75 fixes (PR #660, head 87adf17) — 0C/1H/8L, all fixed
