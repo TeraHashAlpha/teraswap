@@ -323,6 +323,24 @@ describe('HandUnderline', () => {
     expect(svg?.querySelectorAll('path').length).toBeGreaterThanOrEqual(1)
     expect(svg?.getAttribute('class')).toMatch(/text-v2-cream/)
   })
+
+  // Design review 1 (owner): the §2 underline clipped into the glyphs on a two-line title. Headings carrying it are set at
+  // line-height ≤ .98, so the box is ~.98em tall with the baseline ~.89em from its top (Barlow Condensed: ascent 1.0 / descent .2 →
+  // half-leading (lh − 1.2)/2). The next line's cap tops sit at lh + .89 − .70 ≈ 1.17em. The stroke must live in the band between.
+  it('sits in the free band under the baseline and above the next line (never hanging off the box through the glyphs)', () => {
+    render(<HandUnderline data-testid="h">word</HandUnderline>)
+    const cls = screen.getByTestId('h').querySelector('svg')!.getAttribute('class')!
+    expect(cls).not.toMatch(/\btop-/) // bottom-anchored: a wrapped phrase is underlined under its LAST line
+    const overhang = Number(/-bottom-\[([\d.]+)em\]/.exec(cls)![1]) // how far the stroke box hangs below the line box
+    const height = Number(/\bh-\[([\d.]+)em\]/.exec(cls)![1])
+    for (const lh of [0.95, 0.98]) {
+      const baseline = (lh - 1.2) / 2 + 1.0
+      const nextCapTop = lh + baseline - 0.7
+      const top = lh + overhang - height // measured from the top of the last line box
+      expect(top, `line-height ${lh}: starts below the baseline`).toBeGreaterThan(baseline)
+      expect(top + height, `line-height ${lh}: ends above the next line's caps`).toBeLessThan(nextCapTop)
+    }
+  })
 })
 
 describe('Skeleton', () => {
