@@ -29,6 +29,17 @@ export function isExpensiveMethod(method: unknown): boolean {
   return EXPENSIVE_METHOD_PREFIXES.some((p) => method.startsWith(p))
 }
 
+/**
+ * [FEAT-SERVER-RPC-ENV-SPLIT] Rate-limit units one /api/rpc HTTP request costs: one per JSON-RPC
+ * call, so a 25-call batch counts 25 (it used to count 1 and let a client multiply its budget by
+ * the batch size). A single call, an empty/over-cap batch (rejected before any forwarding) or a
+ * non-JSON-RPC body costs 1 — exactly what those requests cost before.
+ */
+export function rpcRateLimitUnits(body: unknown, max: number = MAX_RPC_BATCH_SIZE): number {
+  if (!Array.isArray(body) || body.length === 0 || body.length > max) return 1
+  return body.length
+}
+
 /** True when a batch of `count` requests exceeds the cap. */
 export function exceedsBatchLimit(count: number, max: number = MAX_RPC_BATCH_SIZE): boolean {
   return count > max

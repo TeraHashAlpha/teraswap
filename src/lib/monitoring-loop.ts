@@ -22,7 +22,11 @@ import {
   checkAutoRecovery,
   forceDisable,
   getAllStatuses,
+  getStatus,
+  shouldProbeNow,
 } from './source-state-machine'
+import { shouldRunRpcProbe, probeAllServerRpcs } from './rpc-health'
+import { getAlertChannelStatus } from './alert-channels/status'
 import {
   loadBaseline,
   getBaselineState,
@@ -47,6 +51,7 @@ import {
   type OnChainScanResult,
 } from './on-chain-monitor'
 import { maybeSendWeeklyReport } from './surplus-report'
+import { runRateLimitWatch } from './rate-limit-watch'
 import {
   checkAllKeeperChains,
   alertOnKeeperTrouble,
@@ -121,7 +126,7 @@ export interface MonitoringTickResult {
   transitions: string[]
   recovered: string[]
   statuses: Awaited<ReturnType<typeof getAllStatuses>>
-  /** Present only on quorum ticks (every 5th tick). */
+  /** Present only on quorum ticks (every 15th tick). */
   quorum?: QuorumCheckResult
   /** Circuit breaker evaluation result (present when ≥1 source is disabled). */
   circuitBreaker?: CircuitBreakerResult
@@ -130,6 +135,13 @@ export interface MonitoringTickResult {
   /** [Auditor M2 / PR #497] Per-chain keeper liveness (gas balance + overdue-fill signal). Runs
    *  every tick — see keeper-health-monitor.ts. */
   keeperHealth?: KeeperChainHealth[]
+  /** False when NO alert delivery channel is configured (every alert is then dropped). */
+  alertsConfigured?: boolean
+  /**
+   * [feat/retire-force-mev C3] One `[SOURCE] <id>: rate-limited (429) since <first seen>` line per source answering 429
+   * (H1 probe and/or the real quote path). Absent when none.
+   */
+  rateLimited?: string[]
   /** True when tick was flagged as cold-start warmup (latency discarded). */
   warmup?: boolean
   /** True when tick was skipped due to concurrent lock. */
@@ -183,6 +195,17 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
   // Invalidate per-tick cache (fresh reads from KV)
   beginTick()
 
+  // ── Alert delivery sanity (once per run) ──────────────
+  // With no channel configured every transition/P0 alert is dropped with only a per-channel warn, so
+  // the system looks healthy while telling nobody (the 2026-10-29/30 outage). One loud line per tick.
+  const alertChannels = getAlertChannelStatus()
+  if (!alertChannels.anyConfigured) {
+    console.error(
+      '[ALERT] no delivery channel configured — alerts are NOT reaching anyone. Set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID, ' +
+      'DISCORD_WEBHOOK_URL, or RESEND_API_KEY + ALERT_EMAIL_TO (docs/Runbooks/MONITORING-ALERTS.md)',
+    )
+  }
+
   // ── Warmup detection (gap-based) ──────────────────────
   const warmup = await detectWarmup()
   if (warmup) {
@@ -199,11 +222,28 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
   // Warmup ticks still run checks (availability matters) but skip latency recording
   await Promise.allSettled(
     MONITORED_ENDPOINTS.map(async (ep) => {
+      // A health-disabled source is re-probed every K ticks (shouldProbeNow), not every tick.
+      if (!shouldProbeNow(await getStatus(ep.id))) return
       const result = await runHealthCheck(ep)
       await recordHealthCheck(ep.id, result, { skipLatency: warmup })
       if (!result.ok) failures++
     })
   )
+
+  // ── Server-RPC liveness (every 5th tick, per chain) ───
+  // Nothing probed the server RPC before; a failing resolver now degrades `server-rpc:<chainId>` and
+  // pages through the normal alert path. Never blocks or fails the tick.
+  try {
+    if (await shouldRunRpcProbe()) {
+      const outcomes = await probeAllServerRpcs()
+      await Promise.all(outcomes.map(async (o) => {
+        await recordHealthCheck(o.id, o.result, { skipLatency: warmup })
+        if (!o.result.ok) failures++
+      }))
+    }
+  } catch (err) {
+    console.warn('[MONITOR] Server-RPC probe failed:', err instanceof Error ? err.message : err)
+  }
 
   // ── Keeper liveness (per chain, every tick) ───────────
   // [Auditor M2 / PR #497] Gas balance + overdue-DCA-fill signal for every chain in
@@ -265,7 +305,7 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
     }
   }
 
-  // ── H5: Quorum cross-check (every 5th tick) ──────────
+  // ── H5: Quorum cross-check (every 15th tick; the on-chain scan below stays every 5th) ──
   let quorumResult: QuorumCheckResult | undefined
   try {
     if (await shouldRunQuorum()) {
@@ -296,6 +336,14 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
     if (prev && prev !== s.state) {
       transitions.push(`${s.id}: ${prev} → ${s.state}`)
     }
+  }
+
+  // ── [feat/retire-force-mev C3] Rate-limited (429) sources: line every tick, alert after 30 min (1 h cooldown), recovery ──
+  let rateLimitedLines: string[] = []
+  try {
+    rateLimitedLines = (await runRateLimitWatch(allBefore, allAfter)).lines
+  } catch (err) {
+    console.warn('[MONITOR] Rate-limit watch failed:', err instanceof Error ? err.message : err)
   }
 
   // Check for auto-recovery of non-critical disabled sources
@@ -366,6 +414,8 @@ export async function runMonitoringTick(): Promise<MonitoringTickResult> {
     ...(circuitBreakerResult ? { circuitBreaker: circuitBreakerResult } : {}),
     ...(onChainScanResult ? { onChainScan: onChainScanResult } : {}),
     ...(keeperHealth ? { keeperHealth } : {}),
+    alertsConfigured: alertChannels.anyConfigured,
+    ...(rateLimitedLines.length ? { rateLimited: rateLimitedLines } : {}),
     ...(warmup ? { warmup: true } : {}),
     ...(supabaseKeepalivePinged ? { supabaseKeepalive: true } : {}),
     ...(h2Status ? { h2Status, h2Reason } : {}),

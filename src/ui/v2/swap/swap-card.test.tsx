@@ -256,11 +256,12 @@ describe('20 — quote', () => {
     expect(screen.getByRole('button', { name: /Receive token: USDT/ })).toBeTruthy()
   })
 
-  it('MEV: the row is a switch; v1\'s exposure hint offers Enable, which flips it', () => {
+  it('MEV (retired, owner 2026-11-06): no Force MEV switch and no "CoW Protocol available… Enable" hint — see retire-force-mev.swap.test', () => {
     withQuote()
-    expect(screen.getByText('CoW Protocol available for MEV protection.')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Enable' }))
-    expect(screen.getByRole('switch', { name: /Force MEV Protection/ }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.queryByRole('switch')).toBeNull()
+    expect(screen.queryByText(/Force MEV Protection/)).toBeNull()
+    expect(screen.queryByText('CoW Protocol available for MEV protection.')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Enable' })).toBeNull()
   })
 })
 
@@ -289,7 +290,7 @@ describe('24 — tier notices (the quote panel, as v1 QuoteBreakdown)', () => {
   it('single-source → the verbatim amber notice', () => {
     quoteWithTier(TIER.single)
     expect(document.querySelector('[data-testid="price-tier-single-source"]')?.textContent).toBe(
-      '⚠ Price from one source only (DefiLlama). Value-based limits use that price; double-check the rate before swapping.',
+      'Price from one source only (DefiLlama). Value-based limits use that price; double-check the rate before swapping.',
     )
   })
   it('unpriced → the one-line notice, and the CTA still reads Review swap (its click opens the consent in the review sheet — see 26)', () => {
@@ -413,8 +414,10 @@ describe('26 / 25 — the review and Permit2 sheets opened from the card (B4 she
     const sheet = dlg.textContent!.replace(/[\u00a0\u2009\u202f]/g, ' ')
     for (const s of ['2 480.2211 USDC', '0.001 ETH ($2.49)', '$0.03 (~0.000012 ETH)', '0.3%']) {
       expect(panel).toContain(s)
-      expect(sheet).toContain(s)
+      if (s !== '2 480.2211 USDC') expect(sheet).toContain(s)
     }
+    // [A69 H-1] The quote panel's estimate stays; the sheet shows no minimum output until the hook has frozen the transaction (its calldata floor).
+    expect(sheet).not.toContain('Minimum output')
     expect(within(dlg).getByRole('button', { name: 'Confirm & Sign' }).hasAttribute('data-b5-stub')).toBe(false) // Confirm is wired (lifecycle tests)
     fireEvent.click(within(dlg).getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('dialog')).toBeNull()

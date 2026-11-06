@@ -19,7 +19,7 @@ import { selectBestWithMevPreference } from '@/lib/mev-preference'
 import { shouldShowSourceToggle } from '@/lib/ui/source-toggle-visibility'
 import { evaluatePairOracle } from '@/lib/chainlink'
 import { isUsdStablecoin } from '@/lib/chains/stablecoins'
-import { isChainActive, getChainConfig, remapTokenToChain } from '@/lib/chains'
+import { isChainActive, getChainConfig, remapPairToChain } from '@/lib/chains'
 import { isTrustedSpender } from '@/lib/trusted-addresses'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
 import { AGGREGATOR_META, DEFAULT_SLIPPAGE, MEV_PREFERENCE_THRESHOLD } from '@/lib/constants'
@@ -28,16 +28,15 @@ import { playQuoteReceived, playTouchMP3 } from '@/lib/sounds'
 import { CHAIN_ID } from '@/lib/constants'
 import { isVerifiedToken } from '@/lib/chains/tokens'
 import { safeBigInt } from '@/lib/utils'
-import { Button, Input, Skeleton, Surface, Toggle } from '../primitives'
+import { Button, Input, Skeleton, Surface } from '../primitives'
 import { CtaButton } from './CtaButton'
 import { shortAddress } from '../shell/format-address'
 import './swap.css'
 import { ctaFor } from './cta'
-import { buildQuoteView, quoteIsForAmount } from './quote-model'
+import { buildQuoteView, buildShareText, quoteIsForAmount } from './quote-model'
 import { QuotePanel, Notice } from './QuotePanel'
 import { TierNotice } from './TierNotice'
 import { SourcesMenu } from './SourcesMenu'
-import { Tip } from './Tip'
 import { TokenButton } from './TokenButton'
 import { SlippageSheet } from '../modals/SlippageSheet'
 import { TokenSheet } from '../modals/TokenSheet'
@@ -56,7 +55,6 @@ import { useSwapGates } from './lifecycle/use-swap-gates'
 import { useSwapLifecycle } from './lifecycle/use-swap-lifecycle'
 import { buildTimeline, confirmButtonState, SIGNING_STATUSES } from './lifecycle/lifecycle-view'
 
-const MEV_HINT_KEY = 'teraswap:mev-hint-dismissed' // v1's key: one dismissal across v1 and v2
 
 /** README §3: the thousands separator is a thin space. v1's `formatWithSeparator` groups with U+0020 (and `stripSeparator` eats `\s`, thin space included). */
 const thin = (s: string) => s.replace(/ /g, ' ')
@@ -102,15 +100,8 @@ export function SwapCard() {
   const [selectedOut, setSelectedOut] = useState<Token | null>(findToken('USDC') ?? null)
   const [displayAmountIn, setDisplayAmountIn] = useState('')
   const [spenderAnswer, setSpenderAnswer] = useState<{ key: string; spender: `0x${string}` | undefined } | null>(null)
-  const [mevProtected, setMevProtected] = useState(false)
-  // The exposure hint is only ever shown next to a quote (client state), so reading storage in the initialiser cannot mismatch SSR.
-  const [mevHintDismissed, setMevHintDismissed] = useState(() => {
-    try {
-      return localStorage.getItem(MEV_HINT_KEY) === '1'
-    } catch {
-      return false // storage disabled — treat as not dismissed
-    }
-  })
+  // [feat/retire-force-mev, owner 2026-11-06] v1's Force MEV Protection toggle, its notice and the "CoW Protocol available…
+  // Enable" strip (with the shared localStorage dismissal) are retired in both UIs. CoW stays an ordinary source.
   const [excludedSources, setExcludedSources] = useState<Set<string>>(new Set())
   // v1's SwapBox state, same names and defaults: slippage is Auto until the user picks otherwise (frame 22).
   const [manualSlippage, setManualSlippage] = useState(DEFAULT_SLIPPAGE)
@@ -124,14 +115,6 @@ export function SwapCard() {
   const { openConnectModal } = useConnectModal()
   const { switchChain } = useSwitchChain()
 
-  const dismissMevHint = useCallback(() => {
-    setMevHintDismissed(true)
-    try {
-      localStorage.setItem(MEV_HINT_KEY, '1')
-    } catch {
-      /* session-only dismissal is still useful */
-    }
-  }, [])
   const toggleSource = useCallback((source: string) => {
     setExcludedSources((prev) => {
       const next = new Set(prev)
@@ -150,8 +133,9 @@ export function SwapCard() {
 
   // v1 re-resolves the selected tokens to the ACTIVE chain's addresses in an effect (the defaults are mainnet's); here the
   // selection is state and the chain's token is derived, so there is never a render with a Base pair on mainnet addresses.
-  const tokenIn = useMemo(() => remapTokenToChain(selectedIn, activeChainId), [selectedIn, activeChainId])
-  const tokenOut = useMemo(() => remapTokenToChain(selectedOut, activeChainId), [selectedOut, activeChainId])
+  // [fix/chain-switch-token-fallback] One pair-level derivation: a leg with no home on the chain (mainnet SNX on Arbitrum) turns
+  // the whole pair into the chain's default pair — the same rule as v1's effect — never a foreign-chain address.
+  const { tokenIn, tokenOut } = useMemo(() => remapPairToChain(selectedIn, selectedOut, activeChainId), [selectedIn, selectedOut, activeChainId])
   // v1 re-runs calculateAutoSlippage in an effect whenever the pair/chain changes while Auto is on; here Auto is derived, so there
   // is never a render where the pair has changed and the value has not.
   const autoSlippage = tokenIn && tokenOut ? calculateAutoSlippage(tokenIn.symbol, tokenOut.symbol, activeChainId) : DEFAULT_SLIPPAGE
@@ -172,9 +156,10 @@ export function SwapCard() {
     () => (rawMeta && quoteMatchesSelection(rawMeta.identity, { chainId: activeChainId, tokenIn, tokenOut }) ? rawMeta : null),
     [rawMeta, activeChainId, tokenIn, tokenOut],
   )
-  const { meta: pickedMeta, smartMevApplied, mevExposedBest } = useMemo(
-    () => selectBestWithMevPreference(scopeToExecutable(matchedRawMeta, activeChainId), mevProtected, AGGREGATOR_META, MEV_PREFERENCE_THRESHOLD),
-    [matchedRawMeta, mevProtected, activeChainId],
+  // The 2nd argument (the retired force toggle) is deprecated and ignored; `false` was its default.
+  const { meta: pickedMeta, smartMevApplied } = useMemo(
+    () => selectBestWithMevPreference(scopeToExecutable(matchedRawMeta, activeChainId), false, AGGREGATOR_META, MEV_PREFERENCE_THRESHOLD),
+    [matchedRawMeta, activeChainId],
   )
   // …and, new in v2, only while it answers the amount that is in the field (see quoteIsForAmount).
   const quoteCurrent = !!pickedMeta && !!tokenIn && quoteIsForAmount(matchedRawMeta?.identity.amountRaw, amountIn, tokenIn.decimals)
@@ -375,19 +360,39 @@ export function SwapCard() {
   const sheetModel = baseModel && frozenSwap ? withFrozenSwap(baseModel, frozenSwap, AGGREGATOR_META[frozenSwap.source]?.label ?? frozenSwap.source) : baseModel
   const swapSt = lc.swap.status
   // The single-route review is on screen from the CTA until the signature is requested; a split has no such review (v1 goes straight to the plan).
+  // [A69 L-3] The Permit2 explainer takes the screen INSTEAD of the review (it used to render underneath it, unreachable): v1 puts it before any
+  // review too — `<Permit2EducationModal open={needsPermit2Education}>` (SwapBox.tsx:1242) opens off the approve click, and TransactionPreview
+  // (SwapBox.tsx:1252) only exists once the hook has frozen the transaction. Continue / Cancel bring the review back (it stays requested).
   const singleReviewOpen =
-    !lc.isSplitActive && reviewOpen({ requested: reviewRequested, ackRequired: lc.swap.unpricedAckRequired }) && !SIGNING_STATUSES.has(swapSt) && swapSt !== 'success' && swapSt !== 'cow_awaiting_review'
+    !lc.isSplitActive &&
+    !needsPermit2Education &&
+    reviewOpen({ requested: reviewRequested, ackRequired: lc.swap.unpricedAckRequired }) &&
+    !SIGNING_STATUSES.has(swapSt) &&
+    swapSt !== 'success' &&
+    swapSt !== 'cow_awaiting_review'
   const splitConsentOpen = lc.isSplitActive && (lc.consentRequested || lc.split.unpricedAckRequired)
   const splitReviewOpen = lc.isSplitActive && lc.split.status === 'awaiting-review' && !!address
   const cowReviewOpen = lc.swap.status === 'cow_awaiting_review' && !!lc.swap.pendingCowOrder && !!address
   const anySheetOpen = showSlippage || tokenPicker !== null || needsPermit2Education || singleReviewOpen || splitConsentOpen || splitReviewOpen || cowReviewOpen
   const confirmBtn = confirmButtonState({ approvalStatus: approval.status, approvalReady: approval.isReady, swapStatus: swapSt })
+  // [A69 L-1] Confirm is gated like the CTA behind it (v1's SwapButton order): a price-gate block lands, or the quote it would execute is gone. It says
+  // the CTA's own words and is disabled — never a press that silently does nothing. A hook already working keeps its in-flight label, and a frozen
+  // transaction (v1's TransactionPreview) is signed regardless, as in v1.
+  // [A69b S-2] Gated on the CTA's own disabled state, not on three of its kinds: `ctaFor` ranks insufficient-balance (and connect / wrong-network) AHEAD of
+  // `blocked`, so a gate block hidden behind one of them left Confirm enabled as "Confirm & Sign" while the press silently did nothing
+  // (`lifecycle.confirm` returns on `gates.anyBlocked`). `anyBlocked` is added for the two ranks that stay enabled (connect, wrong-network).
+  const confirmGated = !frozenSwap && !confirmBtn.disabled && ((cta.disabled && cta.kind !== 'in-flight') || gates.anyBlocked)
 
   // The Execution column is up from the first hook step until the visitor starts over (New swap, or any change to the trade).
   const executionActive = lc.status !== 'idle'
+  // [L-1] v1's Share button (SwapBox.tsx): only once the swap has actually succeeded, from the same live `meta`/tokenIn/tokenOut.
+  const shareText = lc.status === 'success' ? buildShareText(meta, tokenIn, tokenOut) : null
+  // [L-3, A75] v1's own rule (SwapBox.tsx: `explorerTxUrl(txHash, txChainId ?? activeChainId)`): once the tx is
+  // sent, the link follows the chain it was actually SENT on, never the currently selected chain — a network switch
+  // while the tx is pending/just-succeeded must not move the link.
   const explorerUrl = (() => {
     try {
-      return getChainConfig(activeChainId).blockExplorer
+      return getChainConfig(lc.swap.txChainId ?? activeChainId).blockExplorer
     } catch {
       return getChainConfig(1).blockExplorer
     }
@@ -410,8 +415,13 @@ export function SwapCard() {
       lc.swap.confirmSwap() // v1: <TransactionPreview onConfirm={confirmSwap}>
       return
     }
+    // The first press freezes the sheet (it keeps describing what was confirmed while the quote polls on during an approval).
     if (liveModel && !confirmedModel) setConfirmedModel(liveModel)
-    await lc.confirm(c)
+    // [A69 M-1] …and the press that actually executes re-freezes it from the quote it hands the hook, so the sheet, the hook's arguments and the
+    // success summary all describe one quote. v1 freezes at `execute` too (useSwap.ts:733), not at the click that only approves.
+    await lc.confirm(c, () => {
+      if (liveModel) setConfirmedModel(liveModel)
+    })
   }
   function onReviewCancel() {
     setReviewRequested(false)
@@ -503,44 +513,12 @@ export function SwapCard() {
           )}
         </div>
 
-        <Toggle
-          className="mt-3"
-          checked={mevProtected}
-          onChange={setMevProtected}
-          label={
-            <span className="inline-flex items-center gap-2">
-              Force MEV Protection
-              <Tip
-                label="MEV protection info"
-                content="Always route through CoW Protocol regardless of price. When off, TeraSwap automatically prefers MEV-protected routes when pricing is competitive."
-              />
-            </span>
-          }
-        />
-
-        {mevProtected && !meta && matchedRawMeta && !quoteLoading && (
-          <div className="mt-3">
-            <Notice tone="amber">No MEV-protected quote available. CoW Protocol may be temporarily unavailable. Try disabling Force MEV Protection or wait a moment.</Notice>
-          </div>
-        )}
-
         {quoteError && (
           <div className="mt-3">
             <Notice tone="red">{quoteError}</Notice>
           </div>
         )}
 
-        {meta && mevExposedBest && !mevHintDismissed && (
-          <div className="mt-2 flex items-center gap-2 text-[13px] text-v2-muted">
-            <span>CoW Protocol available for MEV protection.</span>
-            <Button variant="text" onClick={() => setMevProtected(true)}>
-              Enable
-            </Button>
-            <Button variant="icon" onClick={dismissMevHint} aria-label="Dismiss MEV protection hint">
-              <span aria-hidden="true">×</span>
-            </Button>
-          </div>
-        )}
       </Surface>
 
       <Surface edge="top" className="ts-swap-quote" aria-busy={quoting || undefined}>
@@ -552,6 +530,7 @@ export function SwapCard() {
             symbolOut={tokenOut.symbol}
             amountIn={amountIn}
             summary={lc.success}
+            shareText={shareText}
             txHash={lc.swap.txHash}
             explorerUrl={explorerUrl}
             error={lc.error}
@@ -578,7 +557,6 @@ export function SwapCard() {
             gasless={meta.gasless}
             lowConfidence={!!meta.lowConfidence}
             sourceCount={meta.all.length}
-            onUseGasless={() => setMevProtected(true)}
             tierNotice={<TierNotice tier={priceTier} />}
           />
         ) : (
@@ -599,7 +577,7 @@ export function SwapCard() {
         <SplitRoutePanel splitResult={lc.splitRoute.splitResult} tokenOut={tokenOut} useSplit={lc.splitRoute.useSplit} onToggle={lc.splitRoute.toggleSplit} analyzing={lc.splitRoute.analyzing} />
       )}
 
-      <div className="ts-swap-cta">
+      <div className="ts-swap-cta ts-cta-dock" data-cta-dock="">
         <CtaButton cta={cta} onClick={cta.kind === 'wrong-network' ? onWrongNetwork : onCta} />
         {meta?.gasless?.recommended && meta.best.source !== 'cowswap' && (
           <Button
@@ -641,13 +619,15 @@ export function SwapCard() {
                   routeViaFeeCollector: frozenSwap.routeViaFeeCollector,
                   minimumOutput: frozenSwap.minimumOutput,
                   decimalsOut: frozenSwap.tokenOut.decimals,
+                  tokenOutAddress: frozenSwap.tokenOut.address,
                 }
               : undefined
           }
           ackRequired={lc.ackRequired}
-          confirmLabel={confirmBtn.label}
+          confirmLabel={confirmGated ? cta.label : confirmBtn.label}
           confirmBusy={confirmBtn.disabled}
-          confirmTone={confirmBtn.tone}
+          confirmDisabled={confirmGated}
+          confirmTone={confirmGated ? 'error' : confirmBtn.tone}
           step={
             <>
               {lc.error && lc.swap.status === 'error' && (
@@ -671,7 +651,7 @@ export function SwapCard() {
         <SplitReviewSheet plannedLegs={lc.split.plannedLegs} tokenIn={tokenIn} tokenOut={tokenOut} userAddress={address} onConfirm={() => void lc.split.confirmPlan()} onCancel={lc.cancel} />
       )}
       {cowReviewOpen && lc.swap.pendingCowOrder && (
-        <CowOrderReviewSheet order={lc.swap.pendingCowOrder} onConfirm={() => void lc.swap.confirmCowOrder()} onCancel={lc.cancel} />
+        <CowOrderReviewSheet order={lc.swap.pendingCowOrder} onConfirm={() => void lc.swap.confirmCowOrder()} onCancel={onReviewCancel} />
       )}
       {tokenPicker && (
         <TokenSheet

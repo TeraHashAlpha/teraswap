@@ -1,0 +1,107 @@
+ ✓ src/ui/v2/dca/dca-review.test.tsx > review sheet · consent gates the CTA (server tier = authority) > on-chain feed: nothing to consent to — Create DCA is live and hands over the draft WITHOUT an acknowledgement 
+ ✓ src/ui/v2/dca/dca-review.test.tsx > review sheet · consent gates the CTA (server tier = authority) > unpriced: the consent block gates Create DCA; ticking it acknowledges THAT tier 
+ ✓ src/ui/v2/dca/dca-review.test.tsx > review sheet · consent gates the CTA (server tier = authority) > offchain-price: the consent block gates Create DCA; ticking it acknowledges THAT tier 
+ ✓ src/ui/v2/dca/dca-review.test.tsx > review sheet · consent gates the CTA (server tier = authority) > the words are v1's: heading, checkbox label and body (real {N}, symbols and cap) come from v1's own exports 
+ ✓ src/ui/v2/dca/dca-review.test.tsx > review sheet · consent gates the CTA (server tier = authority) > the cap line (the tier line) shows the REAL cap, clamped to v1's ceiling 
+ ✓ src/ui/v2/dca/dca-review.test.tsx > review sheet · consent gates the CTA (server tier = authority) > shows the schedule table: total, per buy, buys, execution, duration, expiry, the signed floor and Protection 
+ ✓ src/ui/v2/dca/dca-review.test.tsx > review sheet · a 409 reopens the consent > pure: reopenTier names only a STRONGER tier than the one already asked 
+ ✓ src/ui/v2/dca/dca-review.test.tsx > review sheet · a 409 reopens the consent > on-chain feed + 409 requiredTier "unpriced": the consent block opens, the CTA locks again, ticking acknowledges the NEW tier 
+ ✓ src/ui/v2/dca/dca-review.test.tsx > review sheet · a 409 reopens the consent > an acknowledgement given for offchain-price does not survive a 409 naming unpriced 
+ ✓ src/ui/v2/dca/dca-review.test.tsx > review sheet · a 409 reopens the consent > a 409 naming a weaker tier than the one on screen changes nothing 
+ ✓ src/ui/v2/dca/dca-review.test.tsx > review sheet · keyboard > Cancel is the default focus, Esc closes, Tab stays inside, a click on the dimmed page does not dismiss 
+ ✓ src/ui/v2/dca/dca-review.test.tsx > Positions · v2 rows show v1's fields for the same order objects > each active and history order: pair, filled/total, status label, tier badge, chain — present in v1 AND v2 
+ ✓ src/ui/v2/dca/dca-review.test.tsx > Positions · v2 rows show v1's fields for the same order objects > an active row shows the next buy and the expiry; a history row does not 
+ ✓ src/ui/v2/dca/dca-review.test.tsx > Positions · v2 rows show v1's fields for the same order objects > a failed order shows v1's reason; the tx link is chain-aware 
+ ✓ src/ui/v2/dca/dca-review.test.tsx > Positions · v2 rows show v1's fields for the same order objects > Cancel calls v1's cancelOrder with the order id (and plays v1's click); Remove / Cancel All / Remove All are v1's handlers 
+ ✓ src/ui/v2/dca/dca-review.test.tsx > Positions · v2 rows show v1's fields for the same order objects > an order on another chain than the wallet: the badge is amber and Cancel reads "Switch to {chain}" (v1) 
+ ✓ src/ui/v2/dca/dca-review.test.tsx > Positions · v2 rows show v1's fields for the same order objects > empty state: v1's words, verbatim, and its Start a DCA button returns to the form 
+ ✓ src/ui/v2/dca/dca-review.test.tsx > Positions · v2 rows show v1's fields for the same order objects > the 1 s clock stops at the target (no timer leak): unmounting clears it 
+ ✓ src/ui/v2/dca/dca-gate-sounds.test.tsx > (5a) chain gate > Ethereum: v2 says what v1 says ("DCA runs on Base and Arbitrum One") and offers the same two switches — never "Soon" 
+ ✓ src/ui/v2/dca/dca-gate-sounds.test.tsx > (5a) chain gate > the chain list is the SAME source as v1's: DCA_CHAINS, named by the registry (v1's panel and the v2 gate list equal chains) 
+ ✓ src/ui/v2/dca/dca-gate-sounds.test.tsx > (5a) chain gate > the gate shows exactly when v1's page does: launch flag on AND the selected chain is not a DCA chain 
+ ✓ src/ui/v2/dca/dca-gate-sounds.test.tsx > (5a) chain gate > the switch buttons use v1's mechanism: the disconnected selection store, or wagmi switchChain when a wallet is connected 
+ ✓ src/ui/v2/dca/dca-gate-sounds.test.tsx > (5a) chain gate > chain 1: gate shown = true (Base and Arbitrum mount the card) 
+ ✓ src/ui/v2/dca/dca-gate-sounds.test.tsx > (5a) chain gate > chain 8453: gate shown = false (Base and Arbitrum mount the card) 
+ ✓ src/ui/v2/dca/dca-gate-sounds.test.tsx > (5a) chain gate > chain 42161: gate shown = false (Base and Arbitrum mount the card) 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > (3) the draft v2 builds equals v1's createOrder config > defaults, 0.5 total 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > (3) the draft v2 builds equals v1's createOrder config > 25% quick-fill 
+ ✓ src/ui/v2/dca/dca-a11y-edge.test.tsx > focus stays in the sheet while the engine moves > frozen → signing → created: the SAME dialog, focus never leaves it, the busy button holds focus without being disabled 
+ ✓ src/ui/v2/dca/dca-a11y-edge.test.tsx > focus stays in the sheet while the engine moves > Tab cycles inside the sign sheet (the shared Sheet's trap), the busy button included 
+ ✓ src/ui/v2/dca/dca-signing.test.tsx > arg equality: v1 DCAPanel and the v2 card on one engine > standard (on-chain feed): createOrder(config) once, then confirmOrder() once — same config, same order, same sounds, one POST 
+ ✓ src/ui/v2/dca/dca-cancel.test.tsx > cancel one: v1 and v2 hand the engine the same calls > Cancel → cancelOrder(id) · confirm → confirmCancel() · the event plays v1's sound and toast — equal sequences 
+ ✓ src/ui/v2/dca/dca-cancel.test.tsx > cancel one: v1 and v2 hand the engine the same calls > Keep this order → clearPendingCancel(), no confirmCancel; Esc does the same (v1: backdrop / Cancel → clearPendingCancel) 
+ ✓ src/ui/v2/dca/dca-cancel.test.tsx > cancel one: v1 and v2 hand the engine the same calls > the list is the engine's: no status flips before the event, the cancelled order moves to History after it, and v2 fetches nothing itself 
+ ✓ src/ui/v2/dca/dca-gate-sounds.test.tsx > (5b) sounds: the same sounds.ts calls as v1 for the same actions > chips, quick-fill and the Custom toggle → playClick (v1 and v2 identical, step by step) 
+ ✓ src/ui/v2/dca/dca-gate-sounds.test.tsx > (5b) sounds: the same sounds.ts calls as v1 for the same actions > CTA → playTouchMP3 then startWaitingSound; a weaker tier stops the wait when the consent opens (v1: dialog; v2: review) 
+ ✓ src/ui/v2/dca/dca-gate-sounds.test.tsx > (5b) sounds: the same sounds.ts calls as v1 for the same actions > CTA on an on-chain-feed pair: the wait runs on into the EIP-712 review in BOTH (B6b closed B6a's one documented difference) 
+ ✓ src/ui/v2/dca/dca-gate-sounds.test.tsx > (5b) sounds: the same sounds.ts calls as v1 for the same actions > engine event order_created#0 → the same sounds and the same toast as v1 
+ ✓ src/ui/v2/dca/dca-gate-sounds.test.tsx > (5b) sounds: the same sounds.ts calls as v1 for the same actions > engine event dca_execution#1 → the same sounds and the same toast as v1 
+ ✓ src/ui/v2/dca/dca-gate-sounds.test.tsx > (5b) sounds: the same sounds.ts calls as v1 for the same actions > engine event order_filled#2 → the same sounds and the same toast as v1 
+ ✓ src/ui/v2/dca/dca-gate-sounds.test.tsx > (5b) sounds: the same sounds.ts calls as v1 for the same actions > engine event order_cancelled#3 → the same sounds and the same toast as v1 
+ ✓ src/ui/v2/dca/dca-gate-sounds.test.tsx > (5b) sounds: the same sounds.ts calls as v1 for the same actions > engine event order_error#4 → the same sounds and the same toast as v1 
+ ✓ src/ui/v2/dca/dca-gate-sounds.test.tsx > (5b) sounds: the same sounds.ts calls as v1 for the same actions > engine event order_error#5 → the same sounds and the same toast as v1 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > (3) the draft v2 builds equals v1's createOrder config > 100% quick-fill, 3 buys, 4h, 24h expiry 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > (3) the draft v2 builds equals v1's createOrder config > custom mode: 12 buys every 3 hours 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > (3) the draft v2 builds equals v1's createOrder config > offchain-price tier: the same draft once the acknowledgement is stripped; v1 asks consent for the tier the server named 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > (3) the draft v2 builds equals v1's createOrder config > unpriced tier: the same draft once the acknowledgement is stripped; v1 asks consent for the tier the server named 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > (3) the draft v2 builds equals v1's createOrder config > the draft carries no price condition (DCA signs priceFeed = address(0), targetPrice 0) 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > (4) cap, floor and tier lines are v1's own strings > unpriced: the cap line is v1's floorTierHint with the REAL cap, clamped to the ceiling 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > (4) cap, floor and tier lines are v1's own strings > renders the cap line in the card, tagged with its tier, and the Protection row is v1's badge label 
+ ✓ src/ui/v2/dca/dca-cancel.test.tsx > cancel one: v1 and v2 hand the engine the same calls > a failed cancel: the engine's error is v1's toast, the row stays active 
+ ✓ src/ui/v2/dca/dca-cancel.test.tsx > Cancel All: v1 and v2 freeze the same invalidate plan > Cancel All → cancelAllOrders() → the plan sheet (v1's arithmetic: one cancelOrder() per DCA) → confirmCancel() 
+ ✓ src/ui/v2/dca/dca-cancel.test.tsx > the cancel sheet is v1's OrderCancelReviewModal, word for word > cancel: every visible v1 text node is in v2; Confirm / Keep call the same handlers 
+ ✓ src/ui/v2/dca/dca-cancel.test.tsx > the cancel sheet is v1's OrderCancelReviewModal, word for word > invalidate (nonce + one DCA cancel, one skipped chain): every visible v1 text node is in v2; Confirm / Keep call the same handlers 
+ ✓ src/ui/v2/dca/dca-gate-sounds.test.tsx > (5b) sounds: the same sounds.ts calls as v1 for the same actions > Cancel / Remove rows → playClick, as v1's dashboard 
+ ✓ src/ui/v2/dca/dca-gate-sounds.test.tsx > a11y > names, groups and pressed state: every control has an accessible name, presets are labelled groups with the default pressed 
+ ✓ src/ui/v2/dca/dca-gate-sounds.test.tsx > a11y > the sub-tabs move with the arrow keys and Positions shows v1's empty state 
+ ✓ src/ui/v2/dca/dca-gate-sounds.test.tsx > a11y > the Create CTA is the ONLY filled shape on the form (round 7): every other button is a text / chip / icon variant 
+ ✓ src/ui/v2/dca/dca-a11y-edge.test.tsx > focus stays in the sheet while the engine moves > the timeline is announced politely and marks the current step; the created outcome marks every step done 
+ ✓ src/ui/v2/dca/dca-a11y-edge.test.tsx > focus stays in the sheet while the engine moves > review → frozen: the review sheet hands over to the sign sheet; Cancel on the sign sheet is the default focus 
+ ✓ src/ui/v2/dca/dca-a11y-edge.test.tsx > Esc / Cancel / backdrop: dead while a step is in flight, live everywhere else > creating: two presses on Create in one tick reach createOrder once (the engine's freeze is synchronous, so the busy window is one microtask) 
+ ✓ src/ui/v2/dca/dca-a11y-edge.test.tsx > Esc / Cancel / backdrop: dead while a step is in flight, live everywhere else > idle review: Esc closes it, the loop stops, focus returns to the CTA; nothing reached the engine 
+ ✓ src/ui/v2/dca/dca-signing.test.tsx > arg equality: v1 DCAPanel and the v2 card on one engine > offchain-price + consent: createOrder(config) once, then confirmOrder() once — same config, same order, same sounds, one POST 
+ ✓ src/ui/v2/dca/dca-signing.test.tsx > arg equality: v1 DCAPanel and the v2 card on one engine > unpriced + consent: createOrder(config) once, then confirmOrder() once — same config, same order, same sounds, one POST 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > (4) cap, floor and tier lines are v1's own strings > offchain-price: v1's hint and badge label; on-chain feed: v1 shows nothing (no row, no hint) 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > (4) cap, floor and tier lines are v1's own strings > the consent body keeps v1's words and numbers: {N}, the symbols and the cap come from the server answer 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > (4) cap, floor and tier lines are v1's own strings > floor: the under-minimum buy message is v1's (same formatter, same inputs) — shown inline and the CTA says so 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > the CTA > {"isConnected":false} → connect "Connect wallet" 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > the CTA > {"wrongNetwork":true} → wrong-network "Switch to Base" 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > the CTA > {"paused":true} → paused "DCA temporarily paused" 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > the CTA > {"hasTokens":false} → select-tokens "Select Tokens" 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > the CTA > {"hasAmount":false} → enter-amount "Enter Amount" 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > the CTA > {"insufficient":true} → insufficient-balance "Insufficient balance" 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > the CTA > {"checkingRoute":true} → checking-route "Checking route…" 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > the CTA > {"belowFloor":true} → below-floor "Below minimum buy" 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > the CTA > {"blocked":true} → blocked "Review DCA" 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > the CTA > {} → review "Review DCA" 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > the CTA > the card: Enter amount → Review DCA; short balance → Insufficient balance (only when the balance is KNOWN) 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > the CTA > not connected → Connect wallet opens the connect modal; wrong wallet chain → switches to the selected chain 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > the CTA > skeleton while the server's tier is in flight: the Protection row is aria-busy, and the CTA cannot review yet 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > (2) parity: every visible v1 DCA create-tab text node is in v2 > empty form 
+ ✓ src/ui/v2/dca/dca-card.test.tsx > (2) parity: every visible v1 DCA create-tab text node is in v2 > with an amount (summary, route sentence, Start DCA → Review DCA) 
+ ✓ src/ui/v2/dca/dca-a11y-edge.test.tsx > Esc / Cancel / backdrop: dead while a step is in flight, live everywhere else > frozen: Esc = v1's modal Cancel → clearPendingOrder(), nothing signed, the loop stops (v2), the form is back with its amount cleared (v1 :994) 
+ ✓ src/ui/v2/dca/dca-a11y-edge.test.tsx > Esc / Cancel / backdrop: dead while a step is in flight, live everywhere else > signing: Esc, Cancel and the backdrop do nothing; the engine is untouched (v1: no way out of isSubmitting) 
+ ✓ src/ui/v2/dca/dca-a11y-edge.test.tsx > Esc / Cancel / backdrop: dead while a step is in flight, live everywhere else > created: Esc dismisses the sheet (back to the form) — the engine is not asked anything more 
+ ✓ src/ui/v2/dca/dca-a11y-edge.test.tsx > Esc / Cancel / backdrop: dead while a step is in flight, live everywhere else > failed: Esc dismisses the sheet (back to the form) — the engine is not asked anything more 
+ ✓ src/ui/v2/dca/dca-signing.test.tsx > arg equality: v1 DCAPanel and the v2 card on one engine > approval first: Approve {sym} (v1 OrderReviewModal) is the one press, then Confirm & Sign Order — both trees, same calls 
+ ✓ src/ui/v2/dca/dca-signing.test.tsx > consent gates the call > unpriced, box not ticked: Create DCA is disabled and a press reaches no hook 
+ ✓ src/ui/v2/dca/dca-signing.test.tsx > signing → created > Confirm & Sign Order: the SAME sheet turns busy ("Signing order...", aria-disabled, not disabled), then says what v1's toast says 
+ ✓ src/ui/v2/dca/dca-signing.test.tsx > signing → created > the waiting loop: starts at the form press, is NOT restarted by Create on the on-chain tier, IS restarted after a consent (v1 :825), ends with the event 
+ ✓ src/ui/v2/dca/dca-a11y-edge.test.tsx > the draft changes under an open sheet (B5 rule, owner: auto-close) > review open, a new amount: the review closes, nothing was created 
+ ✓ src/ui/v2/dca/dca-a11y-edge.test.tsx > the draft changes under an open sheet (B5 rule, owner: auto-close) > review open, a different number of buys / interval: same — the key covers the whole schedule 
+ ✓ src/ui/v2/dca/dca-a11y-edge.test.tsx > the draft changes under an open sheet (B5 rule, owner: auto-close) > frozen (the engine holds a review), a new amount: the frozen order is dropped (clearPendingOrder — the engine's own reset) and the sheet closes, nothing signed 
+ ✓ src/ui/v2/dca/dca-a11y-edge.test.tsx > the draft changes under an open sheet (B5 rule, owner: auto-close) > a consent given for one draft does not carry to another: the reopened review asks again 
+ ✓ src/ui/v2/dca/dca-a11y-edge.test.tsx > use-dca-lifecycle: guards > double press on Create: createOrder once while the first call is in flight 
+ ✓ src/ui/v2/dca/dca-a11y-edge.test.tsx > use-dca-lifecycle: guards > double press on Sign: confirmOrder once (the engine consumes its review; the second press finds nothing frozen / a submitting engine) 
+ ✓ src/ui/v2/dca/dca-a11y-edge.test.tsx > use-dca-lifecycle: guards > the engine abandons the attempt silently (its chain / account reset, a guard in confirmOrder): back to the review, disarmed — a later unrelated event is NOT this attempt's 
+ ✓ src/ui/v2/dca/dca-a11y-edge.test.tsx > use-dca-lifecycle: guards > an event that predates the press is not read as the outcome; only the one after it is 
+ ✓ src/ui/v2/dca/dca-a11y-edge.test.tsx > reduced motion: the sheets add no motion of their own > dca.css and modals.css declare no animation; swap.css (whose timeline classes the sign sheet reuses) keeps every `animation` inside prefers-reduced-motion: no-preference 
+ ✓ src/ui/v2/dca/dca-a11y-edge.test.tsx > reduced motion: the sheets add no motion of their own > the three DCA sheets carry no animate-/transition- utility classes 
+ ✓ src/ui/v2/dca/dca-signing.test.tsx > failure > the wallet rejects: no POST, v1's text verbatim, v1's sounds (stop + cancel), Retry re-sends the identical config 
+ ✓ src/ui/v2/dca/dca-signing.test.tsx > failure > API error after the signature: one confirmOrder for any number of presses / Esc / Cancel while signing; the server's text verbatim 
+ ✓ src/ui/v2/dca/dca-signing.test.tsx > failure > the freeze-403 reads as v1's pause, not a failure 
+ ✓ src/ui/v2/dca/dca-signing.test.tsx > 409: the server names a stronger tier → the review reopens for it, the next Create carries that ack > on-chain client tier, server says "unpriced": consent block (unpriced, focused, unticked) → tick → Create → createOrder #2 = #1 + floorAck.unpriced → signed 
+ ✓ src/ui/v2/dca/dca-signing.test.tsx > 409: the server names a stronger tier → the review reopens for it, the next Create carries that ack > pure: the tier is read from the server's own sentence; anything else is a plain failure 
+ ✓ src/ui/v2/dca/dca-signing.test.tsx > wrong network under the review > the wallet moves to another chain: Create becomes v1's switch action (Switch to Base → switchChain), nothing is created 
+ ✓ src/ui/v2/dca/dca-signing.test.tsx > the sign sheet is v1's OrderReviewModal, word for word > timeline: v1's words only, in v1's order 
+ ✓ src/ui/v2/dca/dca-signing.test.tsx > the sign sheet is v1's OrderReviewModal, word for word > every visible text of v1's modal for the same frozen order is in the v2 sheet (rows, note, buttons) 

@@ -78,6 +78,7 @@ import {
   MIN_ACTIVE_SOURCES,
 } from './quorum-check'
 import { beginTick } from './source-state-machine'
+import { QUORUM_TICK_INTERVAL } from './quorum-check'
 import { isP0Reason, P0_REASONS } from './p0-reasons'
 import { getCircuitBreaker, resetAllCircuitBreakers, circuitKey } from './adapters/circuit-breaker'
 
@@ -212,18 +213,16 @@ describe('quorum-check', () => {
   // ── Tick counter (atomic incr) ────────────────────────
 
   describe('shouldRunQuorum', () => {
-    it('returns true on every 5th tick (uses atomic kv.incr)', async () => {
+    it('returns true on every 15th tick (uses atomic kv.incr)', async () => {
+      expect(QUORUM_TICK_INTERVAL).toBe(15)
       const results: boolean[] = []
-      for (let i = 0; i < 10; i++) {
+      for (let i = 0; i < 30; i++) {
         results.push(await shouldRunQuorum())
       }
-      // incr starts at 1 (not 0): tick 5, 10 are true
-      expect(results).toEqual([
-        false, false, false, false, true,
-        false, false, false, false, true,
-      ])
+      // incr starts at 1 (not 0): tick 15, 30 are true
+      expect(results.map((r, i) => (r ? i + 1 : 0)).filter(Boolean)).toEqual([15, 30])
       // Verify kv.incr was called (not get+set)
-      expect(mockKvIncr).toHaveBeenCalledTimes(10)
+      expect(mockKvIncr).toHaveBeenCalledTimes(30)
       expect(mockKvGet).not.toHaveBeenCalled()
     })
 
@@ -865,5 +864,69 @@ describe('quorum-check', () => {
       expect(secondary.label).toContain('USDT')
       expect(secondary.maxDeviationPercent).toBe(2)
     })
+  })
+})
+
+
+// ═══════════════════════════════════════════════════════════════
+// fix/monitor-self-source-alerts — the quorum must not probe a backing-off source
+// ═══════════════════════════════════════════════════════════════
+
+describe('quorum-check — OPEN breakers are not called (CoW 429 loop)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.useRealTimers()
+    kvStore.clear()
+    kvSets.clear()
+    beginTick()
+    resetAllCircuitBreakers()
+  })
+
+  function seedFive() {
+    for (const id of ['1inch', 'cowswap', 'velora', 'kyberswap', '0x']) seedSource(id, 'active')
+    mockFetchMetaQuote.mockResolvedValue(
+      makeMetaQuoteResult([
+        { source: '1inch', toAmount: '3000000000' },
+        { source: 'velora', toAmount: '2995000000' },
+        { source: 'kyberswap', toAmount: '3001000000' },
+        { source: '0x', toAmount: '3002000000' },
+      ]),
+    )
+  }
+
+  it('passes every OPEN-breaker source as excludeSources on both reference pairs', async () => {
+    seedFive()
+    getCircuitBreaker(circuitKey('cowswap')).forceOpen('test: 429 backoff')
+    await runQuorumCheck()
+    expect(mockFetchMetaQuote).toHaveBeenCalledTimes(2)
+    for (const call of mockFetchMetaQuote.mock.calls) expect(call[5]).toEqual(['cowswap'])
+  })
+
+  it('with no OPEN breaker nothing is excluded', async () => {
+    seedFive()
+    await runQuorumCheck()
+    for (const call of mockFetchMetaQuote.mock.calls) expect(call[5]).toEqual([])
+  })
+
+  it('does not half-open the breaker even when its cooldown has elapsed (monitor is never the probe)', async () => {
+    seedFive()
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-30T10:00:00Z'))
+    const cb = getCircuitBreaker(circuitKey('cowswap'))
+    cb.onFailure(new Error('CoW 429: rate limited')) // OPEN, 300 s cooldown
+    expect(cb.getState()).toBe('OPEN')
+    vi.advanceTimersByTime(301_000) // cooldown elapsed: isOpen() WOULD flip it to HALF_OPEN
+
+    await runQuorumCheck()
+    expect(cb.getState()).toBe('OPEN') // still OPEN: only user traffic may half-open it
+    for (const call of mockFetchMetaQuote.mock.calls) expect(call[5]).toContain('cowswap')
+    vi.useRealTimers()
+  })
+
+  it('per-chain breakers (name:chainId) are not mixed into the mainnet exclusion list', async () => {
+    seedFive()
+    getCircuitBreaker(circuitKey('cowswap', 8453)).forceOpen('test: base only')
+    await runQuorumCheck()
+    for (const call of mockFetchMetaQuote.mock.calls) expect(call[5]).toEqual([])
   })
 })

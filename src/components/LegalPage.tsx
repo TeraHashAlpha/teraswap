@@ -128,7 +128,7 @@ function PrivacyPolicy() {
       <SectionTitle id="pp-security">9. Data Security</SectionTitle>
       <P>
         We implement reasonable technical safeguards to protect the limited data we process.
-        However, no method of electronic transmission or storage is 100% secure. You are
+        However, no system is completely secure. You are
         responsible for the security of your wallet, private keys, and seed phrases. We will never
         ask for your private keys or seed phrases.
       </P>

@@ -20,6 +20,11 @@ export interface HealthCheckResult {
   ok: boolean
   latencyMs: number
   error?: string
+  /** 'infra' = the probe path itself failed (transport/timeout); not evidence about the source. */
+  /** 'rate-limited' = the source answered HTTP 429 — degraded, never healthy (feat/retire-force-mev C3). */
+  kind?: 'infra' | 'rate-limited'
+  /** Seconds from a 429's Retry-After header, when numeric. */
+  retryAfterSec?: number
 }
 
 /**
@@ -34,11 +39,14 @@ export async function runHealthCheck(endpoint: MonitoredEndpoint): Promise<Healt
     }
     return await checkAggregator(endpoint, start)
   } catch (err) {
-    return {
-      ok: false,
-      latencyMs: Date.now() - start,
-      error: err instanceof Error ? err.message : String(err),
+    const error = err instanceof Error ? err.message : String(err)
+    // The self probe is our lambda fetching our own public URL: a thrown fetch (timeout, DNS, reset)
+    // is a probe-path problem, not proof the site is down for users, so it is reported as infra and
+    // never counts toward degraded/disabled. An HTTP response (any status) is still a real result.
+    if (endpoint.id === 'teraswap-self') {
+      return { ok: false, latencyMs: Date.now() - start, error: `transport: ${error}`, kind: 'infra' }
     }
+    return { ok: false, latencyMs: Date.now() - start, error }
   }
 }
 
@@ -89,7 +97,20 @@ async function checkAggregator(endpoint: MonitoredEndpoint, start: number): Prom
     })
     clearTimeout(timer)
 
-    // Any response (even 400) means the endpoint is reachable.
+    // [feat/retire-force-mev C3] A 429 is NOT "reachable, fine": the source is refusing us. It was read as healthy
+    // (status < 500) while CoW 429'd our servers from 2026-10-29 — the monitor stayed green. Now: rate-limited → degraded.
+    if (res.status === 429) {
+      const sec = Number(res.headers.get('retry-after'))
+      return {
+        ok: false,
+        latencyMs: Date.now() - start,
+        error: 'HTTP 429 (rate-limited)',
+        kind: 'rate-limited',
+        ...(Number.isFinite(sec) && sec > 0 ? { retryAfterSec: sec } : {}),
+      }
+    }
+
+    // Any other response (even 400/405) means the endpoint is reachable.
     // Only network errors, timeouts, and 5xx count as failures.
     const ok = res.status < 500
 

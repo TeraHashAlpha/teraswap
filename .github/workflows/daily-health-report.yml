@@ -137,14 +137,50 @@ jobs:
           MONITOR_SECRET: ${{ secrets.MONITOR_SECRET }}
         run: |
           set -euo pipefail
+          # [feat/retire-force-mev C3] Sources answering HTTP 429 (public /api/monitor/status, no secret needed): one
+          # "id=ISO-since" token per rate-limited source. Every character is whitelisted before $GITHUB_OUTPUT.
+          status_body=$(curl -s --max-time 15 "$SITE_URL/api/monitor/status" || echo "")
+          rate_limited=$(node -e 'const s=(v)=>String(v??"").replace(/[^A-Za-z0-9:._-]/g,"");try{const r=JSON.parse(process.argv[1]);process.stdout.write((r.sources||[]).filter((x)=>x.rateLimitedSince).map((x)=>`${s(x.id)}=${s(x.rateLimitedSince)}`).join(" "))}catch{process.stdout.write("")}' "$status_body")
+          echo "rate_limited=$rate_limited" >> "$GITHUB_OUTPUT"
           if [ -z "${MONITOR_SECRET:-}" ]; then
             echo "code=NOSECRET" >> "$GITHUB_OUTPUT"
+            echo "alerts=UNKNOWN" >> "$GITHUB_OUTPUT"
+            echo "keepers_status=UNKNOWN" >> "$GITHUB_OUTPUT"
+            echo "keepers=" >> "$GITHUB_OUTPUT"
+            echo "keepers_infra=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
             -H "Authorization: Bearer ${MONITOR_SECRET}" \
             "$SITE_URL/api/monitor" || echo "000")
           echo "code=$code" >> "$GITHUB_OUTPUT"
+
+          # Alert-delivery status (booleans only, never values): OK | NOT_CONFIGURED | UNKNOWN.
+          # Without a configured channel the monitor pages nobody (2026-10-29/30 outage went unreported).
+          alerts_body=$(curl -s --max-time 15 \
+            -H "Authorization: Bearer ${MONITOR_SECRET}" \
+            "$SITE_URL/api/monitor/alerts" || echo "")
+          alerts=$(node -e 'try{const r=JSON.parse(process.argv[1]);process.stdout.write(r.status==="OK"?"OK":r.status==="NOT CONFIGURED"?"NOT_CONFIGURED":"UNKNOWN")}catch{process.stdout.write("UNKNOWN")}' "$alerts_body")
+          echo "alerts=$alerts" >> "$GITHUB_OUTPUT"
+
+          # [fix/executor-alert-masking-rpc-auth] INC-2026-10-30-001 — the keepers' self-reported paused
+          # state (keeper_runtime_config.paused via /api/monitor/keepers): OK | PAUSED | UNKNOWN, plus
+          # one "chainId=state" token per chain (state: ok | unreadable | paused:<reason>@<since>).
+          # Every character is whitelisted before it reaches $GITHUB_OUTPUT (no newline injection).
+          keepers_body=$(curl -s --max-time 15 \
+            -H "Authorization: Bearer ${MONITOR_SECRET}" \
+            "$SITE_URL/api/monitor/keepers" || echo "")
+          keepers_status=$(node -e 'try{const r=JSON.parse(process.argv[1]);process.stdout.write(["OK","PAUSED","UNKNOWN"].includes(r.status)?r.status:"UNKNOWN")}catch{process.stdout.write("UNKNOWN")}' "$keepers_body")
+          keepers=$(node -e 'const s=(v)=>String(v??"").replace(/[^A-Za-z0-9:._-]/g,"");try{const r=JSON.parse(process.argv[1]);process.stdout.write((r.chains||[]).map((c)=>`${s(c.chainId)}=${c.paused?`paused:${s(c.paused)}@${s(c.pausedSince)||"unknown"}`:c.readable?"ok":c.active===false?"inactive":"unreadable"}`).join(" "))}catch{process.stdout.write("")}' "$keepers_body")
+          echo "keepers_status=$keepers_status" >> "$GITHUB_OUTPUT"
+          echo "keepers=$keepers" >> "$GITHUB_OUTPUT"
+          # [ADR-026] orders the keeper could NOT attempt for OUR reasons (RPC auth/transport, paused,
+          # Supabase or /api/swap down, keeper gas) in the last 24 h — never counted against the order.
+          # [A73 S-4] One "chainId=<n|unknown|error>" token per chain: <n> when infraMissStatus is ok,
+          # unknown when the migration is not applied (status missing, or an older route without the
+          # field), error when the read failed (the report warns — an outage's orders would go unreported).
+          keepers_infra=$(node -e 'const s=(v)=>String(v??"").replace(/[^A-Za-z0-9:._-]/g,"");try{const r=JSON.parse(process.argv[1]);process.stdout.write((r.chains||[]).map((c)=>{const st=c.infraMissStatus;const n=c.infraMissOrders24h;const v=st==="ok"&&Number.isInteger(n)&&n>=0?String(n):st==null||st==="missing"?"unknown":"error";return `${s(c.chainId)}=${v}`}).join(" "))}catch{process.stdout.write("")}' "$keepers_body")
+          echo "keepers_infra=$keepers_infra" >> "$GITHUB_OUTPUT"
 
       - name: Check keeper gas balance (per chain)
         id: gas
@@ -243,6 +279,11 @@ jobs:
           SSL_END: ${{ steps.site.outputs.ssl_end }}
           SSL_DAYS: ${{ steps.site.outputs.ssl_days }}
           MONITOR_CODE: ${{ steps.monitor.outputs.code }}
+          ALERTS_STATUS: ${{ steps.monitor.outputs.alerts }}
+          KEEPERS_STATUS: ${{ steps.monitor.outputs.keepers_status }}
+          KEEPERS: ${{ steps.monitor.outputs.keepers }}
+          KEEPERS_INFRA: ${{ steps.monitor.outputs.keepers_infra }}
+          RATE_LIMITED: ${{ steps.monitor.outputs.rate_limited }}
           GAS_CHAINS: ${{ steps.gas.outputs.chains }}
           GIT_COUNT: ${{ steps.git.outputs.count }}
         run: |
@@ -327,6 +368,90 @@ jobs:
             }
           }
 
+          // Alert delivery: a monitor that cannot reach a human is not monitoring. Computed BEFORE
+          // `overall` so the bump below is reflected in the headline status.
+          let alertsRow
+          if (e.ALERTS_STATUS === 'OK') {
+            alertsRow = '| Alerts (/api/monitor/alerts) | ✅ | alerts: OK — at least one delivery channel configured |'
+          } else if (e.ALERTS_STATUS === 'NOT_CONFIGURED') {
+            alertsRow = '| Alerts (/api/monitor/alerts) | ⚠️ | **alerts: NOT CONFIGURED** — no delivery channel; every monitor alert is dropped |'
+            requiresAttention.push('alerts: NOT CONFIGURED — set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, or RESEND_API_KEY + ALERT_EMAIL_TO in Vercel, then test-fire (docs/Runbooks/MONITORING-ALERTS.md).')
+            bump(1)
+          } else {
+            alertsRow = '| Alerts (/api/monitor/alerts) | ⚠️ | alerts: UNKNOWN — status could not be read (MONITOR_SECRET unset, endpoint not deployed yet, or unreachable) |'
+            requiresAttention.push('alerts: UNKNOWN — /api/monitor/alerts could not be read, so alert delivery is unverified.')
+            bump(1)
+          }
+
+          // [fix/executor-alert-masking-rpc-auth] INC-2026-10-30-001 — a keeper that reports itself
+          // paused (e.g. `rpc-auth`: its RPC provider rejects its key) executes NOTHING while its
+          // process looks alive. KEEPERS = "chainId=state" tokens from the monitor step. Computed
+          // BEFORE `overall` so a pause is in the headline.
+          const keeperStateLines = []
+          const keeperTokens = (e.KEEPERS || '').split(' ').filter(Boolean).map((t) => t.split('='))
+          const pausedTokens = keeperTokens.filter(([, st]) => (st || '').startsWith('paused:'))
+          // [A71 M-2] "unreadable" = an ACTIVE chain whose state could not be read (inactive ones are
+          // "inactive"). It may be the paused one, so it is never reported as OK, whatever the status says.
+          const unreadableTokens = keeperTokens.filter(([, st]) => st === 'unreadable')
+          if (e.KEEPERS_STATUS === 'PAUSED' || pausedTokens.length) {
+            for (const [chainId, st] of pausedTokens) {
+              const [reason, since] = st.slice('paused:'.length).split('@')
+              const name = CHAIN_NAMES[chainId] || `chain ${chainId}`
+              keeperStateLines.push(`| Keeper state (${name}) | ❌ | **PAUSED: ${reason}** since ${since} — the keeper cannot execute any order |`)
+              requiresAttention.push(`The ${name} keeper reports **paused: ${reason}** since ${since}${reason === 'rpc-auth' ? ' — its RPC provider rejects its key/allowlist; follow docs/Runbooks/EXECUTOR-OPERATIONS.md § 7' : ''}.`)
+            }
+            bump(2)
+          } else if (e.KEEPERS_STATUS === 'OK' && unreadableTokens.length === 0) {
+            keeperStateLines.push(`| Keeper state (keeper_runtime_config) | ✅ | no keeper reports a pause (${keeperTokens.map(([c, st]) => `${c}: ${st}`).join(', ') || 'no chains'}) |`)
+          } else {
+            const unreadable = unreadableTokens.map(([c]) => `${CHAIN_NAMES[c] || `chain ${c}`} (${c})`).join(', ')
+            const why = unreadable
+              ? `the paused state of ${unreadable} could not be read (Supabase unreachable, or migration 20261031120000_keeper_runtime_config_paused.sql not applied)`
+              : '/api/monitor/keepers could not be read (MONITOR_SECRET unset, endpoint not deployed yet, or migration 20261031120000_keeper_runtime_config_paused.sql not applied)'
+            keeperStateLines.push(`| Keeper state (keeper_runtime_config) | ⚠️ | UNKNOWN — ${why} |`)
+            requiresAttention.push(`Keeper state: UNKNOWN — ${why}, so a paused keeper (INC-2026-10-30-001) would go unreported.`)
+            bump(1)
+          }
+
+          // [ADR-026] Orders the keeper could NOT attempt for OUR reasons in the last 24 h (RPC
+          // auth/transport, paused, Supabase or /api/swap down, keeper gas). They were NOT counted
+          // against the orders — this row says how many were touched, so an outage is visible even
+          // when it is over. KEEPERS_INFRA = "chainId=<n|unknown>" tokens from the monitor step; no
+          // tokens (endpoint unreadable) ⇒ no row (the keeper-state row already says UNKNOWN).
+          const infraMissLines = []
+          const infraTokens = (e.KEEPERS_INFRA || '').split(' ').filter(Boolean).map((t) => t.split('='))
+          if (infraTokens.length) {
+            const chainName = (c) => CHAIN_NAMES[c] || `chain ${c}`
+            const hit = infraTokens.filter(([, n]) => /^\d+$/.test(n || '') && Number(n) > 0)
+            const unknown = infraTokens.filter(([, n]) => n === 'unknown')
+            // [A73 S-4] tri-state: "error" is a FAILED read (⚠️ — an outage's orders would go unreported);
+            // "unknown" is only the pending migration (ℹ️, quiet).
+            const failed = infraTokens.filter(([, n]) => n === 'error')
+            const detail = infraTokens.map(([c, n]) => `${chainName(c)}: ${n}`).join(', ')
+            if (hit.length || failed.length) {
+              const clauses = []
+              if (hit.length) clauses.push('misses caused by our infrastructure, NOT counted against the orders (ADR-026)')
+              if (failed.length) clauses.push(`the infra-miss count could not be read for ${failed.map(([c]) => chainName(c)).join(', ')} (Supabase query failed), so an outage's orders would go unreported`)
+              infraMissLines.push(`| Orders with infra misses (24 h) | ⚠️ | ${detail} — ${clauses.join('; ')} |`)
+              if (hit.length) requiresAttention.push(`${hit.map(([c, n]) => `${n} order(s) on ${chainName(c)}`).join(', ')} missed a cycle for an infrastructure reason in the last 24 h (ADR-026: not counted against them). Read the keeper log's "infra miss (<reason>)" lines; docs/Runbooks/EXECUTOR-OPERATIONS.md § 8.`)
+              if (failed.length) requiresAttention.push(`Orders with infra misses: the 24 h count could not be read for ${failed.map(([c]) => chainName(c)).join(', ')} (Supabase query failed) — check /api/monitor/keepers and the Supabase logs; until it reads, an outage's orders would go unreported.`)
+              bump(1)
+            } else if (unknown.length === infraTokens.length) {
+              infraMissLines.push('| Orders with infra misses (24 h) | ℹ️ | unknown — migration 20261104120000_orders_infra_miss.sql not applied (or Supabase unreadable) |')
+            } else {
+              infraMissLines.push(`| Orders with infra misses (24 h) | ✅ | ${detail} |`)
+            }
+          }
+
+          // [feat/retire-force-mev C3] Sources answering HTTP 429 — degraded, never green (CoW's free quote API has 429'd our
+          // servers since 2026-10-29 while the monitor read it as healthy). RATE_LIMITED = "id=ISO-since" tokens.
+          const rateLimitLines = []
+          for (const [id, since] of (e.RATE_LIMITED || '').split(' ').filter(Boolean).map((t) => t.split('='))) {
+            rateLimitLines.push(`| Source rate limit (${id}) | ⚠️ | [SOURCE] ${id}: rate-limited (429) since ${since} |`)
+            requiresAttention.push(`[SOURCE] ${id}: rate-limited (429) since ${since} — the source stays queried but degraded; see docs/feedback/recon-cowswap-429.md.`)
+            bump(1)
+          }
+
           const overall = severity === 2 ? '🔴 CRITICAL' : severity === 1 ? '🟡 WARNING' : '🟢 OK'
 
           // Every ⚠️/❌ table row gets a corresponding bullet here — a WARNING/CRITICAL report
@@ -364,7 +489,11 @@ jobs:
               : '| SSL Certificate | ⚠️ | Could not read certificate expiry |',
           )
           lines.push(`| Monitor (/api/monitor) | ${monitorLine} |`)
+          lines.push(alertsRow)
           lines.push(...gasLines) // [Auditor M2 / PR #497] one row per monitored/not-monitored chain
+          lines.push(...keeperStateLines) // [fix/executor-alert-masking-rpc-auth] INC-2026-10-30-001
+          lines.push(...infraMissLines) // [ADR-026] infra misses are visible, never counted
+          lines.push(...rateLimitLines) // [feat/retire-force-mev C3] HTTP 429 sources
           lines.push(`| Git Activity (origin/main) | ℹ️ | ${e.GIT_COUNT} commits in the last 24h |`, '')
           lines.push('## Actions Taken')
           lines.push('None — this workflow only reads (curl + a read-only eth_getBalance RPC call); it never writes to any endpoint.', '')

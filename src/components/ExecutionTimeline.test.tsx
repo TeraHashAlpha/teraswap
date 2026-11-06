@@ -63,6 +63,31 @@ describe('ExecutionTimeline — explorer link [RQ-2026-06-11]', () => {
   })
 })
 
+describe('ExecutionTimeline — per-chain explorer link [fix/v1-maintenance C1]', () => {
+  // Hostname is asserted exactly via new URL() — never a substring match.
+  it.each([
+    [1, 'etherscan.io'],
+    [8453, 'basescan.org'],
+    [42161, 'arbiscan.io'],
+  ])('chainId %i links to %s', async (chainId, host) => {
+    renderWithProviders(
+      <ExecutionTimeline
+        orderId="order-1"
+        wallet="0x1111111111111111111111111111111111111111"
+        tokenInSymbol="WETH"
+        tokenOutSymbol="USDC"
+        tokenInDecimals={18}
+        tokenOutDecimals={6}
+        chainId={chainId}
+      />,
+    )
+    const link = await screen.findByText(`${TX.slice(0, 10)}...${TX.slice(-6)}`)
+    const url = new URL((link.closest('a') as HTMLAnchorElement).href)
+    expect(url.hostname).toBe(host)
+    expect(url.pathname).toBe(`/tx/${TX}`)
+  })
+})
+
 describe('ExecutionTimeline — gas row [fix/dca-chain-switch / P4]', () => {
   const props = {
     orderId: 'order-1',

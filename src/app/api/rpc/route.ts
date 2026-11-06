@@ -4,7 +4,7 @@ import { checkRateLimit, RPC_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { resolveProxyChainId } from '@/lib/rpc-proxy-chain'
 import { getRpcUrlForChain } from '@/lib/adapters/shared'
 import { trustedClientIp } from '@/lib/trusted-ip'
-import { isExpensiveMethod, exceedsBatchLimit, clampGetLogsRange, MAX_RPC_BATCH_SIZE } from '@/lib/rpc-cost-policy'
+import { isExpensiveMethod, exceedsBatchLimit, clampGetLogsRange, rpcRateLimitUnits, MAX_RPC_BATCH_SIZE } from '@/lib/rpc-cost-policy'
 import { assertChainIdentity, createJsonRpcChainIdProbe } from '@/lib/rpc-chain-identity'
 
 /**
@@ -72,7 +72,22 @@ export async function POST(req: NextRequest) {
   // [B-06] Rate limiting by IP — persistent via Vercel KV
   // [CHORE-API-HARDENING-2 / P3a] Trusted IP — see trusted-ip.ts.
   const ip = trustedClientIp(req)
-  const rateCheck = await checkRateLimit(`rpc:${ip}`, RPC_RATE_LIMIT.limit, RPC_RATE_LIMIT.windowMs)
+  // [FEAT-SERVER-RPC-ENV-SPLIT] Parse BEFORE limiting: the budget is charged per JSON-RPC call in
+  // a batch (rpcRateLimitUnits), not per HTTP request. Same per-IP key/limit/window as before; a
+  // body that does not parse still costs 1 and still ends in the 500 below.
+  let body: unknown
+  let parseFailed = false
+  try {
+    body = await req.json()
+  } catch {
+    parseFailed = true
+  }
+  const rateCheck = await checkRateLimit(
+    `rpc:${ip}`,
+    RPC_RATE_LIMIT.limit,
+    RPC_RATE_LIMIT.windowMs,
+    rpcRateLimitUnits(parseFailed ? undefined : body),
+  )
   if (!rateCheck.allowed) {
     return NextResponse.json(
       { jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Rate limit exceeded' } },
@@ -86,10 +101,14 @@ export async function POST(req: NextRequest) {
     )
   }
 
+  if (parseFailed) {
+    return NextResponse.json(
+      { jsonrpc: '2.0', id: null, error: { code: -32603, message: 'Internal proxy error' } },
+      { status: 500 },
+    )
+  }
+
   try {
-
-    const body = await req.json()
-
     // Support single and batch requests
     let requests = Array.isArray(body) ? body : [body]
 

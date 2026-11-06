@@ -324,9 +324,10 @@ export const DEPEG_DIVERGENCE_BLOCK = 0.10  // 10% — hard block (no click-thro
 // accepted + this tolerance (mirrors PRICE_IMPACT_CONSENT_TOLERANCE).
 export const DEPEG_CONSENT_TOLERANCE = 0.005 // 0.5%
 
-// [LP-04] Smart MEV preference threshold.
-// When the user has NOT toggled "Force MEV Protection" on, the SwapBox
-// auto-routes through CoW Protocol (or any other mevProtected source)
+// [LP-04] Smart CoW preference threshold (a ranking rule).
+// [feat/retire-force-mev] The Force MEV toggle that could override this is
+// retired (owner 2026-11-06). The SwapBox / v2 SwapCard
+// auto-route through CoW Protocol (the mevProtected-flagged source)
 // if its quoted output is within this fraction of the highest non-CoW
 // output AND the gasless engine reports it as net-positive for the
 // user. 0.0015 = 15 bps — tight enough that the price shortfall is
@@ -469,6 +470,14 @@ export const NATIVE_ETH = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' as const
 export const WETH_ADDRESS = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' as const
 
 // ── Etherscan ────────────────────────────────────────────
+/**
+ * @deprecated [fix/tx-links-remaining] Mainnet-only — a Base/Arbitrum tx got an etherscan.io link
+ * where the tx doesn't exist. Every caller (SwapBox, ToastProvider, LimitOrderPanel,
+ * ConditionalOrderPanel, AdminMonitor) migrated to the chain-aware `explorerTxUrl` from
+ * `@/lib/chains/tokens`. Kept per CLAUDE.md rule #4 (never delete) — enforced at 0 callers by
+ * `etherscan-tx-guard.test.ts`. Do not add a new caller; use `explorerTxUrl(txHash, chainId)` with
+ * the chain the tx was actually sent on.
+ */
 export const ETHERSCAN_TX = 'https://etherscan.io/tx/'
 
 // ── Price deviation (Chainlink) ─────────────────────────

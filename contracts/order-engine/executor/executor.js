@@ -116,7 +116,7 @@ import {
 } from "./idle-backoff.js"
 import { ExecutorMonitor } from "./monitor.js"            // [EX-MON] Prometheus + Telegram
 // [DCA-OBS] Freeze-urgency scoring + Telegram alert builders (pure/fail-safe modules).
-import { computeFreezeScore, scoreTier, TIER_WARN_THRESHOLD } from "./freeze-score.js"
+import { computeFreezeScore, scoreTier, TIER_WARN_THRESHOLD, TIER_CRITICAL_THRESHOLD } from "./freeze-score.js"
 import { buildQuotePath, buildSwapRoutePayload, computeNetChunkAmount, sourceForRouter } from "./swap-route.js" // [chore/dca-router-chainaware] router-constrained route for the net chunk; buildQuotePath = unconstrained best-of-N reference for the deviation gate [chore/dca-deviation-guard]
 import { decodeSwapFailed, extractRevertData, decodeExecutorMarketRevert } from "./revert-decode.js" // [chore/dca-swapfailed] unwrap SwapFailed(bytes); [FIX-P1B-M01] the executor's own market reverts
 // [CHORE-KEEPER-RECORD-EXECUTIONS] Confirmed-only, idempotent order_executions row
@@ -133,7 +133,17 @@ import {
   alertLowGas,
   alertUnexplainedOutflow,
   alertOps,
+  alertRpcAuth,
 } from "./alert.js"
+// [fix/executor-alert-masking-rpc-auth] INC-2026-10-30-001: every error that reaches a log line or
+// an alert goes through redactError (viem puts the keyed RPC URL in err.message). Pinned for every
+// console.* / log() call in this directory by redact.test.mjs's source guard.
+import { redactError, redactUrl } from "./redact.js"
+// [fix/executor-alert-masking-rpc-auth] RPC auth/allowlist rejection = FATAL-OPS, not transient:
+// boot says `rpc: AUTH REJECTED …` and alerts (rate-limited across pm2 restarts); at runtime 3
+// consecutive auth errors ⇒ ONE high-urgency alert + `paused: rpc-auth` on /health, /metrics and
+// keeper_runtime_config. Reporting only — no gate, no change to what a cycle executes.
+import { classifyRpcError, createRpcAuthMonitor, createBootAlertGate, RPC_AUTH, PAUSED_RPC_AUTH } from "./rpc-auth.js"
 // [chore/dca-resilience] Transient-vs-permanent failure classification + retry
 // decision + reason-bearing orders patches (pure, unit-tested in
 // retry-policy.test.mjs). Replaces the old blunt MAX_RETRIES=3 → 'failed' (no
@@ -148,6 +158,12 @@ import {
 import {
   MAX_CYCLE_FAILURES,
   planFailureHandling,
+  classifySwapApiMiss,
+  recordInfraMiss,
+  clearInfraMisses,
+  pruneInfraMisses,
+  stripInfraMissColumns,
+  isInfraMissColumnRejection,
   readPersistedRetryState,
   isInBackoffWindow,
   resetRetryStateFields,
@@ -194,7 +210,7 @@ import {
 import { createCycleQuoteContext } from "./price-sources.js"
 // [ADR-024 scope addition 2026-10-11] Boot-time publish of the effective (ceiling-clamped) no-price
 // fill cap to keeper_runtime_config — logged, never fatal, tolerates the table not existing yet.
-import { buildRuntimeConfigRow, publishRuntimeConfig, readKeeperVersion } from "./runtime-config.js"
+import { buildRuntimeConfigRow, publishRuntimeConfig, readKeeperVersion, publishPausedState } from "./runtime-config.js"
 // [CHORE-KEEPER-HARDENING / P5a] A configured-but-unwired VAULT_ADDR must NOT
 // count as a managed signer (else it suppresses the plaintext-key FATAL).
 import { resolveSignerKind, vaultCountsAsManagedSigner } from "./signer-guard.js"
@@ -329,6 +345,10 @@ const EXPIRY_URGENCY_SECONDS = parseInt(process.env.GAS_EXPIRY_URGENCY_S || "720
 // restart. The pinned-route path below still writes here (backoff reuse) but
 // never persists a count, so it can never feed the ladder.
 const orderRetries = new Map()   // orderId -> { count, lastAttempt }  (backoff cache)
+// [ADR-026 / A73 S-1] orderId -> { streak, lastAttempt, reason, backoffMs }: consecutive INFRA misses
+// (never counted, never persisted). The cycle gate backs an order off at the ladder's cadence on this
+// streak so an outage does not re-attempt every order every tick; any order miss or fill clears it.
+const orderInfraMisses = new Map()
 // [SPRINT-P1B / ADR-014 (a)] orderId -> consecutive pinned-route reverts. Tracked separately from
 // orderRetries because a pinned-route revert must NEVER walk the failure ladder to 'failed' — the
 // order stays fillable until expiry. Cleared on any successful fill.
@@ -350,6 +370,9 @@ const seenDcaOrderIds = new Set()
 let consecutiveExecFailures = 0
 let rpcDown = false
 let freezeAlertedState = null
+// [fix/executor-alert-masking-rpc-auth] The process's RPC-auth monitor (rpc-auth.js), created in
+// main() once the boot gates pass; null before that (callers then keep today's handling).
+let rpcAuthMonitor = null
 // [PERF-KEEPER-IDLE-BACKOFF] The last IDLE cycle's observability context, held until the next
 // successful cycle-start balance read closes its outflow window (see endCycleObservability).
 const idleBalanceCarry = createIdleBalanceCarry()
@@ -703,7 +726,13 @@ async function updateOrderStatus(orderId, status) {
 //   • a patch that CARRIED those columns is accepted → markPresent() (decision returns to the row)
 // Only a patch that actually carried the columns can clear the state — a status-only patch
 // succeeding proves nothing about the schema, and neither does the stripped re-send below.
+//
+// [ADR-026] The two infra-miss columns (last_infra_miss_at / last_infra_miss_reason, migration
+// 20261104120000_orders_infra_miss.sql, applied manually) get the SAME tolerance, independently: the
+// specific 400 naming one of them re-sends the patch without them (logged once per process) and
+// never touches `retryStateAvailability` — that sensor is about the retry-state columns only.
 const retryStateAvailability = createRetryStateAvailability()
+let infraMissColumnsWarned = false
 async function patchOrderRow(orderId, patch) {
   const send = (body) =>
     supabaseFetch(`orders?id=eq.${orderId}`, {
@@ -711,10 +740,28 @@ async function patchOrderRow(orderId, patch) {
       headers: { Prefer: "return=minimal" },
       body: JSON.stringify(body),
     })
-  const stripped = stripRetryStateColumns(patch)
-  const hadRetryState = Object.keys(stripped).length < Object.keys(patch).length
+  const carriesRetryState = (p) => Object.keys(stripRetryStateColumns(p)).length < Object.keys(p).length
+  const carriesInfraMiss = (p) => Object.keys(stripInfraMissColumns(p)).length < Object.keys(p).length
 
-  let res = await send(patch)
+  let current = patch
+  let res = await send(current)
+  let body = ""
+  if (!res.ok) {
+    try { body = await res.text() } catch { /* body is diagnostic only */ }
+    if (res.status === 400 && carriesInfraMiss(current) && isInfraMissColumnRejection(body)) {
+      if (!infraMissColumnsWarned) {
+        infraMissColumnsWarned = true
+        console.error(
+          `  Order ${orderId.slice(0, 8)}... infra-miss columns REJECTED (${res.status}: ${body.slice(0, 160)}) — ` +
+            `migration 20261104120000_orders_infra_miss.sql is NOT applied; the 24 h infra-miss count stays empty. Re-sending without them (logged once per process).`,
+        )
+      }
+      current = stripInfraMissColumns(current)
+      res = await send(current)
+      if (!res.ok) { try { body = await res.text() } catch { /* diagnostic only */ } }
+    }
+  }
+  const hadRetryState = carriesRetryState(current)
   if (res.ok) {
     // The migration is applied (possibly JUST applied, mid-process): the row can hold the count
     // again, so the decision must go back to reading it. This is what stops the fallback latching.
@@ -727,8 +774,7 @@ async function patchOrderRow(orderId, patch) {
     }
     return res
   }
-  let body = ""
-  try { body = await res.text() } catch { /* body is diagnostic only */ }
+  const stripped = stripRetryStateColumns(current)
   if (res.status === 400 && hadRetryState && /consecutive_failures|last_attempt_at/.test(body)) {
     console.error(
       `  Order ${orderId.slice(0, 8)}... retry-state columns REJECTED (${res.status}: ${body.slice(0, 160)}) — ` +
@@ -745,6 +791,14 @@ async function patchOrderRow(orderId, patch) {
     res = await send(stripped)
     if (res.ok) return res
     try { body = await res.text() } catch { /* diagnostic only */ }
+    // [ADR-026] Both migrations missing: PostgREST named last_attempt_at first (patch key order), so
+    // the infra columns are only rejected NOW — strip them too; the status transition must land.
+    if (res.status === 400 && carriesInfraMiss(stripped) && isInfraMissColumnRejection(body)) {
+      infraMissColumnsWarned = true
+      res = await send(stripInfraMissColumns(stripped))
+      if (res.ok) return res
+      try { body = await res.text() } catch { /* diagnostic only */ }
+    }
   }
   console.error(`  Order ${orderId.slice(0, 8)}... orders PATCH FAILED (${res.status}: ${body.slice(0, 160)}) — patch keys: ${Object.keys(patch).join(",")}`)
   return res
@@ -771,13 +825,22 @@ async function patchOrderRow(orderId, patch) {
 // columns ARE available it returns 0, and since planFailureHandling takes max(persisted, prev),
 // the decision provably follows the ROW — the Map cannot raise it. Do not inline this ternary:
 // the two states are unit-tested through that one function.
-async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, executorErrorName = null, noRoute = false } = {}, obsCtx = null) {
+// [ADR-026] The miss's EVIDENCE (noRouteCause / minedRevert / txSent / the paused state) reaches the
+// plan so every miss is tagged `infra` or `order` (retry-policy.js classifyMissCause); the log line
+// names the cause. Only an `order` miss advances consecutive_failures; an `infra` miss (kind
+// "infra") keeps the order active, writes last_attempt_at + last_infra_miss_at/_reason and leaves the
+// count untouched — the same-process cache mirrors that unchanged count.
+async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, executorErrorName = null, noRoute = false, noRouteCause = null, minedRevert = false, txSent = false } = {}, obsCtx = null) {
   const plan = planFailureHandling({
     dbOrder,
     err,
     swapReason,
     executorErrorName,
     noRoute,
+    noRouteCause,
+    minedRevert,
+    txSent,
+    paused: rpcAuthMonitor ? rpcAuthMonitor.state().paused : null,
     prevFailures: prevFailuresForDecision({
       columnsAvailable: retryStateAvailability.isAvailable(),
       cached: orderRetries.get(dbOrder.id),
@@ -802,6 +865,9 @@ async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, 
   // Apply the Supabase patch (status [+ error] + updated_at + consecutive_failures/last_attempt_at).
   await patchOrderRow(dbOrder.id, plan.patch)
 
+  // [A73 S-1] An ORDER miss (retry / fail / expired) ends the run of consecutive infra misses.
+  if (plan.kind !== "infra") clearInfraMisses(orderInfraMisses, dbOrder.id)
+
   // Refresh the same-process backoff cache (the row already carries the authoritative count).
   if (plan.clearRetries) {
     orderRetries.delete(dbOrder.id)
@@ -811,10 +877,31 @@ async function handleExecutionFailure(dbOrder, { err = null, swapReason = null, 
 
   if (plan.kind === "expired") {
     log(`  Order ${dbOrder.id.slice(0, 8)}... expired — recording 'expired', not a route failure`)
+  } else if (plan.kind === "infra") {
+    // [ADR-026 §2] Ours, not the order's: the ladder did not move. [A73 S-1] The in-memory infra
+    // streak spaces the next attempt at the ladder's cadence (counts nothing, cleared by any order
+    // miss or fill).
+    stats.infraMisses++
+    const infra = recordInfraMiss(orderInfraMisses, dbOrder.id, { reason: plan.causeReason, nowMs: Date.now() })
+    log(`  Order ${dbOrder.id.slice(0, 8)}... infra miss (${plan.causeReason}) — NOT counted (${plan.failures}/${MAX_CYCLE_FAILURES}); order left active, infra streak ${infra.streak}, retry in ~${Math.round(infra.backoffMs / 1000)}s`)
+    // [A73 C(3) / C(1)] A persistent run of UNRECOGNISED infra misses (unclassified / misroute /
+    // keeper-config) is most likely our bug or config: page ops ONCE (critical tier), then at most
+    // hourly while it persists. The order is still never burned.
+    if (infra.alert) {
+      try {
+        await alertOps(
+          {
+            kind: "infra-miss-streak",
+            detail: `Order ${dbOrder.id} (${dbOrder.order_type}) on chain ${CHAIN_ID} missed ${infra.unrecognisedStreak} consecutive cycles for an UNRECOGNISED infra reason (${plan.causeReason}) over ~${Math.max(1, Math.round((Date.now() - infra.unrecognisedSince) / 60_000))} min. NOT counted against the order (ADR-026) — this points at the keeper or /api/swap, not the order: read this order's "infra miss" log lines; docs/Runbooks/EXECUTOR-OPERATIONS.md § 8. Next reminder in ≥ 1 h while it persists.`,
+          },
+          TIER_CRITICAL_THRESHOLD,
+        )
+      } catch { /* alert is best-effort, never blocks the cycle */ }
+    }
   } else if (plan.kind === "fail") {
-    log(`  Order ${dbOrder.id.slice(0, 8)}... FAILED — reason=${plan.reason} (after ${plan.failures} attempt(s))`)
+    log(`  Order ${dbOrder.id.slice(0, 8)}... FAILED — reason=${plan.reason} cause=${plan.cause}:${plan.causeReason} (after ${plan.failures} attempt(s))`)
   } else {
-    log(`  Order ${dbOrder.id.slice(0, 8)}... transient miss ${plan.failures}/${MAX_CYCLE_FAILURES}, retry in ~${Math.round(plan.backoffMs / 1000)}s (left active)`)
+    log(`  Order ${dbOrder.id.slice(0, 8)}... transient miss ${plan.failures}/${MAX_CYCLE_FAILURES} cause=${plan.cause}:${plan.causeReason}, retry in ~${Math.round(plan.backoffMs / 1000)}s (left active)`)
   }
 }
 
@@ -858,7 +945,7 @@ async function readFreezeFlag() {
     if (!row) return { frozen: false }
     return { frozen: row.frozen === true, reason: row.reason || null }
   } catch (err) {
-    log(`  WARNING: freeze read error (${err.message}) -- treating as NOT frozen`)
+    log(`  WARNING: freeze read error (${redactError(err)}) -- treating as NOT frozen`)
     return { frozen: false }
   }
 }
@@ -893,7 +980,7 @@ async function readEthUsd(publicClient) {
     const usd = Number(answer) / 1e8
     return Number.isFinite(usd) && usd > 0 ? usd : null
   } catch (err) {
-    log(`  WARNING: ETH/USD feed read failed (${err.message?.slice(0, 80)}) -- skipping low-gas signal`)
+    log(`  WARNING: ETH/USD feed read failed (${redactError(err, { max: 80 })}) -- skipping low-gas signal`)
     return null
   }
 }
@@ -908,15 +995,18 @@ async function readEthUsd(publicClient) {
 // 1inch router → SwapFailed). `amount` here is the per-chunk NET amount (after
 // the contract's 0.1% tokenIn fee — see computeNetChunkAmount at the call site).
 async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecimals, dstDecimals, router) {
+  // [ADR-026] Every "no route" return says WHY, as a classified miss ({ miss: { cause, reason } }):
+  // our API unreachable / 5xx / 429 / a keeper config gap is `infra` (never counted against the
+  // order); the API answering with no acceptable route for this pair is `order`.
   if (!API_URL) {
     log("  TERASWAP_API_URL not configured -- skipping swap route")
-    return null
+    return { miss: classifySwapApiMiss({ configMissing: true }) }
   }
 
   const source = sourceForRouter(router)
   if (!source) {
     console.error(`  Swap route: no /api/swap source maps to order.router ${router} -- skipping (would mis-route)`)
-    return null
+    return { miss: classifySwapApiMiss({ configMissing: true }) }
   }
 
   try {
@@ -936,13 +1026,21 @@ async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecim
       // INVALID_SOURCE / priceGuard cause (chore/keeper-swap-payload-fix).
       const body = await res.text().catch(() => "")
       console.error(`  Swap API error: ${res.status} ${body.slice(0, 300)} (source=${source})`)
-      return null
+      // [A73 S-1] The body's `code` (NO_ROUTE / unpriced_ack_required / PRICE_GUARD / ORACLE_UNAVAILABLE /
+      // …) decides whose miss this is; the status is only the fallback for a body without one.
+      let code = null
+      try {
+        const parsed = JSON.parse(body)
+        code = parsed?.code
+        if (typeof code !== "string") code = null
+      } catch { /* not JSON (a platform page): status-only classification */ }
+      return { miss: classifySwapApiMiss({ status: res.status, code }) }
     }
 
     const data = await res.json()
     if (!data.tx?.data) {
       console.error("  Swap route: missing tx data")
-      return null
+      return { miss: classifySwapApiMiss({ missingData: true }) }
     }
 
     // [chore/dca-router-chainaware] FUND-FLOW GUARD: the calldata MUST target the
@@ -952,7 +1050,7 @@ async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecim
     const target = data.tx.to
     if (!target || !router || target.toLowerCase() !== router.toLowerCase()) {
       console.error(`  Swap route: tx.to ${target} != order.router ${router} (source=${source}) -- refusing to mis-route`)
-      return null
+      return { miss: classifySwapApiMiss({ misroute: true }) }
     }
 
     // [chore/dca-deviation-guard] Also surface the committed router's expected out
@@ -962,8 +1060,8 @@ async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecim
     // fail-open ⇒ execute).
     return { data: data.tx.data, toAmount: data.toAmount ?? null }
   } catch (err) {
-    console.error("  fetchSwapRoute error:", err.message)
-    return null
+    console.error("  fetchSwapRoute error:", redactError(err))
+    return { miss: classifySwapApiMiss({ networkError: true }) }
   }
 }
 
@@ -1132,6 +1230,7 @@ async function beginCycleObservability(publicClient, walletAddress, monitor) {
     ctx.cycleStartBalanceWei = await publicClient.getBalance({ address: walletAddress })
     ctx.walletBalanceEth = Number(formatEther(ctx.cycleStartBalanceWei))
     rpcDown = false
+    if (rpcAuthMonitor) await rpcAuthMonitor.onRpcSuccess("balance-read") // never throws
     // [PERF-KEEPER-IDLE-BACKOFF] The previous cycle was IDLE and skipped its end read (nothing was
     // sent, so THIS read is its end read): close its outflow window now — same math, ownGas = 0.
     // Taken only after a SUCCESSFUL read, so a failed one leaves the window for the next cycle.
@@ -1142,10 +1241,21 @@ async function beginCycleObservability(publicClient, walletAddress, monitor) {
   } catch (err) {
     // Could not read chain state ⇒ flag RPC down for the score; keep going.
     rpcDown = true
-    log(`  WARNING: balance read failed (${err.message?.slice(0, 80)}) -- rpcDown=true`)
+    // [fix/executor-alert-masking-rpc-auth] An auth/allowlist rejection is the monitor's: counted,
+    // and alerted ONCE (rate-limited) at the threshold — during INC-2026-10-30-001 the per-cycle "rpc"
+    // alert fired every cycle for ~20 h. [A71 M-1] It is muted ONLY while the monitor is paused; an
+    // auth error below the threshold (or any transient one) keeps today's per-cycle alert.
+    let verdict = null
     try {
-      await alertOps({ kind: "rpc", detail: `balance read failed: ${err.message}` }, scoreFromContext(ctx))
+      verdict = rpcAuthMonitor ? await rpcAuthMonitor.onRpcError("balance-read", err) : null
     } catch { /* never throw */ }
+    log(`  WARNING: balance read failed (${redactError(err, { max: 80 })}) -- rpcDown=true${verdict?.kind === RPC_AUTH ? ` [rpc auth rejected: ${verdict.signal}]` : ""}`)
+    if (verdict?.muted !== true) {
+      try {
+        // INC-2026-10-30-001: THIS line posted the full keyed RPC URL to Telegram (err.message).
+        await alertOps({ kind: "rpc", detail: `balance read failed: ${redactError(err)}` }, scoreFromContext(ctx))
+      } catch { /* never throw */ }
+    }
   }
 
   // Freeze flag (fail-open). Alert ONCE per state transition (frozen<->unfrozen).
@@ -1305,6 +1415,23 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
 
   log(`  Found ${orders.length} active order(s)`)
 
+  // [A73b S-9] An order that left the active set (cancelled / filled / failed elsewhere) takes its
+  // in-memory infra streak with it — the keeper has no cancel path of its own, so absence from the
+  // set just fetched is the signal (an empty set leaves the map alone: see pruneInfraMisses).
+  pruneInfraMisses(orderInfraMisses, orders.map((o) => o.id))
+
+  // [ADR-026 §3] While the provider rejects our credentials nothing can execute: attempt NOTHING —
+  // no lock, no tx, no retry count, no patch. The balance read above and the event watcher keep
+  // probing, so the pause clears by itself (rpc-auth.js onRpcSuccess) and the next cycle attempts
+  // again. Returning the order count keeps the idle cadence in ACTIVE mode (a full cycle every poll).
+  const pausedState = rpcAuthMonitor ? rpcAuthMonitor.state().paused : null
+  if (pausedState) {
+    log(`  PAUSED (${pausedState}): ${orders.length} active order(s) NOT attempted — no lock, no tx, no retry count (ADR-026)`)
+    stats.pausedCycles++
+    await endCycleObservability(obsCtx, publicClient, ownGasSpentWei, { idle: true })
+    return orders.length
+  }
+
   // [ADR-024 / feat/keeper-price-quorum] ONE price-quote context per cycle: the off-chain sources
   // are fetched once for every active DCA token (one DefiLlama + one CoinGecko batch per 50
   // tokens, cached for the cycle) and Chainlink reads are memoized per token. The ETH leg's
@@ -1326,6 +1453,11 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   for (const dbOrder of orders) {
     if (executed >= MAX_BATCH) break
 
+    // [ADR-026] Set the moment writeContract returns a hash: the catch below needs to know whether
+    // a tx was SENT (receipt unavailable ⇒ infra) or the attempt died before any tx (simulated
+    // revert ⇒ order; RPC/transport ⇒ infra).
+    let sentTxHash = null
+
     try {
       // Check if expired (off-chain pre-filter). [chore/dca-resilience] An order
       // that expires mid-retry is recorded 'expired' (its own status) — never a
@@ -1336,6 +1468,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         await updateOrderStatus(dbOrder.id, "expired")
         orderRetries.delete(dbOrder.id)
         quorumSkips.delete(dbOrder.id) // [ADR-024] drop the skip streak too (no Map leak)
+        clearInfraMisses(orderInfraMisses, dbOrder.id) // [A73b S-9] and the infra streak (no Map leak)
         log(`  Order ${dbOrder.id.slice(0, 8)}... expired (expiry: ${dbOrder.expiry})`)
         continue
       }
@@ -1349,6 +1482,12 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       const retryState = orderRetries.get(dbOrder.id) || readPersistedRetryState(dbOrder)
       if (isInBackoffWindow({ count: retryState.count, lastAttempt: retryState.lastAttempt, nowMs: Date.now() })) {
         continue // Still in backoff window — retry a later cycle
+      }
+      // [ADR-026 / A73 S-1] …and the infra floor: consecutive infra misses back off at the ladder's
+      // cadence too (in-memory streak; counts nothing), so an outage never re-attempts every tick.
+      const infraState = orderInfraMisses.get(dbOrder.id)
+      if (infraState && isInBackoffWindow({ count: infraState.streak, lastAttempt: infraState.lastAttempt, nowMs: Date.now() })) {
+        continue // Still inside the infra-miss window — retry a later cycle
       }
 
       // Atomic lock
@@ -1469,7 +1608,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
           log(`  Chainlink price from ${orderStruct.priceFeed.slice(0,10)}...: ${answer.toString()} (=$${Number(answer) / 1e8})`)
           log(`  Target: ${orderStruct.targetPrice.toString()} (=$${Number(orderStruct.targetPrice) / 1e8}), Condition: ${orderStruct.condition === 0 ? 'ABOVE' : 'BELOW'}`)
         } catch (e) {
-          log(`  Could not read Chainlink price: ${e.message?.slice(0, 80)}`)
+          log(`  Could not read Chainlink price: ${redactError(e, { max: 80 })}`)
         }
       }
 
@@ -1558,12 +1697,13 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
           orderStruct.router,
         )
 
-        if (!swapData) {
+        if (!swapData || swapData.miss) {
           // [chore/dca-resilience] No route THIS cycle is transient: keep the order
           // active and retry a later cycle (backoff). Only after MAX_CYCLE_FAILURES
           // consecutive misses does this fail with no_route_after_retries (+alert).
+          // [ADR-026] The classified miss rides along: an unreachable /api/swap is OUR miss.
           log(`  Order ${dbOrder.id.slice(0, 8)}... -- no swap route this cycle`)
-          await handleExecutionFailure(dbOrder, { noRoute: true }, obsCtx)
+          await handleExecutionFailure(dbOrder, { noRoute: true, noRouteCause: swapData?.miss ?? null }, obsCtx)
           skipped++
           continue
         }
@@ -1879,6 +2019,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         maxPriorityFeePerGas: gasTier.maxPriorityFeePerGas,
       })
 
+      sentTxHash = txHash
       log(`  TX sent: ${txHash}`)
 
       // Wait for confirmation
@@ -1901,6 +2042,8 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         // [chore/dca-resilience] ...and resets THIS order's transient-miss count,
         // so a later isolated miss starts fresh (consecutive, not cumulative).
         orderRetries.delete(dbOrder.id)
+        // [ADR-026 / A73 S-1] ...and the infra-miss streak (a fill proves the path works again).
+        clearInfraMisses(orderInfraMisses, dbOrder.id)
         // [SPRINT-P1B] A fill also clears the pinned-route revert streak (consecutive, not
         // cumulative) so the ops alert only fires on a genuinely stuck route.
         pinnedRouteReverts.delete(dbOrder.id)
@@ -1978,7 +2121,8 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         // cycle (backoff), capping at MAX_CYCLE_FAILURES so a persistently
         // reverting tx stops burning gas and fails with no_route_after_retries
         // (+alert) instead of re-sending forever.
-        await handleExecutionFailure(dbOrder, {}, obsCtx)
+        // [ADR-026] Sent and reverted: the chain judged the order ⇒ `order`, counted.
+        await handleExecutionFailure(dbOrder, { minedRevert: true }, obsCtx)
       }
     } catch (err) {
       // [chore/dca-swapfailed] If the revert is SwapFailed(bytes), unwrap the
@@ -2009,12 +2153,12 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
           }
         }
       } catch { /* never let diagnostics mask the original error */ }
-      console.error(`  Order ${dbOrder.id.slice(0, 8)}... error:`, err.message)
+      console.error(`  Order ${dbOrder.id.slice(0, 8)}... error:`, redactError(err))
       errors++
       // [DCA-OBS] Execution threw (RPC/revert/timeout) — bump the failure signal.
       consecutiveExecFailures++
       stats.totalErrors++
-      stats.lastError = { orderId: dbOrder.id, message: err.message, at: new Date().toISOString() }
+      stats.lastError = { orderId: dbOrder.id, message: redactError(err), at: new Date().toISOString() }
 
       // ── [SPRINT-P1B / ADR-014 (a)] Pinned-route revert is NOT an order failure ──────────
       // Under option (a) the route is fixed at signing, so a thin/dislocated pool at trigger
@@ -2062,7 +2206,9 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       // [FIX-RETRY-CAP-RESTART] executorErrorName rides along: a DCA that trips the cap on the
       // executor's own InsufficientOutput (the incident's shape — DCA is excluded from the pinned
       // branch above by construction) is failed as min_output_unreachable, not no-route.
-      await handleExecutionFailure(dbOrder, { err, swapReason, executorErrorName }, obsCtx)
+      // [ADR-026] txSent tells the plan whether this is a receipt we could not read (infra) or an
+      // attempt that died before any tx (classified by what threw).
+      await handleExecutionFailure(dbOrder, { err, swapReason, executorErrorName, txSent: sentTxHash !== null }, obsCtx)
     }
   }
 
@@ -2101,6 +2247,13 @@ const stats = {
   lastCycleAt: null,
   lastExecutionAt: null,
   lastError: null,
+  // [fix/executor-alert-masking-rpc-auth] null | "rpc-auth" — and the monitor's state behind it.
+  paused: null,
+  rpcAuth: null,
+  // [ADR-026] misses that were OURS (never counted against an order) and cycles that attempted
+  // nothing because the keeper was paused — per process, for /health.
+  infraMisses: 0,
+  pausedCycles: 0,
 }
 
 // ---- Health check HTTP server ------------------------------------------
@@ -2129,6 +2282,10 @@ function startHealthServer() {
       res.end(JSON.stringify({
         status: "ok",
         chainId: CHAIN_ID,
+        // [fix/executor-alert-masking-rpc-auth] "ok" = the process answers; `paused` says whether it
+        // can WORK. Additive: `status` keeps its meaning for any existing reader.
+        paused: stats.paused,
+        rpcAuth: stats.rpcAuth,
         uptime: Math.floor((Date.now() - new Date(stats.startedAt).getTime()) / 1000),
         stats: {
           totalCycles: stats.totalCycles,
@@ -2136,6 +2293,9 @@ function startHealthServer() {
           totalSkipped: stats.totalSkipped,
           totalErrors: stats.totalErrors,
           lastCycleAt: stats.lastCycleAt,
+          // [ADR-026] additive: misses that were ours (not counted) / cycles that attempted nothing
+          infraMisses: stats.infraMisses,
+          pausedCycles: stats.pausedCycles,
         },
       }, null, 2))
     } else if (req.url === "/") {
@@ -2157,6 +2317,47 @@ function startHealthServer() {
       log(`Health check port ${HEALTH_PORT} in use -- skipping`)
     }
   })
+}
+
+// ---- Boot: RPC auth rejection ------------------------------------------
+
+/**
+ * [fix/executor-alert-masking-rpc-auth] Called on every path that is about to refuse the boot. If
+ * the cause is an RPC auth/allowlist rejection (chain-verify tags its refusal; any other boot error
+ * is classified here) print THE line, record `paused: rpc-auth` on keeper_runtime_config, and send
+ * the high-urgency alert — rate-limited across pm2 restarts (rpc-auth.js createBootAlertGate). The
+ * boot still exits non-zero afterwards: this only makes the refusal impossible to misread.
+ * Never throws.
+ * @returns {Promise<boolean>} whether the refusal was an auth rejection
+ */
+async function reportBootRpcAuth(err) {
+  try {
+    const signal =
+      err?.name === "ChainVerificationError"
+        ? (err.rpcAuth ? err.rpcAuthSignal : null)
+        : (() => {
+            const v = classifyRpcError(err)
+            return v.kind === RPC_AUTH ? v.signal : null
+          })()
+    if (!signal) return false
+    console.error(`rpc: AUTH REJECTED chain=${CHAIN_ID} source=RPC_URL — check provider allowlist/key`)
+    console.error(`   signal: ${signal} — runbook: docs/Runbooks/EXECUTOR-OPERATIONS.md § Changing an RPC key`)
+    const nowIso = new Date().toISOString()
+    try {
+      await publishPausedState({ supabaseFetch, chainId: CHAIN_ID, paused: PAUSED_RPC_AUTH, nowIso, log })
+    } catch { /* reporting only */ }
+    const gate = createBootAlertGate({ chainId: CHAIN_ID }).check()
+    if (gate.send) {
+      await alertRpcAuth({ phase: "boot", chainId: CHAIN_ID, source: "RPC_URL", signal, since: nowIso, suppressed: gate.suppressed })
+    } else {
+      console.error(
+        `   (boot auth alert rate-limited: last sent ${gate.lastSentAt}; ${gate.suppressed} boot refusal(s) since — pm2 keeps restarting)`,
+      )
+    }
+    return true
+  } catch {
+    return false
+  }
 }
 
 // ---- Entrypoint --------------------------------------------------------
@@ -2239,7 +2440,8 @@ async function main() {
       log,
     })
   } catch (err) {
-    console.error(err.message)
+    // chain-verify already redacts its refusals (stricter redactUrls); redactError is idempotent on them.
+    console.error(redactError(err))
     // Name the RPC by HOST only — an RPC_URL routinely carries the provider API key in its path,
     // and a boot-refusal log is exactly the text an operator pastes into a ticket.
     let rpcHost = "unparseable RPC_URL"
@@ -2250,6 +2452,7 @@ async function main() {
       `   Refusing to boot: the keeper will not execute orders against an unverified chain/contract ` +
         `binding (CHAIN_ID=${CHAIN_ID}, RPC host=${rpcHost}).`,
     )
+    await reportBootRpcAuth(err) // [fix/executor-alert-masking-rpc-auth] same refusal, said loudly if it is auth
     process.exit(1)
   }
 
@@ -2271,12 +2474,13 @@ async function main() {
       log,
     })
   } catch (err) {
-    console.error(err.message)
+    console.error(redactError(err))
     console.error(
       `   Refusing to boot: this process's signer ${account.address} is not an executor the configured ` +
         `contract accepts on CHAIN_ID=${CHAIN_ID}. Check KMS_KEY_ID / KMS_REGION name the key whitelisted for ` +
         `THIS chain (docs/DEPLOYMENTS.md § Keeper registry), or execute the pending executor change on-chain.`,
     )
+    await reportBootRpcAuth(err)
     process.exit(1)
   }
 
@@ -2300,7 +2504,8 @@ async function main() {
       chain,
       transport: http(FLASHBOTS_RPC),
     })
-    log(`Flashbots Protect RPC enabled: ${FLASHBOTS_RPC.slice(0, 40)}...`)
+    // Host only: a 40-char prefix of a keyed relay URL is a partial key. [fix/executor-alert-masking-rpc-auth]
+    log(`Flashbots Protect RPC enabled: ${redactUrl(FLASHBOTS_RPC)}`)
   }
 
   const balance = await publicClient.getBalance({ address: account.address })
@@ -2349,9 +2554,27 @@ async function main() {
     const runtimeRow = buildRuntimeConfigRow({ chainId: CHAIN_ID, noPriceFillCapUsd: capResolution.value, keeperVersion: readKeeperVersion(), nowIso: new Date().toISOString() })
     if (!runtimeRow.ok) log(`  WARNING: keeper_runtime_config row not built (non-fatal): ${runtimeRow.reason}`)
     await publishRuntimeConfig({ supabaseFetch, row: runtimeRow.row, log })
+    // [fix/executor-alert-masking-rpc-auth] The gates above just proved the RPC answers: clear a
+    // `paused: rpc-auth` left by a previous process (only touches a row that IS paused).
+    await publishPausedState({ supabaseFetch, chainId: CHAIN_ID, paused: null, nowIso: new Date().toISOString(), log })
   } catch (err) {
-    log(`  WARNING: keeper_runtime_config publish error (non-fatal): ${err?.message?.slice(0, 120)}`)
+    log(`  WARNING: keeper_runtime_config publish error (non-fatal): ${redactError(err, { max: 120 })}`)
   }
+
+  // [fix/executor-alert-masking-rpc-auth] ONE monitor for every RPC outcome this process observes
+  // (event watcher, cycle-start balance read, a thrown cycle). Its state is mirrored to stats
+  // (/health, /metrics, heartbeat) and to keeper_runtime_config; its alerts are alertRpcAuth.
+  rpcAuthMonitor = createRpcAuthMonitor({
+    chainId: CHAIN_ID,
+    source: "RPC_URL",
+    alert: alertRpcAuth,
+    log,
+    onStateChange: async (s) => {
+      stats.paused = s.paused
+      stats.rpcAuth = s
+      await publishPausedState({ supabaseFetch, chainId: CHAIN_ID, paused: s.paused, nowIso: new Date().toISOString(), log })
+    },
+  })
 
   // Start health check server
   startHealthServer()
@@ -2376,7 +2599,7 @@ async function main() {
   if (V3_CONTRACT_ADDRESS) {
     watchedContracts.push({ address: V3_CONTRACT_ADDRESS, label: 'OrderExecutorV3' })
   }
-  const watcher = startEventWatcher(publicClient, watchedContracts, monitor)
+  const watcher = startEventWatcher(publicClient, watchedContracts, monitor, rpcAuthMonitor)
 
   // [PERF-KEEPER-IDLE-BACKOFF] Every POLL_INTERVAL_MS tick runs runTick. ACTIVE (the last cycle
   // found ≥1 order): the tick IS a full cycle — today's behaviour. IDLE (0 orders): the tick is a
@@ -2393,7 +2616,14 @@ async function main() {
       if (probe.length === 0) return
       log("  Active order(s) appeared while idle -- running the full cycle now")
     }
+    const pausedCyclesBefore = stats.pausedCycles
     const activeOrders = await executeCycle(publicClient, walletClient, null, flashbotsPublicClient, flashbotsWalletClient, monitor)
+    // [A71 M-1] A full cycle that did not throw ends the "cycle" origin's auth streak (a probe tick,
+    // which makes no RPC call, is not evidence and never gets here). Never throws (rpc-auth.js).
+    // [A74 S-11] …unless the cycle took the PAUSED branch (stats.pausedCycles moved): it attempted nothing,
+    // so it proves nothing about the "cycle" origin and must not wipe the streak that paused it. The streak
+    // ends by a cycle that really ran, or ages out (rpc-auth.js RPC_AUTH_STREAK_TTL_MS, S-10) — no deadlock.
+    if (rpcAuthMonitor && stats.pausedCycles === pausedCyclesBefore) await rpcAuthMonitor.onRpcSuccess("cycle")
     cadence.record(activeOrders)
     watcher.setIdle(cadence.isIdle())
     if (cadence.isIdle()) log(`  Idle: next RPC cycle in ${IDLE_POLL_INTERVAL_MS / 1000}s (Supabase probe every ${POLL_INTERVAL_MS / 1000}s)`)
@@ -2406,8 +2636,12 @@ async function main() {
     try {
       await runTick()
     } catch (err) {
-      console.error("Cycle error:", err.message)
-      if (monitor) monitor.onCycleError(err)
+      console.error("Cycle error:", redactError(err))
+      // [fix/executor-alert-masking-rpc-auth] An auth rejection is alerted once by rpcAuthMonitor.
+      // [A71 M-1] The monitor's 5-min "consecutive errors" alert is muted ONLY while it is paused;
+      // every other cycle error (transient, or auth below the threshold) still reaches it.
+      const verdict = rpcAuthMonitor ? await rpcAuthMonitor.onRpcError("cycle", err) : null
+      if (monitor && verdict?.muted !== true) monitor.onCycleError(err)
     }
   }, POLL_INTERVAL_MS)
 
@@ -2425,7 +2659,11 @@ process.on("SIGTERM", () => {
   process.exit(0)
 })
 
-main().catch((err) => {
-  console.error("Fatal error:", err)
+main().catch(async (err) => {
+  // The raw error object printed viem's message — URL and key included. Keep the stack frames
+  // (redactUrl leaves file:// alone), lose the endpoint path. [fix/executor-alert-masking-rpc-auth]
+  console.error("Fatal error:", redactUrl(err?.stack || redactError(err)))
+  // e.g. the boot balance read after the gates: an auth rejection there is said as loudly.
+  await reportBootRpcAuth(err)
   process.exit(1)
 })

@@ -1,19 +1,19 @@
 /**
- * [P140] Smart MEV preference selection — pure, deterministic, testable.
+ * [P140] Smart CoW preference selection — pure, deterministic, testable.
  *
  * Extracted from the SwapBox useMemo so the routing logic can be exercised
- * directly without rendering the component. Behaviour is identical to the
- * inline implementation it replaces.
+ * directly without rendering the component.
  *
- * Two paths:
- *   1. mevProtected = true  → strict filter: keep only MEV-protected
- *      sources. If none exist, return meta=null so the UI can surface
- *      "no MEV-protected quote available".
- *   2. mevProtected = false → if best is not MEV-protected and a CoW
- *      quote exists within `threshold` of the best output AND the
- *      gasless engine flags it as net-positive (gasless.recommended),
- *      promote CoW into best. Otherwise leave best untouched and flag
- *      the route as MEV-exposed so the UI can offer the toggle.
+ * [feat/retire-force-mev, owner decision 2026-11-06] The "Force MEV Protection" toggle is retired
+ * (CoW's free quote API has answered 429 to our servers since 2026-10-29; TeraSwap makes no MEV-related
+ * promise any more). Its strict CoW-only filter is gone; the second argument is DEPRECATED and IGNORED.
+ * CoW stays an ordinary source: queried, ranked, and selected when it wins.
+ *
+ * The one remaining path (ranking rule, unchanged): if best is not a
+ * `mevProtected`-flagged source (CoW) and a CoW quote exists within
+ * `threshold` of the best output AND the gasless engine flags it as
+ * net-positive (gasless.recommended), promote CoW into best. Otherwise
+ * leave best untouched.
  */
 import type { MetaQuoteResult } from '@/lib/api'
 import type { AGGREGATOR_META } from '@/lib/constants'
@@ -23,13 +23,20 @@ export interface MevPreferenceResult {
   meta: MetaQuoteResult | null
   /** True when path 2 actively promoted CoW into best. */
   smartMevApplied: boolean
-  /** True when best stayed non-MEV-protected and the user hasn't forced. */
+  /**
+   * @deprecated [feat/retire-force-mev] Still computed (best stayed a non-CoW source), but no UI reads it:
+   * the "CoW Protocol available… Enable" strip it drove is retired with the toggle.
+   */
   mevExposedBest: boolean
 }
 
 export function selectBestWithMevPreference(
   rawMeta: MetaQuoteResult | null,
-  mevProtected: boolean,
+  /**
+   * @deprecated [feat/retire-force-mev, owner 2026-11-06] Was the "Force MEV Protection" toggle (strict CoW-only
+   * filter). IGNORED: `true` and `false` select identically. Callers pass `false` (the old default).
+   */
+  _forceMevProtected: boolean,
   aggregatorMeta: typeof AGGREGATOR_META,
   threshold: number,
 ): MevPreferenceResult {
@@ -37,24 +44,11 @@ export function selectBestWithMevPreference(
     return { meta: null, smartMevApplied: false, mevExposedBest: false }
   }
 
-  // Path 1: forced — strict MEV-only filter.
-  if (mevProtected) {
-    const mevSources = rawMeta.all.filter(q => aggregatorMeta[q.source]?.mevProtected)
-    if (mevSources.length === 0) {
-      return { meta: null, smartMevApplied: false, mevExposedBest: false }
-    }
-    return {
-      meta: { ...rawMeta, best: mevSources[0], all: mevSources },
-      smartMevApplied: false, // user forced it; not a smart-routing event
-      mevExposedBest: false,
-    }
-  }
-
-  // Path 2: smart preference — promote CoW if within threshold of best.
+  // Smart preference — promote CoW if within threshold of best.
   const bestIsMevProtected = aggregatorMeta[rawMeta.best.source]?.mevProtected ?? false
   if (bestIsMevProtected) {
-    // Best already happens to be MEV-protected. No promotion needed; no
-    // exposure warning needed.
+    // Best already is the CoW (mevProtected-flagged) source. No promotion
+    // needed; not "exposed".
     return { meta: rawMeta, smartMevApplied: false, mevExposedBest: false }
   }
 
@@ -80,6 +74,6 @@ export function selectBestWithMevPreference(
     }
   }
 
-  // Best stays as-is; non-MEV-protected → mark exposed for the UI hint.
+  // Best stays as-is (a non-CoW source) → mevExposedBest (deprecated, no UI reads it).
   return { meta: rawMeta, smartMevApplied: false, mevExposedBest: true }
 }

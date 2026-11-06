@@ -4,6 +4,7 @@ import { useEffect, useRef, type ReactNode } from 'react'
 import { AGGREGATOR_META } from '@/lib/constants'
 import { Button } from '../../primitives'
 import { Notice } from '../QuotePanel'
+import type { ShareText } from '../quote-model'
 import { explorerName, type SuccessSummary, type TimelineStep } from './lifecycle-view'
 
 export interface ExecutionLeg {
@@ -21,6 +22,8 @@ export interface ExecutionPanelProps {
   amountIn: string
   /** Standard path only; null for CoW / split (v1 builds no summary there). */
   summary: SuccessSummary | null
+  /** [L-1] v1's Share button (quote-model's `buildShareText`); null hides it, as in v1. */
+  shareText: ShareText | null
   txHash?: string
   /** `getChainConfig(chainId).blockExplorer` of the ORDER's chain. */
   explorerUrl: string
@@ -112,7 +115,7 @@ export function ExecutionPanel(p: ExecutionPanelProps) {
         {p.phase === 'pending' && (
           <>
             {p.txHash && <p data-testid="exec-sent">{link(<>Transaction sent — track on {explorerName(p.explorerUrl)} ↗</>)}</p>}
-            {p.cowPending && <p className="text-v2-muted">Your order is MEV-protected. Solvers are competing to fill it at the best price.</p>}
+            {p.cowPending && <p className="text-v2-muted">Your order is in CoW Protocol&apos;s batch auction. Solvers are competing to fill it at the best price.</p>}
           </>
         )}
         {p.phase === 'success' && (
@@ -129,6 +132,25 @@ export function ExecutionPanel(p: ExecutionPanelProps) {
                 New swap
               </Button>
             </div>
+            {p.shareText && (
+              <Button
+                variant="text"
+                className="w-full justify-center gap-2"
+                data-testid="exec-share"
+                onClick={() =>
+                  window.open(
+                    `https://twitter.com/intent/tweet?text=${encodeURIComponent(p.shareText!.text)}`,
+                    '_blank',
+                    'noopener,noreferrer,width=550,height=420',
+                  )
+                }
+              >
+                <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                </svg>
+                {p.shareText.label}
+              </Button>
+            )}
           </div>
         )}
         {p.phase === 'failure' && (
@@ -152,7 +174,7 @@ export function ExecutionPanel(p: ExecutionPanelProps) {
         )}
         {p.simulation.skipped && (
           <p className="mt-2 text-[12px] text-v2-amber">
-            <span aria-hidden="true">⚠</span> Simulation unavailable — proceed with caution
+            Simulation unavailable — proceed with caution
           </p>
         )}
         {p.fallback && (

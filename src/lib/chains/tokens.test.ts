@@ -2,8 +2,8 @@
  * [P224] Per-chain token catalog (P221).
  */
 import { describe, it, expect } from 'vitest'
-import { getPopularTokens, getChainToken, getChainTokenList, CHAIN_TOKENS, remapTokenToChain, findChainToken, isVerifiedToken, explorerTokenUrl, explorerTxUrl, explorerAddressUrl, getSearchCatalog, rankSearchMatches, computeLowLiquidityDemotions, LOW_LIQUIDITY_FLOOR_USD, getCanonicalUsdc } from './tokens'
-import { DEFAULT_TOKENS, findToken, addCustomToken } from '@/lib/tokens'
+import { getPopularTokens, getChainToken, getChainTokenList, CHAIN_TOKENS, remapTokenToChain, remapPairToChain, getDefaultPair, findChainToken, isVerifiedToken, explorerTokenUrl, explorerTxUrl, explorerAddressUrl, getSearchCatalog, rankSearchMatches, computeLowLiquidityDemotions, LOW_LIQUIDITY_FLOOR_USD, getCanonicalUsdc } from './tokens'
+import { DEFAULT_TOKENS, findToken, addCustomToken, removeCustomToken } from '@/lib/tokens'
 import { NATIVE_ETH } from '@/lib/constants'
 import { getChainlinkFeed } from './chainlink-feeds'
 import { getChainConfig, getWrappedNative, getSupportedChainIds } from './registry'
@@ -334,5 +334,142 @@ describe('getCanonicalUsdc — chain-aware DCA default-buy resolution [CHORE-DCA
     const unsupportedChainId = 999999
     expect(() => getChainConfig(unsupportedChainId)).toThrow()
     expect(getCanonicalUsdc(unsupportedChainId)).toBeNull()
+  })
+})
+
+// [fix/v1-maintenance C2] isCuratedToken — per-chain curated membership (case-insensitive).
+import { isCuratedToken as _isCuratedToken } from './tokens'
+describe('isCuratedToken [fix/v1-maintenance C2]', () => {
+  const MAINNET_USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
+  const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+  const ARB_USDC = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'
+  it('each chain curates its own USDC, case-insensitively', () => {
+    expect(_isCuratedToken(MAINNET_USDC, 1)).toBe(true)
+    expect(_isCuratedToken(BASE_USDC.toLowerCase(), 8453)).toBe(true)
+    expect(_isCuratedToken(ARB_USDC, 42161)).toBe(true)
+  })
+  it('lists are per chain: a mainnet address is not curated on Base/Arbitrum, and unknowns are not curated anywhere', () => {
+    expect(_isCuratedToken(MAINNET_USDC, 8453)).toBe(false)
+    expect(_isCuratedToken(BASE_USDC, 1)).toBe(false)
+    expect(_isCuratedToken('0xDeadBeefDeadBeefDeadBeefDeadBeefDeadBeef', 42161)).toBe(false)
+    expect(_isCuratedToken(MAINNET_USDC, 999999)).toBe(false)
+  })
+})
+
+// ── [fix/chain-switch-token-fallback] a token with no home on the chain is NEVER carried over ──
+
+describe('remapTokenToChain / remapPairToChain — chain-switch fallback [fix/chain-switch-token-fallback]', () => {
+  const ARB = 42161
+  const BASE = 8453
+  const SNX_MAINNET = '0xc011a73ee8576fb46f5e1c5751ca3b9fe0af2a6f'
+  const SNX_BASE = '0x22e6966b799c4d5b13be962e1d117b56327fda66'
+  const mainnetSNX = findToken('SNX')!
+  const mainnetUSDC = findToken('USDC')!
+  const mainnetDAI = findToken('DAI')!
+  const mainnetETH = findToken('ETH')!
+  const baseSNX = findChainToken(SNX_BASE, BASE)!
+  const addrs = (p: { tokenIn: { address: string } | null; tokenOut: { address: string } | null }) =>
+    [p.tokenIn?.address.toLowerCase(), p.tokenOut?.address.toLowerCase()]
+
+  it('fixtures: mainnet + Base list SNX, Arbitrum has none (the owner repro)', () => {
+    expect(mainnetSNX.address.toLowerCase()).toBe(SNX_MAINNET)
+    expect(baseSNX.symbol).toBe('SNX')
+    expect(findChainToken(SNX_MAINNET, ARB)).toBeNull()
+    expect(getChainTokenList(ARB).some((t) => t.symbol === 'SNX')).toBe(false)
+  })
+
+  it('token helper: mainnet SNX → Arbitrum is null, never the mainnet token', () => {
+    expect(remapTokenToChain(mainnetSNX, ARB)).toBeNull()
+  })
+
+  it('pair: mainnet SNX/USDC → Arbitrum = the Arbitrum default pair (ETH → USDC)', () => {
+    const r = remapPairToChain(mainnetSNX, mainnetUSDC, ARB)
+    expect(r).toEqual(getDefaultPair(ARB))
+    expect(r.tokenIn?.symbol).toBe('ETH')
+    expect(r.tokenOut?.address.toLowerCase()).toBe('0xaf88d065e77c8cc2239327c5edb3a432268e5831')
+  })
+
+  it('Base SNX (0x22e6…) stays on Base — it belongs to the chain (even outside the curated list)', () => {
+    expect(remapTokenToChain(baseSNX, BASE)).toBe(baseSNX)
+    const r = remapPairToChain(baseSNX, findChainToken('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', BASE)!, BASE)
+    expect(r.tokenIn).toBe(baseSNX)
+  })
+
+  it('mainnet SNX → Base: Base SNX is catalogued but not curated, so symbol matching does NOT pick it (long-tail clones) → null', () => {
+    expect(remapTokenToChain(mainnetSNX, BASE)).toBeNull()
+  })
+
+  it('DAI mainnet → Base = Base DAI (symbol match)', () => {
+    const r = remapPairToChain(mainnetDAI, mainnetUSDC, BASE)
+    expect(r.tokenIn?.address.toLowerCase()).toBe('0x50c5725949a6f0c72e6c4a641f24049a917db0cb')
+    expect(r.tokenOut?.address.toLowerCase()).toBe('0x833589fcd6edb6e08f4c7c32d4f71b54bda02913')
+  })
+
+  it('stale {SNX mainnet, DAI mainnet} restored on Base = Base default pair — no mainnet address survives', () => {
+    const r = remapPairToChain(mainnetSNX, mainnetDAI, BASE)
+    expect(r).toEqual(getDefaultPair(BASE))
+    expect(addrs(r)).toEqual(['0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'])
+  })
+  it('stale {SNX mainnet, DAI mainnet} restored on Arbitrum = Arbitrum default pair', () => {
+    expect(remapPairToChain(mainnetSNX, mainnetDAI, ARB)).toEqual(getDefaultPair(ARB))
+  })
+
+  it('a token imported on Base stays only on Base', () => {
+    const imported = '0x1234567890123456789012345678901234567890'
+    addCustomToken({ address: imported, symbol: 'IMPBASE', name: 'Imported on Base', decimals: 18, logoURI: '', category: 'Imported', chainId: BASE })
+    try {
+      const tok = findChainToken(imported, BASE)!
+      expect(tok).not.toBeNull()
+      // On Base: untouched (same object), pair keeps it.
+      expect(remapTokenToChain(tok, BASE)).toBe(tok)
+      expect(remapPairToChain(tok, mainnetUSDC, BASE).tokenIn).toBe(tok)
+      // Anywhere else: no home → null → default pair.
+      expect(remapTokenToChain(tok, 1)).toBeNull()
+      expect(remapTokenToChain(tok, ARB)).toBeNull()
+      expect(remapPairToChain(tok, mainnetUSDC, ARB)).toEqual(getDefaultPair(ARB))
+    } finally {
+      removeCustomToken(imported, BASE)
+    }
+  })
+
+  it('both legs collapsing to the same address → the default pair', () => {
+    // A foreign-address "USDC" and the real mainnet USDC both resolve to Base USDC.
+    const fakeUsdc = { ...mainnetUSDC, address: '0x9999999999999999999999999999999999999999' as `0x${string}` }
+    const r = remapPairToChain(fakeUsdc, mainnetUSDC, BASE)
+    expect(r).toEqual(getDefaultPair(BASE))
+    expect(r.tokenIn?.address).not.toBe(r.tokenOut?.address)
+  })
+
+  it('mainnet is a no-op: same objects back, nothing swapped for the default pair', () => {
+    const r = remapPairToChain(mainnetSNX, mainnetUSDC, 1)
+    expect(r.tokenIn).toBe(mainnetSNX)
+    expect(r.tokenOut).toBe(mainnetUSDC)
+    expect(remapPairToChain(mainnetETH, mainnetDAI, 1)).toEqual({ tokenIn: mainnetETH, tokenOut: mainnetDAI })
+  })
+
+  it('the default pair is what a fresh visitor gets: ETH → USDC from the chain list; mainnet = DEFAULT_TOKENS entries', () => {
+    expect(getDefaultPair(1)).toEqual({ tokenIn: mainnetETH, tokenOut: mainnetUSDC })
+    for (const c of [1, BASE, ARB]) {
+      const d = getDefaultPair(c)
+      expect(d.tokenIn?.symbol).toBe('ETH')
+      expect(d.tokenOut?.symbol).toBe('USDC')
+      expect(findChainToken(d.tokenOut!.address, c)).not.toBeNull()
+    }
+  })
+
+  it('every leg of every result is known on the target chain (catalog ∪ imported-for-that-chain)', () => {
+    const pool = [mainnetSNX, mainnetUSDC, mainnetDAI, mainnetETH, baseSNX, findChainToken('0xaf88d065e77c8cC2239327C5EDb3A432268e5831', ARB)!]
+    for (const c of [1, BASE, ARB]) {
+      for (const a of pool) for (const b of pool) {
+        const r = remapPairToChain(a, b, c)
+        expect(findChainToken(r.tokenIn!.address, c), `${a.symbol}/${b.symbol} → ${c} in`).not.toBeNull()
+        expect(findChainToken(r.tokenOut!.address, c), `${a.symbol}/${b.symbol} → ${c} out`).not.toBeNull()
+      }
+    }
+  })
+
+  it('null in stays null; an unknown chain has no home for anything', () => {
+    expect(remapPairToChain(null, mainnetUSDC, BASE).tokenIn).toBeNull()
+    expect(remapTokenToChain(mainnetUSDC, 999999)).toBeNull()
   })
 })

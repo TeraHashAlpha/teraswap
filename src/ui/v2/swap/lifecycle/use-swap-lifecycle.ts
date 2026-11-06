@@ -48,7 +48,7 @@ export interface LifecycleArgs {
  */
 export function useSwapLifecycle(a: LifecycleArgs) {
   const { tokenIn, tokenOut, amountIn, slippage, meta, activeChainId, approval } = a
-  const { address } = useAccount()
+  const { address, chain } = useAccount()
   const { toast, dismiss } = useV2Toast()
   const { addRecord } = useSwapHistory()
   const { addApproval } = useActiveApprovals()
@@ -104,11 +104,15 @@ export function useSwapLifecycle(a: LifecycleArgs) {
   /**
    * SwapBox's `handleApproveAndSwap` / `handleSwap` / `confirmUnpricedSwap` in one: gates → (approval) → consent → execute.
    * `unpricedAck` is true only when the user ticked the consent for THIS attempt; it rides every /api/swap call (single, CoW, each split leg).
+   * [A69 M-1] `onExecute` runs synchronously, in the same tick and from the same render's quote, immediately before the hook is called:
+   * only the press that actually executes (not the approval press, not the consent-gated one) reaches it — v1 freezes its preview at the
+   * same point (`useSwap.execute` → `setPendingSwap`, useSwap.ts:733).
    */
   const confirm = useCallback(
-    async (c: { unpricedAck: boolean } = { unpricedAck: false }) => {
+    async (c: { unpricedAck: boolean } = { unpricedAck: false }, onExecute?: () => void) => {
       if (!a.chainActive) return // [P223]
       if (a.gates.anyBlocked) return // hard block — never execute above the deviation threshold or an unverified large swap
+      if (!meta) return // [A69 L-1] nothing to execute: the waiting loop below would start and never get its settle
       startWaitingSound()
       if (!approval.isReady) {
         await approval.approve()
@@ -121,9 +125,10 @@ export function useSwapLifecycle(a: LifecycleArgs) {
         return
       }
       setConsentRequested(false)
+      onExecute?.()
       run(c.unpricedAck) // the ack is whatever THIS attempt's consent produced — also after a 409 the client tier did not predict
     },
-    [a.chainActive, a.gates.anyBlocked, a.unpricedPair, approval, run],
+    [a.chainActive, a.gates.anyBlocked, a.unpricedPair, approval, run, meta],
   )
 
   /** SwapBox's `cancelUnpricedSwap` + the review modals' `onCancel={resetSwap | resetSplitSwap}`. */
@@ -177,7 +182,9 @@ export function useSwapLifecycle(a: LifecycleArgs) {
         title: 'Swap confirmed!',
         description: `${amountIn} ${tokenIn.symbol} → ${summary.outDisplay} ${tokenOut.symbol}${summary.savingsLine ? ` · ${summary.savingsLine}` : ''}`,
         txHash: swap.txHash,
-        chainId: activeChainId,
+        // [L-3, A75b] the chain the tx was SENT on (v1 SwapBox.tsx:412 passes txChainId): the wallet may have switched network while
+        // it confirmed, and the link must still open the explorer that has the tx. activeChainId only when useSwap reports none.
+        chainId: swap.txChainId ?? activeChainId,
         duration: 10000,
       })
       swapToastId.current = null
@@ -216,6 +223,7 @@ export function useSwapLifecycle(a: LifecycleArgs) {
           method: 'exact',
           timestamp: Date.now(),
           needsRevoke: false,
+          chainId: chain?.id, // [fix/revoke-chain] as v1 SwapBox: the wallet's chain for this swap, never a UI default
         })
       }
     }

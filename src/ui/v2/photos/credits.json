@@ -144,7 +144,8 @@
           "bytes": 98424
         }
       ],
-      "status": "rejected"
+      "status": "rejected",
+      "landing": "retired (design review 1, 6 Nov 2026): the landing hero no longer paints it — the hero still is the baked overpass (MAG Photography, 37644721). The raw files stay (nothing is deleted) but no v2 surface references them."
     }
   ],
   "narrativeNote": "Round-6 scroll narrative (MOTION-SPEC §2): graded derivatives of existing tab photos, recipe steps 1-3 baked in (grayscale, contrast, brightness, duotone, 65% BG shade); the constant veil is a CSS layer. Source: round6/landing/img/bg-*. Width is the long edge (1920 landscape for desktop, 1080 portrait for mobile). Round 7 (owner addition, 26 Oct preview review): the app shell's per-tab photos use this same baked set — zakim, archnight and overpass are added (tab = the shell tab that shows it). archnight and overpass are the pack's round7 files, byte for byte; zakim is the pack's round7 `bg-zakim` zip (landing/img, prep7_zakim.py), byte for byte (it first shipped baked locally, before the pack had the files; README in narrative/).",
@@ -317,6 +318,7 @@
       "pexelsId": "17102595",
       "pexelsUrl": "https://www.pexels.com/photo/leonard-p-zakim-bunker-hill-memorial-bridge-in-boston-17102595/",
       "tab": "swap",
+      "section": "why",
       "files": [
         {
           "file": "narrative/bg-zakim-1920.avif",
@@ -379,6 +381,7 @@
       "pexelsId": "37644721",
       "pexelsUrl": "https://www.pexels.com/photo/37644721/",
       "tab": "analytics",
+      "section": "hero",
       "files": [
         {
           "file": "narrative/bg-overpass-1920.avif",

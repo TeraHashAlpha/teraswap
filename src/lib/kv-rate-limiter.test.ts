@@ -260,3 +260,37 @@ describe('[CodeQL log-injection] only the LOG line is sanitised — keys and lim
     for (const l of lines) expect(l).not.toMatch(/[\r\n\x1b]/)
   })
 })
+
+describe('[FEAT-SERVER-RPC-ENV-SPLIT] cost units', () => {
+  beforeEach(() => { vi.clearAllMocks(); _internal.reset() })
+
+  it('cost 1 (default) is the old rule: allowed iff count < limit', async () => {
+    mockPipelineExec.mockResolvedValueOnce(okPipeline(9))
+    expect((await checkRateLimit('c1', 10, 60_000)).allowed).toBe(true)
+    mockPipelineExec.mockResolvedValueOnce(okPipeline(10))
+    expect((await checkRateLimit('c1', 10, 60_000)).allowed).toBe(false)
+  })
+
+  it('cost n is allowed iff count + n <= limit, and remaining reflects n', async () => {
+    mockPipelineExec.mockResolvedValueOnce(okPipeline(275))
+    const ok = await checkRateLimit('c25', 300, 60_000, 25)
+    expect(ok).toMatchObject({ allowed: true, remaining: 0 })
+    mockPipelineExec.mockResolvedValueOnce(okPipeline(276))
+    const no = await checkRateLimit('c25', 300, 60_000, 25)
+    expect(no.allowed).toBe(false)
+  })
+
+  it('an over-limit multi-unit call removes every member it added', async () => {
+    mockPipelineExec.mockResolvedValueOnce(okPipeline(290))
+    await checkRateLimit('c25', 300, 60_000, 25)
+    expect(mockZrem).toHaveBeenCalledTimes(1)
+    expect(mockZrem.mock.calls[0].length).toBe(1 + 25) // redisKey + 25 members
+  })
+
+  it('a non-integer / <1 cost falls back to 1', async () => {
+    mockPipelineExec.mockResolvedValueOnce(okPipeline(9))
+    expect((await checkRateLimit('cx', 10, 60_000, 0)).remaining).toBe(0)
+    mockPipelineExec.mockResolvedValueOnce(okPipeline(9))
+    expect((await checkRateLimit('cx', 10, 60_000, NaN)).remaining).toBe(0)
+  })
+})

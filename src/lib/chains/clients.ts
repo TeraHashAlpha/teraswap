@@ -17,6 +17,7 @@ import { createPublicClient, fallback, http, type Chain, type PublicClient } fro
 import { mainnet, base, arbitrum } from 'viem/chains'
 import { getPrivateClient } from '@/lib/rpc'
 import { guardedHttp } from '@/lib/rpc-guarded-transport'
+import { serverRpcEnvUrl } from '@/lib/rpc-env'
 import { getChainConfig, DEFAULT_CHAIN_ID } from './registry'
 
 // [SPRINT-47-ARBITRUM-ACTIVATION-PREP] Arbitrum was registered in chains/registry.ts (Sprint 46)
@@ -50,7 +51,11 @@ export function getPublicClientForChain(chainId: number = DEFAULT_CHAIN_ID): Pub
   // pattern: a single URL stays a plain http transport; several become a viem
   // fallback() chain tried in order. The mainnet path above (getPrivateClient
   // → /api/rpc privacy proxy) is intentionally untouched.
-  const configuredUrls = [config.rpc.primary, ...(config.rpc.fallbacks ?? [])].filter(Boolean)
+  // [FEAT-SERVER-RPC-ENV-SPLIT] On the server the primary is `RPC_URL_<id>` (else the same
+  // NEXT_PUBLIC_* the registry holds, so unset => unchanged); the browser keeps the registry value.
+  const primary =
+    (typeof window === 'undefined' ? serverRpcEnvUrl(chainId) : undefined) ?? config.rpc.primary
+  const configuredUrls = [primary, ...(config.rpc.fallbacks ?? [])].filter(Boolean)
   // [FIX-RPC-CHAIN-IDENTITY-GUARD] No configured RPC at all (registry primary + fallbacks both
   // empty — currently unreachable for Base/Arbitrum, whose registry entries always carry a
   // hardcoded fallback, but real for any future chain registered without one). Bare `http()`

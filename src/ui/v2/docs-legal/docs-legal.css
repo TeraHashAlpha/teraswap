@@ -1,0 +1,10 @@
+/* [feat/ui-v2-docs-legal] Docs/Terms/Privacy, round-7 containers 2 and 3. */
+
+/* Container 3: long prose on the photo gets its OWN local scrim (owner decision, 5 Nov) instead of relying on the
+   shell's uniform appScrim — the same recipe the landing's sections use (ts-v2-scrim), built from the same
+   --scrim-left / --scrim-down tokens (tokens.css), scoped here under its own name since this tree is not the landing. */
+.ts-v2-prose-scrim { position: relative; }
+.ts-v2-prose-scrim::after { content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none; background: var(--scrim-left); }
+@media (max-width: 640px) {
+  .ts-v2-prose-scrim::after { background: var(--scrim-down); }
+}

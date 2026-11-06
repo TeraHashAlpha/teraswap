@@ -120,7 +120,10 @@ describe('28a — pending', () => {
     expect(steps()).toEqual([['Preparing swap...', 'done'], ['Simulating transaction...', 'done'], ['Review transaction...', 'done'], ['Executing swap...', 'active'], ['Swap complete', 'todo']])
     const a = within(execCol()).getByTestId('exec-tx-link') as HTMLAnchorElement
     expect(a.href).toBe(`https://etherscan.io/tx/${TX}`)
-    expect(a.textContent).toBe('Transaction sent — track on Etherscan ↗') // v1's sentence
+    // [fix/tx-links-remaining] v1 switched to a generic "track on explorer ↗" (no longer names a
+    // specific host, now that ETHERSCAN_TX — mainnet-only — is deprecated with 0 callers); v2
+    // keeps its own chain-named copy, so this pins v2's text for chain 1, not byte parity with v1.
+    expect(a.textContent).toBe('Transaction sent — track on Etherscan ↗')
     expect(a.rel).toContain('noopener')
     expect(execCol().textContent).toContain('Pre-swap simulation passed — transaction verified safe')
     expect(document.querySelector('[data-cta]')!.textContent).toBe('Executing swap...') // v1's button label, disabled
@@ -135,13 +138,23 @@ describe('28a — pending', () => {
     expect(a.href).toBe(`https://${host}/tx/${TX}`)
     expect(a.textContent).toContain(name)
   })
-  it('CoW pending: v1\'s MEV-protected line and the Waiting for solver step', () => {
+  // [L-3, A75] The tx was SENT on chain 1 (useSwap's own `txChainId`); the wallet then switches network before the
+  // card re-renders. The link must stay on the chain the tx actually lives on, never follow the newly selected one.
+  it('a network switch AFTER the tx was sent never moves the link off the order\'s own chain', () => {
+    mount({ status: 'swapping', txHash: TX, txChainId: 1 })
+    h.chainId = 8453
+    h.account = { ...h.account, chain: { id: 8453 } }
+    view.rerender(<SwapCard />)
+    const a = within(execCol()).getByTestId('exec-tx-link') as HTMLAnchorElement
+    expect(a.href).toBe(`https://etherscan.io/tx/${TX}`)
+  })
+  it('CoW pending: v1\'s batch-auction line (no MEV promise since feat/retire-force-mev) and the Waiting for solver step', () => {
     const m = fixtureMeta()
     const cow = { ...m.all[0], source: 'cowswap' as const, gasUsd: 0 }
     h.quote = { ...h.quote, meta: taggedFixture({ ...m, best: cow, all: [cow, ...m.all.slice(1)] }, '1') }
     mount({ status: 'cow_pending' })
     expect(steps()[2]).toEqual(['Waiting for solver...', 'active'])
-    expect(execCol().textContent).toContain('Your order is MEV-protected. Solvers are competing to fill it at the best price.')
+    expect(execCol().textContent).toContain("Your order is in CoW Protocol's batch auction. Solvers are competing to fill it at the best price.")
   })
   it('a fallback and an inconclusive simulation are told in v1\'s words', () => {
     mount({ status: 'swapping', simulationSkipped: true, fallbackNotice: { from: 'velora', to: 'kyberswap' } })
@@ -180,6 +193,35 @@ describe('28b — success', () => {
     fireEvent.click(screen.getByTestId('exec-new-swap'))
     expect(h.swap.reset).toHaveBeenCalled()
     expect((screen.getByLabelText('Sell amount') as HTMLInputElement).value).toBe('')
+  })
+
+  describe('[L-1] Share (v1 SwapBox.tsx\'s Share button, owner decision: BUILD in v2)', () => {
+    it('more than one source compared: "Share — saved X%", opens v1\'s tweet intent for the live meta/tokenIn/tokenOut', () => {
+      const open = vi.spyOn(window, 'open').mockReturnValue(null)
+      mount({ status: 'success', txHash: TX })
+      const btn = screen.getByTestId('exec-share')
+      expect(btn.textContent).toBe('Share — saved 0.27%')
+      fireEvent.click(btn)
+      expect(open).toHaveBeenCalledTimes(1)
+      const [url, target, features] = open.mock.calls[0]
+      expect(String(url)).toMatch(/^https:\/\/twitter\.com\/intent\/tweet\?text=/)
+      expect(decodeURIComponent(String(url).split('text=')[1])).toContain('I just saved 0.27% on my ETH → USDC swap by comparing 5 DEX sources with @TeraSwapDEX')
+      expect(target).toBe('_blank')
+      expect(features).toBe('noopener,noreferrer,width=550,height=420')
+      open.mockRestore()
+    })
+
+    it('only one source: no Share button — v1 never shows it without a comparison', () => {
+      const m = fixtureMeta()
+      h.quote = { ...h.quote, meta: taggedFixture({ ...m, all: [m.best] }, '1') }
+      mount({ status: 'success', txHash: TX })
+      expect(screen.queryByTestId('exec-share')).toBeNull()
+    })
+
+    it('not success: no Share button even with a live quote in hand', () => {
+      mount({ status: 'swapping', txHash: TX })
+      expect(screen.queryByTestId('exec-share')).toBeNull()
+    })
   })
 })
 

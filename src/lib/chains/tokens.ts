@@ -245,6 +245,23 @@ export function getChainTokenList(chainId: number): Token[] {
   return (CHAIN_TOKENS[chainId] ?? []).map((t) => chainTokenToToken(t, chainId))
 }
 
+const curatedAddressSets = new Map<number, Set<string>>()
+
+/**
+ * [fix/v1-maintenance C2] Is `address` part of `chainId`'s curated list (the same list
+ * `getChainTokenList` returns and usePortfolio uses for curated metadata)? Portfolio uses this to
+ * split "curated" rows from "Discovered in Wallet" per ACTIVE chain — mainnet's list must not
+ * decide that for Base/Arbitrum.
+ */
+export function isCuratedToken(address: string, chainId: number): boolean {
+  let set = curatedAddressSets.get(chainId)
+  if (!set) {
+    set = new Set(getChainTokenList(chainId).map((t) => t.address.toLowerCase()))
+    curatedAddressSets.set(chainId, set)
+  }
+  return set.has(address.toLowerCase())
+}
+
 // [SPRINT-9Y] Map a ChainToken to the rich Token the selector renders.
 // [CHORE-STABLECOIN-CONSTANT] Carries the chainId so the category fallback is chain-keyed.
 function chainTokenToToken(t: ChainToken, chainId: number): Token {
@@ -421,22 +438,58 @@ export function computeLowLiquidityDemotions<T extends { symbol: string; liquidi
 }
 
 /**
- * [SPRINT-9E] Re-resolve a selected token to the active chain's catalog BY SYMBOL,
- * so a swap quotes the chain's REAL address (e.g. mainnet USDC 0xA0b8… → Base USDC
- * 0x833589…). Returns the original token unchanged when the same-symbol token on
- * the chain has the SAME address (mainnet → byte-identical no-op) or no match
- * exists — preventing the "mainnet USDC on Base → 1inch 400 not valid token →
- * No valid quotes" class of bug (INC follow-up / SPRINT-9E).
+ * [SPRINT-9E → fix/chain-switch-token-fallback] Re-resolve a selected token to `chainId`.
+ *
+ *  1. The token already BELONGS to the chain (its address is in the chain's full catalog or in
+ *     the custom-token store scoped to that chain) → returned as-is (same object, so mainnet is a
+ *     byte-identical no-op and an on-chain import stays put).
+ *  2. Else a same-symbol token in the chain's CURATED list (never the long tail: a symbol there can be a clone) → that token, so a swap quotes the
+ *     chain's REAL address (mainnet USDC 0xA0b8… → Base USDC 0x8335…).
+ *  3. Else `null`. NEVER the input token: an address that is not known on `chainId` (mainnet SNX on
+ *     Arbitrum) is what produced the ⚠ badge + 1inch "not valid token" + "No valid quotes".
+ *     Callers must fall back (see `remapPairToChain`); a bare `null` in is `null` out.
  */
 export function remapTokenToChain(token: Token | null, chainId: number): Token | null {
   if (!token) return token
+  if (findChainToken(token.address, chainId)) return token
   // Case-insensitive symbol match: the pipeline's consensus casing follows the on-chain
   // symbol per chain (mainnet 'MOG' ↔ Base 'Mog' are the same asset).
   const sym = token.symbol.toLowerCase()
-  const match = getChainTokenList(chainId).find(
-    (t) => t.symbol.toLowerCase() === sym && t.address.toLowerCase() !== token.address.toLowerCase(),
-  )
-  return match ?? token
+  return getChainTokenList(chainId).find((t) => t.symbol.toLowerCase() === sym) ?? null
+}
+
+/**
+ * The pair a fresh visitor gets on `chainId`: ETH → USDC resolved against that chain's own curated
+ * list (the SwapBox/SwapCard defaults are `findToken('ETH')`/`findToken('USDC')` re-resolved to the
+ * chain, which is exactly this). A leg the chain does not list is `null`.
+ */
+export function getDefaultPair(chainId: number): { tokenIn: Token | null; tokenOut: Token | null } {
+  const list = getChainTokenList(chainId)
+  const find = (sym: string) => list.find((t) => t.symbol.toLowerCase() === sym) ?? null
+  return { tokenIn: find('eth'), tokenOut: find('usdc') }
+}
+
+/**
+ * [fix/chain-switch-token-fallback] Remap BOTH legs of a swap pair to `chainId` (the one place the
+ * Swap — v1 and v2 — decides what a chain switch does to the selection).
+ *
+ * Each non-null leg goes through `remapTokenToChain`. If either leg has no home on the chain
+ * (→ null), or the two legs land on the same address, the whole pair falls back to the chain's
+ * DEFAULT pair — never a half-remapped pair, never a foreign-chain address. A null INPUT leg means
+ * "nothing selected" and stays null. Objects are returned as passed when nothing changes, so
+ * callers can rely on identity for effect/memo deps.
+ */
+export function remapPairToChain(
+  tokenIn: Token | null,
+  tokenOut: Token | null,
+  chainId: number,
+): { tokenIn: Token | null; tokenOut: Token | null } {
+  const nextIn = remapTokenToChain(tokenIn, chainId)
+  const nextOut = remapTokenToChain(tokenOut, chainId)
+  const lostLeg = (tokenIn !== null && nextIn === null) || (tokenOut !== null && nextOut === null)
+  const collapsed = nextIn !== null && nextOut !== null && nextIn.address.toLowerCase() === nextOut.address.toLowerCase()
+  if (lostLeg || collapsed) return getDefaultPair(chainId)
+  return { tokenIn: nextIn, tokenOut: nextOut }
 }
 
 /**

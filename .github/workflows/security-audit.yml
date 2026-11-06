@@ -1,12 +1,13 @@
 # [SC-SUPPLY] Weekly security audit + CI gate
 # High/critical vulns fail the build. Moderate vulns are advisory.
-# Runs: weekly (Monday 08:00 UTC), on push to main, on PRs to main
+# Runs: daily (06:23 UTC, off the hour), on push to main, on PRs to main. Daily so a new advisory
+# surfaces in the morning instead of the next time someone happens to open a PR.
 
 name: "Security Audit"
 
 on:
   schedule:
-    - cron: "0 8 * * 1"
+    - cron: "23 6 * * *"
   push:
     branches: ["main"]
   pull_request:

@@ -189,6 +189,36 @@ describe('OrderDashboard — explorer link [RQ-2026-06-11]', () => {
   })
 })
 
+describe('OrderDashboard — per-chain explorer link [fix/v1-maintenance C1]', () => {
+  // The link follows the ORDER's chainId, never the connected wallet's (useChainId stays 1 here).
+  it.each([
+    [1, 'etherscan.io'],
+    [8453, 'basescan.org'],
+    [42161, 'arbiscan.io'],
+  ])('order on chainId %i links to %s while the wallet is on mainnet', (chainId, host) => {
+    const txHash = '0x' + 'ab'.repeat(32)
+    const order = makeOrder({ status: 'filled', txHash, chainId })
+    useOrderEngineMock.mockReturnValue({
+      orders: [order],
+      activeOrders: [],
+      historyOrders: [order],
+      cancelOrder: vi.fn(),
+      cancelAllOrders: vi.fn(),
+      removeOrder: vi.fn(),
+      isLoading: false,
+    })
+    useChainIdMock.mockReturnValue(1)
+    renderWithProviders(<OrderDashboard />)
+    fireEvent.click(screen.getByText(/Completed \(1\)/))
+    fireEvent.click(screen.getByText(/WETH/).closest('button')!)
+    const link = document.querySelector(`a[href*="${txHash}"]`) as HTMLAnchorElement | null
+    expect(link).toBeTruthy()
+    const url = new URL(link!.href)
+    expect(url.hostname).toBe(host)
+    expect(url.pathname).toBe(`/tx/${txHash}`)
+  })
+})
+
 describe('OrderDashboard — [CHORE-DCA-UX-FIXES] failed order reason', () => {
   it('shows a default reason for a failed order when the keeper persisted no error', () => {
     const failed = makeOrder({ status: 'error', error: null })

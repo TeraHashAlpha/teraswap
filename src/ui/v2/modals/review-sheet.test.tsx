@@ -60,10 +60,9 @@ describe('fields match the quote object', () => {
     expect(cell('review-rate')).toBe(`Rate 1 ETH = ${sp(fmtToken(Number(formatUnits(BigInt(best.toAmount), 6))))} USDC`)
     expect(cell('review-route')).toContain('Dexalot + PancakeSwap V3 + Dexalot')
     expect(cell('review-slippage')).toContain('0.3%')
-    // The floor is the bigint derivation (what useSwap floors with), not a float multiplication.
-    expect(cell('review-min')).toBe(`Minimum output ${sp(fmtToken(deriveMinimumOutput(best.toAmount, 0.3), 6))} USDC`)
-    // 2 487.6842 × (1 − 0.3 %) in integer math: floor(2 487 684 200 × 9 970 / 10 000) = 2 480 221 147 → 4 dp
-    expect(cell('review-min')).toBe('Minimum output 2 480.2211 USDC')
+    // [A69 H-1] No minimum-output row before the hook has frozen the transaction: the sheet never shows a figure it computed itself.
+    expect(screen.queryByTestId('review-min')).toBeNull()
+    expect(screen.queryByTestId('review-min-pending')).toBeNull()
     expect(cell('review-fee')).toBe('Platform fee (0.1%) 0.001 ETH ($2.49)')
     expect(cell('review-gas')).toBe('Est. gas $0.03 (~0.000012 ETH)')
     expect(screen.getByRole('dialog', { name: 'Review Transaction' })).toBeTruthy()
@@ -79,7 +78,7 @@ describe('fields match the quote object', () => {
     cleanup()
     render(<ReviewSheet model={model()} onConfirm={() => {}} onCancel={() => {}} />)
     const dlg = visibleText(screen.getByRole('dialog'))
-    for (const x of [v.rate, v.route, v.slippage, v.gas, v.feeLabel, v.feeValue!, v.minOutput]) expect(dlg).toContain(sp(x).toLowerCase())
+    for (const x of [v.rate, v.route, v.slippage, v.gas, v.feeLabel, v.feeValue!]) expect(dlg).toContain(sp(x).toLowerCase())
     for (const x of [v.rate, v.route, v.slippage, v.gas, v.feeValue!, v.minOutput]) expect(panelText).toContain(sp(x).toLowerCase())
   })
 
@@ -119,6 +118,7 @@ describe('the calldata half is v1 TransactionPreview (parity on the same props)'
     routeViaFeeCollector: true,
     minimumOutput: 2_480_221_200n,
     decimalsOut: 6,
+    tokenOutAddress: USDC.address,
   }
   const v1Props = {
     calldata: pending.calldata,
@@ -155,7 +155,8 @@ describe('the calldata half is v1 TransactionPreview (parity on the same props)'
     expect(cell('review-min')).toBe('Minimum output Enforced on-chain 2 400.0000 USDC')
     cleanup()
     render(<ReviewSheet model={model()} pending={{ ...pending, routeViaFeeCollector: false }} onConfirm={() => {}} onCancel={() => {}} />)
-    expect(cell('review-min')).not.toContain('Enforced on-chain')
+    // Direct route + calldata that decodes to nothing: no row at all (A69 H-1 — never a UI-computed fallback).
+    expect(screen.queryByTestId('review-min')).toBeNull()
   })
 
   it('an undecodable calldata gets v1\'s warning and still lets the user read the raw bytes', () => {

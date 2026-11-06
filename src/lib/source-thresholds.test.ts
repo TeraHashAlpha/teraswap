@@ -113,7 +113,9 @@ describe('source thresholds', () => {
     it('returns custom thresholds for teraswap-self', () => {
       const t = getThresholds('teraswap-self')
       expect(t.failuresToDegraded).toBe(2)
-      expect(t.failuresToDisabled).toBe(3)
+      // fix/monitor-self-source-alerts: slow to disable (5 failures spanning >= 5 min), quick to degrade
+      expect(t.failuresToDisabled).toBe(5)
+      expect(t.minFailingWindowMs).toBe(300_000)
       expect(t.p95LatencyThresholdMs).toBe(3000)
     })
 

@@ -15,7 +15,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 // real KV call — the monitor's own alert logic is covered by cow-fee-monitor.test.ts.
 vi.mock('@/lib/cow-fee-monitor', () => ({ recordCowFeeZeroing: vi.fn(async () => {}) }))
 
-import cowAdapter, { pollCowOrderStatus } from './cow'
+import cowAdapter, { pollCowOrderStatus, __resetCow429LogForTests } from './cow'
 import { FEE_RECIPIENT, FEE_BPS, NATIVE_ETH } from '@/lib/constants'
 
 const VALID_QUOTE = {
@@ -246,5 +246,103 @@ describe('pollCowOrderStatus — poll fetches are time-bounded [RQ-2026-06-11]',
       vi.useRealTimers()
       vi.unstubAllGlobals()
     }
+  })
+})
+
+
+describe('cow adapter — 429 Retry-After reaches the circuit breaker (fix/monitor-self-source-alerts)', () => {
+  const SELL = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+  const BUY = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'
+  const reply429 = (headers: Record<string, string>) =>
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ description: 'rate limited' }), { status: 429, headers: { 'Content-Type': 'application/json', ...headers } }),
+    )
+
+  afterEach(() => vi.restoreAllMocks())
+
+  it('embeds retryAfterMs=<n> when CoW sends Retry-After (seconds)', async () => {
+    reply429({ 'Retry-After': '45' })
+    await expect(cowAdapter.fetchQuote({ src: SELL, dst: BUY, amount: '1000000' })).rejects.toThrow(/CoW 429.*retryAfterMs=45000/)
+  })
+
+  it('the breaker then backs off for exactly that long, not the fixed 5-minute fallback', async () => {
+    const { CircuitBreaker, classifyFailure } = await import('./circuit-breaker')
+    reply429({ 'Retry-After': '45' })
+    const err = await cowAdapter.fetchQuote({ src: SELL, dst: BUY, amount: '1000000' }).catch((e: unknown) => e)
+    expect(classifyFailure(err)).toMatchObject({ status: 429, retryAfterMs: 45_000 })
+    const cb = new CircuitBreaker('cowswap')
+    cb.onFailure(err)
+    expect(cb.getInfo().cooldownRemaining).toBeLessThanOrEqual(45_000)
+    expect(cb.getInfo().cooldownRemaining).toBeGreaterThan(40_000)
+  })
+
+  it('no Retry-After header: message unchanged, breaker keeps its fixed rate-limit cooldown', async () => {
+    reply429({})
+    const err = await cowAdapter.fetchQuote({ src: SELL, dst: BUY, amount: '1000000' }).catch((e: unknown) => e)
+    expect((err as Error).message).not.toContain('retryAfterMs')
+    expect((err as Error).message).toContain('CoW 429')
+  })
+
+  it('a non-numeric Retry-After (HTTP-date) is ignored, never NaN', async () => {
+    reply429({ 'Retry-After': 'Wed, 21 Oct 2026 07:28:00 GMT' })
+    const err = await cowAdapter.fetchQuote({ src: SELL, dst: BUY, amount: '1000000' }).catch((e: unknown) => e)
+    expect((err as Error).message).not.toContain('retryAfterMs')
+  })
+})
+
+
+describe('cow adapter — the first 429 of the process is logged ONCE, structured [feat/retire-force-mev C3]', () => {
+  const SELL = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+  const BUY = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'
+  const body = JSON.stringify({ errorType: 'RateLimited', description: 'x'.repeat(400) })
+  const reply = () =>
+    vi.spyOn(global, 'fetch').mockImplementation(async () =>
+      new Response(body, {
+        status: 429,
+        headers: { 'Content-Type': 'application/json', 'Retry-After': '30', 'X-RateLimit-Limit': '10', 'RateLimit-Policy': '10;w=1', 'CF-Ray': '8d1-FRA', Server: 'cloudflare', 'X-Api-Key-Echo': 'should-not-appear' },
+      }),
+    )
+  const firstLines = (warn: ReturnType<typeof vi.spyOn>) =>
+    warn.mock.calls.map((c: unknown[]) => String(c[0])).filter((l: string) => l.includes('cow_quote_429_first'))
+
+  beforeEach(() => __resetCow429LogForTests())
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllEnvs()
+  })
+
+  it('one JSON line: status, Retry-After, the allowlisted rate-limit/cf-ray/server headers, region, ≤ 200 body chars', async () => {
+    vi.stubEnv('VERCEL_REGION', 'iad1')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    reply()
+    await expect(cowAdapter.fetchQuote({ src: SELL, dst: BUY, amount: '1000000' })).rejects.toThrow(/CoW 429/)
+    const lines = firstLines(warn)
+    expect(lines).toHaveLength(1)
+    const j = JSON.parse(lines[0])
+    expect(j).toMatchObject({ event: 'cow_quote_429_first', status: 429, retryAfter: '30', region: 'iad1', endpoint: 'https://api.cow.fi/mainnet/api/v1/quote' })
+    expect(j.headers).toEqual({ 'retry-after': '30', 'x-ratelimit-limit': '10', 'ratelimit-policy': '10;w=1', 'cf-ray': '8d1-FRA', server: 'cloudflare' })
+    expect(j.body).toHaveLength(200)
+    expect(lines[0]).not.toContain('should-not-appear') // only allowlisted response headers; nothing from the request
+  })
+
+  it('a second 429 in the same process logs nothing more', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    reply()
+    await cowAdapter.fetchQuote({ src: SELL, dst: BUY, amount: '1000000' }).catch(() => {})
+    await cowAdapter.fetchQuote({ src: SELL, dst: BUY, amount: '1000000' }).catch(() => {})
+    expect(firstLines(warn)).toHaveLength(1)
+  })
+
+  it('the request shape is unchanged: POST <base>/quote, headers Content-Type + Accept only', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const spy = reply()
+    await cowAdapter.fetchQuote({ src: SELL, dst: BUY, amount: '1000000' }).catch(() => {})
+    const [url, init] = spy.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://api.cow.fi/mainnet/api/v1/quote')
+    expect(init.method).toBe('POST')
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json', Accept: 'application/json' })
+    expect(Object.keys(JSON.parse(String(init.body))).sort()).toEqual(
+      ['appData', 'buyToken', 'buyTokenBalance', 'from', 'kind', 'partiallyFillable', 'sellAmountBeforeFee', 'sellToken', 'sellTokenBalance', 'signingScheme'].sort(),
+    )
   })
 })

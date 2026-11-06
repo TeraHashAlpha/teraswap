@@ -15,6 +15,8 @@ vi.mock('@/lib/sounds', async () => {
   return Object.fromEntries(Object.entries(actual).map(([k, v]) => [k, typeof v === 'function' ? vi.fn() : v]))
 })
 vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars', v2BodyFontFamily: 'body-font' }))
+// [B8] the v2 Portfolio tab's Swap button navigates with the App Router (no Next app mounted here; nothing is pressed).
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), usePathname: () => '/portfolio' }))
 vi.mock('@/components/ParticleNetwork', () => ({ default: () => null, setParticleTurbo: vi.fn() }))
 
 import { installHarnessGlobals, runScenario, sum, type ScenarioResult, type State, type Ui } from './scenarios'
@@ -41,7 +43,7 @@ afterAll(() => {
   if (process.env.RPC_TABLE_OUT) writeFileSync(process.env.RPC_TABLE_OUT, `${table}\n`)
 })
 
-const STATES: State[] = ['a0', 'a', 'b', 'c', 'c20']
+const STATES: State[] = ['a0', 'a', 'b', 'c', 'c20', 'p', 'an']
 
 describe.each(['v1', 'v2'] as Ui[])('browser RPC harness — %s', (ui) => {
   it.each(STATES)('state %s: visible then hidden', async (state) => {

@@ -17,6 +17,9 @@ const ALLOWED = [
   'proxy.ts',
   'proxy.test.ts',
   'app/api/admin/ui-version/',
+  // [B7, owner-approved 2026-10-31] The APPROX_PRICES guard lists `ui/v2/dca/positions-model.ts` as a display-only importer: a path
+  // string in a test's allow-list (data, never an import), and a test file is never bundled into a page.
+  'lib/order-engine/usd-scope-guard.test.ts',
 ]
 
 function walk(dir: string, out: string[] = []): string[] {

@@ -18,6 +18,13 @@ export type V2TabId = (typeof V2_TABS)[number]['id']
 
 export const V2_TAB_PATHS: readonly string[] = V2_TABS.map((t) => t.path)
 
+/**
+ * [L-5, A75] The 6 tab paths with NO v1 page of their own (everything but `/swap` and `/analytics`, which are real
+ * v1 pages today — src/app/swap, src/app/analytics). proxy.ts uses this to redirect them to `/` under v1 instead of
+ * falling through to Next's generic 404 once v2 is off.
+ */
+export const V2_ONLY_TAB_PATHS: readonly string[] = V2_TAB_PATHS.filter((p) => p !== '/swap' && p !== '/analytics')
+
 /** Active tab for a pathname, with or without the `/v2` prefix; anything else (`/`, `/v2`) is Swap. */
 export function tabIdFromPathname(pathname: string | null | undefined): V2TabId {
   const path = (pathname ?? '').replace(/^\/v2(?=\/|$)/, '').replace(/\/+$/, '') || '/'

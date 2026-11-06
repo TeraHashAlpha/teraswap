@@ -4,6 +4,10 @@
  * `useSplitRoute` answer both trees: v1's SwapBox is driven the way a user drives it, the v2 card is driven the way a v2 user drives
  * it, and what each handed the hooks (arguments, order, count) must be equal. No wallet, no RPC, no transaction: the hooks are mocks.
  *
+ * [A69 M-2] The hooks are mocks that RECORD what the tree handed them (`rec`: the constructor arguments of useSwap / useSplitSwap /
+ * useApproval / useSplitRoute, per render) as well as what it later called on them (execute / approve / confirm…). Both go in the
+ * v1-vs-v2 `toEqual`, so a dropped or altered argument — the `unpricedAck` option above all — fails every scenario that carries it.
+ *
  * Evidence 2 of the goal: standard · approval-first · unpriced without ack (no call) · unpriced with ack (`{ unpricedAck: true }`) ·
  * CoW (`execute('cowswap', …)` then `confirmCowOrder`) · split (`execute(bestSplit[, ack])`, both legs) · 409 reopens the dialog.
  */
@@ -24,6 +28,7 @@ const h = vi.hoisted(() => {
     split: {} as Record<string, unknown>,
     route: {} as Record<string, unknown>,
     depeg: { mode: 'ok', divergence: 0, symbol: '', message: null } as Record<string, unknown>,
+    rec: { swap: [], split: [], approval: [], route: [] } as Record<'swap' | 'split' | 'approval' | 'route', unknown[][]>,
   }
 })
 
@@ -38,12 +43,12 @@ vi.mock('@/hooks/useQuote', () => ({ useQuote: () => h.quote }))
 vi.mock('@/hooks/useChainId', () => ({ useQuoteChainId: () => 1, useActiveChainId: () => 1 }))
 vi.mock('@/hooks/useChainlinkPrice', () => ({ useChainlinkPrice: () => h.oracle }))
 vi.mock('@/hooks/useEthGasCost', () => ({ useEthGasCost: () => ({ ethPrice: 2490, gasPriceGwei: 0.1, estimate: () => ({ eth: 0.000012, usd: 0.03 }) }) }))
-vi.mock('@/hooks/useApproval', () => ({ useApproval: () => h.approval }))
+vi.mock('@/hooks/useApproval', () => ({ useApproval: (...a: unknown[]) => (h.rec.approval.push(a), h.approval) }))
 vi.mock('@/hooks/useSwapPriceTier', () => ({ useSwapPriceTier: () => h.tier }))
 vi.mock('@/hooks/useDepegCheck', () => ({ useDepegCheck: () => h.depeg }))
-vi.mock('@/hooks/useSwap', () => ({ useSwap: () => h.swap }))
-vi.mock('@/hooks/useSplitRoute', () => ({ useSplitRoute: () => h.route }))
-vi.mock('@/hooks/useSplitSwap', () => ({ useSplitSwap: () => h.split }))
+vi.mock('@/hooks/useSwap', () => ({ useSwap: (...a: unknown[]) => (h.rec.swap.push(a), h.swap) }))
+vi.mock('@/hooks/useSplitRoute', () => ({ useSplitRoute: (...a: unknown[]) => (h.rec.route.push(a), h.route) }))
+vi.mock('@/hooks/useSplitSwap', () => ({ useSplitSwap: (...a: unknown[]) => (h.rec.split.push(a), h.split) }))
 vi.mock('@/hooks/useSwapHistory', () => ({ useSwapHistory: () => ({ addRecord: () => {} }) }))
 vi.mock('@/hooks/useActiveApprovals', () => ({ useActiveApprovals: () => ({ addApproval: () => {} }) }))
 vi.mock('@/components/ActiveApprovals', () => ({ default: () => null }))
@@ -115,13 +120,23 @@ afterEach(() => {
 const typeAmount = (c: HTMLElement) => fireEvent.change(c.querySelector('input[inputmode="decimal"]') as HTMLInputElement, { target: { value: '1' } })
 const unpricedTier = { data: { tier: 'unpriced', legs: { in: { tier: 'unpriced', sources: [] }, out: { tier: 'unpriced', sources: [] } } }, loading: false }
 
+/** The arguments each hook was last called with — the render the user is looking at. Every hook is called on every render, so empty means the mock dropped them. */
+function hookArgs() {
+  const last = Object.fromEntries(Object.entries(h.rec).map(([k, v]) => [k, v[v.length - 1]]))
+  expect(Object.values(last).every((a) => Array.isArray(a) && a.length > 0)).toBe(true)
+  return last
+}
+const clearRec = () => Object.values(h.rec).forEach((v) => (v.length = 0))
+
 /** Drive v1 the way a user does, return what the hooks received; reset the spies for the v2 run. */
 function v1Run(drive: () => void) {
+  clearRec()
   const v1 = render(<SwapBox />)
   typeAmount(v1.container)
   drive()
-  const out = { execute: [...calls(h.swap.execute)], split: [...calls(h.split.execute)], approve: [...calls(h.approval.approve)], reset: calls(h.swap.reset).length, splitReset: calls(h.split.reset).length, confirmSwap: calls(h.swap.confirmSwap).length, confirmCow: calls(h.swap.confirmCowOrder).length, confirmPlan: calls(h.split.confirmPlan).length }
+  const out = { hooks: hookArgs(), execute: [...calls(h.swap.execute)], split: [...calls(h.split.execute)], approve: [...calls(h.approval.approve)], reset: calls(h.swap.reset).length, splitReset: calls(h.split.reset).length, confirmSwap: calls(h.swap.confirmSwap).length, confirmCow: calls(h.swap.confirmCowOrder).length, confirmPlan: calls(h.split.confirmPlan).length }
   cleanup()
+  clearRec()
   for (const f of [h.swap.execute, h.split.execute, h.approval.approve, h.swap.reset, h.split.reset, h.swap.confirmSwap, h.swap.confirmCowOrder, h.split.confirmPlan]) (f as ReturnType<typeof vi.fn>).mockClear()
   return out
 }
@@ -130,7 +145,7 @@ function v2Render() {
   typeAmount(v2.container)
   return v2
 }
-const v2Out = () => ({ execute: [...calls(h.swap.execute)], split: [...calls(h.split.execute)], approve: [...calls(h.approval.approve)], reset: calls(h.swap.reset).length, splitReset: calls(h.split.reset).length, confirmSwap: calls(h.swap.confirmSwap).length, confirmCow: calls(h.swap.confirmCowOrder).length, confirmPlan: calls(h.split.confirmPlan).length })
+const v2Out = () => ({ hooks: hookArgs(), execute: [...calls(h.swap.execute)], split: [...calls(h.split.execute)], approve: [...calls(h.approval.approve)], reset: calls(h.swap.reset).length, splitReset: calls(h.split.reset).length, confirmSwap: calls(h.swap.confirmSwap).length, confirmCow: calls(h.swap.confirmCowOrder).length, confirmPlan: calls(h.split.confirmPlan).length })
 
 const v1Click = (name: string | RegExp) => fireEvent.click(screen.getByRole('button', { name }))
 const openReview = () => fireEvent.click(screen.getByRole('button', { name: 'Review swap' }))
@@ -366,6 +381,7 @@ describe('409 unpriced_ack_required: the consent comes back, unticked, even afte
     fireEvent.click(confirmBtn())
     await flush()
     expect(v2Out().execute).toEqual(two.execute)
+    expect(v2Out()).toEqual(two) // [A69 M-2] …and every hook argument and call, not only execute's
   })
 
   it('split: split.unpricedAckRequired reopens the consent; Continue → execute(bestSplit, { unpricedAck: true }); Cancel → the split hook\'s reset()', async () => {
@@ -379,10 +395,17 @@ describe('409 unpriced_ack_required: the consent comes back, unticked, even afte
     expect(calls(h.split.reset)).toHaveLength(1)
     cleanup()
     h.split = splitHook({ unpricedAckRequired: true })
+    const two = v1Run(() => {
+      fireEvent.click(screen.getByTestId('unpriced-consent-checkbox'))
+      fireEvent.click(screen.getByTestId('unpriced-consent-confirm'))
+    })
+    expect(two.split[0][1]).toEqual({ unpricedAck: true })
+    h.split = splitHook({ unpricedAckRequired: true })
     v2Render()
     fireEvent.click(screen.getByTestId('unpriced-consent-checkbox'))
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Continue' }))
     await flush()
+    expect(v2Out()).toEqual(two) // [A69 M-2] the retry after a split 409: v1's calls and hook arguments, equal
     expect(calls(h.split.execute)[0][1]).toEqual({ unpricedAck: true })
     expect(approve()).not.toHaveBeenCalled()
     expect(splitExec()).toHaveBeenCalledTimes(1)

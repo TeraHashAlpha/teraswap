@@ -12,6 +12,10 @@
   --bg:#0B0D0F; --surface:#15171A; --surface-2:#1B1E22; --border:#2A2D31;
   --cream:#EADFB6; --teal:#6B9B94; --text:#F2EEE3; --muted:#A8A498; --dim:#8C887F;
   --red:#FF5C7A; --green:#7FC8A0; --amber:#E3B341;
+  /* Platform green (design review 1, owner): the green the info NOTICE strip's left bar and "NOTICE" label already used (--teal).
+     EVERY vertical accent stroke in v2 — notice/alert bars, chip separators, list + column rules, section labels — uses this one value;
+     severity is carried by the title text, not the bar colour. tokens.test.ts pins it to --teal. */
+  --c-accent-green:var(--teal);
 
   --font-display:var(--font-barlow),"Barlow Condensed",sans-serif;
   --font-body:var(--font-plex-sans),"IBM Plex Sans",system-ui,sans-serif;

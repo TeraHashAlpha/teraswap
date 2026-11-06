@@ -125,6 +125,58 @@ function isAppDataRejection(status: number, desc: string): boolean {
   return d.includes('appdata') || d.includes('app data') || d.includes('partnerfee') || d.includes('partner fee')
 }
 
+// ── [feat/retire-force-mev C3] The first 429 of this process is logged ONCE, structured ─────────────────────────────
+// Recon (docs/feedback/recon-cowswap-429.md) could not capture a real 429 from production — only the breaker's `[CB]` line.
+// This line carries what CoW answered: status, Retry-After, rate-limit / cf-ray / server headers (an allowlist — no cookies),
+// the Vercel region, and ≤ 200 body chars. Nothing from the REQUEST is logged (CoW quotes carry no key anyway).
+let cow429Logged = false
+const COW_429_HEADERS = ['retry-after', 'x-ratelimit-limit', 'x-ratelimit-remaining', 'x-ratelimit-reset', 'ratelimit', 'ratelimit-policy', 'ratelimit-limit', 'ratelimit-remaining', 'ratelimit-reset', 'cf-ray', 'cf-cache-status', 'server', 'via'] as const
+
+function logFirstCow429(res: Response, rawBody: string, endpoint: string): void {
+  if (cow429Logged) return
+  cow429Logged = true
+  const headers: Record<string, string> = {}
+  for (const name of COW_429_HEADERS) {
+    const v = res.headers?.get?.(name)
+    if (v) headers[name] = v.slice(0, 200)
+  }
+  res.headers?.forEach?.((v, k) => {
+    if (/ratelimit/i.test(k) && !(k in headers)) headers[k] = v.slice(0, 200)
+  })
+  console.warn(JSON.stringify({
+    event: 'cow_quote_429_first',
+    status: res.status,
+    retryAfter: res.headers?.get?.('retry-after') ?? null,
+    headers,
+    region: (typeof process !== 'undefined' && process.env?.VERCEL_REGION) || null,
+    endpoint,
+    body: rawBody.slice(0, 200),
+  }))
+}
+
+/** @internal tests only — re-arm the once-per-process 429 line. */
+export function __resetCow429LogForTests(): void {
+  cow429Logged = false
+}
+
+/** An error response's body: the raw text (for the 429 line) and its JSON object (for the existing description mapping). */
+async function readCowErrorBody(res: Response): Promise<{ err: Record<string, unknown>; raw: string }> {
+  let raw = ''
+  try {
+    raw = typeof res.text === 'function' ? await res.text() : JSON.stringify(await res.json())
+  } catch {
+    raw = ''
+  }
+  let err: Record<string, unknown> = {}
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object') err = parsed as Record<string, unknown>
+  } catch {
+    /* non-JSON body — same as the old res.json().catch(() => ({})) */
+  }
+  return { err, raw }
+}
+
 /**
  * POST /quote with the partner-fee appData. FAIL-SOFT: if (and ONLY if) CoW rejects the partnerFee
  * appData schema, retry ONCE with the fee-free appData so quoting never breaks over the fee — and
@@ -144,7 +196,7 @@ async function postCowQuoteWithFeeFallback(
   let res = await post(buildCowAppData(true))
   if (res.ok) return res.json()
 
-  let err = await res.json().catch(() => ({}))
+  let { err, raw } = await readCowErrorBody(res)
   let desc = String(err.description || err.errorType || '')
   if (isAppDataRejection(res.status, desc)) {
     // Never break CoW quoting over the fee — drop the partnerFee and retry once.
@@ -163,12 +215,26 @@ async function postCowQuoteWithFeeFallback(
     }
     res = await post(buildCowAppData(false))
     if (res.ok) return res.json()
-    err = await res.json().catch(() => ({}))
+    ;({ err, raw } = await readCowErrorBody(res))
     desc = String(err.description || err.errorType || '')
   }
-  const e = new Error(desc || 'quote failed') as Error & { cowStatus?: number }
+  const e = new Error(desc || 'quote failed') as Error & { cowStatus?: number; cowRetryAfterMs?: number }
   e.cowStatus = res.status
+  // [fix/monitor-self-source-alerts] Carry the upstream's own Retry-After (seconds) so the circuit
+  // breaker backs off for as long as CoW asked instead of its fixed 5-min fallback (same contract
+  // as zerox.ts: `retryAfterMs=<n>` in the message, read by classifyFailure).
+  if (res.status === 429) {
+    const sec = Number(res.headers.get('retry-after'))
+    if (Number.isFinite(sec) && sec > 0) e.cowRetryAfterMs = Math.round(sec * 1000)
+    logFirstCow429(res, raw, `${base}/quote`)
+  }
   throw e
+}
+
+/** ` retryAfterMs=<n>` suffix for a CoW error carrying a 429 Retry-After, else ''. */
+function cowRetryAfterSuffix(e: unknown): string {
+  const ms = (e as { cowRetryAfterMs?: number }).cowRetryAfterMs
+  return ms ? ` retryAfterMs=${ms}` : ''
 }
 
 /**
@@ -206,7 +272,7 @@ async function fetchCowSwapQuote(
     if (desc.includes('SellAmountDoesNotCoverFee') || desc.includes('NoLiquidity')) {
       throw new Error(`CoW: Amount too small or no liquidity for this pair`)
     }
-    throw new Error(`CoW ${(e as { cowStatus?: number }).cowStatus ?? ''}: ${desc}`)
+    throw new Error(`CoW ${(e as { cowStatus?: number }).cowStatus ?? ''}: ${desc}${cowRetryAfterSuffix(e)}`)
   })
   const quote = data.quote
 
@@ -215,7 +281,7 @@ async function fetchCowSwapQuote(
     toAmount: quote.buyAmount,
     estimatedGas: 0,
     gasUsd: 0,
-    routes: ['CoW Protocol (MEV Protected)'],
+    routes: ['CoW Protocol'],
   }
 }
 
@@ -262,7 +328,7 @@ async function fetchCowSwapOrder(
     signingScheme: 'eip712',
   })).catch((e: unknown) => {
     const desc = e instanceof Error ? e.message : 'failed'
-    throw new Error(`CoW quote ${(e as { cowStatus?: number }).cowStatus ?? ''}: ${desc}`)
+    throw new Error(`CoW quote ${(e as { cowStatus?: number }).cowStatus ?? ''}: ${desc}${cowRetryAfterSuffix(e)}`)
   })
   const quote = quoteData.quote
 
@@ -293,7 +359,7 @@ async function fetchCowSwapOrder(
     toAmount: quote.buyAmount,
     estimatedGas: 0,
     gasUsd: 0,
-    routes: ['CoW Protocol (MEV Protected)'],
+    routes: ['CoW Protocol'],
     cowOrderParams: { ...cowOrderParams, buyAmount: minBuyAmount },
   }
 }

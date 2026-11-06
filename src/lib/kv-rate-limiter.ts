@@ -106,6 +106,7 @@ function fallbackRateLimit(
   key: string,
   limit: number,
   windowMs: number,
+  cost: number,
 ): RateLimitResult {
   const fallbackLimit = Math.ceil(limit / 2)
   const now = Date.now()
@@ -118,7 +119,7 @@ function fallbackRateLimit(
     entry.windowStart = now
   }
 
-  entry.count++
+  entry.count += cost
   fallbackMap.set(key, entry)
 
   // Periodic cleanup to prevent unbounded growth across many keys
@@ -146,6 +147,9 @@ function fallbackRateLimit(
  * @param key   — Unique key, e.g. "swap:192.168.1.1"
  * @param limit — Max requests per window
  * @param windowMs — Window size in milliseconds
+ * @param cost  — Units this call consumes (default 1; [FEAT-SERVER-RPC-ENV-SPLIT] /api/rpc charges
+ *                one unit per JSON-RPC call in a batch). Allowed iff count + cost <= limit; cost 1
+ *                is exactly the old `count < limit`.
  * @returns { allowed, remaining, resetAt }
  *
  * On KV failure: falls back to an in-memory limiter enforcing 50% of the
@@ -156,7 +160,9 @@ export async function checkRateLimit(
   key: string,
   limit: number,
   windowMs: number,
+  cost: number = 1,
 ): Promise<RateLimitResult> {
+  const units = Number.isFinite(cost) && cost >= 1 ? Math.floor(cost) : 1
   try {
     const redisKey = `ratelimit:${key}`
     const now = Date.now()
@@ -168,9 +174,10 @@ export async function checkRateLimit(
     const pipeline = kv.pipeline()
     pipeline.zremrangebyscore(redisKey, 0, windowStart)
     pipeline.zcard(redisKey)
-    // Add member with score=now, member=now:random to prevent collisions
-    const member = `${now}:${Math.random().toString(36).slice(2, 8)}`
-    pipeline.zadd(redisKey, { score: now, member })
+    // Add `units` members with score=now, member=now:random to prevent collisions
+    const members = Array.from({ length: units }, () => `${now}:${Math.random().toString(36).slice(2, 8)}`)
+    const [first, ...rest] = members.map((m) => ({ score: now, member: m }))
+    pipeline.zadd(redisKey, first, ...rest)
     pipeline.expire(redisKey, Math.ceil(windowMs / 1000))
 
     const results = await pipeline.exec()
@@ -187,9 +194,9 @@ export async function checkRateLimit(
     // results[3] = EXPIRE result
     const countBeforeAdd = (results[1] as number) ?? 0
 
-    if (countBeforeAdd >= limit) {
-      // Over limit — remove the entry we just added
-      await kv.zrem(redisKey, member).catch(() => {})
+    if (countBeforeAdd + units > limit) {
+      // Over limit — remove the entries we just added
+      await kv.zrem(redisKey, ...members).catch(() => {})
       // Find the oldest entry in the window to calculate resetAt
       const oldest = await kv.zrange(redisKey, 0, 0, { withScores: true }).catch(() => [])
       const oldestScore = oldest.length >= 2 ? (oldest[1] as number) : now
@@ -202,7 +209,7 @@ export async function checkRateLimit(
 
     return {
       allowed: true,
-      remaining: limit - countBeforeAdd - 1,
+      remaining: limit - countBeforeAdd - units,
       resetAt: now + windowMs,
     }
   } catch (err) {
@@ -216,7 +223,7 @@ export async function checkRateLimit(
       kvFailureAlerted = true
     }
 
-    return fallbackRateLimit(key, limit, windowMs)
+    return fallbackRateLimit(key, limit, windowMs, units)
   }
 }
 

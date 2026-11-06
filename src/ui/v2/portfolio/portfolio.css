@@ -1,0 +1,30 @@
+/* [ADR-025 / B8] Portfolio (round7 44 / 45a / 45b / m06): typography on the tunnel photo, one hairline per row, no card, no fill. */
+.ts-pf { width: 100%; max-width: 860px; margin: 0 auto; }
+.ts-pf-main { min-width: 0; }
+.ts-pf-group { margin-top: 28px; }
+.ts-pf-label { padding-bottom: 8px; border-bottom: 1px solid var(--hairline-rule); }
+.ts-pf-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--hairline); }
+.ts-pf-group .ts-pf-row:first-child { border-top: 0; }
+.ts-pf-amount { flex: none; }
+.ts-pf-avatar {
+  display: inline-flex; width: 32px; height: 32px; flex: none; align-items: center; justify-content: center; border-radius: 50%;
+  background: var(--surface-2); color: var(--cream); font-size: 12px; font-weight: 700; object-fit: cover;
+}
+.ts-pf-empty { padding: 40px 0; text-align: center; }
+.ts-pf-error { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 20px; padding-left: 14px; border-left: 2px solid var(--c-accent-green); }
+.ts-pf-spin { animation: ts-pf-spin 1s linear infinite; }
+@keyframes ts-pf-spin { to { transform: rotate(360deg); } }
+.ts-pf-link:focus-visible, .ts-pf-row button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+/* Active Approvals (44 / m06): below the holdings on a phone, in the right column on a wide screen. */
+.ts-pf-approvals { margin-top: 36px; padding-top: 20px; border-top: 1px solid var(--hairline-rule); }
+.ts-pf-approval { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--hairline); }
+.ts-pf-approval:first-child { border-top: 0; }
+.ts-pf-approvals-foot { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--hairline); }
+@media (min-width: 1024px) {
+  .ts-pf--aside { display: grid; max-width: 1180px; grid-template-columns: minmax(0, 1fr) 320px; column-gap: 40px; align-items: start; }
+  .ts-pf--aside .ts-pf-approvals { margin-top: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ts-pf-spin { animation: none; }
+}

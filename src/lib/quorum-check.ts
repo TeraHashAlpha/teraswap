@@ -10,10 +10,13 @@
  *   - flagged:    deviation > threshold on 2/2 pairs → disable source + alert
  *   - correlated: ≥3 sources flagged simultaneously → force-disable all (P0) + alert
  *
- * Runs every 5th monitoring tick (every ~5 min) to stay within rate limits.
+ * Runs every 15th monitoring tick (every ~15 min) to stay within rate limits. It was every 5th
+ * tick (= the 300 s 429 cooldown), which made the quorum the half-open probe of a rate-limited
+ * source on every cycle (fix/monitor-self-source-alerts). Sources whose breaker is OPEN are not
+ * called at all (see runQuorumCheck).
  * Consumes fetchMetaQuote() output — does NOT duplicate adapter fan-out.
  *
- * API call budget per quorum cycle (every 5 ticks / 5 min):
+ * API call budget per quorum cycle (every 15 ticks / 15 min):
  * - 2 reference pairs × N active sources = ~22 calls (if all 11 active)
  * - Combined with H1 (11 calls/min): peak burst = ~33 calls in 1 min
  * - Known rate-limit-sensitive adapters: 1inch (free tier), KyberSwap
@@ -24,11 +27,12 @@
  */
 
 import { kv } from '@/lib/kv'
+import { forLog } from './log-sanitize'
 import { WETH_ADDRESS } from './constants'
 import type { MetaQuoteResult } from './adapters'
 import { fetchMetaQuote } from './api'
-import { getAllStatuses, getStatus, getThresholds, forceDisable } from './source-state-machine'
-import { getCircuitBreaker, circuitKey } from './adapters/circuit-breaker'
+import { getAllStatuses, getStatus, getThresholds, forceDisable, recordRateLimited, clearRateLimited } from './source-state-machine'
+import { getCircuitBreaker, circuitKey, getOpenBreakerSources } from './adapters/circuit-breaker'
 
 // ── Token addresses (Ethereum mainnet) ──────────────────
 
@@ -113,7 +117,7 @@ export interface QuorumCheckResult {
 // ── KV keys ────────────────────────────────────────────
 
 const TICK_COUNTER_KEY = 'teraswap:monitor:quorumTickCounter'
-const QUORUM_TICK_INTERVAL = 5
+export const QUORUM_TICK_INTERVAL = 15
 const LAST_QUORUM_KEY = 'teraswap:monitor:lastQuorumResult'
 const KILLSWITCH_AUDIT_PREFIX = 'teraswap:quorum:killswitch:'
 
@@ -250,6 +254,9 @@ function getMaxDeviation(sourceId: string, pair: ReferencePair): number {
 async function analyzePair(
   pair: ReferencePair,
   activeSourceIds: Set<string>,
+  excludeSources: string[],
+  /** [feat/retire-force-mev C3] Filled with every source that returned a quote (any state) — clean 429 evidence. */
+  responded?: Set<string>,
 ): Promise<PairResult> {
   const result: PairResult = {
     label: pair.label,
@@ -270,6 +277,7 @@ async function analyzePair(
       pair.amount,
       pair.srcDecimals,
       pair.dstDecimals,
+      excludeSources,
     )
   } catch (err) {
     console.warn(`[QUORUM] fetchMetaQuote failed for ${pair.label}:`, err instanceof Error ? err.message : err)
@@ -277,6 +285,8 @@ async function analyzePair(
     result.skipReason = `fetchMetaQuote failed: ${err instanceof Error ? err.message : String(err)}`
     return result
   }
+
+  for (const q of metaResult.all) responded?.add(q.source)
 
   // Filter to only active sources
   const activeQuotes = metaResult.all.filter(q => activeSourceIds.has(q.source))
@@ -349,12 +359,33 @@ async function analyzePair(
 
 // ── Main entry point ────────────────────────────────────
 
+/**
+ * [feat/retire-force-mev C3] The real quote path's 429 evidence. H1 only GETs CoW's quote URL (a 405 when healthy), which
+ * may not be rate-limited the way the POST /quote is; this run's own fan-out IS the real path. A source whose breaker
+ * failed with HTTP 429 during this run → rate-limited via 'quote' (degraded, never healthy); one that returned a quote →
+ * clean for 'quote'. Never throws — the quorum result does not depend on it.
+ */
+export async function recordQuotePathRateLimits(sourceIds: readonly string[], since: number, responded: ReadonlySet<string>): Promise<void> {
+  for (const id of sourceIds) {
+    if (id.startsWith('server-rpc:') || id === 'teraswap-self') continue
+    try {
+      const info = getCircuitBreaker(circuitKey(id)).getInfo()
+      if (info.lastFailureStatus === 429 && info.lastFailureAt >= since) await recordRateLimited(id, 'quote')
+      else if (responded.has(id)) await clearRateLimited(id, 'quote')
+    } catch (err) {
+      console.warn('[QUORUM] rate-limit evidence failed for %s:', forLog(id), forLog(err instanceof Error ? err.message : err))
+    }
+  }
+}
+
 export async function runQuorumCheck(): Promise<QuorumCheckResult> {
   const timestamp = new Date().toISOString()
 
   // Get all active sources — only include active in quorum
   const allStatuses = await getAllStatuses()
-  const activeSources = allStatuses.filter(s => s.state === 'active')
+  // `server-rpc:<chainId>` entries are liveness probes, not quote sources — they must not count toward
+  // MIN_ACTIVE_SOURCES (fix/monitor-self-source-alerts).
+  const activeSources = allStatuses.filter(s => s.state === 'active' && !s.id.startsWith('server-rpc:'))
   const activeSourceIds = new Set(activeSources.map(s => s.id))
 
   // [API-H-02] Trust model: quorum assumes majority of active sources are honest.
@@ -373,12 +404,23 @@ export async function runQuorumCheck(): Promise<QuorumCheckResult> {
     }
   }
 
+  // A source whose breaker is OPEN is backing off (e.g. CoW after a 429): the monitor must not call
+  // it, or it becomes the half-open probe and draws the next 429. Excluded sources simply yield no
+  // quote (MIN_QUOTES_PER_PAIR still guards the median).
+  const excludeSources = await getOpenBreakerSources()
+  if (excludeSources.length > 0) {
+    console.log(`[QUORUM] not calling sources with OPEN breaker: ${excludeSources.join(', ')}`)
+  }
+
   // Analyze each reference pair
+  const quorumStart = Date.now()
+  const responded = new Set<string>()
   const pairResults: PairResult[] = []
   for (const pair of QUORUM_REFERENCE_PAIRS) {
-    const result = await analyzePair(pair, activeSourceIds)
+    const result = await analyzePair(pair, activeSourceIds, excludeSources, responded)
     pairResults.push(result)
   }
+  await recordQuotePathRateLimits(allStatuses.map(s => s.id), quorumStart, responded)
 
   // Aggregate outlier flags across pairs
   const outliersBySource = new Map<string, OutlierInfo[]>()

@@ -45,6 +45,8 @@ interface ExecutionTimelineProps {
   tokenOutDecimals: number
   dcaTotal?: number
   dcaExecuted?: number
+  /** Chain the order executed on (orders.chain_id). Drives the tx explorer link; defaults to mainnet. */
+  chainId?: number
 }
 
 // ── Formatters ─────────────────────────────────────────
@@ -146,6 +148,7 @@ export default function ExecutionTimeline({
   tokenOutDecimals,
   dcaTotal,
   dcaExecuted,
+  chainId = 1,
 }: ExecutionTimelineProps) {
   const [executions, setExecutions] = useState<Execution[]>([])
   const [orderMeta, setOrderMeta] = useState<OrderMeta | null>(null)
@@ -284,11 +287,11 @@ export default function ExecutionTimeline({
                   )}
 
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                    {/* [RQ-2026-06-11] chain-aware helper; executions are mainnet-only
-                        today (executor on chainId 1 only) → byte-identical mainnet URL. */}
+                    {/* [fix/v1-maintenance C1] explorer follows the ORDER's chain (never the wallet's):
+                        etherscan.io / basescan.org / arbiscan.io via the chain registry. */}
                     {exec.tx_hash && (
                       <a
-                        href={explorerTxUrl(exec.tx_hash, 1)}
+                        href={explorerTxUrl(exec.tx_hash, chainId)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center gap-0.5 text-[10px] text-cream-30 hover:text-cream transition-colors"

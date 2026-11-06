@@ -4,6 +4,7 @@ import {
   NATIVE_ETH,
 } from '@/lib/constants'
 import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
+import { serverRpcUrl, serverRpcEnvUrl } from '@/lib/rpc-env'
 import type { Address } from 'viem'
 
 // ── Slippage safety clamp ────────────────────────────────
@@ -48,24 +49,57 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout?: () =
 }
 
 // ── User-friendly error mapping ─────────────────────────
+
+// friendlyError's rules, in ITS order — first match wins. [A73b S-10] isNoRouteError applies the same
+// order, so a message an earlier rule claims (an outage, a limit, an auth error) is never a NO_ROUTE.
+/** Network-level failure (lower-cased input). */
+const isNetworkErrorText = (lower: string): boolean => lower.includes('failed to fetch') || lower.includes('networkerror')
+/** The request timed out (lower-cased input). */
+const isTimeoutText = (lower: string): boolean => lower.includes('timeout')
+/** Rate limited (lower-cased input). */
+const isRateLimitText = (lower: string): boolean => lower.includes('429') || lower.includes('rate limit')
+/** Access denied (lower-cased input). */
+const isForbiddenText = (lower: string): boolean => lower.includes('403') || lower.includes('forbidden')
+/** The adapter's own words for "not enough liquidity for this size" (lower-cased input). */
+const isInsufficientLiquidityText = (lower: string): boolean => lower.includes('insufficient') && lower.includes('liquidity')
+/** The adapter's own words for "this pair has no route / pool" (lower-cased input). */
+const isNoRouteText = (lower: string): boolean => lower.includes('no route') || lower.includes('no pool')
+/** An EARLIER friendlyError rule claims the message: an outage / limit / auth error, whatever else it says. */
+const isPrecedingRuleText = (lower: string): boolean =>
+  isNetworkErrorText(lower) || isTimeoutText(lower) || isRateLimitText(lower) || isForbiddenText(lower)
+
+/**
+ * [ADR-026 / A73 S-1] Did the adapter say the PAIR cannot be routed (no route / no pool / insufficient
+ * liquidity)? Exactly the rules friendlyError maps to its liquidity / no-route copy — ONE predicate, so
+ * /api/swap's machine-readable `NO_ROUTE` (the keeper's "order, not outage" verdict) and the user's
+ * copy can never drift apart. Anything else (timeouts, 5xx, auth, rate limits) is NOT a no-route —
+ * [A73b S-10] including a message that ALSO contains the no-route words: friendlyError's network /
+ * timeout / 429 / 403 rules come first there, so they come first here.
+ */
+export function isNoRouteError(msg: string): boolean {
+  const lower = String(msg ?? '').toLowerCase()
+  if (isPrecedingRuleText(lower)) return false
+  return isInsufficientLiquidityText(lower) || isNoRouteText(lower)
+}
+
 export function friendlyError(source: string, err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err)
   const lower = msg.toLowerCase()
 
   // Network-level
-  if (lower.includes('failed to fetch') || lower.includes('networkerror'))
+  if (isNetworkErrorText(lower))
     return `${source}: Network error — check your connection.`
-  if (lower.includes('timeout'))
+  if (isTimeoutText(lower))
     return `${source}: Request timed out. Try again.`
 
   // HTTP codes
-  if (lower.includes('429') || lower.includes('rate limit'))
+  if (isRateLimitText(lower))
     return `${source}: Rate limited. Wait a moment and retry.`
-  if (lower.includes('403') || lower.includes('forbidden'))
+  if (isForbiddenText(lower))
     return `${source}: Access denied — API key may be invalid.`
-  if (lower.includes('insufficient') && lower.includes('liquidity'))
+  if (isInsufficientLiquidityText(lower))
     return `${source}: Insufficient liquidity for this pair/amount.`
-  if (lower.includes('no route') || lower.includes('no pool'))
+  if (isNoRouteText(lower))
     return `${source}: No route found for this pair.`
 
   // Fallback: first 80 chars
@@ -98,7 +132,7 @@ export function isNativeEth(token: string): boolean {
  *  Server: hits the configured RPC directly. */
 export function getRpcUrl(): string {
   if (typeof window === 'undefined') {
-    return process.env.RPC_URL || process.env.NEXT_PUBLIC_RPC_URL || 'https://eth.llamarpc.com'
+    return serverRpcUrl(DEFAULT_CHAIN_ID)
   }
   return '/api/rpc'
 }
@@ -115,7 +149,10 @@ export function getRpcUrl(): string {
 export function getRpcUrlForChain(chainId: number = DEFAULT_CHAIN_ID): string {
   if (chainId === DEFAULT_CHAIN_ID) return getRpcUrl()
   const { rpc } = getChainConfig(chainId)
-  return rpc.primary || rpc.fallbacks?.[0] || ''
+  // [FEAT-SERVER-RPC-ENV-SPLIT] Server: RPC_URL_<id> (else the NEXT_PUBLIC_* the registry holds)
+  // wins; the browser keeps the registry value untouched.
+  const configured = typeof window === 'undefined' ? serverRpcEnvUrl(chainId) : undefined
+  return configured || rpc.primary || rpc.fallbacks?.[0] || ''
 }
 
 /**

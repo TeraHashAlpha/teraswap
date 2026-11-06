@@ -195,7 +195,11 @@ describe('usePortfolio', () => {
 
   it('filters out zero-balance tokens', async () => {
     const { result } = renderHook(() => usePortfolio())
-    await waitFor(() => expect(result.current.tokens.length).toBeGreaterThan(0))
+    // Wait until the multicall fallback has produced the non-zero USDC row; only then is "WBTC
+    // absent" a statement about the zero-balance filter rather than about a half-loaded list.
+    await waitFor(() =>
+      expect(result.current.tokens.find((t) => t.token.symbol === 'USDC')).toBeDefined(),
+    )
     expect(result.current.tokens.find((t) => t.token.symbol === 'WBTC')).toBeUndefined()
   })
 
@@ -345,7 +349,11 @@ describe('usePortfolio', () => {
       { [USDC]: 1 },
     )
     const { result } = renderHook(() => usePortfolio())
-    await waitFor(() => expect(result.current.tokens.length).toBeGreaterThan(0))
+    // Wait for the discovered USDC itself — the native-ETH row (instant useBalance mock)
+    // makes `tokens.length > 0` true before discovery resolves.
+    await waitFor(() =>
+      expect(result.current.tokens.find((t) => t.token.address.toLowerCase() === USDC)).toBeDefined(),
+    )
     const usdc = result.current.tokens.find((t) => t.token.address.toLowerCase() === USDC)!
     // The curated DEFAULT_TOKENS entry — mocked above as { symbol: 'USDC',
     // decimals: 6 } — must win over what Alchemy returned.
@@ -369,7 +377,11 @@ describe('usePortfolio', () => {
       {},
     )
     const { result } = renderHook(() => usePortfolio())
-    await waitFor(() => expect(result.current.tokens.length).toBeGreaterThan(0))
+    // Wait for the discovered UNK row itself, not just "any row": the native-ETH row (instant
+    // useBalance mock) makes `tokens.length > 0` true before discovery resolves.
+    await waitFor(() =>
+      expect(result.current.tokens.find((t) => t.token.symbol === 'UNK')).toBeDefined(),
+    )
     const unk = result.current.tokens.find((t) => t.token.symbol === 'UNK')!
     expect(unk.token.category).toBe('Other')
   })
@@ -614,7 +626,11 @@ describe('usePortfolio', () => {
       {},
     )
     const { result } = renderHook(() => usePortfolio())
-    await waitFor(() => expect(result.current.tokens.length).toBeGreaterThan(0))
+    // Wait for the discovered UNK row itself, not just "any row": the native-ETH row (instant
+    // useBalance mock) makes `tokens.length > 0` true before discovery resolves.
+    await waitFor(() =>
+      expect(result.current.tokens.find((t) => t.token.symbol === 'UNK')).toBeDefined(),
+    )
     const unk = result.current.tokens.find((t) => t.token.symbol === 'UNK')!
     expect(unk.balance).toBe(expectedBalance)
   })
@@ -722,5 +738,87 @@ describe('usePortfolio — chain-aware [E-3]', () => {
       expect(priceCalls.length).toBeGreaterThan(0)
       expect(String(priceCalls[0][0])).toContain('chainId=8453')
     }, { timeout: 5000 })
+  })
+})
+
+// ─── [fix/v1-maintenance C3] hidden-tab polling ───────────
+
+describe('usePortfolio — hidden-tab polling [fix/v1-maintenance C3]', () => {
+  const setVisibility = (state: 'visible' | 'hidden') => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
+    document.dispatchEvent(new Event('visibilitychange'))
+  }
+  const calls = (prefix: string) => fetchMock.mock.calls.filter((a: unknown[]) => String(a[0]).startsWith(prefix)).length
+  const discovery = () => calls('/api/portfolio/tokens')
+  const prices = () => calls('/api/portfolio/prices')
+  const settle = async () => { await act(async () => { await vi.advanceTimersByTimeAsync(0) }) }
+  const advance = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms) }) }
+
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => {
+    vi.useRealTimers()
+    // back to jsdom's own (visible) value
+    delete (document as unknown as Record<string, unknown>).visibilityState
+  })
+
+  it('baseline: a visible tab polls discovery and prices every 60 s', async () => {
+    renderHook(() => usePortfolio())
+    await settle()
+    const d0 = discovery(); const p0 = prices()
+    expect(d0).toBeGreaterThan(0); expect(p0).toBeGreaterThan(0)
+    await advance(60_000)
+    expect(discovery()).toBe(d0 + 1)
+    expect(prices()).toBe(p0 + 1)
+  })
+
+  it('a hidden tab makes no discovery or price requests, however long it stays hidden', async () => {
+    renderHook(() => usePortfolio())
+    await settle()
+    setVisibility('hidden')
+    const d0 = discovery(); const p0 = prices()
+    await advance(5 * 60_000)
+    expect(discovery()).toBe(d0)
+    expect(prices()).toBe(p0)
+  })
+
+  it('becoming visible again refreshes exactly once, then the 60 s cadence resumes', async () => {
+    renderHook(() => usePortfolio())
+    await settle()
+    setVisibility('hidden')
+    await advance(5 * 60_000)
+    const d0 = discovery(); const p0 = prices()
+    setVisibility('visible')
+    await settle()
+    expect(discovery()).toBe(d0 + 1)
+    expect(prices()).toBe(p0 + 1)
+    await advance(60_000)
+    expect(discovery()).toBe(d0 + 2)
+    expect(prices()).toBe(p0 + 2)
+  })
+
+  it('mounted while hidden: the initial load still happens, but no timer runs until the tab is visible', async () => {
+    setVisibility('hidden')
+    renderHook(() => usePortfolio())
+    await settle()
+    const d0 = discovery(); const p0 = prices()
+    expect(d0).toBeGreaterThan(0); expect(p0).toBeGreaterThan(0)
+    await advance(3 * 60_000)
+    expect(discovery()).toBe(d0)
+    expect(prices()).toBe(p0)
+    setVisibility('visible')
+    await settle()
+    expect(discovery()).toBe(d0 + 1)
+    expect(prices()).toBe(p0 + 1)
+  })
+
+  it('unmounting removes the visibilitychange listener (no request after unmount)', async () => {
+    const { unmount } = renderHook(() => usePortfolio())
+    await settle()
+    unmount()
+    const d0 = discovery(); const p0 = prices()
+    setVisibility('hidden'); setVisibility('visible')
+    await advance(2 * 60_000)
+    expect(discovery()).toBe(d0)
+    expect(prices()).toBe(p0)
   })
 })

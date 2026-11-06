@@ -293,6 +293,38 @@ describe('PortfolioTab', () => {
     expect(screen.queryByRole('button', { name: /^Swap UNK$/ })).toBeNull()
   })
 
+  // [fix/v1-maintenance C2] curated vs "Discovered in Wallet" follows the ACTIVE chain's list.
+  it.each([
+    [8453, '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'],
+    [42161, '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'],
+  ])('chain %i: that chain\'s USDC is curated (Swap, no Discovered section, no Add)', (chainId, usdcAddr) => {
+    activeChainId = chainId
+    const l2Usdc = entry({
+      symbol: 'USDC', name: 'USD Coin', address: usdcAddr as `0x${string}`, category: 'Stablecoin',
+      decimals: 6, balance: 1_000_000n, balanceFormatted: '1', priceUsd: 1, valueUsd: 1,
+    })
+    portfolioState = makePortfolio({ tokens: [l2Usdc], totalValueUsd: 1 })
+    render(<PortfolioTab onSwapToken={vi.fn()} />)
+    expect(screen.queryByText(/Discovered in Wallet/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Add USDC to tokens/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /Swap USDC/ })).toBeTruthy()
+  })
+
+  it.each([8453, 42161])('chain %i: an unknown token is still "Discovered in Wallet" with Add', (chainId) => {
+    activeChainId = chainId
+    portfolioState = makePortfolio({ tokens: [discovered], totalValueUsd: null })
+    render(<PortfolioTab onSwapToken={vi.fn()} />)
+    expect(screen.getByText(/Discovered in Wallet/i)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Add UNK to tokens/ })).toBeTruthy()
+  })
+
+  it('a mainnet-only address is not curated on an L2 (the lists are per chain)', () => {
+    activeChainId = 8453
+    portfolioState = makePortfolio({ tokens: [USDC], totalValueUsd: 1500 }) // mainnet USDC address on Base
+    render(<PortfolioTab onSwapToken={vi.fn()} />)
+    expect(screen.getByText(/Discovered in Wallet/i)).toBeTruthy()
+  })
+
   it('does NOT render the "Discovered" section when every token is in DEFAULT_TOKENS', () => {
     portfolioState = makePortfolio({
       tokens: [ETH, USDC],

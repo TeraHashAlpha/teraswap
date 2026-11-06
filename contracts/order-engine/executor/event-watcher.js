@@ -17,7 +17,10 @@
  */
 
 import { parseAbiItem, formatEther, decodeEventLog } from "viem"
-import { sendTelegramAlert } from "./alert.js"
+import { sendTelegramAlert, esc } from "./alert.js"
+// [fix/executor-alert-masking-rpc-auth] Poll errors are viem errors whose message carries the RPC
+// URL (key in the path) — INC-2026-10-30-001 logged "Poll error (5/5)" for ~20 h.
+import { redactError } from "./redact.js"
 // [PERF-KEEPER-IDLE-BACKOFF] The poll follows the keeper's mode: POLL_INTERVAL_MS while it has
 // active orders, IDLE_POLL_INTERVAL_MS while it has none (executor.js pushes the mode via setIdle).
 import { POLL_INTERVAL_MS, IDLE_POLL_INTERVAL_MS } from "./idle-backoff.js"
@@ -180,9 +183,14 @@ const EVENT_CONFIG = {
  * @param {import('viem').PublicClient} publicClient — viem public client
  * @param {Array<{ address: string, label: string }>|string} contracts — contracts to monitor
  * @param {import('./monitor.js').ExecutorMonitor|null} monitor — optional Prometheus monitor
+ * @param {ReturnType<import('./rpc-auth.js').createRpcAuthMonitor>|null} rpcAuth — optional
+ *   [fix/executor-alert-masking-rpc-auth] the keeper's RPC-auth monitor: every poll outcome is
+ *   reported to it, and an error IT classifies as an auth rejection is alerted by it (rate-limited)
+ *   instead of by the Degraded alert below. Transient errors — and a watcher started without a
+ *   monitor — keep today's backoff + Degraded alert exactly.
  * @returns {{ stop: () => void, setIdle: (idle: boolean) => void }}
  */
-export function startEventWatcher(publicClient, contracts, monitor = null) {
+export function startEventWatcher(publicClient, contracts, monitor = null, rpcAuth = null) {
   // Backward compatibility: accept a single address string
   if (typeof contracts === 'string') {
     contracts = [{ address: contracts, label: 'OrderExecutor' }]
@@ -198,8 +206,13 @@ export function startEventWatcher(publicClient, contracts, monitor = null) {
   async function poll() {
     if (stopped) return
 
+    // [A71 M-1] Which RPC method is in flight: the auth monitor keeps one streak per method, so a
+    // provider that answers getBlockNumber but refuses getLogs still reaches the threshold.
+    let rpcCall = "getBlockNumber"
     try {
       const currentBlock = await publicClient.getBlockNumber()
+      // This method answered: ITS auth streak (if any) is over. Never throws (rpc-auth.js).
+      if (rpcAuth) await rpcAuth.onRpcSuccess("event-watcher:getBlockNumber")
 
       // First poll: just record the block, don't replay history
       if (lastBlock === null) {
@@ -219,11 +232,14 @@ export function startEventWatcher(publicClient, contracts, monitor = null) {
       // the same per-contract buckets (by log.address, lower-cased — nodes return it lower-case,
       // env addresses may be checksummed) and processed contract-by-contract in `contracts` order,
       // exactly as the per-contract calls did. Pinned by event-watcher.test.mjs.
+      rpcCall = "getLogs"
       const unionLogs = await publicClient.getLogs({
         address: contracts.map((c) => c.address),
         fromBlock: lastBlock + 1n,
         toBlock: currentBlock,
       })
+      if (rpcAuth) await rpcAuth.onRpcSuccess("event-watcher:getLogs")
+      rpcCall = "poll"
       const logsByAddress = new Map(contracts.map((c) => [c.address.toLowerCase(), []]))
       for (const log of unionLogs) {
         const bucket = logsByAddress.get(String(log.address).toLowerCase())
@@ -281,17 +297,35 @@ export function startEventWatcher(publicClient, contracts, monitor = null) {
         }
       }
 
+      // [A71b S-1] The processing phase is its own origin (`event-watcher:poll`, see rpcCall above): a
+      // poll that got this far ended its streak, or a pause could never clear once it holds one.
+      if (rpcAuth) await rpcAuth.onRpcSuccess("event-watcher:poll")
       lastBlock = currentBlock
       consecutiveFailures = 0
       backoffMs = INITIAL_BACKOFF_MS
     } catch (err) {
       consecutiveFailures++
-      console.error(`[EVENT-WATCHER] Poll error (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): ${err.message}`)
+      let verdict = null
+      if (rpcAuth) {
+        try {
+          verdict = await rpcAuth.onRpcError(`event-watcher:${rpcCall}`, err)
+        } catch {
+          verdict = null // a broken monitor must not silence the Degraded alert
+        }
+      }
+      console.error(
+        `[EVENT-WATCHER] Poll error (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES})${verdict?.kind === "auth" ? " [rpc auth rejected]" : ""}: ${redactError(err)}`,
+      )
 
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        await sendTelegramAlert(
-          `\u26A0\uFE0F <b>Event Watcher Degraded</b>\n${MAX_CONSECUTIVE_FAILURES} consecutive RPC failures.\nLast error: ${err.message}`
-        )
+        // [A71 M-1] Muted ONLY while the monitor is paused (it already sent the rate-limited auth
+        // alert); repeating it here every 5 polls is the "keeps logging, nobody acts" loop of
+        // INC-2026-10-30-001. An auth error below the threshold still gets today's Degraded alert.
+        if (verdict?.muted !== true) {
+          await sendTelegramAlert(
+            `\u26A0\uFE0F <b>Event Watcher Degraded</b>\n${MAX_CONSECUTIVE_FAILURES} consecutive RPC failures.\nLast error: ${esc(redactError(err))}`
+          )
+        }
         consecutiveFailures = 0
         backoffMs = INITIAL_BACKOFF_MS
       } else {

@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAccount } from 'wagmi'
 import {
   CATEGORY_DISPLAY_ORDER,
-  DEFAULT_TOKENS,
   type Token,
   type TokenCategory,
 } from '@/lib/tokens'
@@ -13,20 +12,17 @@ import { usePortfolio, type PortfolioToken } from '@/hooks/usePortfolio'
 import { useTokenImport } from '@/hooks/useTokenImport'
 import { useActiveChainId } from '@/hooks/useChainId'
 import { getChainConfig } from '@/lib/chains/registry'
+import { isCuratedToken } from '@/lib/chains/tokens'
 
 interface PortfolioTabProps {
   onSwapToken?: (token: Token) => void
 }
 
-// Lower-cased set of DEFAULT_TOKENS addresses. A discovered token whose
-// address is NOT in this set is rendered in the "Discovered in Wallet"
-// section with the dashed-border treatment and the Add-to-Tokens CTA.
-const DEFAULT_TOKEN_ADDRESSES = new Set<string>(
-  DEFAULT_TOKENS.map((t) => t.address.toLowerCase()),
-)
-
-function isDefaultToken(token: Token): boolean {
-  return DEFAULT_TOKEN_ADDRESSES.has(token.address.toLowerCase())
+// A discovered token that is NOT in the ACTIVE chain's curated list (isCuratedToken — mainnet's
+// DEFAULT_TOKENS on chain 1, the Base/Arbitrum catalog elsewhere) is rendered in the "Discovered
+// in Wallet" section with the dashed-border treatment and the Add-to-Tokens CTA.
+function isDefaultToken(token: Token, chainId: number): boolean {
+  return isCuratedToken(token.address, chainId)
 }
 
 function shortenAddress(addr: string): string {
@@ -254,7 +250,7 @@ export default function PortfolioTab({ onSwapToken }: PortfolioTabProps) {
     const buckets = new Map<TokenCategory, PortfolioToken[]>()
     const discoveredList: PortfolioToken[] = []
     for (const entry of tokens) {
-      if (isDefaultToken(entry.token)) {
+      if (isDefaultToken(entry.token, activeChainId)) {
         const list = buckets.get(entry.token.category) ?? []
         list.push(entry)
         buckets.set(entry.token.category, list)
@@ -268,7 +264,7 @@ export default function PortfolioTab({ onSwapToken }: PortfolioTabProps) {
       ),
       discovered: discoveredList,
     }
-  }, [tokens])
+  }, [tokens, activeChainId])
 
   if (!isConnected) {
     return (

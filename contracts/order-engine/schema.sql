@@ -86,6 +86,12 @@ CREATE TABLE IF NOT EXISTS orders (
   consecutive_failures INTEGER NOT NULL DEFAULT 0
     CONSTRAINT orders_consecutive_failures_nonneg CHECK (consecutive_failures >= 0),
   last_attempt_at TIMESTAMPTZ,
+  -- [ADR-026] Keeper INFRA-miss trail (fix/infra-failures-dont-burn-orders): when / why the keeper
+  -- last could NOT complete an attempt for a reason that is OURS (RPC auth/transport, paused,
+  -- Supabase or /api/swap down, keeper gas, receipt unreadable). Such a miss never advances
+  -- consecutive_failures; the trail is never reset. Migration 20261104120000_orders_infra_miss.sql.
+  last_infra_miss_at TIMESTAMPTZ,
+  last_infra_miss_reason TEXT,
 
   -- [FEAT-DCA-FLOOR-TIERS] DCA minimum-output tier the user consented to + when (nullable; NULL = no
   -- consent required). See supabase/migrations/20261011120000_orders_floor_tier_consent.sql.
@@ -145,6 +151,12 @@ CREATE INDEX IF NOT EXISTS idx_orders_hash       ON orders (order_hash);
 -- (CONCURRENTLY must run outside a transaction).
 CREATE INDEX IF NOT EXISTS idx_orders_chain_status ON orders (chain_id, status);
 CREATE INDEX IF NOT EXISTS idx_orders_chain_active ON orders (chain_id, status, created_at) WHERE status = 'active';
+-- [ADR-026 / A73 S-5] The 24 h infra-miss count (GET /api/monitor/keepers) filters on
+-- chain_id + last_infra_miss_at; partial so it only holds rows that ever missed. Mirrors
+-- supabase/migrations/20261104120000_orders_infra_miss.sql (build it CONCURRENTLY on a live table).
+CREATE INDEX IF NOT EXISTS idx_orders_last_infra_miss_at
+  ON orders (chain_id, last_infra_miss_at)
+  WHERE last_infra_miss_at IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_executions_order  ON order_executions (order_id);
 -- [CHORE-KEEPER-RECORD-EXECUTIONS] Defense-in-depth idempotency for the keeper's per-fill
@@ -280,6 +292,12 @@ CREATE TABLE IF NOT EXISTS keeper_runtime_config (
   chain_id              INTEGER PRIMARY KEY,
   no_price_fill_cap_usd NUMERIC,
   keeper_version        TEXT,
-  updated_at            TIMESTAMPTZ
+  updated_at            TIMESTAMPTZ,
+  -- [fix/executor-alert-masking-rpc-auth] INC-2026-10-30-001: NULL = working, 'rpc-auth' = the RPC
+  -- provider rejects the keeper's credentials. Reporting only. See
+  -- supabase/migrations/20261031120000_keeper_runtime_config_paused.sql.
+  paused                TEXT
+    CONSTRAINT keeper_runtime_config_paused_valid CHECK (paused IS NULL OR paused IN ('rpc-auth')),
+  paused_since          TIMESTAMPTZ
 );
 ALTER TABLE keeper_runtime_config ENABLE ROW LEVEL SECURITY;

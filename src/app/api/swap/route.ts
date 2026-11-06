@@ -12,6 +12,7 @@ import { getChainStatus } from '@/lib/chains/activation'
 import { isSequencerUp, SequencerDownError } from '@/lib/chains/sequencer-check'
 import { getPublicClientForChain } from '@/lib/chains/clients'
 import { sanitizeUpstreamError } from '@/lib/sanitize-error'
+import { isNoRouteError } from '@/lib/adapters/shared'
 import { trustedClientIp } from '@/lib/trusted-ip'
 import { forLog } from '@/lib/log-sanitize'
 
@@ -363,6 +364,8 @@ export async function POST(req: NextRequest) {
           return NextResponse.json(
             {
               error: priceCheck.reason,
+              // [ADR-026 / A73 S-1] additive, for the keeper: a price-gate refusal is the ORDER's
+              code: 'PRICE_GUARD',
               priceGuard: true,
               deviation: priceCheck.deviation,
               blocked: priceCheck.blocked,
@@ -385,6 +388,8 @@ export async function POST(req: NextRequest) {
           return NextResponse.json(
             {
               error: 'Price validation unavailable for high-value swap. Please try again.',
+              // [ADR-026 / A73 S-1] additive, for the keeper: OUR oracle is down ⇒ infra, not the order
+              code: 'ORACLE_UNAVAILABLE',
               priceGuard: true,
               blocked: true,
             },
@@ -407,6 +412,12 @@ export async function POST(req: NextRequest) {
     // [SPRINT-9J J2] Always JSON (never let the platform serve HTML), and redact
     // any secret an upstream adapter error might have echoed (URL apiKey, Bearer).
     const message = sanitizeUpstreamError(err instanceof Error ? err.message : 'Unknown error')
+    // [ADR-026 / A73 S-1] The adapter said "no route / no pool / insufficient liquidity" (the same rules
+    // friendlyError maps, adapters/shared.ts isNoRouteError): that is the PAIR, not an outage — a 4xx
+    // with a machine-readable code so the keeper counts it as an `order` miss. The `error` text is the
+    // very string the 502 carried before, so v1 (useSwap.ts `data.error`) and v2 (the same hook) show
+    // the same copy. A 502 without a code remains the keeper's "ours" (never counted).
+    if (isNoRouteError(message)) return NextResponse.json({ error: message, code: 'NO_ROUTE' }, { status: 422 })
     return NextResponse.json({ error: message }, { status: 502 })
   }
 }

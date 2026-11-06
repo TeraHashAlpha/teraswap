@@ -41,6 +41,7 @@ import { DEFAULT_CHAIN_ID, getChainConfig } from './chains/registry'
 import { isSequencerUp, SequencerDownError } from './chains/sequencer-check'
 import { getPublicClientForChain } from './chains/clients'
 import { getFeeIncompatibleSources } from './chains/activation'
+import { serverRpcEnvUrl, browserRpcEnvUrl } from './rpc-env'
 import type { NormalizedQuote, MetaQuoteResult, QuoteMeta, QuoteParams, DEXAdapter } from './adapters'
 
 // ── Re-exports (preserve all existing public API) ───────
@@ -158,7 +159,7 @@ export async function fetchMetaQuote(
   })
 
   // NOTE: FEE_INCOMPATIBLE_SOURCES (0x, CoW) are NOT filtered from quotes.
-  // They still appear so users can choose them (e.g. MEV Protection via CoW).
+  // They still appear so users can choose them (e.g. CoW, an ordinary source since feat/retire-force-mev).
   // Fee collection is skipped at execution time via usesFeeCollector() check.
   const excludeSet = excludeSources ? new Set(excludeSources.map(s => s.toLowerCase())) : null
   const activeSources = excludeSet
@@ -474,7 +475,8 @@ export async function diagnoseQuoteSources(
   // Registry RPC status for the target chain. Resolve primary defensively.
   let rpcPrimary = ''
   try {
-    rpcPrimary = getChainConfig(chainId).rpc.primary ?? ''
+    // [FEAT-SERVER-RPC-ENV-SPLIT] Probe what the SERVER would use (RPC_URL_<id> first).
+    rpcPrimary = serverRpcEnvUrl(chainId) || (getChainConfig(chainId).rpc.primary ?? '')
   } catch { /* unsupported chain → leave empty */ }
   const rpcPrimaryConfigured = rpcPrimary.trim().length > 0
   const rpcReachable = rpcPrimaryConfigured ? await probeRpcReachable(rpcPrimary) : null
@@ -483,7 +485,7 @@ export async function diagnoseQuoteSources(
     ONEINCH_API_KEY: !!process.env.ONEINCH_API_KEY,
     ZEROX_API_KEY: !!process.env.ZEROX_API_KEY,
     ODOS_API_KEY: !!process.env.ODOS_API_KEY,
-    NEXT_PUBLIC_BASE_RPC_URL: !!process.env.NEXT_PUBLIC_BASE_RPC_URL,
+    NEXT_PUBLIC_BASE_RPC_URL: !!browserRpcEnvUrl(8453),
     rpcPrimaryConfigured,
     rpcReachable,
   }

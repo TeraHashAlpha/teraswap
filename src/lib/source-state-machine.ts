@@ -39,12 +39,49 @@ export interface SourceStatus {
   disabledReason?: string
   disabledAt?: number
   lastTransitionAt: number
+  /** [fix/monitor-self-source-alerts] Start (ms) of the current consecutive-failure streak; cleared on success. */
+  failingSince?: number
+  /** Consecutive transport-level probe errors (`kind: 'infra'`); never counted toward failureCount. */
+  infraFailures?: number
+  lastInfraAt?: number
+  /** 'health' when the disable came from consecutive probe failures — eligible for probe-verified recovery. */
+  disabledBy?: 'health'
+  /**
+   * [feat/retire-force-mev C3] Present while the source answers HTTP 429. `via` = which signals currently see the 429: the
+   * H1 probe and/or the real quote path (H5 quorum). Cleared per signal on clean evidence; gone when `via` is empty.
+   * While present the source is `degraded` (never `active`) and the 429 never counts toward `disabled`.
+   */
+  rateLimit?: RateLimitEpisode
+  /** True while the current `degraded` came from a 429 nobody was alerted about yet (a blip stays silent end to end). */
+  quietDegrade?: boolean
+}
+
+export type RateLimitSignal = 'probe' | 'quote'
+
+export interface RateLimitEpisode {
+  /** First 429 of this episode (ms). */
+  since: number
+  lastSeenAt: number
+  via: RateLimitSignal[]
+  /** Last "[SOURCE] … rate-limited" alert (ms); the alert repeats at most once per cooldown. */
+  alertedAt?: number
+  /** Upstream Retry-After (s) from the last 429 that carried one. */
+  retryAfterSec?: number
 }
 
 export interface HealthCheckResult {
   ok: boolean
   latencyMs: number
   error?: string
+  /**
+   * 'infra' = the probe itself could not complete (transport/timeout on the probe path), which says
+   * nothing about the source's health. Recorded separately; never counts as a source failure.
+   * 'rate-limited' = the source answered HTTP 429 [feat/retire-force-mev C3]: `degraded`, never healthy, never a failure
+   * toward `disabled` (a disabled source would stop being called; CoW stays an ordinary, called source).
+   */
+  kind?: 'infra' | 'rate-limited'
+  /** Seconds from a 429's Retry-After header, when numeric. */
+  retryAfterSec?: number
 }
 
 // ── Per-source thresholds ───────────────────────────────
@@ -58,6 +95,8 @@ export interface SourceThresholds {
   quorumMaxDeviationPercent?: number
   /** H5 quorum: max deviation % for stablecoin pairs (default 2) */
   quorumStableMaxDeviationPercent?: number
+  /** Minimum wall-clock span (ms) of the failure streak before degraded → disabled (default 0 = off). */
+  minFailingWindowMs?: number
 }
 
 interface ThresholdsConfig {
@@ -93,6 +132,11 @@ function validateThresholds(t: SourceThresholds, sourceId: string): SourceThresh
     console.warn(`[STATE] Invalid thresholds for ${forLog(sourceId)}: p95LatencyThresholdMs must be >= 100, using defaults`)
     return HARDCODED_DEFAULTS
   }
+  const w = t.minFailingWindowMs
+  if (w !== undefined && (!Number.isInteger(w) || w < 0)) {
+    console.warn(`[STATE] Invalid thresholds for ${forLog(sourceId)}: minFailingWindowMs must be a non-negative integer, using defaults`)
+    return HARDCODED_DEFAULTS
+  }
   return t
 }
 
@@ -117,7 +161,8 @@ function loadThresholds(): ThresholdsConfig {
 
 export function getThresholds(sourceId: string): SourceThresholds {
   const config = loadThresholds()
-  const override = config.overrides[sourceId]
+  // Per-chain ids ("server-rpc:8453") fall back to the bare-name override ("server-rpc").
+  const override = config.overrides[sourceId] ?? config.overrides[sourceId.split(':')[0]]
   if (!override) return config.defaults
 
   const merged: SourceThresholds = {
@@ -131,6 +176,7 @@ export function getThresholds(sourceId: string): SourceThresholds {
     // disabled type-checking on these security-relevant deviation thresholds.
     quorumMaxDeviationPercent: override.quorumMaxDeviationPercent ?? config.defaults.quorumMaxDeviationPercent,
     quorumStableMaxDeviationPercent: override.quorumStableMaxDeviationPercent ?? config.defaults.quorumStableMaxDeviationPercent,
+    minFailingWindowMs: override.minFailingWindowMs ?? config.defaults.minFailingWindowMs,
   }
   return validateThresholds(merged, sourceId)
 }
@@ -145,6 +191,11 @@ export function _resetThresholdsCache(): void {
 const P95_RECOVERY_THRESHOLD = 2000
 const AUTO_RECOVERY_MS = 10 * 60_000
 const MAX_LATENCY_HISTORY = 10
+/** Consecutive infra (probe-path) errors before ONE "probe can't reach it" alert per streak. */
+const INFRA_ALERT_AFTER = 10
+/** A health-disabled source is re-probed this often (ticks are ~60 s, so K = 3 ticks). */
+export const DISABLED_REPROBE_MS = 3 * 60_000
+const TICK_JITTER_MS = 5_000
 
 // ── KV key helpers ──────────────────────────────────────
 
@@ -238,12 +289,14 @@ function calcP95(history: number[]): number {
 
 // ── State transition logic ──────────────────────────────
 
-function transition(status: SourceStatus, newState: SourceState, reason: string): void {
+function transition(status: SourceStatus, newState: SourceState, reason: string, opts?: { alert?: boolean }): void {
   const from = status.state
   if (from === newState) return
   status.state = newState
   status.lastTransitionAt = Date.now()
   console.log(`[STATE] ${forLog(status.id)}: ${from} → ${newState} (${forLog(reason)})`)
+  // [feat/retire-force-mev C3] A 429 degrade is quiet: its own alert fires after RATE_LIMIT_ALERT_AFTER_MS (rate-limit-watch.ts).
+  if (opts?.alert === false) return
 
   // Sole alert path — fans out to Telegram/Email/Discord via alert-wrapper
   // with dedup, grace period, and HTML escaping. Fire-and-forget to never block.
@@ -283,7 +336,34 @@ export async function recordHealthCheck(
 ): Promise<void> {
   const s = await loadFromKV(sourceId)
   const t = getThresholds(sourceId)
-  s.lastCheckAt = Date.now()
+  const now = Date.now()
+  s.lastCheckAt = now
+
+  // [fix/monitor-self-source-alerts] "Probe failed" is not "source unhealthy": a probe that could not
+  // complete (transport/timeout on the probe path) is tracked on its own counter and never moves the
+  // state machine — a transient blip must not disable a source for users. A streak that persists is
+  // still surfaced (one alert per streak), never silently ignored.
+  if (!result.ok && result.kind === 'infra') {
+    s.infraFailures = (s.infraFailures ?? 0) + 1
+    s.lastInfraAt = now
+    console.warn(`[STATE] ${forLog(sourceId)}: probe infra error #${s.infraFailures} (not counted as source failure): ${forLog(result.error ?? 'unknown')}`)
+    if (s.infraFailures === INFRA_ALERT_AFTER) {
+      emitTransitionAlert(sourceId, s.state, s.state, `probe-infra-failure: ${INFRA_ALERT_AFTER} consecutive probe errors — ${result.error ?? 'unknown'}`).catch(err => {
+        console.error('[STATE] infra alert emission failed for %s:', forLog(sourceId), forLog(err instanceof Error ? err.message : err))
+      })
+    }
+    await saveToKV(s)
+    return
+  }
+  if (s.infraFailures) s.infraFailures = 0
+
+  if (!result.ok && result.kind === 'rate-limited') {
+    applyRateLimited(s, 'probe', now, result.retryAfterSec)
+    await saveToKV(s)
+    return
+  }
+  // A probe that answered without a 429 clears the probe's share of a rate-limit episode (the quote path may still see one).
+  if (s.rateLimit) clearRateLimitSignal(s, 'probe')
 
   // [WARMUP] Skip latency recording on cold-start ticks — inflated measurements
   // would push p95 above threshold and cause false degradation alerts.
@@ -297,16 +377,28 @@ export async function recordHealthCheck(
   if (result.ok) {
     s.successCount++
     s.failureCount = 0
+    s.failingSince = undefined
 
-    if (s.state === 'degraded') {
+    if (s.state === 'disabled' && s.disabledBy === 'health') {
+      // Probe-verified recovery: a disabled source that answers again re-enters as degraded and then
+      // earns `active` through the normal successesToActive rule below (no blind timer, no human).
+      s.disabledAt = undefined
+      s.disabledReason = undefined
+      s.disabledBy = undefined
+      transition(s, 'degraded', 'probe recovered after disable')
+    } else if (s.state === 'degraded' && !s.rateLimit) {
+      // [feat/retire-force-mev C3] Never `active` while any signal still sees a 429.
       const p95 = calcP95(s.latencyHistory)
       if (s.successCount >= t.successesToActive && p95 < P95_RECOVERY_THRESHOLD) {
-        transition(s, 'active', `${t.successesToActive} consecutive successes, p95=${Math.round(p95)}ms`)
+        const quiet = s.quietDegrade === true
+        s.quietDegrade = undefined
+        transition(s, 'active', `${t.successesToActive} consecutive successes, p95=${Math.round(p95)}ms`, { alert: !quiet })
       }
     }
   } else {
     s.failureCount++
     s.successCount = 0
+    if (s.failingSince === undefined) s.failingSince = now
 
     if (s.state === 'active') {
       const p95 = calcP95(s.latencyHistory)
@@ -317,20 +409,89 @@ export async function recordHealthCheck(
       }
     }
 
-    if (s.state === 'degraded' && s.failureCount >= t.failuresToDisabled) {
+    // Disabling needs N consecutive failures AND the streak to span the minimum window, so a burst of
+    // back-to-back ticks (retries, lock fail-open) cannot disable a source in seconds.
+    const windowMs = t.minFailingWindowMs ?? 0
+    const windowMet = windowMs <= 0 || (s.failingSince !== undefined && now - s.failingSince >= windowMs)
+    if (s.state === 'degraded' && s.failureCount >= t.failuresToDisabled && windowMet) {
       transition(s, 'disabled', `${s.failureCount} consecutive failures`)
-      s.disabledAt = Date.now()
+      s.disabledAt = now
       s.disabledReason = result.error || 'health-check-failures'
+      s.disabledBy = 'health'
     }
   }
 
   await saveToKV(s)
 }
 
+// ── [feat/retire-force-mev C3] HTTP 429 = rate-limited: degraded, never healthy, never disabled ──
+
+function applyRateLimited(s: SourceStatus, via: RateLimitSignal, now: number, retryAfterSec?: number): void {
+  s.successCount = 0 // a 429 is never evidence of health
+  if (!s.rateLimit) {
+    s.rateLimit = { since: now, lastSeenAt: now, via: [via] }
+    console.warn(`[STATE] ${forLog(s.id)}: rate-limited (429) via ${via}`)
+  } else {
+    s.rateLimit.lastSeenAt = now
+    if (!s.rateLimit.via.includes(via)) s.rateLimit.via = [...s.rateLimit.via, via]
+  }
+  if (retryAfterSec !== undefined) s.rateLimit.retryAfterSec = retryAfterSec
+  // failureCount / failingSince are untouched: a 429 never moves a source toward `disabled`.
+  if (s.state === 'active') {
+    s.quietDegrade = true
+    transition(s, 'degraded', 'rate-limited (429)', { alert: false })
+  }
+}
+
+function clearRateLimitSignal(s: SourceStatus, via: RateLimitSignal): void {
+  if (!s.rateLimit) return
+  const rest = s.rateLimit.via.filter((v) => v !== via)
+  if (rest.length > 0) {
+    s.rateLimit.via = rest
+    return
+  }
+  console.log(`[STATE] ${forLog(s.id)}: no longer rate-limited (429 since ${new Date(s.rateLimit.since).toISOString()})`)
+  s.rateLimit = undefined
+}
+
+/** H5 quorum saw a 429 on the real quote path for this source. Same rules as a probe 429. */
+export async function recordRateLimited(sourceId: string, via: RateLimitSignal, retryAfterSec?: number, now: number = Date.now()): Promise<void> {
+  const s = await loadFromKV(sourceId)
+  applyRateLimited(s, via, now, retryAfterSec)
+  await saveToKV(s)
+}
+
+/** Clean evidence from one signal (e.g. the real quote path returned a quote). No-op without an episode. */
+export async function clearRateLimited(sourceId: string, via: RateLimitSignal): Promise<void> {
+  const s = await loadFromKV(sourceId)
+  if (!s.rateLimit) return
+  clearRateLimitSignal(s, via)
+  await saveToKV(s)
+}
+
+/** The "[SOURCE] … rate-limited" alert was sent: remember when (cooldown), and the degrade is no longer quiet. */
+export async function markRateLimitAlerted(sourceId: string, now: number = Date.now()): Promise<void> {
+  const s = await loadFromKV(sourceId)
+  if (!s.rateLimit) return
+  s.rateLimit.alertedAt = now
+  s.quietDegrade = undefined
+  await saveToKV(s)
+}
+
+/**
+ * Whether H1 should probe this source this tick. A health-disabled source is re-probed every
+ * DISABLED_REPROBE_MS (K = 3 ticks) instead of every tick; everything else is probed every tick.
+ */
+export function shouldProbeNow(s: SourceStatus, now: number = Date.now()): boolean {
+  if (s.state !== 'disabled' || s.disabledBy !== 'health') return true
+  return now - s.lastCheckAt >= DISABLED_REPROBE_MS - TICK_JITTER_MS
+}
+
 export async function forceDisable(sourceId: string, reason: string): Promise<void> {
   const s = await loadFromKV(sourceId)
   s.disabledReason = reason
   s.disabledAt = Date.now()
+  s.disabledBy = undefined // a forced disable is never probe-recovered
   transition(s, 'disabled', `force: ${reason}`)
   await saveToKV(s)
 }
@@ -339,8 +500,11 @@ export async function forceActivate(sourceId: string): Promise<void> {
   const s = await loadFromKV(sourceId)
   s.failureCount = 0
   s.successCount = 0
+  s.failingSince = undefined
+  s.infraFailures = 0
   s.disabledReason = undefined
   s.disabledAt = undefined
+  s.disabledBy = undefined
   transition(s, 'active', 'force activated')
   await saveToKV(s)
 }
@@ -353,6 +517,8 @@ export async function checkAutoRecovery(): Promise<string[]> {
   for (const s of all) {
     if (s.state !== 'disabled' || !s.disabledAt) continue
     if (isP0Reason(s.disabledReason)) continue
+    // Health-disabled sources recover through probe verification (recordHealthCheck), not a blind timer.
+    if (s.disabledBy === 'health') continue
     if (now - s.disabledAt >= AUTO_RECOVERY_MS) {
       s.failureCount = 0
       s.successCount = 0

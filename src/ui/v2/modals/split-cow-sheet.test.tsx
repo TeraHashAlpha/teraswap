@@ -50,9 +50,18 @@ describe('SplitReviewSheet (27, left)', () => {
     const snap = v1.container.cloneNode(true) as HTMLElement
     cleanup()
     const v2 = render(<SplitReviewSheet plannedLegs={LEGS} tokenIn={ETH} tokenOut={USDC} userAddress={USER} onConfirm={() => {}} onCancel={() => {}} />)
-    const result = compareContent(snap, v2.container)
+    // Design review 1 (owner): no ⚠ in any notice/alert — the skipped-leg and simulation-unavailable alerts keep their words (asserted
+    // in the per-leg test); the validation row's glyph is aria-hidden in v2 (it was only "present" through the alerts' ⚠ before).
+    const GLYPH = 'design review 1: warning glyph removed from alerts; the words are kept'
+    const result = compareContent(snap, v2.container, [
+      { text: '⚠ skipped — will not be signed.', reason: GLYPH },
+      { text: '⚠ simulation unavailable — protected only by the on-chain minimum output.', reason: GLYPH },
+      { text: '⚠', reason: 'validation-row glyph: decorative, aria-hidden in v2' },
+    ])
     expect(result.missingText).toEqual([])
     expect(result.staleAllow).toEqual([])
+    expect(v2.container.textContent).toContain('Skipped — will NOT be signed.')
+    expect(v2.container.textContent).toContain('Simulation unavailable — protected only by the on-chain minimum output.')
   })
 
   it('title, the v1 sentence with real leg / prompt counts, and a Confirm that counts signable legs', () => {
@@ -76,7 +85,7 @@ describe('SplitReviewSheet (27, left)', () => {
     // leg 2 simulated inconclusively → v1's fail-open line
     expect(norm(screen.getByTestId('split-leg-1').textContent)).toContain('Simulation unavailable — protected only by the on-chain minimum output.')
     // leg 3 skipped
-    expect(norm(screen.getByTestId('split-leg-2').textContent)).toContain('⚠ Skipped — will NOT be signed. Quote expired')
+    expect(norm(screen.getByTestId('split-leg-2').textContent)).toContain('Skipped — will NOT be signed. Quote expired')
     expect(screen.getByTestId('split-leg-2').textContent).not.toContain('Send')
   })
 
@@ -147,12 +156,12 @@ describe('CowOrderReviewSheet (27, right)', () => {
     expect(result.staleAllow).toEqual([])
   })
 
-  it("v1's CoW explanation, verbatim", () => {
+  it("v1's CoW explanation, verbatim (no MEV promise since feat/retire-force-mev, same words in v1's modal)", () => {
     render(<CowOrderReviewSheet order={order} onConfirm={() => {}} onCancel={() => {}} />)
     expect(norm(screen.getByTestId('cow-explanation').textContent)).toBe(
-      "✓ MEV-protected via CoW Protocol — solvers compete in a batch auction; you're shielded from frontrunning/sandwich attacks. Your wallet signs this order off-chain; no gas to submit.",
+      '✓ Settled via CoW Protocol — solvers compete in a batch auction. Your wallet signs this order off-chain; no gas to submit.',
     )
-    expect(screen.getByRole('dialog', { name: 'Review MEV-Protected Order' })).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: 'Review CoW Protocol Order' })).toBeTruthy()
   })
 
   it('every field is the frozen order.message, formatted by format.ts', () => {

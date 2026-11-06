@@ -52,6 +52,8 @@ import {
   checkAllKeeperChains,
   alertOnKeeperTrouble,
   describeKeeperHealth,
+  readKeeperPausedState,
+  readAllKeeperPausedStates,
   type KeeperChainHealth,
 } from './keeper-health-monitor'
 
@@ -311,5 +313,189 @@ describe('keeper-health-monitor', () => {
       { chainId: 42161, monitored: true, gasStatus: 'critical', balanceEth: 0, overdueOrderCount: 0 },
     ]
     await expect(alertOnKeeperTrouble(health)).resolves.toBeUndefined()
+  })
+})
+
+// ── [fix/executor-alert-masking-rpc-auth] INC-2026-10-30-001 — the keeper's self-reported pause ──
+// The keeper writes keeper_runtime_config.paused ('rpc-auth') when its RPC provider rejects its key;
+// the monitor tick reads it back and alerts, because nothing off the keeper host could see the
+// ~20 h outage.
+
+function makeRuntimeConfigStub(row: unknown, error: unknown = null) {
+  return {
+    from: (table: string) =>
+      table === 'keeper_runtime_config'
+        ? { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: row, error }) }) }) }
+        : makeSupabaseStub([]).from(),
+  }
+}
+const PAUSED_ROW = { paused: 'rpc-auth', paused_since: '2026-10-30T15:00:00.000Z' }
+
+describe('keeper paused state (keeper_runtime_config.paused)', () => {
+  const originalEnv = { ...process.env }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    delete process.env[BASE_ENV]
+    delete process.env[ARBITRUM_ENV]
+    mockIsChainActive.mockReturnValue(false)
+  })
+
+  afterEach(() => {
+    process.env = { ...originalEnv }
+    vi.restoreAllMocks()
+  })
+
+  it('a monitored chain whose keeper reports rpc-auth carries paused + pausedSince', async () => {
+    process.env[BASE_ENV] = BASE_ADDR
+    mockIsChainActive.mockImplementation((chainId: number) => chainId === 8453)
+    mockGetBalance.mockResolvedValueOnce(ethToWei(0.02))
+    mockGetSupabase.mockReturnValue(makeRuntimeConfigStub(PAUSED_ROW) as unknown as ReturnType<typeof makeSupabaseStub>)
+    expect(await checkKeeperChain(KEEPER_CHAINS[0])).toEqual({
+      chainId: 8453,
+      monitored: true,
+      gasStatus: 'ok',
+      balanceEth: 0.02,
+      overdueOrderCount: 0,
+      paused: 'rpc-auth',
+      pausedSince: '2026-10-30T15:00:00.000Z',
+    })
+  })
+
+  it('an ACTIVE chain without a keeper address still surfaces the pause (never silent); an inactive one is not read', async () => {
+    mockIsChainActive.mockImplementation((chainId: number) => chainId === 8453)
+    mockGetSupabase.mockReturnValue(makeRuntimeConfigStub(PAUSED_ROW) as unknown as ReturnType<typeof makeSupabaseStub>)
+    expect(await checkKeeperChain(KEEPER_CHAINS[0])).toEqual({
+      chainId: 8453,
+      monitored: false,
+      paused: 'rpc-auth',
+      pausedSince: '2026-10-30T15:00:00.000Z',
+    })
+    mockGetSupabase.mockClear()
+    expect(await checkKeeperChain(KEEPER_CHAINS[1])).toEqual({ chainId: 42161, monitored: false })
+    expect(mockGetSupabase).not.toHaveBeenCalled()
+  })
+
+  it('not paused / no row / migration not applied → no paused field; only an unexpected error is logged', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockIsChainActive.mockReturnValue(true)
+    for (const [row, error] of [
+      [{ paused: null, paused_since: null }, null],
+      [null, null],
+      [null, { code: '42703', message: 'column keeper_runtime_config.paused does not exist' }],
+    ] as const) {
+      mockGetSupabase.mockReturnValue(makeRuntimeConfigStub(row, error) as unknown as ReturnType<typeof makeSupabaseStub>)
+      expect(await checkKeeperChain(KEEPER_CHAINS[0])).toEqual({ chainId: 8453, monitored: false })
+    }
+    expect(warn).not.toHaveBeenCalled()
+    mockGetSupabase.mockReturnValue(makeRuntimeConfigStub(null, { code: '57014', message: 'statement timeout' }) as unknown as ReturnType<typeof makeSupabaseStub>)
+    expect(await readKeeperPausedState(8453)).toEqual({ chainId: 8453, readable: false, paused: null, pausedSince: null })
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
+  it('alertOnKeeperTrouble: a paused keeper → keeper-paused-<chain> active→disabled, monitored or not', async () => {
+    await alertOnKeeperTrouble([
+      { chainId: 8453, monitored: false, paused: 'rpc-auth', pausedSince: '2026-10-30T15:00:00.000Z' },
+      { chainId: 42161, monitored: true, gasStatus: 'ok', balanceEth: 0.01, overdueOrderCount: 0 },
+    ])
+    expect(mockEmitTransitionAlert).toHaveBeenCalledTimes(1)
+    expect(mockEmitTransitionAlert).toHaveBeenCalledWith(
+      'keeper-paused-8453',
+      'active',
+      'disabled',
+      'keeper-paused: chain 8453 rpc-auth since 2026-10-30T15:00:00.000Z',
+    )
+  })
+
+  it('describeKeeperHealth appends the pause to the reporting line', () => {
+    const since = '2026-10-30T15:00:00.000Z'
+    expect(describeKeeperHealth({ chainId: 8453, monitored: true, gasStatus: 'ok', balanceEth: 0.05, overdueOrderCount: 0, paused: 'rpc-auth', pausedSince: since }))
+      .toBe(`8453: ok (0.05 ETH), PAUSED rpc-auth since ${since}`)
+    expect(describeKeeperHealth({ chainId: 8453, monitored: false, paused: 'rpc-auth', pausedSince: since }))
+      .toBe(`8453: not monitored, PAUSED rpc-auth since ${since}`)
+  })
+
+  it('readAllKeeperPausedStates covers every KEEPER_CHAINS row with active + readable', async () => {
+    mockIsChainActive.mockImplementation((chainId: number) => chainId === 8453)
+    mockGetSupabase.mockReturnValue(makeRuntimeConfigStub(PAUSED_ROW) as unknown as ReturnType<typeof makeSupabaseStub>)
+    const all = await readAllKeeperPausedStates()
+    expect(all.map((s) => [s.chainId, s.active, s.readable, s.paused])).toEqual([
+      [8453, true, true, 'rpc-auth'],
+      [42161, false, true, 'rpc-auth'],
+    ])
+  })
+})
+
+// ── [ADR-026] orders with INFRA misses in the last 24 h ──
+// The keeper records last_infra_miss_at on every miss that was OURS (RPC auth/transport, paused,
+// Supabase or /api/swap down, keeper gas) and never counts it against the order. This is the
+// off-host READ of that trail for GET /api/monitor/keepers → the daily report.
+
+import { countInfraMissOrders24h, INFRA_MISS_WINDOW_MS } from './keeper-health-monitor'
+
+function makeInfraMissStub({ count = 0, error = null, runtimeRow = null }: { count?: number | null; error?: unknown; runtimeRow?: unknown } = {}) {
+  const calls: Array<{ cols: unknown; opts: unknown; chainId: unknown; since: unknown; statuses: unknown }> = []
+  return {
+    calls,
+    from: (table: string) =>
+      table === 'orders'
+        ? {
+            select: (cols: unknown, opts: unknown) => ({
+              eq: (_c: string, chainId: unknown) => ({
+                gte: (_col: string, since: unknown) => ({
+                  // [A73 S-6] the count is restricted to LIVE orders (status in active / executing)
+                  in: (_col2: string, statuses: unknown) => {
+                    calls.push({ cols, opts, chainId, since, statuses })
+                    return Promise.resolve({ count, error })
+                  },
+                }),
+              }),
+            }),
+          }
+        : { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: runtimeRow, error: null }) }) }) },
+  }
+}
+
+describe('[ADR-026] countInfraMissOrders24h', () => {
+  const NOW = Date.parse('2026-11-04T12:00:00.000Z')
+  beforeEach(() => vi.clearAllMocks())
+  afterEach(() => vi.restoreAllMocks())
+
+  it('counts orders on the chain with last_infra_miss_at within the last 24 h (head count, read-only)', async () => {
+    const stub = makeInfraMissStub({ count: 3 })
+    mockGetSupabase.mockReturnValue(stub as unknown as ReturnType<typeof makeSupabaseStub>)
+    expect(await countInfraMissOrders24h(8453, NOW)).toEqual({ count: 3, status: 'ok' })
+    // [A73 S-6] only LIVE orders: a filled, cancelled, expired or failed order's old trail does not count
+    expect(stub.calls).toEqual([{ cols: 'id', opts: { count: 'exact', head: true }, chainId: 8453, since: new Date(NOW - INFRA_MISS_WINDOW_MS).toISOString(), statuses: ['active', 'executing'] }])
+    expect(INFRA_MISS_WINDOW_MS).toBe(24 * 60 * 60 * 1000)
+  })
+
+  // [A73 S-4] tri-state: a missing column (migration pending) is "missing" and quiet; a real query
+  // error is "error" and warned — the report shows ℹ️ for the first and ⚠️ for the second.
+  it('migration not applied (PostgREST names the column) → status missing, quietly; any other error → status error + one warning', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockGetSupabase.mockReturnValue(makeInfraMissStub({ count: null, error: { code: 'PGRST204', message: "Could not find the 'last_infra_miss_at' column of 'orders' in the schema cache" } }) as unknown as ReturnType<typeof makeSupabaseStub>)
+    expect(await countInfraMissOrders24h(8453, NOW)).toEqual({ count: null, status: 'missing' })
+    expect(warn).not.toHaveBeenCalled()
+    mockGetSupabase.mockReturnValue(makeInfraMissStub({ count: null, error: { code: '57014', message: 'canceling statement due to statement timeout' } }) as unknown as ReturnType<typeof makeSupabaseStub>)
+    expect(await countInfraMissOrders24h(8453, NOW)).toEqual({ count: null, status: 'error' })
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
+  it('no Supabase client, or a throwing client → status error, never throws', async () => {
+    mockGetSupabase.mockReturnValue(null as unknown as ReturnType<typeof makeSupabaseStub>)
+    expect(await countInfraMissOrders24h(8453, NOW)).toEqual({ count: null, status: 'error' })
+    mockGetSupabase.mockReturnValue({ from: () => { throw new Error('boom') } } as unknown as ReturnType<typeof makeSupabaseStub>)
+    expect(await countInfraMissOrders24h(8453, NOW)).toEqual({ count: null, status: 'error' })
+  })
+
+  it('readAllKeeperPausedStates carries infraMissOrders24h + infraMissStatus per chain (the route passes them through)', async () => {
+    mockIsChainActive.mockImplementation((chainId: number) => chainId === 8453)
+    mockGetSupabase.mockReturnValue(makeInfraMissStub({ count: 2, runtimeRow: null }) as unknown as ReturnType<typeof makeSupabaseStub>)
+    const all = await readAllKeeperPausedStates()
+    expect(all.map((s) => [s.chainId, s.active, s.readable, s.paused, s.infraMissOrders24h, s.infraMissStatus])).toEqual([
+      [8453, true, true, null, 2, 'ok'],
+      [42161, false, true, null, 2, 'ok'],
+    ])
   })
 })
