@@ -88,3 +88,21 @@ keys + logs = HMAC(IP, daily salt), four raw-XFF routes, Sentry stated off (ahea
 | Privacy §5 ¶2 | **What is protected:** Token balance checks, ERC-20 allowance reads, transaction receipt polling, Chainlink price feed queries, custom token imports, and all swap/quote requests to aggregator APIs (1inch, 0x, CoW Protocol, etc.). | **What is relayed:** same list with "token logos," added |
 | Privacy §5 ¶3 | **What is not protected (by design):** Your wallet's own RPC connection (MetaMask, Coinbase Wallet, etc.) is controlled by your wallet settings. Transaction signing and submission are handled by your wallet directly. We recommend using a privacy-focused RPC in your wallet settings (e.g., MEV Blocker, Flashbots Protect) for maximum privacy. | **What is not relayed (by design):** O2 O3 *(mine)* The same is true of any other connection service your wallet uses: for example MetaMask's, if you pair the MetaMask mobile app from a browser without the extension, and Reown's wallet directory, if you open WalletConnect's own wallet list. |
 | Privacy §8 | The Interface does not use cookies for tracking or advertising purposes. We do not employ any third-party analytics or advertising scripts. Any data stored in your browser (via localStorage) is used solely for your convenience and remains on your device. | The Interface does not use cookies for tracking or advertising purposes, and it runs no advertising scripts. *(mine)* Page views are counted by Vercel Web Analytics, our hosting provider's analytics, which is loaded from our own domain. No third-party error-reporting or session-replay service runs in your browser. Any data stored in your browser (…) — unchanged. |
+
+---
+
+## A76 fixes (Auditor A76 on #668 at `014174c`: blocked 0C/2H) — task checklist
+
+Merged `origin/main` first: already up to date at `7eeefeb` (main `838628c`), no merge commit. One commit per id, each
+with a test that fails on `7eeefeb` (run in a detached worktree at that commit). #668 stays a draft.
+
+- [ ] S-1 (H) browser never calls api.cow.fi — `/api/cow/{quote,orders,order-status,trades}` behind the limiter; v1/v2
+      submit + poll and the LimitOrderPanel price read through them; CI capture "CoW submit after signing"; copy fixed
+- [ ] S-2 (H) Privacy §3.3 — Auditor's sentence, v1 == v2, content-map delta
+- [ ] S-3 (M) `/api/rpc` — drop eth_getLogs / eth_simulateV1 / eth_getProof / eth_createAccessList; 10 s upstream
+      timeout; byte-capped read, > 4 MB → 502
+- [ ] S-4 (M) IPv6 rate-limit keys hash the /64
+- [ ] S-5 (L) `/api/rpc` limiter bounded at 1 s
+- [ ] S-6 (L) order poll by the locally active order hashes, not the 50 newest rows
+- [ ] S-7 (L) empty JSON-RPC batch → −32600
+- [ ] Verify: suite, lint delta 0, tsc, build, host capture incl. CoW, rpc-budget, CodeQL 0 new, gitleaks
