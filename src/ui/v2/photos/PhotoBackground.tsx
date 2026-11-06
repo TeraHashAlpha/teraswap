@@ -4,6 +4,7 @@ import Image from 'next/image'
 import './photo.css'
 import { PHOTOS, type PhotoId } from './photos'
 import { photoForTab } from './tab-photos'
+import { NARRATIVE_PHOTOS, type NarrativePhotoId } from './narrative'
 import { photoScrim } from './photo-scrim'
 import type { V2TabId } from '../shell/tab-paths'
 
@@ -21,6 +22,7 @@ import type { V2TabId } from '../shell/tab-paths'
  */
 export function PhotoBackground({
   tab,
+  baked: bakedId,
   photoId,
   aboveFold = true,
   section = false,
@@ -28,6 +30,9 @@ export function PhotoBackground({
 }: {
   /** The shell: one fixed photo per tab (pack round4 assignment). */
   tab?: V2TabId
+  /** [feat/ui-v2-docs-legal] A baked narrative photo directly, for a shell page that is not one of the 8 tabs
+   *  (Docs/Terms/Privacy — see photos/tab-photos.ts's DOCS_LEGAL_PHOTO). Takes precedence over `tab`. */
+  baked?: NarrativePhotoId
   /** A named photo instead of a tab's — the landing places photos per section. */
   photoId?: PhotoId
   aboveFold?: boolean
@@ -37,7 +42,7 @@ export function PhotoBackground({
   appScrim?: boolean
 }) {
   if (!photoId) {
-    const baked = photoForTab(tab ?? 'swap')
+    const baked = bakedId ? NARRATIVE_PHOTOS[bakedId] : photoForTab(tab ?? 'swap')
     return (
       <div aria-hidden="true" data-photo={baked.id} data-photo-baked="" className={section ? 'ts-v2-photo ts-v2-photo--section' : 'ts-v2-photo'}>
         <picture>

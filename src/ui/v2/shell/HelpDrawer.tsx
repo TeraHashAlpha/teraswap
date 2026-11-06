@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import Link from 'next/link'
 import { helpSections } from '@/lib/help-content'
 import { SUPPORT_EMAIL } from '@/lib/constants'
 import { EyebrowLabel, Input } from '../primitives'
@@ -105,6 +106,23 @@ export function HelpDrawer({ open, onClose }: { open: boolean; onClose: () => vo
               </div>
             )
           })}
+        </div>
+
+        <div className="mt-6">
+          {/* [feat/ui-v2-docs-legal] Docs/Terms/Privacy are reachable from the footer on every tab (Footer.tsx); the
+              drawer had no link to any of them — recon/docs-v2 flagged this as a reachability gap. */}
+          <EyebrowLabel>Resources</EyebrowLabel>
+          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <Link href="/docs" className={HELP_LINK}>
+              Docs
+            </Link>
+            <Link href="/terms" className={HELP_LINK}>
+              Terms
+            </Link>
+            <Link href="/privacy" className={HELP_LINK}>
+              Privacy
+            </Link>
+          </div>
         </div>
 
         <div className="mt-6">

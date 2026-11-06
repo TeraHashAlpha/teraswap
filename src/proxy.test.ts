@@ -11,6 +11,7 @@ import { NextRequest } from 'next/server'
 import { config, proxy } from './proxy'
 import { isV2EnableEnabled, isV2KitEnabled } from '@/ui/v2/kit-gate'
 import { V2_TAB_PATHS, V2_ONLY_TAB_PATHS } from '@/ui/v2/shell/tab-paths'
+import { V2_DOCS_LEGAL_PATHS } from '@/ui/v2/shell/docs-legal-paths'
 import { signUiVersionCookie } from '@/ui/v2/ui-cookie'
 
 const SECRET = 'test-cookie-secret-abc123'
@@ -32,14 +33,17 @@ afterEach(() => {
 })
 
 const TAB_PATHS = ['/swap', '/portfolio', '/dca', '/limit', '/sltp', '/orders', '/history', '/analytics']
+const DOCS_LEGAL_PATHS = ['/docs', '/terms', '/privacy']
 
 describe('matcher', () => {
-  it('covers `/`, the 8 tab paths and the v2 tree only — nothing else is touched', () => {
-    expect(config.matcher).toEqual(['/', ...TAB_PATHS, '/v2', '/v2/:path*'])
+  it('covers `/`, the 8 tab paths, docs/terms/privacy and the v2 tree only — nothing else is touched', () => {
+    expect(config.matcher).toEqual(['/', ...TAB_PATHS, ...DOCS_LEGAL_PATHS, '/v2', '/v2/:path*'])
   })
   it('the literal matcher (Next cannot parse a spread) and the shell tab list never drift apart', () => {
-    expect(config.matcher.slice(1, -2)).toEqual([...V2_TAB_PATHS])
+    expect(config.matcher.slice(1, 9)).toEqual([...V2_TAB_PATHS])
+    expect(config.matcher.slice(9, -2)).toEqual([...V2_DOCS_LEGAL_PATHS])
     expect(TAB_PATHS).toEqual([...V2_TAB_PATHS])
+    expect(DOCS_LEGAL_PATHS).toEqual([...V2_DOCS_LEGAL_PATHS])
   })
 })
 
@@ -110,6 +114,30 @@ describe('the 8 tab paths (one generic rule: `/<tab>` → `/v2/<tab>` under the 
   it('every tab rewrite target is the one the shell route serves', () => {
     process.env.UI_V2_ENABLED = 'true'
     for (const path of TAB_PATHS) expect(rewrittenTo(proxy(req(path))).startsWith('/v2/')).toBe(true)
+  })
+})
+
+describe('/docs, /terms, /privacy (same rule as /swap / /analytics: each has a real v1 page)', () => {
+  it.each(DOCS_LEGAL_PATHS)('%s: no env, no cookie → untouched (v1 keeps its own page)', (path) => {
+    expect(passes(proxy(req(path)))).toBe(true)
+  })
+  it.each(DOCS_LEGAL_PATHS)('%s: forged / wrong-secret / secret-less cookie → untouched', (path) => {
+    expect(passes(proxy(req(path, 'f'.repeat(64))))).toBe(true)
+    expect(passes(proxy(req(path, signUiVersionCookie('other-secret'))))).toBe(true)
+    const cookie = signUiVersionCookie(SECRET)
+    delete process.env.UI_V2_COOKIE_SECRET
+    expect(passes(proxy(req(path, cookie)))).toBe(true)
+  })
+  it.each(DOCS_LEGAL_PATHS)('%s: UI_V2_ENABLED=true → rewritten to /v2%s', (path) => {
+    process.env.UI_V2_ENABLED = 'true'
+    expect(rewrittenTo(proxy(req(path)))).toBe(`/v2${path}`)
+  })
+  it.each(DOCS_LEGAL_PATHS)('%s: valid cookie → rewritten to /v2%s', (path) => {
+    expect(rewrittenTo(proxy(req(path, signUiVersionCookie(SECRET))))).toBe(`/v2${path}`)
+  })
+  it('a direct /v2/docs hit (no gate) is always a real 404, whatever the switch says', () => {
+    process.env.UI_V2_ENABLED = 'true'
+    expect(rewrittenTo(proxy(req('/v2/docs')))).toBe('/v2-disabled')
   })
 })
 

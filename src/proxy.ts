@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { isV2EnableEnabled, isV2KitEnabled } from '@/ui/v2/kit-gate'
 import { V2_TAB_PATHS, V2_ONLY_TAB_PATHS } from '@/ui/v2/shell/tab-paths'
+import { V2_DOCS_LEGAL_PATHS } from '@/ui/v2/shell/docs-legal-paths'
 import { UI_COOKIE_NAME, resolveUiVersion } from '@/ui/v2/ui-cookie'
 
 /**
@@ -12,6 +13,8 @@ import { UI_COOKIE_NAME, resolveUiVersion } from '@/ui/v2/ui-cookie'
  *            untouched for `/swap` and `/analytics` (real v1 pages, stay exactly as they are) — [L-5, A75] the
  *            other 6 (`V2_ONLY_TAB_PATHS`) have no v1 page at all, so v1 redirects them to `/` instead of falling
  *            through to Next's generic 404
+ *   `/docs` `/terms` `/privacy` (`V2_DOCS_LEGAL_PATHS`, feat/ui-v2-docs-legal): same rule as `/swap` / `/analytics` —
+ *            each has a real v1 page, so v2 → rewrite to `/v2<path>`, v1 → untouched. Not app tabs (no TabBar entry).
  *   `/v2/*`  NEVER reachable by a direct hit — [L-4, A75] fixed: it used to pass through once the switch said v2.
  *            A request that reaches this function with a `/v2/*` path IS a direct hit (the tab rewrite above
  *            returns its own response before this would ever re-run on the rewritten path), so it is always a
@@ -39,13 +42,32 @@ export function proxy(req: NextRequest) {
     if (v2) return NextResponse.rewrite(new URL(`/v2${req.nextUrl.pathname}`, req.url))
     return V2_ONLY_TAB_PATHS.includes(req.nextUrl.pathname) ? NextResponse.redirect(new URL('/', req.url)) : NextResponse.next()
   }
+  if (V2_DOCS_LEGAL_PATHS.includes(req.nextUrl.pathname)) {
+    return v2 ? NextResponse.rewrite(new URL(`/v2${req.nextUrl.pathname}`, req.url)) : NextResponse.next()
+  }
   const path = req.nextUrl.pathname
   const inV2Tree = path === '/v2' || path.startsWith('/v2/')
   const allowed = path === '/v2/_kit' ? isV2KitEnabled() : path === '/v2/_enable' ? isV2EnableEnabled() : inV2Tree ? false : v2
   return allowed ? NextResponse.next() : NextResponse.rewrite(new URL(NOT_FOUND_PATH, req.url))
 }
 
-// Next statically parses `config`: the matcher must be literals (no spread). proxy.test.ts pins the tab entries to V2_TAB_PATHS.
+// Next statically parses `config`: the matcher must be literals (no spread). proxy.test.ts pins the tab entries to
+// V2_TAB_PATHS and the docs/legal entries to V2_DOCS_LEGAL_PATHS.
 export const config = {
-  matcher: ['/', '/swap', '/portfolio', '/dca', '/limit', '/sltp', '/orders', '/history', '/analytics', '/v2', '/v2/:path*'],
+  matcher: [
+    '/',
+    '/swap',
+    '/portfolio',
+    '/dca',
+    '/limit',
+    '/sltp',
+    '/orders',
+    '/history',
+    '/analytics',
+    '/docs',
+    '/terms',
+    '/privacy',
+    '/v2',
+    '/v2/:path*',
+  ],
 }

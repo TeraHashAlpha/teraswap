@@ -1,0 +1,538 @@
+'use client'
+
+import { useEffect } from 'react'
+import { SUPPORT_EMAIL } from '@/lib/constants'
+import { INTEGRATED_DEX_SOURCE_LABELS, SWAP_CHAIN_LIST_LABEL, formatChainList } from '@/config/product-claims'
+import { EyebrowLabel } from '../primitives'
+import { useScrollSpy, scrollToSection } from './use-scroll-spy'
+import './docs-legal.css'
+
+export type LegalType = 'privacy' | 'terms'
+
+/** v1's LegalPage.tsx — byte-identical copy, this is just the wrapper restyle; a parity test pins the two together. */
+const LAST_UPDATED = 'March 16, 2026'
+
+interface TocSection {
+  id: string
+  title: string
+}
+
+const PRIVACY_SECTIONS: TocSection[] = [
+  { id: 'pp-intro', title: '1. Introduction' },
+  { id: 'pp-architecture', title: '2. Non-Custodial Architecture' },
+  { id: 'pp-collect', title: '3. Information We Collect' },
+  { id: 'pp-use', title: '4. How We Use Your Information' },
+  { id: 'pp-proxy', title: '5. Privacy Proxy & IP Protection' },
+  { id: 'pp-sharing', title: '6. Data Sharing & Third Parties' },
+  { id: 'pp-chainlink', title: '7. Oracle Price Verification' },
+  { id: 'pp-cookies', title: '8. Cookies & Tracking' },
+  { id: 'pp-security', title: '9. Data Security' },
+  { id: 'pp-retention', title: '10. Data Retention' },
+  { id: 'pp-rights', title: '11. Your Rights' },
+  { id: 'pp-children', title: "12. Children's Privacy" },
+  { id: 'pp-changes', title: '13. Changes to This Policy' },
+  { id: 'pp-contact', title: '14. Contact' },
+]
+
+const TERMS_SECTIONS: TocSection[] = [
+  { id: 'tos-acceptance', title: '1. Acceptance of Terms' },
+  { id: 'tos-description', title: '2. Description of the Interface' },
+  { id: 'tos-eligibility', title: '3. Eligibility' },
+  { id: 'tos-non-custodial', title: '4. Non-Custodial Nature' },
+  { id: 'tos-third-party', title: '5. Third-Party Protocols & Services' },
+  { id: 'tos-oracle', title: '6. Chainlink Oracle Verification' },
+  { id: 'tos-fees', title: '7. Fees' },
+  { id: 'tos-approvals', title: '8. Token Approvals' },
+  { id: 'tos-risks', title: '9. Risks' },
+  { id: 'tos-no-advice', title: '10. No Financial Advice' },
+  { id: 'tos-disclaimers', title: '11. Disclaimers' },
+  { id: 'tos-liability', title: '12. Limitation of Liability' },
+  { id: 'tos-indemnification', title: '13. Indemnification' },
+  { id: 'tos-prohibited', title: '14. Prohibited Activities' },
+  { id: 'tos-ip', title: '15. Intellectual Property' },
+  { id: 'tos-termination', title: '16. Termination' },
+  { id: 'tos-governing', title: '17. Governing Law & Dispute Resolution' },
+  { id: 'tos-severability', title: '18. Severability & Entire Agreement' },
+  { id: 'tos-changes', title: '19. Changes to These Terms' },
+  { id: 'tos-contact', title: '20. Contact' },
+]
+
+const LINK = 'ts-v2-underline text-v2-cream font-medium transition hover:text-v2-text'
+
+/* ────────────────────────────────────────────────────────────────
+   Round-7 wrapper primitives (container 2 TOC + container 3 prose). Text content below is byte-identical to v1.
+   ──────────────────────────────────────────────────────────────── */
+
+function TocList({ sections, activeId }: { sections: readonly TocSection[]; activeId: string }) {
+  return (
+    <ol className="mt-4 space-y-0">
+      {sections.map((s) => {
+        const active = activeId === s.id
+        return (
+          <li key={s.id} className="ts-v2-rule-t">
+            <button
+              type="button"
+              onClick={() => scrollToSection(s.id)}
+              aria-current={active ? 'true' : undefined}
+              className={`block w-full py-2 text-left text-[13px] leading-snug transition-colors ${active ? 'text-v2-cream' : 'text-v2-muted hover:text-v2-text'}`}
+            >
+              {s.title}
+            </button>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+/** Desktop (>= 1024): sticky sidebar. */
+function Toc({ sections, activeId }: { sections: readonly TocSection[]; activeId: string }) {
+  return (
+    <nav aria-label="Table of contents" className="sticky top-24 hidden h-fit w-60 shrink-0 lg:block">
+      <EyebrowLabel>On this page</EyebrowLabel>
+      <TocList sections={sections} activeId={activeId} />
+    </nav>
+  )
+}
+
+/** Below 1024: the TOC collapses to an in-page list (a <details>, not sticky, not a sidebar). */
+function MobileToc({ sections, activeId }: { sections: readonly TocSection[]; activeId: string }) {
+  return (
+    <details className="ts-v2-rule-t mb-8 pb-2 lg:hidden">
+      <summary className="cursor-pointer py-2 font-v2-mono text-[11px] font-bold uppercase tracking-[2px] text-v2-cream">On this page</summary>
+      <TocList sections={sections} activeId={activeId} />
+    </details>
+  )
+}
+
+function SectionTitle({ id, children }: { id: string; children: React.ReactNode }) {
+  return (
+    <h2 id={id} className="mb-3 mt-10 scroll-mt-28 font-v2-display text-2xl text-v2-text first:mt-0 sm:text-3xl">
+      {children}
+    </h2>
+  )
+}
+
+function SubTitle({ children }: { children: React.ReactNode }) {
+  return <h3 className="mb-2 mt-6 text-sm font-semibold text-v2-cream sm:text-base">{children}</h3>
+}
+
+function P({ children }: { children: React.ReactNode }) {
+  return <p className="mb-3 text-[15px] leading-relaxed text-v2-muted">{children}</p>
+}
+
+function UL({ children }: { children: React.ReactNode }) {
+  return <ul className="mb-4 ml-5 list-disc space-y-1.5 text-[15px] leading-relaxed text-v2-muted marker:text-v2-dim">{children}</ul>
+}
+
+/* ────────────────────────────────────────────────────────────────
+   PRIVACY POLICY — same 14 sections and text as v1's PrivacyPolicy()
+   ──────────────────────────────────────────────────────────────── */
+function PrivacyPolicy() {
+  return (
+    <>
+      <SectionTitle id="pp-intro">1. Introduction</SectionTitle>
+      <P>
+        TeraSwap (&ldquo;we,&rdquo; &ldquo;us,&rdquo; or &ldquo;our&rdquo;) operates a decentralized exchange
+        meta-aggregator interface (the &ldquo;Interface&rdquo;) that enables users to access optimal
+        swap rates across multiple decentralized exchange protocols on the Ethereum network.
+        This Privacy Policy explains how we collect, use, disclose, and safeguard your information
+        when you visit our Interface.
+      </P>
+      <P>
+        By accessing or using the Interface, you agree to this Privacy Policy. If you do not agree
+        with the terms of this Privacy Policy, please do not access the Interface.
+      </P>
+
+      <SectionTitle id="pp-architecture">2. Non-Custodial Architecture</SectionTitle>
+      <P>
+        TeraSwap is a non-custodial, client-side interface. We do not take custody of your digital
+        assets at any time. All transactions are executed directly between your wallet and the
+        underlying smart contracts of third-party protocols (including but not limited to
+        {formatChainList(INTEGRATED_DEX_SOURCE_LABELS)}). Your private keys never leave your device.
+      </P>
+
+      <SectionTitle id="pp-collect">3. Information We Collect</SectionTitle>
+      <SubTitle>3.1 On-Chain Data</SubTitle>
+      <P>
+        When you connect your non-custodial wallet and interact with the Interface, we access
+        publicly-available blockchain data, including your wallet address and transaction history.
+        Blockchain addresses are publicly-available data that are not, by themselves, personally
+        identifiable. We may screen wallet addresses using third-party blockchain analytics
+        providers to detect and prevent illicit activity.
+      </P>
+
+      <SubTitle>3.2 Automatically Collected Data</SubTitle>
+      <P>
+        When you access the Interface, we may automatically collect certain technical information,
+        including device type, operating system, browser type and version, and general usage patterns.
+        We use this data solely to improve Interface performance, debug errors, and enhance user experience.
+        We do not collect or store your name, email address, IP address, home address, or date of birth.
+      </P>
+
+      <SubTitle>3.3 Local Storage</SubTitle>
+      <P>
+        The Interface uses your browser&rsquo;s local storage to remember your preferences, such as
+        imported tokens, slippage settings, swap history, theme preferences, and active approvals.
+        This data remains exclusively on your device and is never transmitted to our servers.
+      </P>
+
+      <SectionTitle id="pp-use">4. How We Use Your Information</SectionTitle>
+      <P>We use the limited information we collect to:</P>
+      <UL>
+        <li>Provide, maintain, and improve the Interface</li>
+        <li>Fetch and compare swap quotes from multiple decentralized exchange protocols</li>
+        <li>Validate transaction pricing against Chainlink oracle feeds for your protection</li>
+        <li>Screen wallets for compliance with applicable sanctions and anti-money laundering regulations</li>
+        <li>Analyze usage patterns to improve Interface design and performance</li>
+        <li>Detect and prevent fraud, security breaches, and other harmful activities</li>
+      </UL>
+
+      <SectionTitle id="pp-proxy">5. Privacy Proxy &amp; IP Protection</SectionTitle>
+      <P>
+        TeraSwap implements a server-side privacy proxy that shields your IP address from external
+        services. All blockchain read operations (token balances, price feeds, transaction receipts)
+        and all aggregator API requests are routed through our server-side proxy. Only our server
+        communicates with third-party RPC providers and DEX APIs — your browser never makes direct
+        requests to these services.
+      </P>
+      <P>
+        <strong className="text-v2-text">What is protected:</strong> Token balance checks, ERC-20
+        allowance reads, transaction receipt polling, Chainlink price feed queries, custom token
+        imports, and all swap/quote requests to aggregator APIs (1inch, 0x, CoW Protocol, etc.).
+      </P>
+      <P>
+        <strong className="text-v2-text">What is not protected (by design):</strong> Your
+        wallet&rsquo;s own RPC connection (MetaMask, Coinbase Wallet, etc.) is controlled by your
+        wallet settings. Transaction signing and submission are handled by your wallet directly.
+        We recommend using a privacy-focused RPC in your wallet settings (e.g., MEV Blocker, Flashbots
+        Protect) for maximum privacy.
+      </P>
+
+      <SectionTitle id="pp-sharing">6. Data Sharing &amp; Third Parties</SectionTitle>
+      <P>
+        When you request a swap quote, the Interface sends your wallet address and transaction
+        parameters to the APIs of third-party aggregator and DEX protocols via our server-side
+        proxy. Your IP address is not exposed to these services. Each protocol has its own privacy
+        policy. We encourage you to review them.
+      </P>
+      <P>
+        We may share wallet addresses with blockchain analytics providers to comply with applicable
+        laws and regulations. We do not sell, rent, or trade your personal information to any
+        third party for marketing purposes.
+      </P>
+
+      <SectionTitle id="pp-chainlink">7. Oracle Price Verification</SectionTitle>
+      <P>
+        TeraSwap queries Chainlink price oracle smart contracts and the DefiLlama Price API to verify
+        that swap prices are within acceptable deviation thresholds. Chainlink verification occurs
+        on-chain and involves publicly-available data. DefiLlama verification occurs server-side
+        through our privacy proxy. No personal data is transmitted as part of either process.
+      </P>
+
+      <SectionTitle id="pp-cookies">8. Cookies &amp; Tracking</SectionTitle>
+      <P>
+        The Interface does not use cookies for tracking or advertising purposes. We do not employ
+        any third-party analytics or advertising scripts. Any data stored in your browser
+        (via localStorage) is used solely for your convenience and remains on your device.
+      </P>
+
+      <SectionTitle id="pp-security">9. Data Security</SectionTitle>
+      <P>
+        We implement reasonable technical safeguards to protect the limited data we process.
+        However, no system is completely secure. You are
+        responsible for the security of your wallet, private keys, and seed phrases. We will never
+        ask for your private keys or seed phrases.
+      </P>
+
+      <SectionTitle id="pp-retention">10. Data Retention</SectionTitle>
+      <P>
+        We retain automatically collected technical data only for as long as necessary to fulfill
+        the purposes outlined in this Privacy Policy. On-chain data exists permanently on public
+        blockchains, which we cannot modify or delete.
+      </P>
+
+      <SectionTitle id="pp-rights">11. Your Rights</SectionTitle>
+      <P>
+        Depending on your jurisdiction, you may have the right to access, correct, or delete your
+        personal data. Because the Interface collects minimal personal data and most data is stored
+        locally on your device, you can exercise most of these rights by clearing your browser&rsquo;s
+        local storage. For any data-related requests, please contact us at the address below.
+      </P>
+      <P>
+        We cannot edit or delete information stored on a public blockchain, including transaction
+        data and wallet addresses, as these are immutable by design.
+      </P>
+
+      <SectionTitle id="pp-children">12. Children&rsquo;s Privacy</SectionTitle>
+      <P>
+        The Interface is not intended for individuals under the age of 18. We do not knowingly
+        collect personal information from children. If you believe that a child has provided us
+        with personal information, please contact us so we can take appropriate action.
+      </P>
+
+      <SectionTitle id="pp-changes">13. Changes to This Policy</SectionTitle>
+      <P>
+        We may update this Privacy Policy from time to time. Changes will be posted on this page
+        with an updated &ldquo;Last Updated&rdquo; date. Your continued use of the Interface after
+        any changes constitutes your acceptance of the revised Privacy Policy.
+      </P>
+
+      <SectionTitle id="pp-contact">14. Contact</SectionTitle>
+      <P>
+        If you have questions about this Privacy Policy or wish to exercise your data rights,
+        please email us at <a href={`mailto:${SUPPORT_EMAIL}`} className={LINK}>{SUPPORT_EMAIL}</a>{' '}
+        or <a href="https://x.com/TeraHash" target="_blank" rel="noopener noreferrer" className={LINK}>DM @TeraHash on X</a>.
+      </P>
+    </>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────────
+   TERMS OF SERVICE — same 20 sections and text as v1's TermsOfService()
+   ──────────────────────────────────────────────────────────────── */
+function TermsOfService() {
+  return (
+    <>
+      <SectionTitle id="tos-acceptance">1. Acceptance of Terms</SectionTitle>
+      <P>
+        By accessing or using the TeraSwap Interface (the &ldquo;Interface&rdquo;), you agree to
+        be bound by these Terms of Service (&ldquo;Terms&rdquo;). If you do not agree to these
+        Terms, you must not access or use the Interface. These Terms constitute a legally binding
+        agreement between you and TeraSwap (&ldquo;we,&rdquo; &ldquo;us,&rdquo; or &ldquo;our&rdquo;).
+      </P>
+
+      <SectionTitle id="tos-description">2. Description of the Interface</SectionTitle>
+      <P>
+        TeraSwap is a decentralized exchange meta-aggregator that provides a client-side interface
+        for comparing and executing token swaps across multiple decentralized exchange protocols
+        on {SWAP_CHAIN_LIST_LABEL}. The Interface queries third-party protocols including, but not
+        limited to, {formatChainList(INTEGRATED_DEX_SOURCE_LABELS)}.
+      </P>
+      <P>
+        The Interface is a front-end application only. We do not operate, control, or have custody
+        over any of the underlying smart contracts, liquidity pools, or blockchain networks. All
+        swaps are executed directly between your wallet and the relevant smart contracts.
+      </P>
+
+      <SectionTitle id="tos-eligibility">3. Eligibility</SectionTitle>
+      <P>To use the Interface, you must:</P>
+      <UL>
+        <li>Be at least 18 years old or the age of majority in your jurisdiction</li>
+        <li>Not be a resident of, or located in, any jurisdiction where the use of decentralized exchange services is prohibited</li>
+        <li>Not be subject to any sanctions administered by OFAC, the United Nations, the European Union, or any other applicable governmental authority</li>
+        <li>Not use the Interface for any unlawful purpose, including money laundering, terrorist financing, or sanctions evasion</li>
+      </UL>
+
+      <SectionTitle id="tos-non-custodial">4. Non-Custodial Nature</SectionTitle>
+      <P>
+        The Interface is entirely non-custodial. You retain full control of your digital assets
+        at all times. We do not hold, manage, or have access to your private keys, seed phrases,
+        or funds. You are solely responsible for the security of your wallet and credentials.
+      </P>
+      <P>
+        Transactions initiated through the Interface are executed on-chain through third-party
+        smart contracts. Once submitted to the blockchain, transactions are irreversible. We
+        cannot cancel, reverse, or modify any transaction on your behalf.
+      </P>
+
+      <SectionTitle id="tos-third-party">5. Third-Party Protocols &amp; Services</SectionTitle>
+      <P>
+        The Interface aggregates quotes from third-party decentralized exchange protocols. Each
+        protocol has its own smart contracts, terms of service, and risk profile. We do not
+        control, audit, endorse, or guarantee the security or accuracy of any third-party protocol.
+      </P>
+      <P>
+        By using the Interface to interact with third-party protocols, you acknowledge that you
+        are subject to the terms and conditions of those protocols. Any issues arising from
+        interactions with third-party smart contracts are between you and the relevant protocol.
+      </P>
+
+      <SectionTitle id="tos-oracle">6. Chainlink Oracle Verification</SectionTitle>
+      <P>
+        The Interface uses Chainlink decentralized oracle price feeds to verify swap pricing. While
+        this provides an additional layer of protection against manipulated prices, oracle feeds
+        are not infallible. Price data may be delayed, inaccurate, or temporarily unavailable.
+        Oracle verification does not guarantee the accuracy of any swap price.
+      </P>
+
+      <SectionTitle id="tos-fees">7. Fees</SectionTitle>
+      <P>
+        TeraSwap may charge a protocol fee on swaps executed through the Interface. The current
+        fee rate is displayed in the Interface before you confirm any transaction. Fees are
+        subject to change. In addition, you will incur network gas fees payable to Ethereum
+        validators, which are not set or collected by TeraSwap.
+      </P>
+
+      <SectionTitle id="tos-approvals">8. Token Approvals</SectionTitle>
+      <P>
+        Certain swaps require you to approve a third-party smart contract to spend your tokens.
+        TeraSwap defaults to exact-amount approvals (rather than infinite approvals) where
+        technically feasible, reducing the risk of residual token allowances. Some protocols
+        (such as CoW Protocol) may require broader approvals. The Interface will notify you of
+        the approval type before you confirm.
+      </P>
+      <P>
+        You are responsible for monitoring and revoking token approvals as you see fit. The
+        Interface provides an &ldquo;Active Approvals&rdquo; panel for your convenience, but
+        managing your approvals remains your sole responsibility.
+      </P>
+
+      <SectionTitle id="tos-risks">9. Risks</SectionTitle>
+      <P>
+        Using decentralized exchange protocols involves significant risks, including but not
+        limited to:
+      </P>
+      <UL>
+        <li><strong className="text-v2-text">Smart Contract Risk:</strong> Third-party smart contracts may contain bugs, vulnerabilities, or exploits that could result in loss of funds</li>
+        <li><strong className="text-v2-text">Market Risk:</strong> Digital asset prices are highly volatile. The value of your assets may decrease significantly</li>
+        <li><strong className="text-v2-text">Slippage Risk:</strong> The actual execution price of a swap may differ from the quoted price due to market movements between quote and execution</li>
+        <li><strong className="text-v2-text">MEV Risk:</strong> Transactions may be subject to front-running, sandwich attacks, or other forms of miner/maximal extractable value (MEV) exploitation</li>
+        <li><strong className="text-v2-text">Network Risk:</strong> The Ethereum network may experience congestion, high gas fees, outages, or forks that affect transaction execution</li>
+        <li><strong className="text-v2-text">Oracle Risk:</strong> Price feeds may be delayed, inaccurate, or manipulated</li>
+        <li><strong className="text-v2-text">Regulatory Risk:</strong> The legal status of decentralized finance may change in your jurisdiction</li>
+        <li><strong className="text-v2-text">Impermanent Loss:</strong> Liquidity providers in underlying pools may experience impermanent loss</li>
+      </UL>
+      <P>
+        You acknowledge that you understand these risks and accept full responsibility for any
+        losses incurred through use of the Interface.
+      </P>
+
+      <SectionTitle id="tos-no-advice">10. No Financial Advice</SectionTitle>
+      <P>
+        Nothing on the Interface constitutes financial, investment, legal, or tax advice. The
+        Interface displays information from third-party sources for informational purposes only.
+        You should consult qualified professionals before making any financial decisions.
+      </P>
+
+      <SectionTitle id="tos-disclaimers">11. Disclaimers</SectionTitle>
+      <P>
+        THE INTERFACE IS PROVIDED &ldquo;AS IS&rdquo; AND &ldquo;AS AVAILABLE&rdquo; WITHOUT
+        WARRANTIES OF ANY KIND, WHETHER EXPRESS, IMPLIED, OR STATUTORY. WE DISCLAIM ALL WARRANTIES,
+        INCLUDING BUT NOT LIMITED TO MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
+        NON-INFRINGEMENT, AND ACCURACY.
+      </P>
+      <P>
+        WE DO NOT WARRANT THAT THE INTERFACE WILL BE UNINTERRUPTED, ERROR-FREE, SECURE, OR FREE
+        OF VIRUSES OR OTHER HARMFUL COMPONENTS. WE DO NOT WARRANT THE ACCURACY, COMPLETENESS,
+        OR TIMELINESS OF ANY QUOTES, PRICES, OR DATA DISPLAYED THROUGH THE INTERFACE.
+      </P>
+
+      <SectionTitle id="tos-liability">12. Limitation of Liability</SectionTitle>
+      <P>
+        TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL TERASWAP, ITS
+        AFFILIATES, DIRECTORS, OFFICERS, EMPLOYEES, OR AGENTS BE LIABLE FOR ANY INDIRECT,
+        INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING LOSS OF PROFITS,
+        DATA, USE, GOODWILL, OR OTHER INTANGIBLE LOSSES, RESULTING FROM:
+      </P>
+      <UL>
+        <li>Your access to, use of, or inability to use the Interface</li>
+        <li>Any conduct or content of third-party protocols accessed through the Interface</li>
+        <li>Any unauthorized access, use, or alteration of your wallet or transactions</li>
+        <li>Smart contract failures, exploits, or vulnerabilities in third-party protocols</li>
+        <li>Oracle inaccuracies or failures</li>
+        <li>Network congestion, outages, or forks</li>
+      </UL>
+      <P>
+        OUR TOTAL LIABILITY TO YOU FOR ALL CLAIMS ARISING FROM USE OF THE INTERFACE SHALL NOT
+        EXCEED $100 USD.
+      </P>
+
+      <SectionTitle id="tos-indemnification">13. Indemnification</SectionTitle>
+      <P>
+        You agree to indemnify, defend, and hold harmless TeraSwap and its affiliates from and
+        against any claims, liabilities, damages, losses, and expenses (including reasonable
+        attorneys&rsquo; fees) arising from your use of the Interface, your violation of these
+        Terms, or your violation of any applicable law or regulation.
+      </P>
+
+      <SectionTitle id="tos-prohibited">14. Prohibited Activities</SectionTitle>
+      <P>You agree not to:</P>
+      <UL>
+        <li>Use the Interface for any illegal purpose or in violation of applicable laws</li>
+        <li>Attempt to exploit, hack, or interfere with the Interface or any connected systems</li>
+        <li>Use automated systems (bots, scrapers) to access the Interface without authorization</li>
+        <li>Misrepresent your identity or affiliation with TeraSwap</li>
+        <li>Use the Interface to launder money, finance terrorism, or evade sanctions</li>
+        <li>Circumvent any security or access controls</li>
+      </UL>
+
+      <SectionTitle id="tos-ip">15. Intellectual Property</SectionTitle>
+      <P>
+        The Interface, including its design, code, and branding, is protected by intellectual
+        property laws. The underlying smart contracts of third-party protocols are governed by
+        their respective licenses. You may not copy, modify, distribute, or create derivative
+        works of the Interface without our prior written consent.
+      </P>
+
+      <SectionTitle id="tos-termination">16. Termination</SectionTitle>
+      <P>
+        We reserve the right to restrict, suspend, or terminate your access to the Interface at
+        any time, without notice, for any reason, including suspected violation of these Terms or
+        applicable laws. You may discontinue your use of the Interface at any time. Sections 9
+        through 13 shall survive any termination.
+      </P>
+
+      <SectionTitle id="tos-governing">17. Governing Law &amp; Dispute Resolution</SectionTitle>
+      <P>
+        These Terms shall be governed by and construed in accordance with the laws of the
+        applicable jurisdiction, without regard to conflict of law principles. Any disputes arising
+        from these Terms or the Interface shall be resolved through binding arbitration, except
+        where prohibited by law. You waive any right to participate in class action lawsuits or
+        class-wide arbitration.
+      </P>
+
+      <SectionTitle id="tos-severability">18. Severability &amp; Entire Agreement</SectionTitle>
+      <P>
+        If any provision of these Terms is found to be unenforceable, the remaining provisions
+        shall remain in full force and effect. These Terms, together with our Privacy Policy,
+        constitute the entire agreement between you and TeraSwap regarding the Interface.
+      </P>
+
+      <SectionTitle id="tos-changes">19. Changes to These Terms</SectionTitle>
+      <P>
+        We may modify these Terms at any time by posting the revised Terms on the Interface with
+        an updated &ldquo;Last Updated&rdquo; date. Your continued use of the Interface after any
+        changes constitutes your acceptance of the revised Terms.
+      </P>
+
+      <SectionTitle id="tos-contact">20. Contact</SectionTitle>
+      <P>
+        If you have questions about these Terms of Service, please email us at{' '}
+        <a href={`mailto:${SUPPORT_EMAIL}`} className={LINK}>{SUPPORT_EMAIL}</a>{' '}
+        or <a href="https://x.com/TeraHash" target="_blank" rel="noopener noreferrer" className={LINK}>DM @TeraHash on X</a>.
+      </P>
+    </>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────────
+   MAIN COMPONENT
+   ──────────────────────────────────────────────────────────────── */
+export function LegalPageV2({ type }: { type: LegalType }) {
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [type])
+
+  const sections = type === 'privacy' ? PRIVACY_SECTIONS : TERMS_SECTIONS
+  const activeId = useScrollSpy(sections.map((s) => s.id))
+  const title = type === 'privacy' ? 'Privacy Policy' : 'Terms of Service'
+
+  return (
+    <div className="relative mx-auto flex max-w-5xl gap-10 lg:gap-14">
+      <Toc sections={sections} activeId={activeId} />
+      {/* Container 3: a local scrim for the prose, not the shell's uniform appScrim (ContentShell omits it). */}
+      <div className="ts-v2-prose-scrim min-w-0 flex-1 px-4 pb-20 pt-2 sm:px-6">
+        <div className="relative z-[1]">
+          <div className="mb-10">
+            <EyebrowLabel>Legal</EyebrowLabel>
+            <h1 className="mt-3 font-v2-display text-3xl uppercase leading-none text-v2-text sm:text-4xl">{title}</h1>
+            <p className="mt-2 text-sm text-v2-dim">Last updated: {LAST_UPDATED}</p>
+          </div>
+          <MobileToc sections={sections} activeId={activeId} />
+          {type === 'privacy' ? <PrivacyPolicy /> : <TermsOfService />}
+        </div>
+      </div>
+    </div>
+  )
+}
