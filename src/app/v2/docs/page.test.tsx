@@ -9,7 +9,7 @@ import { cleanup, render } from '@testing-library/react'
 const h = vi.hoisted(() => ({ version: 'v2' as 'v1' | 'v2' }))
 vi.mock('@/ui/v2/version', () => ({ getUiVersion: async () => h.version }))
 vi.mock('@/ui/v2/shell/ContentShell', () => ({ ContentShell: ({ page, children }: { page: string; children: React.ReactNode }) => <div data-shell-page={page}>{children}</div> }))
-vi.mock('@/ui/v2/shell/ContentPane', () => ({ ContentPane: () => <div data-content-pane="" /> }))
+vi.mock('@/ui/v2/docs-legal/DocsTabV2', () => ({ DocsTabV2: () => <div data-docs-tab="" /> }))
 vi.mock('next/navigation', () => ({
   notFound: () => {
     throw new Error('NEXT_NOT_FOUND')
@@ -25,7 +25,7 @@ describe('/v2/docs', () => {
     h.version = 'v2'
     const { container } = render(await V2DocsPage())
     expect(container.querySelector('[data-shell-page="docs"]')).not.toBeNull()
-    expect(container.querySelector('[data-content-pane]')).not.toBeNull()
+    expect(container.querySelector('[data-docs-tab]')).not.toBeNull()
   })
 
   it('v1 (switch off) → notFound(), never the shell', async () => {

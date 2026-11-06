@@ -7,7 +7,7 @@ Base: origin/main after feat/ui-v2-mobile-parity (#660), verified merged at `ff0
 
 - [x] C1: `/v2/docs|terms|privacy` pages + proxy matcher + metadata + v2 help drawer links
 - [x] C2: Legal pages — wrapper-only restyle + the one approved copy change + parity test
-- [ ] C3: Docs page — full restyle (six containers) + scroll-spy + tables + claims-live + a11y
+- [x] C3: Docs page — full restyle (six containers) + scroll-spy + tables + claims-live + a11y
 - [ ] C4: Mobile 375 (overflow test, TOC collapse) + screenshots 375/1440
 - [ ] Verify: suite vs origin/main, lint delta 0, tsc clean, build, v1 module-identical, rpc-budget, CodeQL 0 new
 - [ ] Evidence 1–6 in this file, branch pushed, compare link reported
@@ -76,3 +76,47 @@ Base: origin/main after feat/ui-v2-mobile-parity (#660), verified merged at `ff0
   functions) is the same drift-risk pattern this codebase already accepts for Swap/DCA/Orders/etc. — guarded by
   the parity test, not by single-sourcing. `LegalPage.tsx` is marked read-only-source-of-copy in this goal, so
   refactoring it to export shared data was out of scope; flagging the tradeoff rather than silently taking it.
+
+## P3 — C3: Docs full restyle, six containers, claims-live, a11y (commit TBD)
+
+### What shipped
+- `src/ui/v2/docs-legal/DocsTabV2.tsx` (new, ~1000 lines): full restyle of v1's 1029-line DocsPage, text
+  byte-for-byte identical (a parity test proves it — see Concern/Edge case below for the one real bug it caught).
+  Six owner-approved containers: (1) `DocTable` — hairline rows, no box/fill; (2) sticky TOC / scroll-spy — text
+  list, hairline per item, active cream (`use-scroll-spy.ts`, shared with Legal); (3) `.ts-v2-prose-scrim` — same
+  local scrim as Legal; (4) `FlowDiagram` — a numbered 01-05 list, no boxes; (5) `SourceRow` — one hairline row
+  per liquidity source; (6) `DocTag`/`ComingSoonBanner` — mono caps text / a strip with an amber accent. Every
+  other repeating "numbered step" card (Smart Routing, Security, Order Engine, Limit, SL/TP, DCA, Split Routing,
+  Analytics) reuses the same hairline-row shape — the general no-box rule, not a seventh owner decision.
+- `src/ui/v2/docs-legal/content-parity.docs.test.tsx`: v1 `DocsPage` vs v2 `DocsTabV2`, real product-claims, two
+  chain ids (1, 8453) — 200+ text nodes, 0 missing, 0 missing hrefs, **no allow-list** (see Edge case).
+- `src/ui/v2/docs-legal/claims-live.docs.test.tsx`: all 29 product-claims symbols v1's DocsPage imports (count
+  matches recon/docs-v2's "29 of 66") mocked to distinct fake values; every fake appears in v2's render — proves
+  the slots are live reads, not hardcoded strings that happen to match today.
+- `src/ui/v2/docs-legal/docs-legal-a11y.test.tsx`: heading order (h1 → h2 → h3, no skipped levels) for both Docs
+  and Legal; every TOC button is a real, keyboard-focusable `<button>`; `scrollToSection` respects
+  prefers-reduced-motion (instant jump, not animated).
+- No framer-motion / scroll-reveal in `DocsTabV2` — a simplification, not asked for: v1's `whileInView` fades add
+  nothing the goal requires, and the landing's own reveal mechanism (`ts-v2-rv`) is landing-scoped CSS/JS this
+  tree doesn't share, so pulling it in would be new coupling for a purely decorative effect.
+
+### Edge case (real bug caught and fixed, not just a design choice)
+- First parity run failed: the shared `compareContent` allow-list helper strips an allow-listed substring from
+  **every** v1 text node globally, not just the node it's meant for. An allow entry for the FlowDiagram's bare
+  "→" (round-7 numbered list replacing it) also stripped the arrow out of the unrelated OpenOcean
+  disabled-source message ("...returning 200 JSON for USDC→USDT..."), corrupting that comparison and failing
+  the test. Fix: v2's `FlowDiagram` keeps a plain "→" text separator between its numbered rows (not a box, not
+  a connecting line — just the same character v1 shows), so no allow-list entry is needed at all. Flagging this
+  as a real sharp edge in `content-parity.ts` for whoever next needs an allow-list entry that is also a common
+  substring elsewhere on the page.
+
+### Judgement calls
+- Added a (visually `sr-only`) `<h1>` to Docs — v1 has NO `<h1>` on this page at all. Additive only (parity only
+  requires nothing be *removed*), and it's what let the a11y heading-order test mean anything on this page.
+- `StepRow`'s title is `<h3>`, not v1's `<h4>` — v1 skips a heading level in every section that uses this card
+  shape (`<h2>` SectionTitle directly to `<h4>` step titles, no intervening `<h3>`). Caught by my own a11y test;
+  fixed in v2 only (v1 untouched, per the read-only-copy constraint).
+
+### Concern
+- `DocsTabV2` duplicates v1's prose (same risk noted for Legal in P2) — guarded by the parity test, which just
+  proved its worth by catching a real drift risk (above), not a hypothetical one.

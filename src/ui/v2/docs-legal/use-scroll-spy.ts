@@ -30,6 +30,8 @@ export function useScrollSpy(ids: readonly string[]): string {
   return active
 }
 
+/** Respects prefers-reduced-motion (an instant jump, not a smooth scroll) — the TOC's one piece of motion. */
 export function scrollToSection(id: string): void {
-  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })
+  const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  document.getElementById(id)?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth' })
 }
