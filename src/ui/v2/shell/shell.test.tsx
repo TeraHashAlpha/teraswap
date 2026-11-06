@@ -520,6 +520,10 @@ describe('help drawer + fabs', () => {
     for (const s of helpSections) expect(within(dialog).getByRole('button', { name: new RegExp(escapeRegExp(s.title)) })).toBeTruthy()
     expect(within(dialog).getByRole('link', { name: 'Email support' }).getAttribute('href')).toBe(`mailto:${SUPPORT_EMAIL}`)
     expect(within(dialog).getByRole('link', { name: '@TeraHash on X' }).getAttribute('href')).toBe('https://x.com/TeraHash')
+    // [feat/ui-v2-docs-legal] the drawer links to Docs/Terms/Privacy (recon/docs-v2: it had none).
+    expect(within(dialog).getByRole('link', { name: 'Docs' }).getAttribute('href')).toBe('/docs')
+    expect(within(dialog).getByRole('link', { name: 'Terms' }).getAttribute('href')).toBe('/terms')
+    expect(within(dialog).getByRole('link', { name: 'Privacy' }).getAttribute('href')).toBe('/privacy')
     // [L-6, A75] built on modals/Sheet now: Esc is a capturing document listener, not a window one.
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).toBeNull()
