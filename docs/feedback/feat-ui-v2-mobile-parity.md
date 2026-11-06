@@ -58,7 +58,7 @@ Concerns for the Auditor:
 | Footer `Fee: 0.1%` → `Fee 0.1%` | Footer | found by the A75b S-1 sweep: v1 prints the colon, v2 does not. Punctuation only | **flagged, not owner-ruled** — owner to confirm or ask for the colon back |
 | Help Center links `𝕏 Follow on X` / `✉ Contact support` → `@TeraHash on X` / `Email support` | Help drawer | found by the A75b S-1 sweep: same targets (x.com/TeraHash, mailto:), reworded in pack 03 (pinned by shell.test.tsx); no ruling on record | **flagged, not owner-ruled** — owner to confirm or ask for v1's wording back |
 | Footer `\|` separators, drawer `▾ ▸ 𝕏 ✉` glyphs | Footer, Help drawer | v1 prints them as text; v2 draws them aria-hidden (same rule as the first row) | round 7 item 11 |
-| Share label `%%` → `%` | Swap | **v1 typo, not copied**: SwapBox.tsx prints `Share — saved 0.27%%` (`fmtPct()` already ends in `%`, the label template appends another); v2 prints one `%` (`Share — saved 0.27%`). The tweet text is byte-identical. Asserted in `shell-surfaces-sweep.share.test.tsx` (goes stale and fails if v1 fixes it). v1 left untouched | owner, A75b: keep `%` in v2, note as v1 typo |
+| Share label `%%` → `%` | Swap | **v1 typo, not copied**: SwapBox.tsx prints `Share — saved 0.27%%` (`fmtPct()` already ends in `%`, the label template appends another); v2 prints one `%` (`Share — saved 0.27%`). The tweet text is byte-identical. Asserted in `shell-surfaces-sweep.test.tsx` (goes stale and fails if v1 fixes it). v1 left untouched | owner, A75b: keep `%` in v2, note as v1 typo |
 | Help Center geometry | all tabs (header/fab) | v1 `HelpDrawer`: fixed right-edge drawer, `max-w-[420px]`, left hairline; round 7 item 7 keeps it. A75's rebuild on `Sheet` (L-6) centred a 440 px modal at 1440 and a bottom sheet only ≤ 600. Restored: right-edge full-height drawer + left hairline at ≥ 1024, bottom sheet (top hairline, grab bar) below — `Sheet placement="drawer"`, pinned by `sheet-drawer.test.tsx` and the `help drawer geometry` Playwright block | owner, A75b S-3: RESTORE |
 
 ## Feedback — A75 fixes (PR #660, head 87adf17) — 0C/1H/8L, all fixed
@@ -158,6 +158,12 @@ Plus 5f937ac / c10729a: an unused helper (lint) and a regex-built selector escap
   were deliberately not decrypted, so the Preview env was matched by NAME, not by value. If the Preview env ever diverges from DEPLOYMENTS.md the CI job
   keeps testing the documented addresses. Reversible: `gh variable delete <name>`.
 - Vercel's `NEXT_PUBLIC_DCA_ENABLED` is `sensitive` on Preview/Production; CI sets the literal `"true"`.
+- **Follow-up checks after the first A75b report.** (a) Lint delta MEASURED, not inferred: `eslint .` on 8a77ebd = 93 warnings / 0 errors, on the head = 93 / 0 (cap 94).
+  (b) L-8 variable values compared with the Vercel project's own env by id: `NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR` (Preview), `NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE` and
+  `…_ARBITRUM` (Production) decrypt to exactly the values set as repository variables. Not comparable: `NEXT_PUBLIC_BASE_FEE_COLLECTOR` and `NEXT_PUBLIC_DCA_ENABLED` are `sensitive`
+  (write-only), so those two stay doc-sourced / literal. Note both V3 executor names exist on Vercel only for Production (+ Development for Arbitrum) — no Preview-targeted entry was listed.
+  (c) S-1 consolidated: the chrome and Share sweeps now live in `shell-surfaces-sweep.test.tsx` itself (12 tests, one mock set; `useSwapHistory` left real for the Recent swaps half);
+  the two interim files were folded in and removed (history keeps them).
 - The Playwright geometry block was verified green on the fixed build only (52/52 locally on the CI env); the old centred-modal build was not rebuilt to watch
   it go red — the red evidence is the vitest CSS guard.
 - Local mobile run used Playwright's `PW_CHROMIUM` override (this Mac has Chromium build 1243, Playwright 1.64.1 wants 1248).
