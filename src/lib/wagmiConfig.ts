@@ -3,10 +3,10 @@ import {
   rabbyWallet,
   metaMaskWallet,
   coinbaseWallet,
-  walletConnectWallet,
   ledgerWallet,
   injectedWallet,
 } from '@rainbow-me/rainbowkit/wallets'
+import { lazyWalletConnectWallet } from '@/lib/lazy-walletconnect'
 import { mainnet, base, arbitrum } from 'wagmi/chains'
 import { fallback } from 'wagmi'
 import type { Transport } from 'viem'
@@ -124,10 +124,14 @@ export const WALLETCONNECT_METADATA = {
 // catch-all that covers D'CENT and ANY WalletConnect wallet via QR / deep-link.
 // The list has no platform branch, so mobile and desktop render the identical set.
 // getDefaultConfig still builds a SINGLE provider/Core from this list (9K holds).
+// [fix/user-ip-privacy] `lazyWalletConnectWallet` IS RainbowKit's walletConnectWallet (same id, same two
+// connectors); only its "official modal" connector waits to be chosen before it creates its provider,
+// because creating it made every visitor's browser call api.web3modal.org and pulse.walletconnect.org
+// on page load. See lazy-walletconnect.ts.
 export const WALLET_GROUPS = [
   {
     groupName: 'Recommended',
-    wallets: [rabbyWallet, metaMaskWallet, coinbaseWallet, walletConnectWallet],
+    wallets: [rabbyWallet, metaMaskWallet, coinbaseWallet, lazyWalletConnectWallet],
   },
   {
     groupName: 'More',
@@ -149,6 +153,9 @@ export const config = getDefaultConfig({
   projectId: walletConnectProjectId,
   chains: [mainnet, base, arbitrum],
   wallets: WALLET_GROUPS,
+  // [fix/user-ip-privacy] WalletConnect CORE telemetry (error events to pulse.walletconnect.org/batch) off.
+  // This is already RainbowKit's default; it is stated here so a default change upstream cannot turn it on.
+  walletConnectParameters: { telemetryEnabled: false },
   transports: {
     [mainnet.id]: buildMainnetTransport(),
     [base.id]: buildL2Transport(base.id),

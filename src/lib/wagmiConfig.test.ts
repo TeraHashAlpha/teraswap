@@ -60,6 +60,32 @@ describe('wagmiConfig — WalletConnect metadata [SPRINT-9K]', () => {
   })
 })
 
+describe('wagmiConfig — WalletConnect modal connector is lazy [fix/user-ip-privacy]', () => {
+  // The `showQrModal: true` connector is the one whose provider creates Reown AppKit, and AppKit's creation is what
+  // called api.web3modal.org and pulse.walletconnect.org for every visitor on page load. It must still be registered
+  // (RainbowKit offers "open the official WalletConnect modal" through it) but must not build its provider until chosen.
+  type Rk = { rkDetails?: { id?: string; isWalletConnectModalConnector?: boolean; showQrModal?: boolean } }
+  const modalConnectors = () => config.connectors.filter((c) => (c as unknown as Rk).rkDetails?.isWalletConnectModalConnector)
+
+  it('registers exactly one modal connector, next to the QR one', () => {
+    expect(modalConnectors()).toHaveLength(1)
+    const wcIds = config.connectors.filter((c) => (c as unknown as Rk).rkDetails?.id === 'walletConnect')
+    expect(wcIds).toHaveLength(2) // modal + QR, as RainbowKit builds them
+  })
+
+  it('does not create its provider for a visitor who has not chosen WalletConnect', async () => {
+    localStorage.removeItem('wagmi.recentConnectorId')
+    const [modal] = modalConnectors()
+    await expect(modal.getProvider()).rejects.toThrow(/not initialised until it is chosen/)
+    await expect(modal.isAuthorized()).resolves.toBe(false)
+  })
+
+  it('keeps WalletConnect core telemetry off for every WalletConnect connector', async () => {
+    const src = (await import('node:fs')).readFileSync((await import('node:path')).join(__dirname, 'wagmiConfig.ts'), 'utf8')
+    expect(src).toMatch(/walletConnectParameters: \{ telemetryEnabled: false \}/)
+  })
+})
+
 describe('wagmiConfig — explicit mobile-friendly wallet list [SPRINT-9Z]', () => {
   // RainbowKit's DEFAULT getDefaultConfig list curates a subset that HIDES
   // several wallets on mobile (Rabby/Ledger/D'CENT not findable). We pass an

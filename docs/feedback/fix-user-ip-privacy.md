@@ -6,7 +6,7 @@ copy says plainly what the wallet does on its own. DRAFT PR, Auditor required (R
 
 ## Checklist
 - [x] C1 L2 reads through `/api/rpc?chainId=` (wagmi + clients.ts), allow-list, batch cap, per-call limit, 1–2 s cache
-- [ ] C2 imported-token + portfolio logos → `/api/token-logo`; WalletConnect page-load telemetry/config off
+- [x] C2 imported-token + portfolio logos → `/api/token-logo`; WalletConnect page-load telemetry/config off
 - [ ] C3 CSP: connect-src 'self' + exact wallet hosts; img-src 'self' data: blob:; remotePatterns dropped; CI capture job
 - [ ] C4 rate-limit keys + log lines use HMAC(IP, daily salt); four raw-XFF routes → trustedClientIp; Sentry statement
 - [ ] C5 honest copy, v1 == v2 (Help, Docs, Privacy §3.2/§5/§8, product-claims) + content-map delta
@@ -28,5 +28,20 @@ copy says plainly what the wallet does on its own. DRAFT PR, Auditor required (R
   its domain allow-list — then to the public endpoint. Set both in Vercel (Production + Preview) first.
 - **F4.** `/api/rpc` 300 calls/min per IP is now shared by three chains (it was mainnet only). Measured steady load is
   ≤6 calls/min per wallet tab (rpc-budget), so one user is far below it; many users behind one NAT share the bucket.
+- **F5 (SDK limit, answers "disable AppKit analytics in init if the SDK allows").** It does not, on this path. The
+  page-load `pulse.walletconnect.org/e` + `api.web3modal.org/appkit/v1/config` come from Reown AppKit, created by
+  `EthereumProvider.init({ showQrModal: true })` for RainbowKit's second ("official modal") WalletConnect connector.
+  `@walletconnect/ethereum-provider` builds AppKit's options itself (`convertWCMToAppKitOptions`): `features` is
+  hard-coded and nothing in `qrModalOptions` reaches `features.analytics`. So: (a) that one connector is lazy
+  (`lazy-walletconnect.ts`) — nothing is created or fetched until WalletConnect is chosen, or for a returning visitor
+  whose last connector was WalletConnect; (b) `pulse.walletconnect.org` is not in the CSP (C3). WalletConnect *core*
+  telemetry is a separate switch (`telemetryEnabled`), already off by RainbowKit default and now pinned off.
+- **F6 (lazy-load answer).** The WC config fetch is deferred further than "until Connect is opened": until the user
+  picks the official WalletConnect modal. EIP-6963 / injected wallets never go through WalletConnect and are untouched;
+  the QR connector (RainbowKit's own modal) is untouched and made no page-load request before either.
+- **F7.** The portfolio's discovery route returns the provider's own image-CDN URL as `logoURI` for non-catalog tokens;
+  the browser used to try it (already refused by img-src) before falling back to 1inch. Both are replaced by the
+  same-origin logo route. ENS avatars (`WalletModal.tsx:140`, `ui/v2/shell/AccountPanel.tsx:70`) still render whatever
+  URL the ENS record holds; img-src refuses anything off-origin, so only a `data:` avatar loads. Not changed.
 
 ## Evidence (filled as measured)

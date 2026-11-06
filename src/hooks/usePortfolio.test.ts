@@ -75,6 +75,8 @@ vi.mock('@/lib/tokens', async () => {
     DEFAULT_TOKENS: TOKENS,
     isNativeETH: (t: { address: string }) => t.address.toLowerCase() === NATIVE_ETH.toLowerCase(),
     CATEGORY_DISPLAY_ORDER: ['Native', 'Stablecoin', 'Wrapped BTC'],
+    // [fix/user-ip-privacy] the real helper's exact output (src/lib/tokens.ts `importedTokenLogo`).
+    importedTokenLogo: (address: string, chainId = 1) => `/api/token-logo?chainId=${chainId}&address=${address.toLowerCase()}`,
   }
 })
 
@@ -384,6 +386,49 @@ describe('usePortfolio', () => {
     )
     const unk = result.current.tokens.find((t) => t.token.symbol === 'UNK')!
     expect(unk.token.category).toBe('Other')
+  })
+
+  // [fix/user-ip-privacy] A discovered (non-catalog) holding must never carry a third-party image URL: the browser
+  // would load it and hand the visitor's IP to that host. The fallback used to be 1inch's image host, and the
+  // provider's own metadata `logo` (a URL on its CDN) was passed through untouched.
+  it.each([
+    ['no logo from discovery', null],
+    ['a provider-CDN logo from discovery', 'https://static.alchemyapi.io/images/assets/825.png'],
+    ['a protocol-relative logo', '//evil.example/logo.png'],
+    ['a plain http logo', 'http://img.example/logo.png'],
+    ['a data: URI', 'data:image/png;base64,AAAA'],
+  ])('discovered holding with %s gets the same-origin /api/token-logo URL', async (_label, logoURI) => {
+    discoveryAvailable(
+      [{ address: UNK.toLowerCase(), symbol: 'UNK', name: 'Unk', decimals: 18, logoURI, balance: String(1n * 10n ** 18n), isDefault: false }],
+      {},
+    )
+    const { result } = renderHook(() => usePortfolio())
+    await waitFor(() => expect(result.current.tokens.find((t) => t.token.symbol === 'UNK')).toBeDefined())
+    const unk = result.current.tokens.find((t) => t.token.symbol === 'UNK')!
+    expect(unk.token.logoURI).toBe(`/api/token-logo?chainId=1&address=${UNK.toLowerCase()}`)
+  })
+
+  it('discovered holding keeps a same-origin logo path the discovery route already returned', async () => {
+    discoveryAvailable(
+      [{ address: UNK.toLowerCase(), symbol: 'UNK', name: 'Unk', decimals: 18, logoURI: '/tokens/unk.png', balance: String(1n * 10n ** 18n), isDefault: false }],
+      {},
+    )
+    const { result } = renderHook(() => usePortfolio())
+    await waitFor(() => expect(result.current.tokens.find((t) => t.token.symbol === 'UNK')).toBeDefined())
+    expect(result.current.tokens.find((t) => t.token.symbol === 'UNK')!.token.logoURI).toBe('/tokens/unk.png')
+  })
+
+  it('discovered holding on Base asks the logo route for Base, not mainnet', async () => {
+    accountMock = { ...accountMock, chain: { id: 8453, name: 'base' } }
+    discoveryAvailable(
+      [{ address: UNK.toLowerCase(), symbol: 'UNK', name: 'Unk', decimals: 18, logoURI: null, balance: String(1n * 10n ** 18n), isDefault: false }],
+      {},
+    )
+    const { result } = renderHook(() => usePortfolio())
+    await waitFor(() => expect(result.current.tokens.find((t) => t.token.symbol === 'UNK')).toBeDefined())
+    expect(result.current.tokens.find((t) => t.token.symbol === 'UNK')!.token.logoURI).toBe(
+      `/api/token-logo?chainId=8453&address=${UNK.toLowerCase()}`,
+    )
   })
 
   it('Alchemy 503: falls back to the multicall path (Sprint 31 behaviour)', async () => {
