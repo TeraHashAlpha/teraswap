@@ -7,6 +7,7 @@ import type { PriceCheck } from '@/lib/chainlink'
 import { fmtUsd } from '@/lib/format'
 import { Button, Surface } from '../primitives'
 import { Tip } from './Tip'
+import { SMART_COW_SELECTED_LABEL, SMART_COW_SELECTED_TITLE } from '@/config/product-claims'
 import { priceImpact, type QuoteView } from './quote-model'
 
 const RATE_KEY = 'teraswap:rateInverted' // v1's key: one reading direction across v1 and v2
@@ -55,7 +56,9 @@ export interface QuotePanelProps {
   gasless: MetaQuoteResult['gasless']
   lowConfidence: boolean
   sourceCount: number
-  onUseGasless: () => void
+  /** @deprecated [feat/retire-force-mev, owner 2026-11-06] Ignored — the "Use Gasless Route" CTA it drove switched on the
+   *  retired force filter; the gasless card is now information only (v1 QuoteBreakdown, same change). */
+  onUseGasless?: () => void
   /** Tier notice (commit 2) — rendered with the other price notices, above the breakdown. */
   tierNotice?: ReactNode
 }
@@ -112,14 +115,7 @@ export function QuotePanel(p: QuotePanelProps) {
           <p className="text-[14px] font-semibold text-v2-text">&#9889; Zero Gas Available</p>
           <p className="mt-0.5 text-[13px] text-v2-text/90">
             {p.gasless.gasSavingsUsd >= 0.5 ? `Save ~${fmtUsd(p.gasless.gasSavingsUsd)} in gas fees by using CoW Protocol.` : 'Use CoW Protocol for a fully gasless swap.'}{' '}
-            Your swap is fully MEV-protected.
           </p>
-          <div className="mt-1 flex items-center gap-3">
-            <Button variant="text" onClick={p.onUseGasless} aria-label="Switch to the gasless CoW Protocol route">
-              Use Gasless Route
-            </Button>
-            <span className="text-[12px] text-v2-muted">or keep current</span>
-          </div>
         </section>
       )}
       {p.gasless?.recommended && v.intentBased && (
@@ -133,7 +129,7 @@ export function QuotePanel(p: QuotePanelProps) {
 
       {p.smartMevApplied && (
         <p className="text-[12px] text-v2-text/90">
-          ✦ Smart-routed via CoW {p.gasless && p.gasless.gasSavingsUsd >= 0.5 ? `(gasless, ~${fmtUsd(p.gasless.gasSavingsUsd)} saved)` : '(MEV protected)'}
+          ✦ Smart-routed via CoW {p.gasless && p.gasless.gasSavingsUsd >= 0.5 ? `(gasless, ~${fmtUsd(p.gasless.gasSavingsUsd)} saved)` : '(gasless)'}
         </p>
       )}
 
@@ -142,11 +138,8 @@ export function QuotePanel(p: QuotePanelProps) {
           <span aria-hidden="true" className="inline-block h-2 w-2 rounded-full bg-v2-green" />
           Best via {v.bestLabel}
           {p.smartMevApplied && (
-            <span
-              className="text-[11px] font-normal text-v2-muted"
-              title="CoW Protocol's price was within 0.3% of the highest quote, so TeraSwap routed through it for MEV protection."
-            >
-              · auto-selected for MEV protection
+            <span className="text-[11px] font-normal text-v2-muted" title={SMART_COW_SELECTED_TITLE}>
+              {SMART_COW_SELECTED_LABEL}
             </span>
           )}
         </span>
@@ -158,10 +151,10 @@ export function QuotePanel(p: QuotePanelProps) {
         </span>
       </div>
 
-      {(v.direct || v.mevProtected || v.intentBased || v.gaslessBadge) && (
+      {/* [feat/retire-force-mev] The "MEV Protected" badge is retired (owner 2026-11-06): no MEV-related promise. */}
+      {(v.direct || v.intentBased || v.gaslessBadge) && (
         <div className="flex flex-wrap gap-x-4 gap-y-1 font-v2-mono text-[11px] uppercase tracking-[1.5px]">
           {v.direct && <span className="text-v2-amber">Direct DEX</span>}
-          {v.mevProtected && <span className="text-v2-cream">MEV Protected</span>}
           {v.intentBased && <span className="text-v2-teal">Intent-Based</span>}
           {v.gaslessBadge && <span className="text-v2-teal">Gasless</span>}
         </div>
@@ -170,7 +163,7 @@ export function QuotePanel(p: QuotePanelProps) {
       {v.intentBased && v.executionSeconds ? (
         <p className="text-[13px] text-v2-text/90">
           <span className="font-medium">Execution time: ~{v.executionSeconds}s</span>
-          <span className="text-v2-muted"> — Solvers compete in batch auctions for the best fill. Your trade is fully protected from MEV (frontrunning, sandwich attacks).</span>
+          <span className="text-v2-muted"> — Solvers compete in batch auctions for the best fill.</span>
         </p>
       ) : null}
 
@@ -195,9 +188,9 @@ export function QuotePanel(p: QuotePanelProps) {
         {v.mevSavings && (
           <div
             className="ts-swap-row"
-            title="Difference between CoW Protocol's quote and the median of the non-CoW (public-mempool) quotes for this pair. A rough lower-bound estimate of what MEV bots could have extracted on a non-protected route."
+            title="Difference between CoW Protocol's quote and the median of the other sources' quotes for this pair."
           >
-            <span className="text-v2-muted">Est. MEV savings</span>
+            <span className="text-v2-muted">Vs. median quote</span>
             <span className="ts-swap-val font-v2-mono tabular-nums text-v2-green">{v.mevSavings}</span>
           </div>
         )}
@@ -335,11 +328,6 @@ export function QuotePanel(p: QuotePanelProps) {
                   {q.poolFee && (
                     <span className="font-v2-mono text-[10px] text-v2-amber" title={`Pool fee: ${q.poolFee}`}>
                       {q.poolFee}
-                    </span>
-                  )}
-                  {q.mev && (
-                    <span className="font-v2-mono text-[10px] uppercase tracking-[1.5px] text-v2-cream" title="MEV Protected — no frontrunning or sandwich attacks">
-                      MEV
                     </span>
                   )}
                   {q.time && (

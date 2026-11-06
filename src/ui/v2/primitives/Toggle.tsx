@@ -11,8 +11,9 @@ export interface ToggleProps {
 }
 
 /**
- * Round 7 D3 toggle row (Force MEV Protection): the switch is kept, the row is unboxed — the label sits on the photo with a
+ * Round 7 D3 toggle row: the switch is kept, the row is unboxed — the label sits on the photo with a
  * hairline under it. One `role="switch"` button whose name is the label; the whole row is the 44 px hit area.
+ * [feat/retire-force-mev] Its first product consumer, the Force MEV row, is retired (owner 2026-11-06); the primitive stays in the kit.
  */
 export function Toggle({ checked, onChange, label, disabled = false, className }: ToggleProps) {
   const labelId = useId()

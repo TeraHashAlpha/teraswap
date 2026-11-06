@@ -8,8 +8,9 @@
  *   - promotion requires shortfall ≤ threshold AND gasless.recommended
  *   - threshold itself defaults to 15 bps (callers pass it explicitly)
  *
- * Plus the previously-implicit behaviours: forced MEV filter, the
- * already-best-is-CoW path, and the no-CoW-available fallback.
+ * Plus the previously-implicit behaviours: the already-best-is-CoW path and
+ * the no-CoW-available fallback. The forced MEV filter is retired
+ * (feat/retire-force-mev): its flag is now pinned as ignored.
  */
 import { describe, it, expect } from 'vitest'
 import { selectBestWithMevPreference } from '@/lib/mev-preference'
@@ -211,35 +212,39 @@ describe('selectBestWithMevPreference — already-best paths', () => {
   })
 })
 
-// ── Path 1: forced MEV filter ────────────────────────────
+// ── Retired force flag (feat/retire-force-mev, owner 2026-11-06) ────
+// The "Force MEV Protection" toggle is retired; its strict CoW-only filter is gone. The 2nd argument is
+// deprecated and IGNORED: `true` must select exactly like `false` (the old default).
 
-describe('selectBestWithMevPreference — forced MEV filter', () => {
-  it('with mevProtected=true: returns only MEV-protected sources', () => {
+describe('selectBestWithMevPreference — the retired force flag is ignored', () => {
+  it('true with a non-competitive CoW quote: best stays the top output, every source kept', () => {
     const oneInch = quote('1inch', BEST_AMOUNT)
     const cow = quote('cowswap', COW_16_BPS)
-    const result = selectBestWithMevPreference(
-      meta(oneInch, [cow], { recommended: true }),
-      true, // force toggle
-      AGGREGATOR_META,
-      MEV_PREFERENCE_THRESHOLD,
-    )
-    expect(result.smartMevApplied).toBe(false) // user forced, not smart
-    expect(result.meta?.best.source).toBe('cowswap')
-    expect(result.meta?.all.every(q => AGGREGATOR_META[q.source]?.mevProtected)).toBe(true)
+    const input = meta(oneInch, [cow], { recommended: true })
+    const forced = selectBestWithMevPreference(input, true, AGGREGATOR_META, MEV_PREFERENCE_THRESHOLD)
+    const normal = selectBestWithMevPreference(input, false, AGGREGATOR_META, MEV_PREFERENCE_THRESHOLD)
+    expect(forced).toEqual(normal)
+    expect(forced.meta?.best.source).toBe('1inch')
+    expect(forced.meta?.all.map(q => q.source)).toEqual(['1inch', 'cowswap'])
   })
 
-  it('with mevProtected=true and no CoW available: returns meta=null', () => {
+  it('true with no CoW quote: a quote is still returned (no "no MEV-protected quote" null)', () => {
     const oneInch = quote('1inch', BEST_AMOUNT)
     const odos = quote('odos', '9990')
-    const result = selectBestWithMevPreference(
-      meta(oneInch, [odos], { recommended: false }),
-      true,
-      AGGREGATOR_META,
-      MEV_PREFERENCE_THRESHOLD,
-    )
-    expect(result.meta).toBeNull()
-    expect(result.smartMevApplied).toBe(false)
-    expect(result.mevExposedBest).toBe(false)
+    const input = meta(oneInch, [odos], { recommended: false })
+    const forced = selectBestWithMevPreference(input, true, AGGREGATOR_META, MEV_PREFERENCE_THRESHOLD)
+    expect(forced).toEqual(selectBestWithMevPreference(input, false, AGGREGATOR_META, MEV_PREFERENCE_THRESHOLD))
+    expect(forced.meta?.best.source).toBe('1inch')
+  })
+
+  it('true leaves the smart promotion (ranking rule) exactly as false does', () => {
+    const oneInch = quote('1inch', BEST_AMOUNT)
+    const cow = quote('cowswap', COW_14_BPS)
+    const input = meta(oneInch, [cow], { recommended: true })
+    const forced = selectBestWithMevPreference(input, true, AGGREGATOR_META, MEV_PREFERENCE_THRESHOLD)
+    expect(forced).toEqual(selectBestWithMevPreference(input, false, AGGREGATOR_META, MEV_PREFERENCE_THRESHOLD))
+    expect(forced.smartMevApplied).toBe(true)
+    expect(forced.meta?.best.source).toBe('cowswap')
   })
 })
 

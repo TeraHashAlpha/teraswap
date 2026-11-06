@@ -148,13 +148,13 @@ describe('28a — pending', () => {
     const a = within(execCol()).getByTestId('exec-tx-link') as HTMLAnchorElement
     expect(a.href).toBe(`https://etherscan.io/tx/${TX}`)
   })
-  it('CoW pending: v1\'s MEV-protected line and the Waiting for solver step', () => {
+  it('CoW pending: v1\'s batch-auction line (no MEV promise since feat/retire-force-mev) and the Waiting for solver step', () => {
     const m = fixtureMeta()
     const cow = { ...m.all[0], source: 'cowswap' as const, gasUsd: 0 }
     h.quote = { ...h.quote, meta: taggedFixture({ ...m, best: cow, all: [cow, ...m.all.slice(1)] }, '1') }
     mount({ status: 'cow_pending' })
     expect(steps()[2]).toEqual(['Waiting for solver...', 'active'])
-    expect(execCol().textContent).toContain('Your order is MEV-protected. Solvers are competing to fill it at the best price.')
+    expect(execCol().textContent).toContain("Your order is in CoW Protocol's batch auction. Solvers are competing to fill it at the best price.")
   })
   it('a fallback and an inconclusive simulation are told in v1\'s words', () => {
     mount({ status: 'swapping', simulationSkipped: true, fallbackNotice: { from: 'velora', to: 'kyberswap' } })

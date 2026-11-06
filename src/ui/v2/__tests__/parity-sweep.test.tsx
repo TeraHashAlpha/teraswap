@@ -309,7 +309,8 @@ afterEach(() => {
 
 // ══ Swap ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 describe.each(CHAINS)('sweep · Swap · chain %i', (chainId) => {
-  const ALLOW = glyphs(['⇅', '⟳', '✎', 'ⓘ', '⚙', '×'], 'swap controls')
+  // [feat/retire-force-mev, owner 2026-11-06] '×' left the list: it was the MEV hint's dismiss, retired in v1 and v2.
+  const ALLOW = glyphs(['⇅', '⟳', '✎', 'ⓘ', '⚙'], 'swap controls')
   const type = (container: HTMLElement, value: string) => fireEvent.change(container.querySelector('input[inputmode="decimal"]') as HTMLInputElement, { target: { value } })
 
   function both(connected: boolean) {

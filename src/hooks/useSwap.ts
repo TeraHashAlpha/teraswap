@@ -1052,7 +1052,7 @@ export function useSwap(
     if (p.message.validTo <= Math.floor(Date.now() / 1000)) {
       setPendingCowOrder(null)
       setStatus('error')
-      setErrorMessage('This MEV-protected order expired before you signed — please re-quote.')
+      setErrorMessage('This CoW Protocol order expired before you signed — please re-quote.')
       return
     }
 

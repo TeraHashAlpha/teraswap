@@ -196,12 +196,13 @@ describe('LandingPage — hero paragraph MEV wording [fix/hero-stat-layout]', ()
     useQuoteMock.mockReturnValue({ meta: null, loading: true, error: null, countdown: 0, refetch: vi.fn(), refresh: vi.fn() })
   })
 
-  it('scopes MEV protection to CoW Protocol routes', () => {
+  it('makes no MEV promise (retired 2026-11-06): the sentence ends at the Chainlink check', () => {
     const { container } = render(<LandingPage onLaunchApp={vi.fn()} />)
     const paragraph = Array.from(container.querySelectorAll('p')).find((p) =>
       p.textContent?.startsWith('TeraSwap compares'),
     )
-    expect(paragraph?.textContent).toMatch(/Chainlink oracles, and offers MEV-protected routes via CoW Protocol\.$/)
+    expect(paragraph?.textContent).toMatch(/liquidity sources for every trade and verifies the price against Chainlink oracles\.$/)
+    expect(paragraph?.textContent).not.toMatch(/MEV/)
     expect(paragraph?.textContent).not.toContain('routes through MEV-protected execution')
   })
 })
