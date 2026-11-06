@@ -16,10 +16,12 @@ import { Sheet } from './Sheet'
 afterEach(cleanup)
 
 const css = readFileSync(join(__dirname, 'modals.css'), 'utf8')
-/** The declarations of the first rule whose selector contains `selector`, inside the given at-rule body (or the whole file). */
+/** The declarations of the rule `<selector> { … }` inside `scope` (plain string search: no regex is built from a selector). */
 const rule = (scope: string, selector: string) => {
-  const m = scope.match(new RegExp(`${selector.replace(/[.[\]'=()]/g, '\\$&')}[^{]*\\{([^}]*)\\}`))
-  return m ? m[1] : ''
+  const start = scope.indexOf(`${selector} {`)
+  if (start < 0) return ''
+  const open = scope.indexOf('{', start)
+  return scope.slice(open + 1, scope.indexOf('}', open))
 }
 const media = (query: string) => {
   const start = css.indexOf(`@media (${query})`)
