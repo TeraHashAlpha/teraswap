@@ -3,8 +3,11 @@
  *
  * Mainnet (chainId 1) returns the existing `getPrivateClient()` — which routes
  * the browser through /api/rpc to hide the user's IP — so mainnet simulation
- * behaviour is byte-identical. Other chains get a cached client built from the
- * chain's configured RPC (falling back to viem's default public RPC).
+ * behaviour is byte-identical. Other chains get a cached client: in the BROWSER it
+ * reads through `/api/rpc?chainId=<id>` and nothing else ([fix/user-ip-privacy] — it
+ * used to dial the provider in NEXT_PUBLIC_*_RPC_URL, then a public endpoint, handing
+ * both the visitor's IP); on the SERVER it is built from the chain's configured RPC
+ * (falling back to viem's default public RPC).
  *
  * [FIX-RPC-CHAIN-IDENTITY-GUARD] `guardedHttp` (rpc-guarded-transport.ts), never bare `http(url)`.
  * This is the THIRD upstream resolver the incident exposed — after `/api/rpc` and
@@ -18,6 +21,7 @@ import { mainnet, base, arbitrum } from 'viem/chains'
 import { getPrivateClient } from '@/lib/rpc'
 import { guardedHttp } from '@/lib/rpc-guarded-transport'
 import { serverRpcEnvUrl } from '@/lib/rpc-env'
+import { proxyRpcUrl } from '@/lib/rpc-proxy-url'
 import { getChainConfig, DEFAULT_CHAIN_ID } from './registry'
 
 // [SPRINT-47-ARBITRUM-ACTIVATION-PREP] Arbitrum was registered in chains/registry.ts (Sprint 46)
@@ -45,16 +49,24 @@ export function getPublicClientForChain(chainId: number = DEFAULT_CHAIN_ID): Pub
   const chain = VIEM_CHAINS[chainId]
   const config = getChainConfig(chainId) // throws on an unsupported chain
 
+  // [fix/user-ip-privacy] Browser: one transport, our own proxy. No registry fallbacks — each of
+  // those is a third-party host that would see the visitor's IP. The proxy proves the upstream's
+  // chain itself (route.ts), and guardedHttp still checks what the proxy answers.
+  if (typeof window !== 'undefined') {
+    const proxied = createPublicClient({ chain, transport: guardedHttp(proxyRpcUrl(chainId), chainId) }) as PublicClient
+    clientCache.set(chainId, proxied)
+    return proxied
+  }
+
   // [CHORE-POLISH-3 P3] Use the registry's fallback RPCs. Previously only
   // http(primary) was built, so a degraded Base primary failed ALL Base reads
   // (quote simulation / portfolio / monitor). Mirrors wagmiConfig's transport
   // pattern: a single URL stays a plain http transport; several become a viem
   // fallback() chain tried in order. The mainnet path above (getPrivateClient
   // → /api/rpc privacy proxy) is intentionally untouched.
-  // [FEAT-SERVER-RPC-ENV-SPLIT] On the server the primary is `RPC_URL_<id>` (else the same
-  // NEXT_PUBLIC_* the registry holds, so unset => unchanged); the browser keeps the registry value.
-  const primary =
-    (typeof window === 'undefined' ? serverRpcEnvUrl(chainId) : undefined) ?? config.rpc.primary
+  // [FEAT-SERVER-RPC-ENV-SPLIT] Server only from here: the primary is `RPC_URL_<id>` (else the
+  // deprecated NEXT_PUBLIC_* name, read server-side by rpc-env), then the registry value.
+  const primary = serverRpcEnvUrl(chainId) ?? config.rpc.primary
   const configuredUrls = [primary, ...(config.rpc.fallbacks ?? [])].filter(Boolean)
   // [FIX-RPC-CHAIN-IDENTITY-GUARD] No configured RPC at all (registry primary + fallbacks both
   // empty — currently unreachable for Base/Arbitrum, whose registry entries always carry a

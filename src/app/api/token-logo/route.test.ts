@@ -28,6 +28,7 @@ vi.mock('@/lib/kv-rate-limiter', () => ({
 
 import { GET, __resetTokenLogoCache } from './route'
 import { getSupportedChainIds } from '@/lib/chains/registry'
+import { hashClientIp } from '@/lib/client-ip-key'
 
 // A CoinGecko-shaped token in the stubbed per-chain list. Mixed-case address to
 // prove the route lower-cases keys before lookup.
@@ -374,12 +375,12 @@ describe('GET /api/token-logo — [chore/copy-leftovers] per-IP rate limit (dedi
     expect(limited.headers.get('x-ratelimit-reset')).toBe('1700000060000')
     expect(await limited.json()).toEqual({ error: 'Rate limit exceeded. Try again in a minute.' })
     expect(fetchMock.mock.calls.length).toBe(callsBefore)
-    expect(mockCheckRateLimit).toHaveBeenLastCalledWith('token-logo:198.51.100.9', 300, 60_000)
+    expect(mockCheckRateLimit).toHaveBeenLastCalledWith(`token-logo:${hashClientIp('198.51.100.9')}`, 300, 60_000)
   })
 
   it('is per IP: a different client is unaffected by an exhausted one', async () => {
     stubNetwork()
-    hits.set('token-logo:198.51.100.9', 300)
+    hits.set(`token-logo:${hashClientIp('198.51.100.9')}`, 300)
     expect((await GET(req({ chainId: '1', address: KNOWN_ADDR }, ip('198.51.100.9')))).status).toBe(429)
     expect((await GET(req({ chainId: '1', address: KNOWN_ADDR }, ip('203.0.113.7')))).status).toBe(200)
   })
@@ -387,7 +388,7 @@ describe('GET /api/token-logo — [chore/copy-leftovers] per-IP rate limit (dedi
   it('uses its own key — it does not spend the /api/proxy/logo ("logo:<ip>") budget', async () => {
     stubNetwork()
     await GET(req({ chainId: '1', address: KNOWN_ADDR }, ip('198.51.100.9')))
-    expect(mockCheckRateLimit.mock.calls[0][0]).toBe('token-logo:198.51.100.9')
-    expect(hits.has('logo:198.51.100.9')).toBe(false)
+    expect(mockCheckRateLimit.mock.calls[0][0]).toBe(`token-logo:${hashClientIp('198.51.100.9')}`)
+    expect(hits.has(`logo:${hashClientIp('198.51.100.9')}`)).toBe(false)
   })
 })

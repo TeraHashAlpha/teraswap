@@ -4,12 +4,14 @@
  * The proxy's method policy was a pure blacklist of signing methods — any other
  * JSON-RPC read method was forwarded verbatim to the (paid, metered) upstream
  * RPC. `debug_*`/`trace_*` are archive-grade queries with no legitimate use in
- * this dApp's wagmi/viem call surface (unlike eth_getBlockByNumber/
- * eth_getStorageAt/eth_getProof, which ARE used); an `eth_getLogs` call with an
- * unbounded numeric block range is similarly expensive. These pure helpers cap
- * batch size, deny the archive methods, and clamp eth_getLogs ranges — the
- * per-IP rate limit (rpc:<ip>) remains the backstop, but no longer has to
- * absorb an unbounded per-request cost multiplier.
+ * this dApp's wagmi/viem call surface; these pure helpers cap batch size and
+ * deny the archive methods — the per-IP rate limit (rpc:<ip>) remains the
+ * backstop, but no longer has to absorb an unbounded per-request cost multiplier.
+ *
+ * [fix/user-ip-privacy A76 S-3] eth_getLogs is no longer relayed at all (rpc-method-policy.ts), so the
+ * eth_getLogs range clamp that lived here is gone: a numeric range could be clamped, a tag range
+ * ("earliest".."latest") could not, and that is the 12 MB answer the audit pulled through the proxy. What
+ * bounds an answer now is the upstream deadline and the byte cap below, for every method.
  */
 
 /** Max JSON-RPC requests forwarded per batch. Viem's public-client batching
@@ -17,8 +19,12 @@
  *  multicall-style usage while bounding a scripted amplification attempt. */
 export const MAX_RPC_BATCH_SIZE = 25
 
-/** Max eth_getLogs block span (fromBlock..toBlock) forwarded unclamped. */
-export const MAX_GET_LOGS_BLOCK_RANGE = 2_000
+/** [fix/user-ip-privacy A76 S-3] Upstream deadline, connection to last byte (AbortSignal.timeout on the fetch). */
+export const RPC_UPSTREAM_TIMEOUT_MS = 10_000
+
+/** [fix/user-ip-privacy A76 S-3] Largest upstream answer the proxy relays (read incrementally — read-body-capped.ts);
+ *  larger is a 502. A 25-call batch of this app's reads is a few hundred KB at most; Vercel's own response limit is 4.5 MB. */
+export const RPC_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
 const EXPENSIVE_METHOD_PREFIXES = ['debug_', 'trace_']
 
@@ -43,44 +49,4 @@ export function rpcRateLimitUnits(body: unknown, max: number = MAX_RPC_BATCH_SIZ
 /** True when a batch of `count` requests exceeds the cap. */
 export function exceedsBatchLimit(count: number, max: number = MAX_RPC_BATCH_SIZE): boolean {
   return count > max
-}
-
-/** Parse a JSON-RPC block tag as a block NUMBER; null for tags ("latest",
- *  "earliest", "pending"), absent, or malformed hex — those cannot be bounded
- *  cheaply (no chain-tip lookup here), so the caller leaves them untouched. */
-function parseBlockNumber(v: unknown): number | null {
-  if (typeof v !== 'string' || !v.startsWith('0x')) return null
-  const n = Number.parseInt(v, 16)
-  return Number.isFinite(n) ? n : null
-}
-
-/**
- * Clamp an eth_getLogs request's block range to MAX_GET_LOGS_BLOCK_RANGE by
- * rewriting `fromBlock` (keeps the call working — just bounds the scanned
- * range — rather than rejecting it outright). A no-op for any other method,
- * for a range at/under the cap, or when either bound is a tag/absent/malformed
- * (nothing to bound without an extra chain-tip lookup). Never throws.
- * @returns {{ clamped: boolean, request: object }} `request` is the (possibly
- *   rewritten) rpc request; pass this through instead of the original.
- */
-export function clampGetLogsRange(rpcReq: { method?: unknown; params?: unknown }): {
-  clamped: boolean
-  request: typeof rpcReq
-} {
-  if (rpcReq?.method !== 'eth_getLogs' || !Array.isArray(rpcReq.params) || rpcReq.params.length === 0) {
-    return { clamped: false, request: rpcReq }
-  }
-  const param = rpcReq.params[0]
-  if (!param || typeof param !== 'object') return { clamped: false, request: rpcReq }
-
-  const from = parseBlockNumber((param as Record<string, unknown>).fromBlock)
-  const to = parseBlockNumber((param as Record<string, unknown>).toBlock)
-  if (from === null || to === null) return { clamped: false, request: rpcReq } // tag-based — can't bound cheaply
-
-  if (to - from <= MAX_GET_LOGS_BLOCK_RANGE) return { clamped: false, request: rpcReq }
-
-  const clampedFrom = to - MAX_GET_LOGS_BLOCK_RANGE
-  const newParam = { ...(param as Record<string, unknown>), fromBlock: `0x${clampedFrom.toString(16)}` }
-  const newParams = [newParam, ...rpcReq.params.slice(1)]
-  return { clamped: true, request: { ...rpcReq, params: newParams } }
 }

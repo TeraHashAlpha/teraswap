@@ -10,10 +10,10 @@ import { describe, it, expect } from 'vitest'
 import {
   isExpensiveMethod,
   exceedsBatchLimit,
-  clampGetLogsRange,
   rpcRateLimitUnits,
   MAX_RPC_BATCH_SIZE,
-  MAX_GET_LOGS_BLOCK_RANGE,
+  RPC_MAX_RESPONSE_BYTES,
+  RPC_UPSTREAM_TIMEOUT_MS,
 } from './rpc-cost-policy'
 
 describe('isExpensiveMethod — deny debug_* / trace_* archive queries', () => {
@@ -48,46 +48,12 @@ describe('exceedsBatchLimit', () => {
   })
 })
 
-describe('clampGetLogsRange — bound eth_getLogs cost without breaking the call', () => {
-  it('leaves a narrow numeric range untouched', () => {
-    const req = { method: 'eth_getLogs', params: [{ fromBlock: '0x1', toBlock: '0x2' }] }
-    const out = clampGetLogsRange(req)
-    expect(out.clamped).toBe(false)
-    expect(out.request).toEqual(req)
-  })
-
-  it('CLAMPS a wide numeric range by rewriting fromBlock (keeps the call working, bounds cost)', () => {
-    const from = 0
-    const to = 100_000
-    const req = { method: 'eth_getLogs', params: [{ fromBlock: `0x${from.toString(16)}`, toBlock: `0x${to.toString(16)}` }] }
-    const out = clampGetLogsRange(req)
-    expect(out.clamped).toBe(true)
-    const params = out.request.params as Array<{ fromBlock: string; toBlock: string }>
-    const newFrom = Number.parseInt(params[0].fromBlock, 16)
-    expect(to - newFrom).toBe(MAX_GET_LOGS_BLOCK_RANGE)
-    expect(params[0].toBlock).toBe(req.params[0].toBlock) // toBlock untouched
-  })
-
-  it('boundary: a range exactly at the cap is untouched (inclusive)', () => {
-    const req = { method: 'eth_getLogs', params: [{ fromBlock: '0x0', toBlock: `0x${MAX_GET_LOGS_BLOCK_RANGE.toString(16)}` }] }
-    expect(clampGetLogsRange(req).clamped).toBe(false)
-  })
-
-  it('leaves a tag-based range ("latest"/"earliest"/absent) untouched — cannot bound cheaply', () => {
-    expect(clampGetLogsRange({ method: 'eth_getLogs', params: [{ fromBlock: 'latest', toBlock: 'latest' }] }).clamped).toBe(false)
-    expect(clampGetLogsRange({ method: 'eth_getLogs', params: [{}] }).clamped).toBe(false)
-    expect(clampGetLogsRange({ method: 'eth_getLogs', params: [] }).clamped).toBe(false)
-  })
-
-  it('is a no-op for non-eth_getLogs methods', () => {
-    const req = { method: 'eth_call', params: [{ fromBlock: '0x0', toBlock: '0x186a0' }] }
-    expect(clampGetLogsRange(req).clamped).toBe(false)
-  })
-
-  it('never throws on malformed params', () => {
-    expect(() => clampGetLogsRange({ method: 'eth_getLogs', params: null })).not.toThrow()
-    expect(() => clampGetLogsRange({ method: 'eth_getLogs' })).not.toThrow()
-    expect(clampGetLogsRange({ method: 'eth_getLogs', params: [{ fromBlock: 'not-hex', toBlock: '0x5' }] }).clamped).toBe(false)
+// [fix/user-ip-privacy A76 S-3] eth_getLogs is off the allow-list (rpc-method-policy.ts), so its range clamp is
+// retired; what bounds every answer now is the upstream deadline and the byte cap (route.test.ts drives both).
+describe('upstream bounds [A76 S-3]', () => {
+  it('10 s upstream deadline, 4 MB response cap', () => {
+    expect(RPC_UPSTREAM_TIMEOUT_MS).toBe(10_000)
+    expect(RPC_MAX_RESPONSE_BYTES).toBe(4 * 1024 * 1024)
   })
 })
 

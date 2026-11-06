@@ -816,7 +816,14 @@ export function getCustomTokensVersion(): number {
   return customVersion
 }
 
-export const importedTokenLogo = (address: string): string => `https://tokens.1inch.io/${address.toLowerCase()}.png`
+/**
+ * Logo for a token that is NOT in the catalog (a user import, or a holding the portfolio discovered).
+ * [fix/user-ip-privacy] Our own `/api/token-logo` route — the same resolver catalog tokens use — keyed by
+ * the token's chain. It used to be a URL on 1inch's token-image host, which the visitor's browser
+ * loaded directly (their IP and the token address went to 1inch) and which only ever knew mainnet
+ * addresses, so every Base / Arbitrum import showed a broken image first.
+ */
+export const importedTokenLogo = (address: string, chainId: number = 1): string => logo(address, chainId)
 
 /** Load this chain's saved imports into the in-memory store (once per chain per page-load). */
 export function hydrateCustomTokens(chainId: number): void {
@@ -829,7 +836,7 @@ export function hydrateCustomTokens(chainId: number): void {
       symbol: r.symbol,
       name: r.name,
       decimals: r.decimals,
-      logoURI: importedTokenLogo(r.address),
+      logoURI: importedTokenLogo(r.address, chainId),
       category: 'Imported',
       chainId,
     }))

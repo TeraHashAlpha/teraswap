@@ -24,6 +24,9 @@ import { recoverTypedDataAddress } from 'viem'
 
 export const ORDERS_READ_TTL_MS = 24 * 60 * 60 * 1000 // sign once per day at most
 export const ORDERS_READ_MAX_SKEW_MS = 5 * 60 * 1000 // tolerated client-clock drift
+/** [fix/user-ip-privacy A76 S-6] Most order hashes one GET /api/orders?hashes= poll may name (the client splits a
+ *  longer list into several requests; 50 hashes ≈ 3.4 KB of query string). */
+export const ORDER_POLL_MAX_HASHES = 50
 export const ORDERS_READ_HEADER_ISSUED = 'x-orders-read-issued'
 export const ORDERS_READ_HEADER_SIGNATURE = 'x-orders-read-signature'
 

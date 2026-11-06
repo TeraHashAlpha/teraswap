@@ -5,6 +5,7 @@ import { DEFAULT_TOKENS, type Token } from '@/lib/tokens'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
 import { getChainTokenList } from '@/lib/chains/tokens'
 import { ALCHEMY_BASE_BY_CHAIN, isPortfolioSupportedChain } from '@/lib/portfolio-chains'
+import { clientIpKey } from '@/lib/client-ip-key'
 
 /**
  * GET /api/portfolio/tokens?address=<0x..>
@@ -145,7 +146,10 @@ function fallbackMetadataFor(address: string): AlchemyMetadata {
 // ── Route handler ──────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+  // [fix/user-ip-privacy] Was the raw LEFT-MOST x-forwarded-for token: client-writable (anyone could dodge the
+  // limit or burn someone else's bucket — trusted-ip.ts) and stored / logged as a raw IP. Now the keyed hash of the
+  // TRUSTED client IP.
+  const ip = clientIpKey(req)
   const rateCheck = await checkRateLimit(
     `portfolio-tokens:${ip}`,
     TOKENS_RATE_LIMIT.limit,
