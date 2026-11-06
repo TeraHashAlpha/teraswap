@@ -105,7 +105,7 @@ with a test that fails on `7eeefeb` (run in a detached worktree at that commit).
 - [x] S-5 (L) `/api/rpc` limiter bounded at 1 s
 - [x] S-6 (L) order poll by the locally active order hashes, not the 50 newest rows
 - [x] S-7 (L) empty JSON-RPC batch → −32600
-- [ ] Verify: suite, lint delta 0, tsc, build, host capture incl. CoW, rpc-budget, CodeQL 0 new, gitleaks
+- [x] Verify: suite, lint delta 0, tsc, build, host capture incl. CoW, rpc-budget, CodeQL 0 new, gitleaks
 
 ### A76 content-map delta (v1 = v2 everywhere; Auditor wording verbatim for §3.3)
 
@@ -117,3 +117,49 @@ with a test that fails on `7eeefeb` (run in a detached worktree at that commit).
 | Privacy §3.3, last sentence — S-2 (`PRIVACY_LOCAL_COPIES_NOTE`) | This data remains exclusively on your device and is never transmitted to our servers. | These copies stay in your browser and are never uploaded as such; separately, every swap and order you make is sent to our server and stored with your wallet address (see 3.2) — that server record is what the History tab shows. |
 | Docs · Privacy · 03 Method Policy — S-3 | …read-only methods per chain (balances, contract calls, receipts, blocks, fee data, logs) and refuses everything else… | …read-only methods per chain (balances, contract calls, receipts, blocks, fee data) and refuses everything else… |
 | `csp-policy.js` header comment (not user-facing) — S-1 | Aggregator / DEX APIs (…CoW…): called by our API routes, never by the page. | + the signed order, its status and trades go to /api/cow/*, the limit price to /api/cow/quote; before A76 the page POSTed to api.cow.fi itself. |
+
+## Feedback — A76 fixes (`0f51bfc` … `01495e5`)
+
+### Per finding (each new test was run on `7eeefeb` in a detached worktree and fails there)
+
+| id | sev | commit | fix | fails on `7eeefeb` |
+|---|---|---|---|---|
+| S-1 | H | `0f51bfc` | `/api/cow/{quote,orders,order-status,trades}` (`cow-proxy.ts`): allow-listed fields only, Accept/Content-Type only upstream, 10 s timeout, 1 MB capped read, redirects refused, errors without URLs, per-route HMAC-keyed limits; `cow.ts` submit/poll + every `limit-order-api.ts` call use it; CI `cow.pw.ts` (v1+v2, mock signature); claim, Docs 02, Privacy §6, CSP comment | 22 tests in 7 files + `cow-routes.test.ts` (33) cannot load; capture: v1 and v2 `connect-src api.cow.fi: 1` |
+| S-2 | H | `1e160aa` | §3.3 = the Auditor's sentence, one constant for v1 and v2; backing test pins the real `fetch(` calls | `privacy-copy.test.tsx` §3.3 v1 + v2 |
+| S-3 | M | `667c730` | 4 methods off every chain's list (clamp retired); `AbortSignal.timeout(10_000)` → 504; capped read, > 4 MB → 502; Docs 03 drops "logs" | 12 (403 ×4 methods ×3 chains, timeout 504 ×2, > 4 MB 502 ×2, policy ×4) |
+| S-4 | M | `c8fdc6a` | `rateLimitSubject`: IPv6 → canonical /64, IPv4-mapped → the IPv4, IPv4 unchanged | subject table (14), /64 bucket, mapped = IPv4, route: 3 addresses of one /64 → 1 `ratelimit:rpc:` key |
+| S-5 | L | `ec2ebbc` | `/api/rpc` → `checkRateLimitWithin` (1 s; then the 50% in-memory fallback, no double charge) | hung KV: 1.0 s → 403 and 429 here; time out at 5 s there |
+| S-6 | L | `194a345` | `GET /api/orders?hashes=` (1–50, wallet + `order_hash IN`, limit = count, signature required); poll passes the live orders' hashes | 10 (route query shape + 4×400, client URL/no-request/de-dup/split, hook passes only the live hash) |
+| S-7 | L | `01495e5` | `[]` → 400 `-32600`, id null, nothing forwarded (still 1 unit) | the -32600 test |
+
+### Verification (final head `01495e5`, against `7eeefeb`)
+- Suite: 459 files / 8133 → **460 / 8232**, 0 failures. `tsc` clean. Lint: 0 errors / 92 warnings both, **no per-rule delta**.
+- Build (CI env, marker values): green, 34/34 pages, `/api/cow/*` listed.
+- Host capture on that build: **13/13** (bundle, no-wallet ×6, CoW ×2 new, extension ×2, WalletConnect ×2); thirdParty
+  `[]` and CSP refusals `{}` in every non-WalletConnect scenario; `/api/rpc` refused **0** methods the app sent (S-3
+  removed nothing in use). Same specs on `7eeefeb`: CoW ×2 fail on `connect-src api.cow.fi`.
+- rpc-budget: 33/33 both; the printed tables are **identical**.
+- CodeQL security-extended (105 queries), both trees: **13 → 13, 0 new / 0 fixed** by rule + file + message (the five
+  `orders/route.ts` `js/user-controlled-bypass` alerts moved +3 lines with the S-6 import/constant).
+- gitleaks 8.30.1 (repo config): `7eeefeb..HEAD` 8 commits and `origin/main..HEAD` 18 commits — no leaks. A
+  directory scan of `src` finds the same 6 pre-existing test/fixture matches on both trees (none in new code).
+
+### Edge case
+- `fetchCurrentPrice` (limit panel, conditional-order price fallback) always asked **mainnet's** CoW book, even for a Base
+  or Arbitrum order (`COW_BASE` was `AGGREGATOR_APIS.cowswap.base`). Through the relay it asks the order's own chain.
+- `ConditionalOrderPanel → price-monitor → fetchCurrentPrice` was a third browser path to api.cow.fi, not in the audit.
+- `cancelLimitOrder` has no caller; it is relayed too (DELETE `/api/cow/orders?uid=`, the body it always sent) so the
+  module makes no direct CoW call at all.
+
+### Concern
+- `checkRateLimitWithin` falls back to the 50% in-memory limiter on timeout, not open like `/api/quote`'s KV gate: on a
+  hung Redis the RPC proxy stays limited (150/min per instance). Owner call if quote should match.
+- Privacy §8 still ends "Any data stored in your browser (via localStorage) … remains on your device" — true of the
+  copy, and now consistent with §3.3's wording, but it is the same kind of sentence. Not changed (not in A76).
+- The CI CoW scenario answers `/api/cow/*` in the rig (nothing leaves the machine), so it proves what the BROWSER sends
+  and contacts; the relay's upstream side is covered by `cow-routes.test.ts`, and the rig asserts the browser sends
+  exactly the 17 fields the relay forwards.
+
+### Test gap
+- No end-to-end test exercises a real CoW orderbook through the relay (no network in CI). A Preview check with a real
+  wallet should place one small CoW order on each chain.
