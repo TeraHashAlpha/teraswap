@@ -112,6 +112,8 @@ export class CircuitBreaker {
   private state: CircuitState = 'CLOSED'
   private consecutiveFailures = 0
   private lastFailureAt = 0
+  /** [feat/retire-force-mev C3] HTTP status of the last failure (classifyFailure), so the monitor can tell a 429 from other failures. */
+  private lastFailureStatus: number | undefined = undefined
   private halfOpenAttempts = 0
   private config: CircuitBreakerConfig
   /**
@@ -177,6 +179,7 @@ export class CircuitBreaker {
     this.lastFailureAt = Date.now()
 
     const { status, retryAfterMs } = classifyFailure(err)
+    this.lastFailureStatus = status
     if (status === 429) {
       this.currentCooldownMs = retryAfterMs && retryAfterMs > 0 ? retryAfterMs : this.config.rateLimitCooldownMs
       const wasOpen = this.state === 'OPEN'
@@ -241,6 +244,7 @@ export class CircuitBreaker {
       state: this.state,
       consecutiveFailures: this.consecutiveFailures,
       lastFailureAt: this.lastFailureAt,
+      lastFailureStatus: this.lastFailureStatus,
       cooldownRemaining,
     }
   }

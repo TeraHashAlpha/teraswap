@@ -31,7 +31,7 @@ export function ApprovalStep({ approvalStatus, approvalReady, swapStatus, showNo
           <span className={swapStatus === 'cow_pending' ? 'font-bold text-v2-cream' : ''}>2. Solver fills</span>
         </div>
       )}
-      {swapStatus === 'cow_pending' && <p className="mt-1.5 text-[11px]">Your order is MEV-protected. Solvers are competing to fill it at the best price.</p>}
+      {swapStatus === 'cow_pending' && <p className="mt-1.5 text-[11px]">Your order is in CoW Protocol&apos;s batch auction. Solvers are competing to fill it at the best price.</p>}
       {showNote && !approvalReady && <p className="mt-2 text-[11px]">Exact approval only — we never request unlimited access to your tokens.</p>}
     </div>
   )

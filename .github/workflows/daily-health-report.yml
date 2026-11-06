@@ -137,6 +137,11 @@ jobs:
           MONITOR_SECRET: ${{ secrets.MONITOR_SECRET }}
         run: |
           set -euo pipefail
+          # [feat/retire-force-mev C3] Sources answering HTTP 429 (public /api/monitor/status, no secret needed): one
+          # "id=ISO-since" token per rate-limited source. Every character is whitelisted before $GITHUB_OUTPUT.
+          status_body=$(curl -s --max-time 15 "$SITE_URL/api/monitor/status" || echo "")
+          rate_limited=$(node -e 'const s=(v)=>String(v??"").replace(/[^A-Za-z0-9:._-]/g,"");try{const r=JSON.parse(process.argv[1]);process.stdout.write((r.sources||[]).filter((x)=>x.rateLimitedSince).map((x)=>`${s(x.id)}=${s(x.rateLimitedSince)}`).join(" "))}catch{process.stdout.write("")}' "$status_body")
+          echo "rate_limited=$rate_limited" >> "$GITHUB_OUTPUT"
           if [ -z "${MONITOR_SECRET:-}" ]; then
             echo "code=NOSECRET" >> "$GITHUB_OUTPUT"
             echo "alerts=UNKNOWN" >> "$GITHUB_OUTPUT"
@@ -278,6 +283,7 @@ jobs:
           KEEPERS_STATUS: ${{ steps.monitor.outputs.keepers_status }}
           KEEPERS: ${{ steps.monitor.outputs.keepers }}
           KEEPERS_INFRA: ${{ steps.monitor.outputs.keepers_infra }}
+          RATE_LIMITED: ${{ steps.monitor.outputs.rate_limited }}
           GAS_CHAINS: ${{ steps.gas.outputs.chains }}
           GIT_COUNT: ${{ steps.git.outputs.count }}
         run: |
@@ -437,6 +443,15 @@ jobs:
             }
           }
 
+          // [feat/retire-force-mev C3] Sources answering HTTP 429 — degraded, never green (CoW's free quote API has 429'd our
+          // servers since 2026-10-29 while the monitor read it as healthy). RATE_LIMITED = "id=ISO-since" tokens.
+          const rateLimitLines = []
+          for (const [id, since] of (e.RATE_LIMITED || '').split(' ').filter(Boolean).map((t) => t.split('='))) {
+            rateLimitLines.push(`| Source rate limit (${id}) | ⚠️ | [SOURCE] ${id}: rate-limited (429) since ${since} |`)
+            requiresAttention.push(`[SOURCE] ${id}: rate-limited (429) since ${since} — the source stays queried but degraded; see docs/feedback/recon-cowswap-429.md.`)
+            bump(1)
+          }
+
           const overall = severity === 2 ? '🔴 CRITICAL' : severity === 1 ? '🟡 WARNING' : '🟢 OK'
 
           // Every ⚠️/❌ table row gets a corresponding bullet here — a WARNING/CRITICAL report
@@ -478,6 +493,7 @@ jobs:
           lines.push(...gasLines) // [Auditor M2 / PR #497] one row per monitored/not-monitored chain
           lines.push(...keeperStateLines) // [fix/executor-alert-masking-rpc-auth] INC-2026-10-30-001
           lines.push(...infraMissLines) // [ADR-026] infra misses are visible, never counted
+          lines.push(...rateLimitLines) // [feat/retire-force-mev C3] HTTP 429 sources
           lines.push(`| Git Activity (origin/main) | ℹ️ | ${e.GIT_COUNT} commits in the last 24h |`, '')
           lines.push('## Actions Taken')
           lines.push('None — this workflow only reads (curl + a read-only eth_getBalance RPC call); it never writes to any endpoint.', '')

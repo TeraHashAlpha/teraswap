@@ -70,7 +70,7 @@ const ALLOW: AllowedRemoval[] = [
   { text: '✎', reason: `max-slippage edit: ${GLYPH}` },
   { text: 'ⓘ', reason: `tooltip trigger: ${GLYPH}` },
   { text: '⚙', reason: `sources trigger: ${GLYPH}` },
-  { text: '×', reason: `dismiss MEV hint: ${GLYPH}` },
+  // [feat/retire-force-mev, owner 2026-11-06] '×' (dismiss MEV hint) is gone: the hint itself is retired in v1 and v2 (content-map delta).
 ]
 
 const addr = '0xd44d00000000000000000000000000000000962d'
