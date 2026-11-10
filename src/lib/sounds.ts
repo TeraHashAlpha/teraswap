@@ -49,7 +49,7 @@ let bgMusic: HTMLAudioElement | null = null
 let bgMusicEnabled = true
 
 export function startBackgroundMusic() {
-  if (bgMusic) return // already playing
+  if (bgMusic || !bgMusicEnabled) return // already playing, or switched off (a stale first-interaction listener must not undo the toggle)
   try {
     bgMusic = new Audio('/sounds/background.mp3')
     bgMusic.loop = true

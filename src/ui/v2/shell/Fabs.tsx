@@ -13,8 +13,9 @@ const FAB =
 /** ♫ bottom-left (speaker ↔ muted speaker). Toggles ONLY the background music — the same `toggleBackgroundMusic()` v1 calls. */
 export function MusicToggle() {
   const { on, toggle } = useBackgroundMusic()
-  // stopPropagation keeps this click from reaching the document-level "first interaction" listener of v1's root
-  // BackgroundMusic (mounted by the root layout), which would start music right after we muted it.
+  // stopPropagation only helps when React's root is an element below `document`. In production Next hydrates INTO
+  // `document`, so v1's root BackgroundMusic listener (a sibling on the same node) still sees this click; what keeps it
+  // from starting music right after we muted it is the on/off guard in startBackgroundMusic() (sounds.ts).
   const onClick = useCallback((e: MouseEvent) => {
     e.stopPropagation()
     toggle()
