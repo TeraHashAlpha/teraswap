@@ -3,7 +3,7 @@ import { bodySizeGuard } from '@/lib/body-limit'
 import { fetchMetaQuote, diagnoseQuoteSources } from '@/lib/api'
 import { isValidAddress } from '@/lib/validation'
 import { SequencerDownError } from '@/lib/chains/sequencer-check'
-import { checkRateLimit, QUOTE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
+import { checkRateLimitWithin, QUOTE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { isSystemHalted } from '@/lib/circuit-breaker'
 import { verifyBearerToken } from '@/lib/auth'
 import { DEFAULT_CHAIN_ID, getChainStatus } from '@/lib/chains'
@@ -123,10 +123,9 @@ async function handleQuoteGet(req: NextRequest): Promise<NextResponse> {
   // [CHORE-API-HARDENING-2 / P3a] Trusted IP — the left-most x-forwarded-for
   // token is attacker-controlled on Vercel and defeats this limit; see trusted-ip.ts.
   const ip = clientIpKey(req)
-  const rateCheck = await withTimeout(
-    checkRateLimit(`quote:${ip}`, QUOTE_RATE_LIMIT.limit, QUOTE_RATE_LIMIT.windowMs),
-    KV_GATE_TIMEOUT_MS,
-  ).catch(onKvTimeout({ allowed: true, remaining: QUOTE_RATE_LIMIT.limit, resetAt: Date.now() + QUOTE_RATE_LIMIT.windowMs }))
+  // [fix/quote-limiter-music-toggle A76b S-8] Bounded wait, then the in-memory limiter at half rate — a hung KV
+  // degrades the limit, it no longer lifts it (this used to fail OPEN on timeout). Same as /api/rpc + the CoW proxy.
+  const rateCheck = await checkRateLimitWithin(`quote:${ip}`, QUOTE_RATE_LIMIT.limit, QUOTE_RATE_LIMIT.windowMs)
   if (!rateCheck.allowed) {
     return NextResponse.json(
       { error: 'Rate limit exceeded. Try again in a minute.' },
@@ -256,10 +255,7 @@ async function handleQuotePost(req: NextRequest): Promise<NextResponse> {
   if (await withTimeout(isSystemHalted(), KV_GATE_TIMEOUT_MS).catch(onKvTimeout(false))) return haltResponse()
 
   const postIp = clientIpKey(req)
-  const postRateCheck = await withTimeout(
-    checkRateLimit(`quote:${postIp}`, QUOTE_RATE_LIMIT.limit, QUOTE_RATE_LIMIT.windowMs),
-    KV_GATE_TIMEOUT_MS,
-  ).catch(onKvTimeout({ allowed: true, remaining: QUOTE_RATE_LIMIT.limit, resetAt: Date.now() + QUOTE_RATE_LIMIT.windowMs }))
+  const postRateCheck = await checkRateLimitWithin(`quote:${postIp}`, QUOTE_RATE_LIMIT.limit, QUOTE_RATE_LIMIT.windowMs)
   if (!postRateCheck.allowed) {
     return NextResponse.json(
       { error: 'Rate limit exceeded.' },
