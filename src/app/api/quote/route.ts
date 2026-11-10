@@ -23,10 +23,11 @@ import { getMetaQuoteCached } from '@/lib/meta-quote-cache'
 export const maxDuration = 60
 
 /**
- * [SPRINT-9X X2] Bound the pre-fan-out KV gates (halt check + rate-limit). They already fail OPEN on a
- * KV *error*, but had no timeout — a hung Upstash connection added unbounded wall-clock before any
- * source was contacted. Fail open on timeout too (quotes are read-only price info), so a slow KV can
- * never push the function past maxDuration.
+ * [SPRINT-9X X2] Bound the halt check (a hung Upstash connection added unbounded wall-clock before any source
+ * was contacted). It fails OPEN on timeout and on a KV error (quotes are read-only price info) — the halt flag is
+ * the only gate left on this constant; the rate limit has its own 1 s deadline (checkRateLimitWithin) and degrades
+ * to the in-memory half-rate limiter, and the quote cache has its own shorter bound (meta-quote-cache.ts). The
+ * three waits are sequential, so their sum is the route's worst case with Redis hung: 3 + 1 + 0.5 s.
  */
 const KV_GATE_TIMEOUT_MS = 3_000
 
