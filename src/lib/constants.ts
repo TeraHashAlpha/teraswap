@@ -90,6 +90,10 @@ const COW_API_URLS: Record<number, string> = {
 export function getCowApiBase(chainId: number): string {
   return COW_API_URLS[chainId] || COW_API_URLS[1]
 }
+/** True when CoW has an orderbook for `chainId` of its own (getCowApiBase would NOT fall back to mainnet). */
+export function hasCowApi(chainId: number): boolean {
+  return Object.prototype.hasOwnProperty.call(COW_API_URLS, chainId)
+}
 
 // ── Aggregator metadata (for UI) ─────────────────────────
 export const AGGREGATOR_META: Record<AggregatorName, {

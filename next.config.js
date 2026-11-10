@@ -1,14 +1,12 @@
 const { withSentryConfig } = require('@sentry/nextjs')
+const { buildContentSecurityPolicy } = require('./csp-policy')
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  images: {
-    remotePatterns: [
-      { protocol: 'https', hostname: 'tokens.1inch.io' },
-      { protocol: 'https', hostname: 'assets.coingecko.com' },
-    ],
-  },
+  // [fix/user-ip-privacy] No `images.remotePatterns`: next/image only ever serves our own bundled
+  // photos (src/ui/v2/photos), and every token logo is an <img> on /api/token-logo or /api/proxy/logo.
+  // A remote pattern would let the image optimizer fetch a third-party host on a visitor's request.
 
   // ── Host canonicalization [SPRINT-9M] ─────────────────
   // Canonical host is www.teraswap.app (matches layout.tsx SITE_URL + WC metadata).
@@ -39,41 +37,10 @@ const nextConfig = {
         headers: [
           {
             key: 'Content-Security-Policy',
-            value: [
-              "default-src 'self'",
-              // Scripts: self + inline (Next.js requires it); unsafe-eval only in dev
-              // worker-src 'self' required for service worker registration
-              `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === 'development' ? " 'unsafe-eval'" : ''}`,
-              "worker-src 'self'",
-              // Styles: self + inline (Tailwind/Next.js)
-              "style-src 'self' 'unsafe-inline'",
-              // Images: self + token icon CDNs + data URIs + blob: object URLs.
-              // [wallet-logos-fix] blob: is REQUIRED for the WalletConnect/Reown "All Wallets"
-              // modal: AppKit fetches each wallet logo via JS (allowed by connect-src below) and
-              // renders it as a same-origin blob: object URL in an <img>. Without blob: here, every
-              // wallet icon is CSP-blocked (img-src) → generic placeholder. Mirrors media-src's blob:.
-              // [fix/functional-chain-ui C8] Trust Wallet logos are served same-origin by
-              // /api/proxy/logo, so GitHub's raw host is no longer allowed here.
-              "img-src 'self' data: blob: https://tokens.1inch.io",
-              // Fonts: all self-hosted via next/font/local (Inter, JetBrains Mono, Clash Display)
-              "font-src 'self' data:",
-              // Connect: aggregator APIs + RPC + WalletConnect + CoW + Etherscan
-              // [fix/functional-chain-ui C8] No DefiLlama origin: the floor-tier classifier moved
-              // server-side (/api/dca-floor-cap) and DCAPanel's own price fallback now goes through
-              // /api/price/defillama, so the browser never calls DefiLlama directly.
-              "connect-src 'self' https://api.1inch.dev https://api.0x.org https://api.paraswap.io https://aggregator-api.kyberswap.com https://api.cow.fi https://open-api.openocean.finance https://api.sushi.com https://api-v3.balancer.fi https://eth.llamarpc.com https://*.infura.io https://*.alchemy.com wss://*.walletconnect.com wss://*.walletconnect.org https://*.walletconnect.com https://*.walletconnect.org https://explorer-api.walletconnect.com https://rpc.walletconnect.com https://relay.walletconnect.com https://metamask-sdk.api.cx.metamask.io wss://metamask-sdk.api.cx.metamask.io https://api.etherscan.io https://api.web3modal.org https://api.web3modal.com https://*.supabase.co wss://*.supabase.co https://rpc.ankr.com https://ethereum-rpc.publicnode.com https://eth.merkle.io https://*.ingest.sentry.io",
-              // Media: self (local sound files in /public/sounds/)
-              "media-src 'self' blob:",
-              // Frames: none (clickjacking protection)
-              "frame-src 'none'",
-              "frame-ancestors 'none'",
-              // Objects: none
-              "object-src 'none'",
-              // Base URI
-              "base-uri 'self'",
-              // Form actions
-              "form-action 'self'",
-            ].join('; '),
+            // [fix/user-ip-privacy] Built from csp-policy.js, where every source carries its reason:
+            // connect-src is 'self' + the exact wallet hosts needed after a wallet is chosen, and
+            // img-src is 'self' data: blob:. Do not add a host here — add it there, with a reason.
+            value: buildContentSecurityPolicy({ isDev: process.env.NODE_ENV === 'development' }),
           },
           {
             key: 'X-Frame-Options',

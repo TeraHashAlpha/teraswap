@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { hashClientIp } from '@/lib/client-ip-key'
 
 const mockReadAll = vi.fn()
 vi.mock('@/lib/keeper-health-monitor', () => ({
@@ -28,12 +29,17 @@ describe('[A71 L-1] GET /api/monitor/keepers — rate limit before auth', () => 
   beforeEach(() => {
     originalSecret = process.env.MONITOR_SECRET
     process.env.MONITOR_SECRET = TEST_SECRET
+    // [fix/user-ip-privacy] The key is HMAC(daily salt, ip). `vi.resetModules()` below gives the route its OWN copy of
+    // client-ip-key.ts — a second "instance" — so without a configured salt it and this file would each draw a
+    // different per-process random one. RATE_LIMIT_SALT is what makes two instances agree, in tests as in production.
+    vi.stubEnv('RATE_LIMIT_SALT', 'test-rate-limit-salt-0123456789abcdef-0123456789')
     mockReadAll.mockReset()
     mockRate.mockReset()
     vi.resetModules()
   })
 
   afterEach(() => {
+    vi.unstubAllEnvs()
     if (originalSecret !== undefined) process.env.MONITOR_SECRET = originalSecret
     else delete process.env.MONITOR_SECRET
   })
@@ -57,7 +63,8 @@ describe('[A71 L-1] GET /api/monitor/keepers — rate limit before auth', () => 
     mockReadAll.mockResolvedValue([{ chainId: 8453, active: true, readable: true, paused: null, pausedSince: null }])
     expect((await callGET({ Authorization: `Bearer ${TEST_SECRET}` })).status).toBe(200)
     expect(mockRate).toHaveBeenCalledTimes(1)
-    expect(mockRate).toHaveBeenCalledWith(`monitor:${IP}`, 30, 60_000)
+    expect(mockRate).toHaveBeenCalledWith(`monitor:${hashClientIp(IP)}`, 30, 60_000)
+    expect(String(mockRate.mock.calls[0][0])).not.toContain(IP)
   })
 
   it('allowed ⇒ the auth check still applies (401 without a token)', async () => {

@@ -8,7 +8,7 @@ import { isSystemHalted } from '@/lib/circuit-breaker'
 import { verifyBearerToken } from '@/lib/auth'
 import { DEFAULT_CHAIN_ID, getChainStatus } from '@/lib/chains'
 import { withTimeout } from '@/lib/adapters/shared'
-import { trustedClientIp } from '@/lib/trusted-ip'
+import { clientIpKey } from '@/lib/client-ip-key'
 import { getMetaQuoteCached } from '@/lib/meta-quote-cache'
 
 /**
@@ -122,7 +122,7 @@ async function handleQuoteGet(req: NextRequest): Promise<NextResponse> {
 
   // [CHORE-API-HARDENING-2 / P3a] Trusted IP — the left-most x-forwarded-for
   // token is attacker-controlled on Vercel and defeats this limit; see trusted-ip.ts.
-  const ip = trustedClientIp(req)
+  const ip = clientIpKey(req)
   const rateCheck = await withTimeout(
     checkRateLimit(`quote:${ip}`, QUOTE_RATE_LIMIT.limit, QUOTE_RATE_LIMIT.windowMs),
     KV_GATE_TIMEOUT_MS,
@@ -255,7 +255,7 @@ async function handleQuotePost(req: NextRequest): Promise<NextResponse> {
   // [H-03] Circuit breaker halt — short-circuit before rate limiting
   if (await withTimeout(isSystemHalted(), KV_GATE_TIMEOUT_MS).catch(onKvTimeout(false))) return haltResponse()
 
-  const postIp = trustedClientIp(req)
+  const postIp = clientIpKey(req)
   const postRateCheck = await withTimeout(
     checkRateLimit(`quote:${postIp}`, QUOTE_RATE_LIMIT.limit, QUOTE_RATE_LIMIT.windowMs),
     KV_GATE_TIMEOUT_MS,

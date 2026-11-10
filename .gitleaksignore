@@ -109,3 +109,10 @@ ec6b1c4656977030020b2c7570e236ff932b1e40:src/lib/sanitize-error.test.ts:stripe-a
 7a11e1aea3f01e24087394dd6ce6dbb5ae4cf188:src/hooks/useOrderEngine.v3.test.ts:generic-api-key:205
 7a11e1aea3f01e24087394dd6ce6dbb5ae4cf188:src/hooks/useOrderEngine.test.ts:generic-api-key:407
 7a11e1aea3f01e24087394dd6ce6dbb5ae4cf188:src/hooks/useOrderEngine.test.ts:generic-api-key:408
+
+# [fix/user-ip-privacy] src/lib/rpc-method-policy.ts commit 3ec1c04 — the JSON-RPC method name
+# `eth_createAccessList` ("Access" keyword) followed by the next list entry `eth_simulateV1` trips
+# the generic-api-key heuristic. Not a secret: public method names. Lines already reordered at HEAD
+# (8c51020) so the current content no longer matches; this fingerprint covers only the historical
+# commit, which cannot be changed without a history rewrite. Owner-approved 2026-11-06.
+3ec1c0499fe9cb6c6a255c575bcb7f55a84c7c62:src/lib/rpc-method-policy.ts:generic-api-key:34

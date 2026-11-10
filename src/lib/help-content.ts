@@ -1,4 +1,14 @@
-import { INTEGRATED_DEX_SOURCE_COUNT, INTEGRATED_DEX_SOURCE_LABELS, SWAP_CHAIN_LIST_LABEL, formatChainList } from '@/config/product-claims'
+import {
+  INTEGRATED_DEX_SOURCE_COUNT,
+  INTEGRATED_DEX_SOURCE_LABELS,
+  PRIVACY_DIRECT_NOTE,
+  PRIVACY_IP_STORAGE_NOTE,
+  PRIVACY_PROXY_CLAIM,
+  PRIVACY_WALLET_ADVICE,
+  PRIVACY_WALLET_STORAGE_NOTE,
+  SWAP_CHAIN_LIST_LABEL,
+  formatChainList,
+} from '@/config/product-claims'
 
 export interface HelpItem {
   q: string
@@ -115,11 +125,12 @@ export const helpSections: HelpSection[] = [
       },
       {
         q: 'How does TeraSwap protect my privacy?',
-        a: 'All blockchain reads (balance checks, price feeds, transaction receipts) and aggregator API calls are routed through a server-side privacy proxy. Your IP address is never exposed to RPC providers like Alchemy or external DEX APIs. Only our server communicates with these services.',
+        // [fix/user-ip-privacy] The owner's wording, from product-claims — what is relayed, and what the wallet does on its own.
+        a: `${PRIVACY_PROXY_CLAIM} ${PRIVACY_DIRECT_NOTE} ${PRIVACY_WALLET_ADVICE}`,
       },
       {
         q: 'What data does TeraSwap collect?',
-        a: 'Minimal. We do not track wallets, store private keys, or collect personal information. Your IP address is actively protected by our privacy proxy. See our Privacy Policy for full details.',
+        a: `We do not store private keys. ${PRIVACY_IP_STORAGE_NOTE} ${PRIVACY_WALLET_STORAGE_NOTE} See our Privacy Policy for full details.`,
       },
     ],
   },

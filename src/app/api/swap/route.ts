@@ -13,7 +13,7 @@ import { isSequencerUp, SequencerDownError } from '@/lib/chains/sequencer-check'
 import { getPublicClientForChain } from '@/lib/chains/clients'
 import { sanitizeUpstreamError } from '@/lib/sanitize-error'
 import { isNoRouteError } from '@/lib/adapters/shared'
-import { trustedClientIp } from '@/lib/trusted-ip'
+import { clientIpKey } from '@/lib/client-ip-key'
 import { forLog } from '@/lib/log-sanitize'
 
 // [SPRINT-9J J2] Give the function enough headroom that a slow swap-build never
@@ -146,7 +146,7 @@ export async function POST(req: NextRequest) {
     // [Audit B-06] Rate limiting by IP — persistent via Vercel KV.
     // Runs AFTER the source guard so invalid requests don't burn budget.
     // [CHORE-API-HARDENING-2 / P3a] Trusted IP — see trusted-ip.ts.
-    const ip = trustedClientIp(req)
+    const ip = clientIpKey(req)
     const rateCheck = await checkRateLimit(`swap:${ip}`, SWAP_RATE_LIMIT.limit, SWAP_RATE_LIMIT.windowMs)
 
     if (!rateCheck.allowed) {
