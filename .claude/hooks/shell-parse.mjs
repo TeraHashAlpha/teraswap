@@ -21,7 +21,7 @@ export class ParseError extends Error {}
 
 const RESERVED = new Set(['{', '}', '!', 'if', 'then', 'else', 'elif', 'fi', 'while', 'until', 'do', 'done', 'select', 'esac', 'function'])
 const ASSIGN = /^[A-Za-z_][A-Za-z0-9_]*\+?=/
-const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'ash'])
+const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'ash', 'csh', 'tcsh', 'fish'])
 
 /** Lower-cased basename. macOS volumes are case-insensitive, so `GIT` and `.ENV` are the real thing. */
 export function baseName(word) {
@@ -34,6 +34,7 @@ export const isAllExp = (w) => w.length > 0 && w.replaceAll(EXP, '') === ''
 /** Index just after the `)` that matches the `(` at src[i]. */
 function scanParen(src, i) {
   let depth = 0
+  const pend = [] // heredocs whose body starts after the next newline
   for (let j = i; j < src.length; j++) {
     const c = src[j]
     if (c === '\\') { j++; continue }
@@ -51,6 +52,45 @@ function scanParen(src, i) {
         j++
       }
       if (j >= src.length) throw new ParseError('unterminated double quote')
+      continue
+    }
+    if (c === '<' && src[j + 1] === '<' && src[j + 2] !== '<' && src[j - 1] !== '<') {
+      // A heredoc inside $( ): its body may hold apostrophes and parentheses (audit A77b M-7), so skip it whole.
+      let k = j + 2
+      let strip = false
+      if (src[k] === '-') { strip = true; k++ }
+      while (src[k] === ' ' || src[k] === '\t') k++
+      if (k < src.length && /[A-Za-z_'"\\]/.test(src[k])) {
+        let delim = ''
+        while (k < src.length && !/[\s;&|<>()]/.test(src[k])) {
+          const d = src[k]
+          if (d === "'" || d === '"') {
+            const e = src.indexOf(d, k + 1)
+            if (e < 0) throw new ParseError('unterminated heredoc delimiter')
+            delim += src.slice(k + 1, e)
+            k = e + 1
+          } else if (d === '\\') { delim += src[k + 1] ?? ''; k += 2 } else { delim += d; k++ }
+        }
+        pend.push({ delim, strip })
+        j = k - 1
+        continue
+      }
+    }
+    if (c === '\n' && pend.length > 0) {
+      let p = j + 1
+      while (pend.length > 0) {
+        const h = pend.shift()
+        let found = false
+        while (p < src.length) {
+          let e = src.indexOf('\n', p)
+          if (e < 0) e = src.length
+          const line = src.slice(p, e)
+          p = Math.min(e + 1, src.length)
+          if ((h.strip ? line.replace(/^\t+/, '') : line) === h.delim) { found = true; break }
+        }
+        if (!found) throw new ParseError('unterminated heredoc')
+      }
+      j = p - 1
       continue
     }
     if (c === '(') depth++
@@ -91,16 +131,18 @@ const REDIR_NEEDS_TARGET = /^[\d&]*[<>]+&?$/
 const REDIR_SELF = /^[\d&]*[<>]+(?:&\d+|&-|.+)$/
 function stripRedirects(words) {
   const out = []
+  const redirs = [] // operators and targets (here-strings excluded: their operand is a string, not a file)
   for (let i = 0; i < words.length; i++) {
     const w = words[i]
-    if (REDIR_SELF.test(w) && !/^<<<?$/.test(w)) continue
-    if (REDIR_NEEDS_TARGET.test(w) || /^<<<$/.test(w)) { i++; continue }
+    if (/^<<<$/.test(w)) { i++; continue }
+    if (REDIR_SELF.test(w) && !/^<<<?$/.test(w)) { redirs.push(w); continue }
+    if (REDIR_NEEDS_TARGET.test(w)) { redirs.push(w); if (words[i + 1] !== undefined) redirs.push(words[i + 1]); i++; continue }
     out.push(w)
   }
-  return out
+  return { out, redirs }
 }
 
-/** @returns {{words: string[], argv: string[]}[]} one entry per simple command, substitutions flattened in */
+/** @returns {{words: string[], argv: string[], redirs: string[]}[]} one entry per simple command, substitutions flattened in */
 export function parseCommands(src, depth = 0) {
   if (depth > MAX_DEPTH) throw new ParseError('nesting too deep')
   const n = src.length
@@ -116,7 +158,7 @@ export function parseCommands(src, depth = 0) {
   }
   const endCmd = () => {
     endWord()
-    if (words.length > 0) { cmds.push({ words, argv: stripRedirects(words) }); words = [] }
+    if (words.length > 0) { const { out, redirs } = stripRedirects(words); cmds.push({ words, argv: out, redirs }); words = [] }
   }
   const sub = (inner) => { for (const c of parseCommands(inner, depth + 1)) cmds.push(c) }
   /** Run the substitutions found inside a heredoc body or similar free text. */
@@ -320,6 +362,8 @@ const WRAPPERS = {
   nohup: { valued: [] },
   time: { valued: [] },
   noglob: { valued: [] },
+  nocorrect: { valued: [] },
+  arch: { valued: ['-arch', '-d', '-e'] },
   setsid: { valued: [] },
   exec: { valued: ['-a'] },
   nice: { valued: ['-n', '--adjustment'] },
@@ -350,7 +394,12 @@ export function inspect(command) {
 
   const walk = (str, depth) => {
     if (depth > MAX_DEPTH) throw new ParseError('nesting too deep')
-    for (const c of parseCommands(str, depth)) handle(c.argv, c.words, depth)
+    for (const c of parseCommands(str, depth)) {
+      // Redirect targets are checked for EVERY simple command, compound-command closers (`done < .env`, `) < f`, `} < f`)
+      // and wrappers (`sh -c '…' < .env`) included: handle() may return before it ever pushes this command (A77b H-5).
+      if (c.redirs.length > 0) cmds.push({ argv: [], words: c.redirs, base: '', redirOnly: true })
+      handle(c.argv, c.words, depth)
+    }
   }
 
   const handle = (argv, words, depth) => {
@@ -391,9 +440,22 @@ export function inspect(command) {
       }
       if (WRAPPERS[base]) { a = skipOptions(a, WRAPPERS[base]); continue }
 
+      if (base === 'script' || base === 'coproc') {
+        problems.push(`${base} runs another command through a wrapper the guard cannot unwrap`)
+        return
+      }
+
+      // npx X, pnpx X, bunx X; `npm|pnpm|yarn|bun exec|x|dlx X`; and (A77b lows) `pnpm|yarn|bun X` / `… run X`, which
+      // run a bin from node_modules/.bin exactly like npx does. For those three the package-manager command itself is
+      // inspected too (so `pnpm audit --fix` still reaches the audit rule), X is inspected in addition.
       let runner = null
+      let alsoSelf = false
       if (base === 'npx' || base === 'pnpx' || base === 'bunx') runner = a.slice(1)
       else if (['npm', 'pnpm', 'yarn', 'bun'].includes(base) && ['exec', 'x', 'dlx'].includes(a[1])) runner = a.slice(2)
+      else if (['pnpm', 'yarn', 'bun'].includes(base) && a[1] !== undefined && !a[1].startsWith('-')) {
+        runner = a[1] === 'run' || a[1] === 'run-script' ? a.slice(2) : a.slice(1)
+        alsoSelf = true
+      }
       if (runner !== null) {
         let k = 0
         let called = null
@@ -406,6 +468,11 @@ export function inspect(command) {
           if (RUNNER_VALUED.includes(t)) k++
         }
         if (called !== null) { walk(called, depth + 1); return }
+        if (alsoSelf) {
+          if (runner.slice(k).length > 0) handle(runner.slice(k), words, depth + 1)
+          cmds.push({ argv: a, words, base })
+          return
+        }
         a = runner.slice(k)
         continue
       }

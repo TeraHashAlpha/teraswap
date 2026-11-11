@@ -14,65 +14,113 @@
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { inspect } from './shell-parse.mjs'
-import { ghApiWriteReason, ghParts, gitParts } from './command-guard.mjs'
+import { ghAllowReason } from './command-guard.mjs'
 
 export const READONLY_AGENT_TYPES = new Set(['recon', 'auditor'])
 
-const GIT_WRITES = new Set([
-  'commit', 'push', 'pull', 'am', 'cherry-pick', 'rebase', 'revert', 'tag', 'config', 'clean', 'restore', 'reset', 'apply',
-  'commit-tree', 'update-ref', 'fast-import', 'notes', 'replace', 'stash', 'add', 'rm', 'mv', 'gc', 'prune', 'filter-branch', 'init',
-  'send-pack', 'http-push',
-])
-const GH_READ = [
-  ['pr', 'view'], ['pr', 'diff'], ['pr', 'list'], ['pr', 'status'], ['pr', 'checks'],
-  ['issue', 'view'], ['issue', 'list'], ['issue', 'status'], ['repo', 'view'], ['auth', 'status'],
-  ['run', 'view'], ['run', 'list'], ['release', 'view'], ['release', 'list'], ['workflow', 'view'], ['workflow', 'list'],
-  ['label', 'list'], ['search'], ['codeql'], ['version'], ['help'], ['status'],
-]
-const BRANCH_LIST_FLAGS = new Set(['-l', '--list', '-a', '--all', '-r', '--remotes', '--show-current', '-v', '-vv', '--verbose', '--contains', '--no-contains', '--merged', '--no-merged', '--points-at', '--sort', '--format'])
-const FETCH_VALUED = new Set(['--depth', '--deepen', '--shallow-since', '--shallow-exclude', '-j', '--jobs', '--upload-pack', '--refmap', '-o', '--server-option', '--negotiation-tip'])
+// ALLOW-LIST (audit A77b M-8, M-9): a read-only agent may run only these git forms; everything else is refused.
+const GIT_FREE = new Set(['status', 'log', 'diff', 'show', 'rev-parse', 'ls-files', 'ls-tree', 'cat-file', 'blame', 'grep', 'describe'])
+const GIT_GLOBAL_OK = new Set(['--no-pager', '-P', '--no-optional-locks', '--version', '--help', '-h'])
+const GIT_GLOBAL_VALUED = new Set(['-C', '--git-dir', '--work-tree'])
+const BRANCH_FLAGS = new Set(['-l', '--list', '-a', '--all', '-r', '--remotes', '--show-current', '-v', '-vv', '--verbose'])
+const BRANCH_VALUED = new Set(['--contains', '--no-contains', '--merged', '--no-merged', '--points-at', '--sort', '--format'])
+const TAG_FLAGS = new Set(['-l', '--list', '-n'])
+const TAG_VALUED = new Set(['--contains', '--no-contains', '--merged', '--no-merged', '--points-at', '--sort', '--format'])
+const FETCH_FLAGS = new Set(['--all', '-t', '--tags', '--no-tags', '-q', '--quiet', '-v', '--verbose', '-n', '--dry-run', '--unshallow', '--no-recurse-submodules'])
+const FETCH_VALUED = new Set(['--depth', '--deepen', '--shallow-since', '--shallow-exclude', '-j', '--jobs'])
+const MERGE_FLAGS = new Set(['--no-commit', '--no-ff', '--ff', '--ff-only', '--no-edit', '--no-verify', '-q', '--quiet', '-v', '--verbose', '--no-stat', '--stat'])
+const WORKTREE_ADD_FLAGS = new Set(['--detach', '--no-checkout', '-f', '--force', '-q', '--quiet'])
+const CONFIG_GET = new Set(['--get', '--get-all', '--get-regexp'])
+const CONFIG_SCOPE = new Set(['--local', '--global', '--system', '--worktree', '--show-origin', '--show-scope'])
 
-/** Refusal reason for one effective git command, or null. */
-function gitReason(c) {
-  const { sub, args } = gitParts(c.argv)
-  if (sub === undefined) return null
-  if (sub === 'stash' && (args[0] === 'list' || args[0] === 'show')) return null
-  if (GIT_WRITES.has(sub)) return `git ${sub} writes history, refs or the index`
-  if (sub === 'merge') return args.includes('--no-commit') && !args.includes('--commit') ? null : 'git merge without --no-commit creates a commit'
-  if (sub === 'checkout') {
-    if (args.some((t) => /^(-[a-zA-Z]*[bB][a-zA-Z]*|--orphan|--force-create|-t|--track)$/.test(t))) return 'git checkout -b/-B creates a branch'
-    if (args.includes('--')) return 'git checkout -- <path> overwrites working-tree files'
-    return null
+/** All of `args` must be flags from `flags`, or valued flags from `valued` (`--x v` or `--x=v`), or (when allowed) positionals. */
+function onlyFlags(args, flags, valued, { positionals = 'none' } = {}) {
+  let positional = 0
+  for (let k = 0; k < args.length; k++) {
+    const t = args[k]
+    if (!t.startsWith('-')) { positional++; continue }
+    const name = t.split('=')[0]
+    if (flags.has(t)) continue
+    if (valued.has(name)) { if (!t.includes('=')) k++; continue }
+    if (/^--(depth|deepen|jobs)=/.test(t) || /^-j\d+$/.test(t)) continue
+    return `git flag ${t}`
   }
-  if (sub === 'switch') return args.some((t) => /^(-[cC]|--create|--force-create|--orphan)$/.test(t)) ? 'git switch -c creates a branch' : null
-  if (sub === 'branch') {
-    if (args.some((t) => /^(-[a-zA-Z]*[dDmMcCfu][a-zA-Z]*|--delete|--move|--copy|--force|--set-upstream-to.*|--unset-upstream|--edit-description)$/.test(t) && !BRANCH_LIST_FLAGS.has(t))) return 'git branch write flag'
-    const listing = args.some((t) => BRANCH_LIST_FLAGS.has(t.split('=')[0]))
-    return !listing && args.some((t) => !t.startsWith('-')) ? 'git branch <name> creates a branch' : null
-  }
-  if (sub === 'remote') return args.some((t) => /^(add|remove|rm|rename|set-url|set-head|set-branches|prune)$/.test(t)) ? 'git remote write' : null
-  if (sub === 'reflog') return args.some((t) => /^(expire|delete)$/.test(t)) ? 'git reflog expire/delete' : null
-  if (sub === 'fetch') {
-    const pos = []
-    for (let k = 0; k < args.length; k++) {
-      if (FETCH_VALUED.has(args[k])) { k++; continue }
-      if (!args[k].startsWith('-')) pos.push(args[k])
-    }
-    // `git fetch origin a:b` and `git fetch a:b` (an scp-style remote or a bare refspec) write refs; scheme:// URLs are remotes.
-    return pos.some((t) => t.includes(':') && !/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(t)) ? 'git fetch with a src:dst refspec writes local refs' : null
-  }
+  if (positionals === 'none' && positional > 0) return 'a positional argument'
   return null
 }
 
-function ghReason(c) {
-  const { group, action, afterGroup } = ghParts(c.argv)
-  if (group === undefined) return null // `gh`, `gh --version`, `gh --help`
-  if (group === 'api') {
-    const why = ghApiWriteReason(afterGroup)
-    return why ? `${why} — a read-only agent may only GET` : null
+/** Refusal reason for one effective git command, or null. */
+function gitReason(c) {
+  const { argv } = c
+  let j = 1
+  for (; j < argv.length && argv[j].startsWith('-'); j++) {
+    const t = argv[j]
+    if (GIT_GLOBAL_OK.has(t) || /^--(git-dir|work-tree)=/.test(t)) continue
+    if (GIT_GLOBAL_VALUED.has(t)) { j++; continue }
+    return `git ${t} is not a permitted global option for a read-only agent (-c / --exec-path / --config-env can run commands)`
   }
-  const ok = GH_READ.some(([a, b]) => group === a && (b === undefined || action === b))
-  return ok ? null : `gh ${[group, action].filter(Boolean).join(' ')} is not on the read-only list`
+  const sub = argv[j]
+  const args = argv.slice(j + 1)
+  if (sub === undefined) return null
+  const no = (why) => `git ${sub}: ${why} is not on the read-only git allow-list`
+  if (GIT_FREE.has(sub)) {
+    if (args.some((t) => /^--output(=|$)/.test(t))) return no('--output (writes a file)')
+    if (sub === 'grep' && args.some((t) => /^(-O.*|--open-files-in-pager.*|--no-index|--untracked)$/.test(t))) return no('git grep -O/--no-index/--untracked (runs a pager or reads untracked/ignored files)')
+    return null
+  }
+  switch (sub) {
+    case 'remote': return args.length === 0 || (args.length === 1 && (args[0] === '-v' || args[0] === '--verbose')) ? null : no('anything but `remote` / `remote -v`')
+    case 'branch': {
+      const bad = onlyFlags(args, BRANCH_FLAGS, BRANCH_VALUED, { positionals: 'any' })
+      if (bad) return no(bad)
+      // a bare positional creates a branch; it is a pattern only together with --list/-l
+      const positional = args.filter((t, k) => !t.startsWith('-') && !BRANCH_VALUED.has(args[k - 1]))
+      return positional.length > 0 && !args.some((t) => t === '-l' || t === '--list') ? no('`branch <name>` (creates a branch)') : null
+    }
+    case 'tag': {
+      const bad = onlyFlags(args, TAG_FLAGS, TAG_VALUED, { positionals: 'any' })
+      if (bad) return no(bad)
+      const positional = args.filter((t, k) => !t.startsWith('-') && !TAG_VALUED.has(args[k - 1]))
+      return positional.length > 0 && !args.some((t) => t === '-l' || t === '--list') ? no('`tag <name>` (creates a tag)') : null
+    }
+    case 'config': {
+      const rest = args.filter((t) => !CONFIG_SCOPE.has(t))
+      return CONFIG_GET.has(rest[0]) && rest.length >= 2 && rest.slice(1).every((t) => !t.startsWith('-')) ? null : no('anything but `config --get[-all|-regexp] <key>`')
+    }
+    case 'fetch': {
+      const bad = onlyFlags(args, FETCH_FLAGS, FETCH_VALUED, { positionals: 'any' })
+      if (bad) return no(bad)
+      const pos = args.filter((t, k) => !t.startsWith('-') && !FETCH_VALUED.has(args[k - 1]))
+      // `git fetch origin a:b`, `git fetch a:b`, `+refs/…` write local refs; a scheme:// URL is a remote, not a refspec.
+      return pos.some((t) => (t.includes(':') && !/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(t)) || t.startsWith('+')) ? no('a refspec (writes local refs)') : null
+    }
+    case 'worktree': {
+      const action = args[0]
+      if (action === 'list') return args.slice(1).every((t) => ['--porcelain', '-v', '--verbose', '-z'].includes(t)) ? null : no('worktree list with that flag')
+      if (action === 'remove') return args.slice(1).every((t) => t === '-f' || t === '--force' || !t.startsWith('-')) && args.length >= 2 ? null : no('worktree remove with that flag')
+      if (action === 'add') {
+        const bad = onlyFlags(args.slice(1), WORKTREE_ADD_FLAGS, new Set(), { positionals: 'any' })
+        return bad ? no(`worktree add (${bad}; -b/-B would create a branch)`) : null
+      }
+      return no('worktree other than add|remove|list')
+    }
+    case 'checkout': {
+      const flags = args.filter((t) => t.startsWith('-'))
+      const pos = args.filter((t) => !t.startsWith('-'))
+      return args.includes('--detach') && flags.every((t) => t === '--detach' || t === '-q') && pos.length <= 1 && !pos.includes('.') ? null : no('anything but `checkout --detach [<commit>]`')
+    }
+    case 'merge': {
+      if (args.length === 1 && (args[0] === '--abort' || args[0] === '--quit')) return null
+      const bad = onlyFlags(args, MERGE_FLAGS, new Set(), { positionals: 'any' })
+      if (bad) return no(bad)
+      return args.includes('--no-commit') ? null : no('`merge` without --no-commit (creates a commit)')
+    }
+    default: return no(`\`${sub}\``)
+  }
+}
+
+function ghReason(c) {
+  return ghAllowReason(c.argv, { readonly: true })
 }
 
 /** @returns {string|null} a refusal reason, or null if a read-only agent may run it. Throws on unparseable input. */

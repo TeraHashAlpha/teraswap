@@ -15,7 +15,7 @@ const RO_REFUSED = [
   'sh -c "git push origin x"', "bash -lc 'git commit -m x'", 'eval "git push"', 'FOO=1 git commit -m x', '/usr/bin/git push', 'env git push', 'command git push', '\\git push', '"git" push', 'GIT push', 'xargs git push', 'echo $(git push)',
   'git pull', 'git pull --rebase origin main', 'git -C wt pull', 'git am x.patch', 'git cherry-pick abc', 'git rebase origin/main', 'git revert HEAD', 'git tag v1', 'git tag -a v1 -m x', 'git config user.name x', 'git config --global alias.p push',
   'git clean -fd', 'git clean -n', 'git restore file', 'git restore --staged file', 'git reset --hard', 'git stash', 'git apply x.patch', 'git add .', 'git rm file', 'git mv a b', 'git gc', 'git filter-branch', 'git init',
-  'git merge origin/main', 'git merge --abort', 'git merge --commit --no-commit x',
+  'git merge origin/main', 'git merge --continue', 'git merge --commit --no-commit x',
   'git checkout -b x', 'git checkout -B x origin/main', 'git checkout -fb x', 'git checkout --orphan x', 'git checkout -- file', 'git switch -c x', 'git switch -C x', 'git switch --create x',
   'git fetch origin a:b', 'git fetch origin +refs/heads/*:refs/remotes/o/*', 'git fetch origin pull/5/head:pr-5', 'git fetch --depth 1 origin a:b', 'git -C wt fetch origin main:main',
   'git branch x', 'git branch -D x', 'git branch -m a b', 'git branch -c a b', 'git branch --delete x', 'git branch -u origin/main', 'git remote add x y', 'git remote remove x', 'git remote set-url origin x', 'git reflog expire --all', 'git update-ref -d refs/x',
@@ -24,13 +24,13 @@ const RO_REFUSED = [
   'bash', 'echo x | sh', 'eval "$CMD"',
 ]
 const RO_ALLOWED = [
-  'git status', 'git log --oneline -5', 'git diff origin/main...HEAD --stat', 'git fetch origin main', 'git fetch origin', 'git fetch --depth 1 origin main', 'git fetch origin pull/5/head', 'git worktree add --detach /tmp/wt origin/main', 'git worktree add -b x /tmp/wt origin/main',
+  'git status', 'git log --oneline -5', 'git diff origin/main...HEAD --stat', 'git fetch origin main', 'git fetch origin', 'git fetch --depth 1 origin main', 'git fetch origin pull/5/head', 'git worktree add --detach /tmp/wt origin/main',
   'git worktree remove /tmp/wt', 'git worktree remove --force /tmp/wt', 'git worktree list', 'git -C /tmp/wt rev-parse HEAD', 'git show HEAD:package.json', 'git branch --show-current', 'git branch -a', 'git branch -r --contains abc', 'git branch --list "chore/*"',
-  'git remote -v', 'git remote get-url origin', 'git log -1 --format=%H', 'git merge --no-commit origin/main', 'git merge --no-commit --no-ff x', 'git merge-base HEAD origin/main', 'git checkout --detach origin/main', 'git checkout abc123', 'git switch --detach x',
-  'git rev-list --count HEAD', 'git ls-files', 'git blame -L1,5 file', 'git grep -n "git push" docs', 'git stash list',
+  'git remote -v', 'git log -1 --format=%H', 'git merge --no-commit origin/main', 'git merge --no-commit --no-ff x', 'git merge --abort', 'git merge --quit', 'git checkout --detach origin/main',
+  'git ls-files', 'git blame -L1,5 file', 'git grep -n "git push" docs', 'git config --get remote.origin.url', 'git tag -l "v*"', 'git describe --tags',
   'npm ci', 'npm test', 'npx tsc --noEmit', 'npx --no-install vitest run',
   'gh pr view 5 --json state', 'gh pr diff 5', 'gh pr list', 'gh pr status', 'gh pr checks 5', 'gh -R a/b pr checks 5', 'gh --repo a/b pr view 5', 'gh api repos/a/b/pulls/5', 'gh api repos/a/b/pulls?per_page=5', 'gh api -X GET repos/a/b', 'gh api repos/a/b -H "Accept: x" --jq .name',
-  'gh issue view 5', 'gh issue list', 'gh repo view', 'gh run view 5', 'gh run list', 'gh release view v1', 'gh codeql version', 'gh auth status', 'gh --version', 'gh',
+  'gh issue view 5', 'gh issue list', 'gh repo view', 'gh run view 5', 'gh run list', 'gh --version', 'gh',
   'grep -rn "git push" docs', "grep -rn 'git push --force' docs", 'rg "gh pr merge" docs', 'git log --grep="git commit"', 'echo "git push"', 'echo "do not git commit here" | cat', 'git log --oneline | grep "git push"', 'ls -la', 'cat package.json',
 ]
 
@@ -187,7 +187,7 @@ export const TABLE_A = {
   'git credential / alias injection': ['git credential fill', 'git -C . credential approve', 'git -c credential.helper=x push origin x', 'git -c alias.p=push p', 'git -c core.sshCommand=x fetch', 'git -c remote.origin.push=+x push'],
   'gh pr (all but view diff checks list status)': [
     'gh pr create', 'gh pr create --title x', 'gh pr merge 5', 'gh pr merge 5 --squash', 'gh pr ready 5', 'gh pr close 5', 'gh pr reopen 5', 'gh pr comment 5 -b x', 'gh pr edit 5', 'gh pr review 5 --approve',
-    'gh pr checkout 5', 'gh pr update-branch 5', 'gh pr lock 5', 'gh -R a/b pr create', 'gh --repo a/b pr merge 5', 'gh pr -R a/b merge 5', 'gh pr --repo=a/b close 5', '/opt/homebrew/bin/gh pr create',
+    'gh pr update-branch 5', 'gh pr lock 5', 'gh -R a/b pr create', 'gh --repo a/b pr merge 5', 'gh pr -R a/b merge 5', 'gh pr --repo=a/b close 5', '/opt/homebrew/bin/gh pr create',
     'env gh pr create', 'command gh pr create', 'GH_TOKEN=x gh pr create', 'GH pr create', 'cd x && gh pr create', 'sh -c "gh pr create"', 'eval "gh pr merge 5"', 'xargs gh pr close', 'gh alias set mk "pr create"', 'gh codespace ssh',
   ],
   'gh api (anything not provably GET)': [
@@ -221,9 +221,9 @@ export const TABLE_B = [
   'npm ci', 'npm test', 'npm run build', 'npm run lint', 'npm audit', 'npm audit --json', 'npm audit --omit=dev', 'npm run audit:fix-report', 'npx tsc --noEmit', 'npx --no-install vitest run', './node_modules/.bin/vitest run', 'FOO=1 npm test',
   'env FOO=1 npm test', 'cd x && npm test', 'timeout 60 npm test', 'echo hi | cat', 'xargs echo', 'find . -name "*.ts"', 'node scripts/goal-lint.mjs goal.md', 'bash scripts/agent-verify.sh', 'bash -c "echo hi"', 'sh -c "git status"', 'eval "git status"',
   'bash -lc "npm test"', 'diff <(git show a:f) <(git show b:f)', 'echo "$(git rev-parse HEAD)"', 'git diff --stat 2>&1 | tail', 'rsync -a src/ dst/', 'rsync -a ./a ./b',
-  'gh pr view 5', 'gh pr view 5 --json state', 'gh pr diff 5', 'gh pr checks 5', 'gh pr list', 'gh pr list --state merged', 'gh pr status', 'gh -R a/b pr view 5', 'gh --repo a/b pr checks 5',
+  'gh pr view 5', 'gh pr view 5 --json state', 'gh pr diff 5', 'gh pr checks 5', 'gh pr checkout 5', 'gh pr list', 'gh pr list --state merged', 'gh pr status', 'gh -R a/b pr view 5', 'gh --repo a/b pr checks 5',
   'gh api repos/a/b/pulls/5', 'gh api repos/a/b/pulls?per_page=5', 'gh api repos/a/b/contents/foo-Xbar', 'gh api repos/a/b/contents/x-f', 'gh api -X GET repos/a/b', 'gh api --method GET repos/a/b', 'gh api --method=get repos/a/b', 'gh api -XGET repos/a/b',
-  'gh api repos/a/b -H "Accept: application/vnd.github+json"', 'gh api repos/a/b --jq ".name"', 'gh api repos/a/b -q .name', 'gh api repos/a/b/commits --paginate', 'gh api -H "X-Foo: -f" repos/a/b', 'gh codeql version', 'gh issue view 5',
+  'gh api repos/a/b -H "Accept: application/vnd.github+json"', 'gh api repos/a/b --jq ".name"', 'gh api repos/a/b -q .name', 'gh api repos/a/b/commits --paginate', 'gh api -H "X-Foo: -f" repos/a/b', 'gh issue view 5',
   'forge test', 'forge build', 'forge script S.s.sol --rpc-url x', 'forge fmt --check', 'cast call 0x0 "f()"', 'cast block-number', 'cast --version', 'cast sig "send(address)"',
   'for f in a b; do echo $f; done', 'if true; then echo ok; fi', '# git push --force', 'echo ok # ssh host', 'git commit -m "x" # push --force',
 ]
@@ -316,4 +316,88 @@ describe('A77 accepted residual (runbook only, not a test failure)', () => {
     for (const c of ['npm run force-push', 'bash ./push-force.sh', 'sh push-force.sh', 'source ./push-force.sh']) expect(guardDecide(c), c).toBeNull()
     expect(readFileSync(path.join(ROOT, 'docs', 'Runbooks', 'agent-harness.md'), 'utf8')).toMatch(/script file/)
   })
+})
+
+// ---------------------------------------------------------------------------------------------------------------
+// ALLOW-LISTS (audit A77b H-6, H-7, M-6, M-9): gh, cast, forge and git-for-read-only-agents run only the listed
+// forms. For each list: every permitted form passes, and >= 20 unlisted forms are refused.
+const GH_PERMITTED = [
+  'gh pr view 5', 'gh pr view 5 --json state', 'gh pr diff 5', 'gh pr checks 5', 'gh pr list', 'gh pr list --state merged', 'gh pr status', 'gh pr checkout 5',
+  'gh run view 5', 'gh run view 5 --log', 'gh run list', 'gh repo view', 'gh repo view a/b', 'gh issue view 5', 'gh issue list',
+  'gh api repos/a/b/pulls/5', 'gh api -X GET repos/a/b', 'gh api --method GET repos/a/b', 'gh api repos/a/b -H "Accept: x" --jq .name',
+  'gh -R a/b pr view 5', 'gh --repo a/b pr checks 5', 'gh --repo=a/b issue list', 'gh --version', 'gh',
+]
+const GH_UNLISTED = [
+  'gh auth token', 'gh auth status', 'gh auth status --show-token', 'gh auth login', 'gh auth refresh', 'gh auth setup-git', 'gh config get git_protocol', 'gh secret list', 'gh ssh-key list', 'gh gpg-key list',
+  'gh extension exec x', 'gh browse', 'gh release view v1', 'gh release list', 'gh workflow list', 'gh workflow run x', 'gh status', 'gh search repos x', 'gh label list', 'gh gist list',
+  'gh codeql version', 'gh version', 'gh help', 'gh completion -s zsh', 'gh cache list', 'gh variable list', 'gh ruleset list', 'gh org list', 'gh project list', 'gh repo clone a/b',
+  'gh repo list', 'gh run watch 5', 'gh run download 5', 'gh run rerun 5', 'gh issue create', 'gh issue comment 5', 'gh pr create', 'gh pr merge 5', 'gh pr comment 5', 'gh alias list', 'gh codespace list',
+  'gh pr', 'gh pr --help', 'gh api -X POST x', 'gh api x -f a=b', 'gh api x --input f', 'gh -H x pr view 5', 'gh --hostname h pr view 5',
+]
+const CAST_PERMITTED = [
+  'cast call 0x0 "f()"', 'cast call 0x0 "f()(uint256)" --rpc-url x', 'cast balance 0x0', 'cast block latest', 'cast block-number', 'cast tx 0xabc', 'cast receipt 0xabc', 'cast code 0x0', 'cast storage 0x0 0',
+  'cast chain-id', 'cast gas-price', 'cast nonce 0x0', 'cast logs --from-block 1', 'cast estimate 0x0 "f()"', 'cast sig "f()"', 'cast sig "send(address)"', 'cast 4byte 0xa9059cbb', 'cast 4byte-decode 0x', 'cast abi-decode "f()(uint256)" 0x',
+  'cast abi-encode "f(uint256)" 1', 'cast calldata "f(uint256)" 1', 'cast calldata-decode "f()" 0x', 'cast keccak x', 'cast to-wei 1', 'cast to-hex 5', 'cast from-wei 1', 'cast --version', 'cast --help', 'cast',
+  'cast send --help', 'cast send -h', 'cast wallet new --help', 'cast erc20 transfer --help',
+]
+const CAST_UNLISTED = [
+  'cast send 0x0 "f()"', 'cast s 0x0 "f()"', 'cast publish 0xab', 'cast mktx 0x0 "f()"', 'cast erc20 transfer 0x0 1', 'cast erc20 approve 0x0 1', 'cast erc20 balance 0x0', 'cast wallet new', 'cast wallet sign x', 'cast wallet import x',
+  'cast wallet address --private-key k', 'cast keystore list', 'cast rpc eth_sendRawTransaction 0xab', 'cast rpc eth_chainId', 'cast run 0xabc', 'cast bind 0x0', 'cast access-list 0x0', 'cast interface 0x0', 'cast etherscan-source 0x0',
+  'cast --rpc-url x send 0x0', 'cast --rpc-url x call 0x0 "f()"', 'cast 0x0 send', 'cast cast send', 'cast completions zsh', 'cast wallet', 'cast send', 'cast send 0x0 --help --private-key k', 'cast c 0x0 "f()"', 'cast b 0x0',
+  'cast erc20-token transfer 0x 1', 'cast decode-eof 0x', 'cast creation-code 0x', 'cast proof 0x0', 'cast mktx --help x y z w',
+]
+const FORGE_PERMITTED = ['forge test', 'forge test --match-test testCreate', 'forge build', 'forge fmt --check', 'forge script S.s.sol', 'forge script S.s.sol --rpc-url x', 'forge --version', 'forge inspect X abi', 'forge coverage']
+const FORGE_UNLISTED = [
+  'forge script S.s.sol --broadcast', 'forge script --broadcast S.s.sol', 'forge script S --broadcast=true', 'forge script S --resume', 'forge script S.s.sol --rpc-url x --broadcast --verify', 'forge create X', 'forge create src/X.sol:X --rpc-url x',
+  'forge create --rpc-url x X', 'forge c X', 'forge create X --broadcast', 'env forge create X', 'sh -c "forge create X"', 'FOO=1 forge script S --broadcast', '/usr/local/bin/forge create X', 'npx forge create X', 'forge script S --legacy --broadcast',
+  'forge script S --rpc-url x --private-key k --broadcast', 'forge  create  X', 'forge script S.s.sol --resume --rpc-url x', 'forge --root . create X',
+]
+const RO_GIT_PERMITTED = [
+  'git status', 'git status --short', 'git log --oneline -5', 'git diff origin/main...HEAD --stat', 'git show HEAD:package.json', 'git rev-parse HEAD', 'git ls-files', 'git ls-tree HEAD', 'git cat-file -p HEAD', 'git blame -L1,5 f', 'git grep -n x -- docs',
+  'git describe --tags', 'git remote', 'git remote -v', 'git branch', 'git branch --list "chore/*"', 'git branch -a', 'git branch -r --contains abc', 'git branch --show-current', 'git tag', 'git tag -l "v*"', 'git config --get user.name',
+  'git config --global --get core.editor', 'git fetch', 'git fetch origin', 'git fetch origin main', 'git fetch --depth 1 origin main', 'git fetch origin pull/5/head', 'git worktree add /tmp/w origin/main', 'git worktree add --detach /tmp/w origin/main',
+  'git worktree remove /tmp/w', 'git worktree remove --force /tmp/w', 'git worktree list', 'git checkout --detach origin/main', 'git merge --no-commit origin/main', 'git merge --no-commit --no-ff x', 'git merge --abort', 'git merge --quit', 'git -C /tmp/w status', 'git --no-pager log -1',
+]
+const RO_GIT_UNLISTED = [
+  'git commit -m x', 'git push', 'git pull', 'git add .', 'git rm f', 'git mv a b', 'git reset --hard', 'git clean -fd', 'git stash', 'git stash list', 'git restore f', 'git apply p', 'git am p', 'git rebase main', 'git cherry-pick abc', 'git revert HEAD',
+  'git merge origin/main', 'git merge --continue', 'git checkout .', 'git checkout -- .', 'git checkout main', 'git checkout origin/main', 'git checkout -b x', 'git checkout abc123', 'git switch main', 'git switch --detach x', 'git switch -c x',
+  'git worktree add -b x /tmp/w origin/main', 'git worktree add -B x /tmp/w', 'git worktree prune', 'git worktree move a b', 'git worktree lock a', 'git branch x', 'git branch -D x', 'git branch -m a b', 'git tag v1', 'git tag -d v1', 'git tag -a v1 -m x',
+  'git config user.name x', 'git config --list', 'git config --unset user.name', 'git config --get', 'git fetch origin a:b', 'git fetch +refs/heads/*:refs/x/*', 'git fetch --prune', 'git fetch --refmap=x:y origin main', 'git remote add x y', 'git remote get-url origin', 'git remote show origin',
+  'git rev-list HEAD', 'git merge-base a b', 'git reflog', 'git update-ref -d x', 'git symbolic-ref HEAD x', 'git gc', 'git fsck', 'git init', 'git clone a b', 'git submodule update', 'git bisect start', 'git notes add', 'git archive HEAD -o x.tar', 'git bundle create x',
+  'git log --output=f', 'git diff --output=f', 'git grep -O sh x', 'git grep --no-index x', 'git -c core.pager=sh log', 'git -c alias.x=y x', 'git --exec-path=/x log', 'git credential fill', 'git hash-object -w f', 'git fast-import',
+]
+
+describe('allow-list: gh', () => {
+  it('lists are big enough to mean something', () => { expect(GH_UNLISTED.length).toBeGreaterThanOrEqual(20) })
+  for (const c of GH_PERMITTED) it(`permits: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toBeNull())
+  for (const c of GH_UNLISTED) it(`refuses: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toEqual(expect.any(String)))
+  it('read-only agents lose `pr checkout` (it writes a local branch) and keep the rest', () => {
+    expect(roDecide('gh pr checkout 5')).toEqual(expect.any(String))
+    for (const c of GH_PERMITTED.filter((x) => x !== 'gh pr checkout 5')) expect(roDecide(c), c).toBeNull()
+    for (const c of GH_UNLISTED) expect(roDecide(c), c).toEqual(expect.any(String))
+  })
+})
+describe('allow-list: cast', () => {
+  it('lists are big enough', () => { expect(CAST_UNLISTED.length).toBeGreaterThanOrEqual(20) })
+  for (const c of CAST_PERMITTED) it(`permits: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toBeNull())
+  for (const c of CAST_UNLISTED) it(`refuses: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toEqual(expect.any(String)))
+})
+describe('allow-list: forge', () => {
+  it('lists are big enough', () => { expect(FORGE_UNLISTED.length).toBeGreaterThanOrEqual(19) })
+  for (const c of FORGE_PERMITTED) it(`permits: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toBeNull())
+  for (const c of FORGE_UNLISTED) it(`refuses: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toEqual(expect.any(String)))
+})
+describe('allow-list: git for read-only agents (recon, auditor)', () => {
+  it('lists are big enough', () => { expect(RO_GIT_UNLISTED.length).toBeGreaterThanOrEqual(20) })
+  for (const c of RO_GIT_PERMITTED) it(`permits: ${JSON.stringify(c)}`, () => { expect(roDecide(c), c).toBeNull(); expect(guardDecide(c), c).toBeNull() })
+  for (const c of RO_GIT_UNLISTED) it(`refuses: ${JSON.stringify(c)}`, () => expect(roDecide(c), c).toEqual(expect.any(String)))
+  it('the implementer and the main session are not held to the git list', () => {
+    for (const c of ['git commit -m x', 'git add .', 'git worktree add -b x /tmp/w origin/main', 'git stash', 'git rebase main']) expect(guardDecide(c), c).toBeNull()
+  })
+})
+
+describe('A77b M-6: a flag between the command and the action is refused (cobra eats the next word as its value)', () => {
+  for (const c of ['gh pr -t view merge 5', 'gh pr -R a/b view merge', 'gh pr --title view merge 5', 'gh pr -b view comment 5', 'gh issue -t view close 5', 'gh run -x view rerun 5', 'gh -t pr view 5', 'gh repo -q view delete a/b', 'gh pr --repo a/b view 5']) {
+    it(`refuses: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toEqual(expect.any(String)))
+  }
 })
