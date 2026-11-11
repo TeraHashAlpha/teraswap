@@ -30,18 +30,18 @@ Runs first on the whole command: lower-cased, quotes and backslashes removed, wh
 
 | Rule | Text it refuses |
 |---|---|
-| env | `.env` or `.env.<anything>` except `.env.example`, also glued to a flag (`base64 -i.env`, `grep -f.env`). `process.env.HOME`, `os.environ`, `import.meta.env` and `src/env.ts` pass |
-| harness | `.claude/settings`, `.claude/hooks`, a glob that can match `.claude` (`.cl*`, `.c?aude`) or its children (`.claude/set*`), a `cd`, `pushd`, `git -C` or `--work-tree` into `.claude`, unless the whole command is a pure reader: `cat` `head` `tail` `grep` `rg` `wc` `ls` `stat` `diff` `git diff\|log\|show`, joined by `\|` only, with no `>` `<` `;` `&` `$` or backtick |
+| env | `.env` or `.env.<anything>` except the tracked templates `.env.example` and `.env.<name>.example` (`.env.executor.example`; `.env.example.bak` is not one), also glued to a flag (`base64 -i.env`, `grep -f.env`). `process.env.HOME`, `os.environ`, `import.meta.env` and `src/env.ts` pass |
+| harness | `.claude/settings`, `.claude/hooks`, a glob that can match `.claude` (`.cl*`, `.c?aude`) or its children (`.claude/set*`), a `cd`, `pushd`, `git -C` or `--work-tree` into `.claude`, unless the whole command is a pure reader: `cat` `head` `tail` `grep` `rg` `wc` `ls` `stat` `diff` `jq` `git diff\|log\|show\|blame\|ls-files` (also after `git -C DIR`), joined by `\|` only, optionally after a leading `cd DIR &&`, with no `>` `<` `;` `&` `$` or backtick. A `cd` or `-C` INTO `.claude` is never a read |
 | credentials | `gh` with `auth`; `--show-token`; `git-credential`; `git credential` |
-| cast | `cast` with `send` `publish` `mktx` `wallet` `erc20`; `--broadcast` |
-| push | `push` with `-f` or `-d` (also inside a cluster such as `-uf`), `--force*`, `--mirror`, `--delete`, `--prune` (any abbreviation), or a refspec starting ` +`, ` :` or containing `:+` |
-| gh writes | `gh` with `pr` or `api` and any of `merge` `create` `new` `ready` `close` `edit` `review` `comment` `-X` `--method` `-f` `-F` `--field` `--raw-field` `--input` `method-override` |
-| remote shells | the words `ssh` `scp` `sftp` `ssh-add` `ssh-agent` `ssh-copy-id` `pm2` (also inside a path such as `~/.ssh`); the keychain command `security`; `--upload-pack`; `--receive-pack` |
+| cast | `cast` with `send` `publish` `mktx` `wallet` `erc20` (a variable called `$WALLET` is not the subcommand); `--broadcast` |
+| push | after a `push` word, up to the next `\|` `&&` `;` or newline: `-f` or `-d` (also inside a cluster such as `-uf`), `--force*`, `--mirror`, `--delete`, `--prune` (any abbreviation), or a refspec starting ` +`, ` :` or containing `:+`. `git stash push` is not a push. The whole command is scanned instead when that tail holds `$` or a backtick, or the command uses `xargs` / `parallel` |
+| gh writes | `gh` with `pr` or `api` and any of `merge` `create` `new` `ready` `close` `edit` `review` `comment` `-X` `--method` `-f` `-F` `--field` `--raw-field` `--input` `method-override`; the short flags are looked for in the pipeline segment (split at `\|`) that holds `gh`, so `gh pr diff 5 \| grep -F x` runs (whole command when that segment holds `$`, a backtick, `xargs` or `parallel`) |
+| remote shells | the words `ssh` `scp` `sftp` `ssh-add` `ssh-agent` `ssh-copy-id` `pm2` (also inside a path such as `~/.ssh`); the keychain command `security` (not as a flag value: `git log --grep=security` runs); `--upload-pack`; `--receive-pack` |
 | history | `zsh_history` `zhistory` `bash_history` `sh_history` `histfile` `fish_history` `python_history` `node_repl_history` `zsh_sessions` `.history` |
 
-**The one exemption.** A lone `git commit` (flags and quoted message literals only) whose message holds no `$`, backtick or `<` outside a `<<'EOF'` body may mention these words. The message literals are removed and the rest of the command is still scanned, so `git commit -m "docs: ssh and .env"` runs and `git commit -F .env` does not.
+**The one exemption.** A lone `git commit` (flags and quoted message literals only), also right after `git add <plain words> &&`, whose message holds no `$`, backtick or `<` outside a `<<'EOF'` body may mention these words. The message literals are removed and the rest of the command (the `git add` words included) is still scanned, so `git commit -m "docs: ssh and .env"` and `git add -A && git commit -m "docs: ssh"` run, `git commit -F .env` and `git add .claude/hooks/x && git commit -m x` do not.
 
-**It over-refuses on purpose.** A quoted mention anywhere else is refused as well: `grep -n "ssh" README.md`, `test -f .env.local`, `ls .env*`, `cast send --help`, `gh api -X GET`, `which ssh`, `git add .claude/hooks/x` (use `git add -u`), `cd .claude && ls` (use `ls .claude`), and a chain such as `git push && eslint -f json` (`push` plus `-f`). Write the command without the word, or run it yourself (next-but-one section).
+**It over-refuses on purpose.** A quoted mention anywhere else is refused as well: `grep -n "ssh" README.md`, `test -f .env.local`, `ls .env*`, `cast send --help`, `gh api -X GET`, `which ssh`, `git add .claude/hooks/x` (use `git add -u`), `cd .claude && ls` (use `ls .claude`), and a pipeline that mixes `push` with another tool's `-f` in ONE segment, such as `git push origin x \| tail -f log` (fine since A77d: the pipe ends the tail) but not `xargs git push -f` or `git push origin x $(tail -f log)` (an `xargs` or an expansion brings flags in from elsewhere). Phrase around it: run the two commands as two calls, or write the flag out of reach of `push` (`git push origin x` then `eslint -f json`). `git stash push -m "a + b"` passes layers 0 and 1 but layer 2's `git * push * +*` pattern cannot tell stash from push and still denies it: write `a plus b`. Or run it yourself (next-but-one section).
 
 ## Allow-lists
 
@@ -72,16 +72,41 @@ Two rounds of deny-lists each left new spellings, so the riskiest tools run only
 | Command | Permitted |
 |---|---|
 | `status` `log` `diff` `show` `rev-parse` `rev-list` `merge-base` `name-rev` `shortlog` `for-each-ref` `show-ref` `diff-tree` `ls-files` `ls-tree` `cat-file` `blame` `describe` | any arguments except `--output` (writes a file) |
+| `stash` | `stash list` only (no `push` `pop` `drop` `clear` `apply` `save`) |
+| `reflog` | `reflog`, `reflog show`, `reflog <ref>`; not `expire` `delete`, not `--output` |
+| `symbolic-ref` | `symbolic-ref [-q] [--short] [--no-recurse] <name>`; a second argument, `-d` and `-m` write |
+| `verify-commit` | `[-v] [--raw] <commit>` |
 | `grep` | as above, and not `-O`, `--open-files-in-pager`, `--no-index`, `--untracked` |
 | `remote` | `remote`, `remote -v` |
 | `branch` | no arguments, or list flags (`--list -l -a -r --show-current -v --contains --merged --points-at <commit>`); a bare name creates a branch: refused |
 | `tag` | no arguments, `-l`/`--list [pattern]`, `--contains`, `--points-at` |
 | `config` | `--get`, `--get-all`, `--get-regexp <key>` (optionally with a scope flag) |
 | `fetch` | without a refspec (`origin`, `origin main`, `origin pull/5/head`, `--all`, `--tags`). Refused: `a:b`, `+x`, `--depth`, `--deepen`, `--shallow-*`, `--unshallow`, `--prune`, `--refmap` (shallow and prune rewrite `.git`) |
-| `worktree` | `add --detach <path> [<commit>]` (`--detach` is REQUIRED: `git worktree add ../x` creates a branch named `x`; no `-b`/`-B`), `remove`, `list` |
-| `checkout` | `--detach [<commit>]` only |
-| `merge` | `--no-commit --no-ff <commit>` (both REQUIRED: a fast-forward moves the checked-out branch; `--ff` and `--ff-only` refused), `--abort`, `--quit` |
-| everything else | refused: `commit push pull add rm mv reset clean stash restore apply rebase cherry-pick revert switch reflog update-ref symbolic-ref gc init clone submodule notes archive bundle` and every other subcommand |
+| `worktree` | `add --detach <path> [<commit>]` (`--detach` is REQUIRED: `git worktree add ../x` creates a branch named `x`; no `-b`/`-B`), `remove`, `list`. `remove --force` only where the effective directory is a linked worktree (below) |
+| `checkout` | `--detach [<commit>]` only, and only where the effective directory is a linked worktree (below) |
+| `merge` | `--no-commit --no-ff <commit>` (both REQUIRED: a fast-forward moves the checked-out branch; `--ff` and `--ff-only` refused) only where the effective directory is a linked worktree (below); `--abort`, `--quit` anywhere |
+| everything else | refused: `commit push pull add rm mv reset clean stash push|pop|drop|clear restore apply rebase cherry-pick revert switch reflog expire|delete update-ref symbolic-ref <name> <ref> gc init clone submodule notes archive bundle` and every other subcommand |
+
+## Read-only agents work in a linked worktree, never in the main checkout
+
+A77d H-11. `recon` and `auditor` may run `git checkout --detach`, `git merge --no-commit --no-ff` and `git worktree remove --force`, but those change the HEAD, the index or the worktrees of the checkout they run in. So `readonly-guard.mjs` looks at WHERE they run: the hook's `cwd`, moved by a LEADING `cd DIR &&` and by `git -C DIR`. If that directory is the main checkout (its `.git` is a directory) they are refused; in a linked worktree (its `.git` is a file) they run. A directory it cannot determine is refused too: no `cwd`, `cd "$X"`, a `cd` that is not a leading `cd DIR &&` (a subshell, `; cd`, `|| cd`, inside `sh -c`), `env -C`, `GIT_DIR=`, `--git-dir`, `--work-tree`. (`$CLAUDE_PROJECT_DIR` is not a rule of its own: an agent started inside a linked worktree has it set to that worktree, so the `.git` test decides.)
+
+So the shape is: create the worktree from anywhere (`git worktree add --detach <path> <sha>` is allowed in the main checkout), then address it on every call, because Claude Code resets a `cd` that ends outside the project directory:
+
+```sh
+git worktree add --detach "$HOME/ts-worktrees/audit-x" <sha>
+cd "$HOME/ts-worktrees/audit-x" && git checkout --detach <sha>      # or: git -C "$HOME/ts-worktrees/audit-x" checkout --detach <sha>
+```
+
+`git fetch` stays allowed everywhere: it updates remote-tracking refs and tags, never the checkout (owner ruling).
+
+**A checkout whose branch has no `.claude/` has NO guard.** The hooks and `permissions.deny` come from the `.claude/settings.json` of the directory Claude Code starts in. Until this PR is merged, every branch cut from `main` has none of it, the main checkout included when it sits on such a branch. One line to check a branch before pointing an agent at it (prints `guarded` or `NO GUARD`):
+
+```sh
+git cat-file -e <branch>:.claude/hooks/readonly-guard.mjs 2>/dev/null && echo guarded || echo "NO GUARD"
+```
+
+Start `recon`/`auditor` from a checkout that prints `guarded`, and let them make the linked worktree for the audited commit.
 
 ## When a refused command is legitimate
 
@@ -98,7 +123,7 @@ Editing the harness itself (`.claude/settings*.json`, `.claude/hooks/`) works th
 
 ## Start an agent with a goal
 
-Run from the main checkout (so project settings and hooks apply); the agent creates its own worktree. Lint first, then start:
+Run from a checkout whose branch has `.claude/` (see the previous section; the project settings and hooks come from there); the agent creates its own worktree. Lint first, then start:
 
 ```sh
 node scripts/goal-lint.mjs goal.md && claude --agent implementer "/goal $(cat goal.md)"

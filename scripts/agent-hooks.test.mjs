@@ -1124,3 +1124,30 @@ describe('A77d commit 2 — the building blocks', () => {
     for (const c of ['git add -A; git commit -m x', 'git add "a b" && git commit -m x', 'git add -A && git push', 'git add -A && git commit -m x && ls', 'git add $(ls) && git commit -m x']) expect(loneCommitRemainder(c), c).toBeNull()
   })
 })
+
+// A77d commit 3 — the runbook says plainly what the guards cannot do for you.
+describe('A77d runbook: linked worktrees, the unguarded branch, and the over-refusals that remain on purpose', () => {
+  const rb = readFileSync(path.join(ROOT, 'docs', 'Runbooks', 'agent-harness.md'), 'utf8')
+  const section = rb.slice(rb.indexOf('## Read-only agents work in a linked worktree'), rb.indexOf('## When a refused command is legitimate'))
+  it('read-only agents work in a linked worktree (git worktree add --detach), never the main checkout, and why', () => {
+    expect(section.length).toBeGreaterThan(1500)
+    for (const needle of ['never in the main checkout', 'linked worktree', '`.git` is a directory', '`.git` is a file', 'git worktree add --detach', 'git -C', 'cd DIR &&', '`git fetch` stays allowed', 'owner ruling', 'cannot determine']) expect(section, needle).toContain(needle)
+  })
+  it('a branch without .claude/ has NO guard, and the owner gets a one-line check that really answers', () => {
+    expect(section).toContain('NO GUARD')
+    expect(section).toContain('every branch cut from `main`')
+    const line = section.split('\n').find((l) => l.startsWith('git cat-file -e'))
+    expect(line).toBe('git cat-file -e <branch>:.claude/hooks/readonly-guard.mjs 2>/dev/null && echo guarded || echo "NO GUARD"')
+    const sh = (ref) => spawnSync('sh', ['-c', line.replace('<branch>', ref)], { cwd: ROOT, encoding: 'utf8' }).stdout.trim()
+    expect(sh('HEAD:nope-no-such').length).toBeGreaterThan(0) // the pipeline always prints one of the two words
+    expect(['guarded', 'NO GUARD']).toContain(sh('HEAD'))
+    expect(sh('0000000000000000000000000000000000000000')).toBe('NO GUARD')
+  })
+  it('names the over-refusals that remain on purpose and how to phrase around them', () => {
+    const over = rb.slice(rb.indexOf('**It over-refuses on purpose.**'), rb.indexOf('## Allow-lists'))
+    for (const needle of ['`git add .claude/hooks/x`', '`git add -u`', '`push` with another tool\'s `-f`', 'two calls', '`git stash push -m "a + b"`', '`a plus b`', 'layer 2']) expect(over, needle).toContain(needle)
+  })
+  it('the allow-list tables list the new read-only forms and the where-it-runs condition', () => {
+    for (const needle of ['`stash list` only', '`symbolic-ref [-q] [--short] [--no-recurse] <name>`', '`verify-commit`', '`reflog`', 'only where the effective directory is a linked worktree']) expect(rb, needle).toContain(needle)
+  })
+})
