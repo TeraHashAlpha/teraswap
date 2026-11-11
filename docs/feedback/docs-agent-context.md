@@ -51,4 +51,5 @@ Measuring every sentence needed facts the list does not cover, and I read them i
 `gas-tier.js`, both `foundry.toml`, the token-catalog JSONs, `usd-scope-guard`/`tokens`/`version`/`retire-force-mev`/`check-product-claims` tests,
 `src/lib/body-limit.ts`, and greps/listings of `AUDIT-TOTAL.md`, `ROADMAP.md`, `quote/route.ts`, `cow-proxy.ts`, `Audits/Incidents/`, `docs/Runbooks/`,
 `executor.js` code lines 270-470 (not only headers). Sentences that rest only on those files: Stack versions, 12/4/8 sources, CSP, allowlist, gas tiers,
-catalog counts, Force-MEV, USD/dark rules. Owner: keep them, or tell me which to strip (one commit, no force-push).
+catalog counts, Force-MEV, USD/dark rules.
+**Owner answer (supersedes the goal text): "keep" — the read list was too narrow for "measure every sentence"; the out-of-list reads are accepted.** Nothing stripped.
