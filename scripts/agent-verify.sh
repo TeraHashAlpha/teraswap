@@ -6,7 +6,7 @@
 #
 # Checks (always): suite, lint-delta, tsc, build, v1v2-parity, rpc-budget.
 #   --codeql  FULL javascript-security-extended via scripts/codeql-local.sh, HEAD vs base, count must not grow.
-#   --keeper  keeper `node --test` on every Node major CI uses (parsed from .github/workflows/keeper-tests.yml).
+#   --keeper  keeper `node --test` on every Node major CI uses: the keeper-suite job of ci.yml and keeper-tests.yml.
 # A failing check, a missing tool, or an unparsable result is FAIL and the exit code is non-zero.
 # Never polls CI, never prints environment values (logs stay in $AGENT_VERIFY_OUT; only their path is printed).
 set -u
@@ -20,6 +20,8 @@ FORMAT_ONLY=""
 CODEQL_QLS="codeql/javascript-queries:codeql-suites/javascript-security-extended.qls"
 KEEPER_DIR="contracts/order-engine/executor"
 KEEPER_WORKFLOW=".github/workflows/keeper-tests.yml"
+KEEPER_CI_WORKFLOW=".github/workflows/ci.yml"
+KEEPER_CI_JOB="keeper-suite"
 CHECK_ORDER="suite lint-delta tsc build v1v2-parity rpc-budget codeql keeper"
 
 while [ $# -gt 0 ]; do
@@ -171,10 +173,13 @@ check_codeql() {
 }
 
 find_node_major() { # major -> prints a node binary path of that major, or nothing
-  local want="$1" c v
-  for c in "$(command -v node 2>/dev/null)" "/opt/homebrew/opt/node@$want/bin/node" "/usr/local/opt/node@$want/bin/node" \
-           $HOME/.nvm/versions/node/v$want.*/bin/node $HOME/.volta/tools/image/node/$want.*/bin/node \
-           $HOME/.local/share/fnm/node-versions/v$want.*/installation/bin/node; do
+  local want="$1" c v brewp=""
+  command -v brew >/dev/null 2>&1 && brewp="$(brew --prefix "node@$want" 2>/dev/null)/bin/node"
+  for c in "$(command -v node 2>/dev/null)" "$brewp" "/opt/homebrew/opt/node@$want/bin/node" "/usr/local/opt/node@$want/bin/node" \
+           "${NVM_DIR:-$HOME/.nvm}"/versions/node/v$want.*/bin/node \
+           "${VOLTA_HOME:-$HOME/.volta}"/tools/image/node/$want.*/bin/node \
+           "${FNM_DIR:-$HOME/.local/share/fnm}"/node-versions/v$want.*/installation/bin/node \
+           "$HOME/Library/Application Support/fnm/node-versions"/v$want.*/installation/bin/node; do
     [ -n "$c" ] && [ -x "$c" ] || continue
     v="$("$c" -p 'process.versions.node.split(".")[0]' 2>/dev/null)"
     if [ "$v" = "$want" ]; then echo "$c"; return 0; fi
@@ -182,21 +187,32 @@ find_node_major() { # major -> prints a node binary path of that major, or nothi
   return 1
 }
 
+# Node majors CI runs the keeper suite on: ci.yml's keeper-suite job + keeper-tests.yml (union, numeric).
+keeper_majors() {
+  {
+    awk -v job="$KEEPER_CI_JOB" '
+      /^  [A-Za-z0-9_-]+:/ { injob = ($1 == job ":") }
+      injob && /node-version:/ { print }' "$ROOT/$KEEPER_CI_WORKFLOW" 2>/dev/null
+    grep 'node-version:' "$ROOT/$KEEPER_WORKFLOW" 2>/dev/null
+  } | sed -n 's/.*node-version: *["'"'"']\{0,1\}\([0-9][0-9]*\).*/\1/p' | sort -un
+}
+
 check_keeper() {
   local m
   if m="$(need node npm)"; then :; else fail_missing keeper "$m"; return; fi
-  local wf="$ROOT/$KEEPER_WORKFLOW" majors
-  if [ ! -f "$wf" ]; then record keeper FAIL "$KEEPER_WORKFLOW not found"; return; fi
-  majors="$(sed -n 's/.*node-version: *"\{0,1\}\([0-9][0-9]*\).*/\1/p' "$wf" | sort -un)"
-  if [ -z "$majors" ]; then record keeper FAIL "no node-version found in $KEEPER_WORKFLOW"; return; fi
+  local majors
+  if [ ! -f "$ROOT/$KEEPER_CI_WORKFLOW" ]; then record keeper FAIL "$KEEPER_CI_WORKFLOW not found"; return; fi
+  if [ ! -f "$ROOT/$KEEPER_WORKFLOW" ]; then record keeper FAIL "$KEEPER_WORKFLOW not found"; return; fi
+  majors="$(keeper_majors)"
+  if [ -z "$majors" ]; then record keeper FAIL "no node-version found for the keeper suite in $KEEPER_CI_WORKFLOW / $KEEPER_WORKFLOW"; return; fi
   if [ ! -d "$ROOT/$KEEPER_DIR/node_modules" ]; then
     (cd "$ROOT/$KEEPER_DIR" && npm ci --ignore-scripts) > "$OUT/keeper-ci.log" 2>&1 \
       || { record keeper FAIL "npm ci --ignore-scripts failed (log: $OUT/keeper-ci.log)"; return; }
   fi
-  local major bin log p f c rc parts="" bad=0
+  local major bin log p f c rc parts="" bad=0 missing=""
   for major in $majors; do
     if ! bin="$(find_node_major "$major")"; then
-      parts="$parts node$major:MISSING"; bad=1
+      parts="$parts node$major:MISSING"; bad=1; missing="$missing node@$major"
       continue
     fi
     log="$OUT/keeper-node$major.log"
@@ -213,7 +229,7 @@ check_keeper() {
   if [ "$bad" -eq 0 ]; then record keeper PASS "$parts"
   else
     case "$parts" in
-      *MISSING*) record keeper FAIL "$parts — CI Node version not installed locally (e.g. brew install node@20); not substituting another version" ;;
+      *MISSING*) record keeper FAIL "$parts — not substituting another version; install: brew install${missing}" ;;
       *) record keeper FAIL "$parts (logs: $OUT/keeper-node*.log)" ;;
     esac
   fi

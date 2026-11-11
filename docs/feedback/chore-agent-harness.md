@@ -32,3 +32,10 @@ Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...chore/agent-ha
 - goal-lint rejects "CI-poll" literally, but `_PROMPT-TEMPLATE.md` §1 CONTROL says "NO CI-poll"; this goal's line 1 also lacks `CONTROL:`. Template edit needed (out of scope).
 - Read beyond the allow-list: `keeper-tests.yml` (grep/sed of run/node-version lines), `.gitignore` 44–56, import lines of 2 scripts tests, `git ls-files` name greps.
 - Slip: one stray `git stash` of staged work; popped immediately, nothing lost.
+
+## Round 2 — owner decisions (2026-11-11), 2 commits on top of faf07d6
+- [x] D1 `.gitignore`: added `!scripts/agent-verify.sh` (only that line); `git check-ignore` now exits 1 (not ignored).
+- [x] D2 `_PROMPT-TEMPLATE.md` "NO CI-poll" → "NO CI polling" (2 places, nothing else); its CONTROL block now passes goal-lint (OK 360 chars). Rule kept; CONTROL: is now checked on the FIRST NON-EMPTY line (+tests).
+- [x] D3 `--keeper`: Node majors = ci.yml `keeper-suite` job (22) ∪ keeper-tests.yml (20); looked up via PATH, brew, nvm, fnm, volta; missing = FAIL, never substituted, one line `install: brew install node@20 node@22` (only missing majors). Fake-install tests (pass, fnm layouts, missing, failing) added. This Mac: both missing → FAIL by design; nothing installed without asking. Corrects "Node 20 only" in §1.
+- Verified: agent-verify/goal-lint/settings/hooks tests 106 pass; check:bash3-compat, check:product-claims OK. Full `agent-verify.sh` NOT re-run (keeper cannot pass here); §4 results stand for 5ee35f0.
+- diff --stat origin/main...HEAD: 22 files, +1642 / −2 (the 2 deletions = the template's two edited lines)

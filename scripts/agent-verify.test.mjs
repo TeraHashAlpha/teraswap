@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { spawnSync, execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync, rmSync, symlinkSync, mkdirSync, statSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, symlinkSync, mkdirSync, statSync, readFileSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -120,5 +120,82 @@ describe('agent-verify with tools missing (fails closed)', () => {
       expect(lineOf(r.stdout, n), n).toMatch(/FAIL\s+missing tool: /)
     }
     expect(r.stdout).toContain('RESULT: FAIL (8 failed)')
+  })
+})
+
+describe('agent-verify --keeper (CI Node majors, fake installs)', () => {
+  // Run the script's real helper + check_keeper functions against a fake repo and fake Node installs.
+  const fakeNode = (file, major, pass = 5, fail = 0) => {
+    mkdirSync(path.dirname(file), { recursive: true })
+    writeFileSync(file, `#!/bin/sh\ncase "$1" in -p) echo ${major};; --test) printf '# pass ${pass}\\n# fail ${fail}\\n# cancelled 0\\n';; esac\nexit ${fail ? 1 : 0}\n`)
+    chmodSync(file, 0o755)
+  }
+  const wf = (v) => `jobs:\n  keeper-suite:\n    steps:\n      - with:\n          node-version: "${v}"\n`
+  function keeper(home, { ci = '22', kt = '20' } = {}) {
+    const root = path.join(home, 'repo')
+    mkdirSync(path.join(root, '.github/workflows'), { recursive: true })
+    mkdirSync(path.join(root, 'contracts/order-engine/executor/node_modules'), { recursive: true })
+    // another ci.yml job on a different Node must NOT be counted
+    writeFileSync(path.join(root, '.github/workflows/ci.yml'), `jobs:\n  other:\n    steps:\n      - with:\n          node-version: "18"\n` + wf(ci).replace('jobs:\n', ''))
+    writeFileSync(path.join(root, '.github/workflows/keeper-tests.yml'), wf(kt))
+    const src = readFileSync(SCRIPT, 'utf8')
+    const lines = src.split('\n')
+    const cut = (from, to) => lines.slice(lines.findIndex((l) => l.startsWith(from)), lines.findIndex((l) => l.startsWith(to))).join('\n')
+    const prog = [
+      'set -u',
+      `ROOT=${JSON.stringify(root)}; OUT=${JSON.stringify(home)}; RESULTS=${JSON.stringify(path.join(home, 'res.tsv'))}`,
+      'KEEPER_DIR="contracts/order-engine/executor"; KEEPER_WORKFLOW=".github/workflows/keeper-tests.yml"',
+      'KEEPER_CI_WORKFLOW=".github/workflows/ci.yml"; KEEPER_CI_JOB="keeper-suite"',
+      cut('record()', '# ---------- checks'),
+      cut('find_node_major()', '# ---------- formatter'),
+      'check_keeper',
+      'cat "$RESULTS"',
+    ].join('\n')
+    // PATH has no `node`, only what check_keeper's `need node npm` requires, via stubs in <home>/bin.
+    const bin = path.join(home, 'bin')
+    mkdirSync(bin, { recursive: true })
+    for (const t of ['node', 'npm']) { writeFileSync(path.join(bin, t), '#!/bin/sh\nexit 0\n'); chmodSync(path.join(bin, t), 0o755) }
+    const base = execFileSync('bash', ['-c', 'dirname "$(command -v sed)"'], { encoding: 'utf8' }).trim()
+    return spawnSync('bash', ['-c', prog], {
+      encoding: 'utf8',
+      env: { HOME: home, PATH: `${bin}:${base}:/usr/bin:/bin`, NVM_DIR: path.join(home, '.nvm') },
+    })
+  }
+  const mk = () => mkdtempSync(path.join(dir, 'k-'))
+
+  it('uses ci.yml keeper-suite job + keeper-tests.yml (not other ci.yml jobs): both majors found via nvm/fnm/volta -> PASS', () => {
+    const h = mk()
+    fakeNode(path.join(h, '.nvm/versions/node/v22.3.0/bin/node'), 22)
+    fakeNode(path.join(h, '.volta/tools/image/node/20.11.1/bin/node'), 20)
+    const r = keeper(h)
+    expect(r.stdout).toMatch(/^keeper\tPASS\tnode20:5-pass\/0-fail\/0-cancelled node22:5-pass\/0-fail\/0-cancelled$/m)
+    expect(r.stdout).not.toContain('node18')
+  })
+
+  it('finds fnm installs (Library/Application Support layout)', () => {
+    const h = mk()
+    fakeNode(path.join(h, 'Library/Application Support/fnm/node-versions/v22.1.0/installation/bin/node'), 22)
+    fakeNode(path.join(h, '.local/share/fnm/node-versions/v20.9.0/installation/bin/node'), 20)
+    expect(keeper(h).stdout).toMatch(/^keeper\tPASS\t/m)
+  })
+
+  it('a missing major is FAIL, never substituted, and prints ONE install line naming only the missing majors', () => {
+    const h = mk()
+    fakeNode(path.join(h, '.nvm/versions/node/v22.3.0/bin/node'), 22)
+    const r = keeper(h)
+    const line = r.stdout.split('\n').find((l) => l.startsWith('keeper\t'))
+    expect(line).toMatch(/^keeper\tFAIL\t/)
+    expect(line).toContain('node20:MISSING')
+    expect(line).toContain('node22:5-pass')
+    expect(line).toMatch(/install: brew install node@20$/)
+    const both = keeper(mk()).stdout.split('\n').find((l) => l.startsWith('keeper\t'))
+    expect(both).toMatch(/install: brew install node@20 node@22$/)
+  })
+
+  it('a failing or cancelled test on one major is FAIL', () => {
+    const h = mk()
+    fakeNode(path.join(h, '.nvm/versions/node/v22.3.0/bin/node'), 22, 5, 1)
+    fakeNode(path.join(h, '.nvm/versions/node/v20.1.0/bin/node'), 20)
+    expect(keeper(h).stdout).toMatch(/^keeper\tFAIL\t.*node22:5-pass\/1-fail/m)
   })
 })
