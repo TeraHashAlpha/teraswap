@@ -105,9 +105,10 @@ function envPathReason(word, { nameOnly = false } = {}) {
     if (!nameOnly && /^\.env(\..+)?$/.test(b) && b !== '.env.example') return `${b} is an environment-secrets file`
     if (c.split('/').some((seg) => HISTORY_DIRS.has(seg.toLowerCase()))) return `${c} is inside the shell-history directory`
     if (/[*?[]/.test(b)) { // a glob only matches dotfiles when its first character is a literal dot
-      const re = new RegExp(`^${b.replace(/[.+^${}()|\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`)
+      let re = null
+      try { re = new RegExp(`^${b.replace(/[.+^${}()|\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`) } catch { /* `[`, `[[`, `]]`: the test command's own words, not a glob */ }
       const names = [...(nameOnly ? [] : ENV_NAMES), ...HISTORY_NAMES]
-      const hit = names.find((n) => (n.startsWith('.') ? b.startsWith('.') : /fish/i.test(c)) && re.test(n))
+      const hit = re && names.find((n) => (n.startsWith('.') ? b.startsWith('.') : /fish/i.test(c)) && re.test(n))
       if (hit) return `${b} would match ${hit}`
     }
     if (HISTORY_FILES.has(b)) return `${b} is a shell-history file`
@@ -136,7 +137,7 @@ function canWrite(c) {
   if (base === 'git') return GIT_TREE_WRITERS.has(gitParts(argv).sub)
   return false
 }
-function protectedWord(w, inClaudeDir) {
+function protectedWord(w, inClaudeDir, inHooksDir) {
   for (const x of expandBraces(w.replace(/^\d*>{1,2}[|&]?/, ''))) {
     if (PROTECTED_RE.test(x)) return true
     // a glob on the directory segment: .claude/set*, .claude/h*, .claude/*, or the directory itself
@@ -148,6 +149,7 @@ function protectedWord(w, inClaudeDir) {
         if (PROTECTED_DIR_NAMES.some((n) => re.test(n))) return true
       }
     }
+    if (inHooksDir && !x.includes('/') && x !== '') return true // `cd .claude/hooks && echo x > command-guard.mjs`
     if (inClaudeDir && !x.includes('/') && (PROTECTED_DIR_NAMES.includes(x.toLowerCase()) || /^settings[^/]*\.json$/i.test(x))) return true
   }
   return false
@@ -166,9 +168,9 @@ function writeTargets(redirs) {
 }
 function selfProtectionReason(c, ctx) {
   const targets = c.redirOnly ? writeTargets(c.words) : []
-  for (const t of targets) if (protectedWord(t, ctx.inClaudeDir)) return `a redirect writes ${t}: the harness (.claude/settings*.json, .claude/hooks/) is changed by the owner, not through Bash`
+  for (const t of targets) if (protectedWord(t, ctx.inClaudeDir, ctx.inHooksDir)) return `a redirect writes ${t}: the harness (.claude/settings*.json, .claude/hooks/) is changed by the owner, not through Bash`
   if (!c.redirOnly && canWrite(c)) {
-    for (const w of c.words) if (protectedWord(w, ctx.inClaudeDir)) return `${c.base} could write or delete ${w}: the harness (.claude/settings*.json, .claude/hooks/) is changed by the owner, not through Bash`
+    for (const w of c.words) if (protectedWord(w, ctx.inClaudeDir, ctx.inHooksDir)) return `${c.base} could write or delete ${w}: the harness (.claude/settings*.json, .claude/hooks/) is changed by the owner, not through Bash`
   }
   return null
 }
@@ -321,7 +323,7 @@ function rsyncReason(argv) {
   return null
 }
 
-/** Reason to refuse one effective command, or null. @param {{inClaudeDir?: boolean}} [ctx] */
+/** Reason to refuse one effective command, or null. @param {{inClaudeDir?: boolean, inHooksDir?: boolean}} [ctx] */
 export function commandReason(c, ctx = {}) {
   const { argv, base } = c
 
@@ -382,8 +384,9 @@ export function decide(command) {
   if (problems.length > 0) return problems[0]
   // `cd .claude && rm settings.json`: relative names count once the command line has moved into .claude
   const inClaudeDir = cmds.some((c) => ['cd', 'pushd'].includes(c.base) && c.words.some((w) => /(?:^|\/)\.claude(?:\/|$)/i.test(w)))
+  const inHooksDir = cmds.some((c) => ['cd', 'pushd'].includes(c.base) && c.words.some((w) => /(?:^|\/)\.claude\/hooks(?:\/|$)/i.test(w)))
   for (const c of cmds) {
-    const why = commandReason(c, { inClaudeDir })
+    const why = commandReason(c, { inClaudeDir, inHooksDir })
     if (why) return why
   }
   return null

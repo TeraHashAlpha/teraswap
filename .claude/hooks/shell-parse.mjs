@@ -135,8 +135,9 @@ function stripRedirects(words) {
   for (let i = 0; i < words.length; i++) {
     const w = words[i]
     if (/^<<<$/.test(w)) { i++; continue }
-    if (REDIR_SELF.test(w) && !/^<<<?$/.test(w)) { redirs.push(w); continue }
+    // `>>` also matches REDIR_SELF (it is `>` + `>`), so the operator-with-a-separate-target form is tested first.
     if (REDIR_NEEDS_TARGET.test(w)) { redirs.push(w); if (words[i + 1] !== undefined) redirs.push(words[i + 1]); i++; continue }
+    if (REDIR_SELF.test(w)) { redirs.push(w); continue }
     out.push(w)
   }
   return { out, redirs }

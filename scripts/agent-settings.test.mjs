@@ -91,6 +91,13 @@ export const MUST_NOT_DENY = [
   'grep -rn ssh docs',
 ]
 
+export const REQUIRED_ASK = [
+  'Edit(/.claude/settings*.json)',
+  'Edit(/.claude/hooks/**)',
+  'Edit(~/.claude/settings*.json)',
+  'Edit(~/.claude/hooks/**)',
+]
+
 export const REQUIRED_PATH_RULES = [
   'Read(.env*)',
   'Read(!.env.example)',
@@ -146,7 +153,12 @@ export function validateSettings(settings) {
   const deny = p.deny ?? []
 
   if (Array.isArray(p.allow) ? p.allow.length > 0 : p.allow !== undefined) problems.push('permissions.allow must be absent or empty (no widening)')
-  if (Array.isArray(p.ask) && p.ask.length > 0) problems.push('permissions.ask is not part of the contract')
+  // `ask` is exactly the harness self-protection list (A77b M-10): Edit/Write on the guard and settings files need the owner.
+  // The docs: Edit(...) rules cover every built-in file-editing tool, a path-scoped Write(...) rule matches nothing, and an
+  // `ask` call is denied in `claude -p` runs.
+  const ask = p.ask ?? []
+  for (const r of REQUIRED_ASK) if (!ask.includes(r)) problems.push(`missing ask rule: ${r}`)
+  for (const r of ask) if (!REQUIRED_ASK.includes(r)) problems.push(`unexpected ask rule: ${r}`)
   const mode = p.defaultMode
   if (mode !== undefined && !['default', 'manual', 'plan'].includes(mode)) problems.push(`permissions.defaultMode "${mode}" widens (only default/manual/plan allowed)`)
   if (p.disableBypassPermissionsMode !== 'disable') problems.push('permissions.disableBypassPermissionsMode must be "disable"')
@@ -207,6 +219,16 @@ describe('.claude/settings.json', () => {
       expect(s.permissions.deny.length, name).toBeLessThan(deny.length)
       expect(validateSettings(s).length, `removing "${name}" must be caught`).toBeGreaterThan(0)
     }
+  })
+
+  it('asks before Edit/Write touch the guard and settings files, and nothing else is asked', () => {
+    expect(settings.permissions.ask).toEqual(REQUIRED_ASK)
+    const s = clone()
+    s.permissions.ask = s.permissions.ask.slice(1)
+    expect(validateSettings(s).join('\n')).toMatch(/missing ask rule/)
+    const t = clone()
+    t.permissions.ask.push('Bash(git push *)')
+    expect(validateSettings(t).join('\n')).toMatch(/unexpected ask rule/)
   })
 
   it('fails when an allow rule appears', () => {

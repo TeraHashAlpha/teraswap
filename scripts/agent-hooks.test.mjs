@@ -401,3 +401,93 @@ describe('A77b M-6: a flag between the command and the action is refused (cobra 
     it(`refuses: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toEqual(expect.any(String)))
   }
 })
+
+// ---------------------------------------------------------------------------------------------------------------
+// Commit 2 (A77b H-5, M-10 and lows): redirect targets, history, self-protection, wrappers, over-refusals.
+const H5_REFUSED = [
+  'while read l; do echo "$l"; done < .env', 'while read l; do echo $l; done < .env.local', '(cat) < .env', '( cat ) < .env.local', '{ cat; } < .env', '{ cat; } <.env', 'if true; then cat; fi < .env',
+  'for i in 1; do cat; done < ./.env', 'sh -c "cat" < .env', 'bash -c "while read l; do :; done" < .env', 'while read l; do :; done 0< .env', 'until false; do cat; done < apps/web/.env.production',
+  'case x in x) cat;; esac < .env', 'while read l; do :; done < "$PWD/.env"', 'echo hi; ( cat ) < .env.canary', '{ while read l; do :; done; } < .env', 'xargs echo < .env', 'cat < .env', 'time cat < .env', 'env -i sh -c cat < .env',
+  'while read l; do :; done <.env.local', 'sh -c "cat" 0<.env', 'echo x > .env', '( echo x ) > .env.local', '{ echo x; } >> .env', 'while true; do echo x; done > .env.production',
+]
+const H5_ALLOWED = ['while read l; do echo "$l"; done < list.txt', '(cat) < .env.example', '{ cat; } < ./.env.example', 'for f in a b; do echo $f; done', 'echo hi > out.txt', 'cat < package.json', 'while read l; do :; done < <(git ls-files)']
+const HISTORY_REFUSED = [
+  'cat ~/.zsh_h*', 'cat ~/.zsh_sessions/', 'cat ~/.zsh_sessions/*', 'cat ~/.zsh_sessions/abc.history', 'cat $HISTFILE', 'cat "${HISTFILE}"', 'tail $HISTFILE', 'echo $HISTFILE', 'cat ~/.z*history', 'cat ~/.{zsh,bash}_history',
+  'grep x ~/.zsh_sessions/abc', 'less ~/.local/share/fish/fish_h*', 'cat $HOME/.zsh_h*', 'cat ~/.bash_h*', 'cat ~/.*history', 'ls ~/.zsh_sessions', 'head ~/.zsh_history', 'cp ~/.zsh_history /tmp/x', 'cat ~/.pyth*_history',
+]
+const CREDENTIAL_REFUSED = ['git-credential-osxkeychain get', '/usr/libexec/git-core/git-credential-store get', 'env git-credential-manager get', 'GIT-CREDENTIAL-X get', 'ssh-copy-id host', 'env ssh-copy-id host', '/usr/bin/ssh-copy-id -i k host', 'sh -c "ssh-copy-id host"']
+const MIRROR_REFUSED = [
+  'git push --mirror', 'git push --mirro', 'git push --mirr origin', 'git push --mir', 'git push --mi', 'git push --m', 'git push origin --mirror', 'git -c remote.origin.mirror=true push', 'git -c remote.origin.mirror push', 'git -c remote.origin.pushurl=x push',
+  'git config remote.origin.mirror true', 'git config --add remote.origin.push +refs/*:refs/*', 'git config alias.x "!ssh host"', 'git config credential.helper store', 'git config core.sshCommand x', 'git -c remote.upstream.mirror=1 push upstream',
+]
+const WRAPPER_REFUSED = [
+  'csh -c "ssh host"', 'tcsh -c "git push -f"', 'csh -fc "pm2 ls"', 'script -q /dev/null ssh host', 'script -c "ssh host" /dev/null', 'script', 'coproc ssh host', 'coproc NAME { git push -f; }', 'arch -arm64 ssh host', 'arch -x86_64 git push -f', 'arch -arch arm64 pm2 ls',
+  'nocorrect ssh host', 'nocorrect git push -f', 'pnpm ssh host', 'yarn ssh host', 'bunx ssh host', 'bun x pm2 ls', 'pnpm exec ssh host', 'pnpm dlx pm2 ls', 'yarn run ssh host', 'pnpm run ssh host', 'yarn dlx ssh host', 'pnpm audit --fix', 'yarn audit --fix',
+  'pnpm git push -f', 'pnpm exec gh pr create', 'bun run cast send 0x0', 'fish -c "ssh host"',
+]
+const WRAPPER_ALLOWED = ['arch', 'arch -arm64 npm test', 'nocorrect npm test', 'pnpm test', 'pnpm install', 'pnpm run build', 'yarn build', 'bun test', 'pnpm exec vitest run', 'pnpm audit', 'csh -c "echo hi"']
+const SELF_REFUSED = [
+  'echo x > .claude/settings.json', 'echo x >> .claude/settings.local.json', 'tee .claude/hooks/command-guard.mjs', 'echo x | tee -a .claude/settings.json', 'rm .claude/settings.json', 'rm -rf .claude/hooks', 'rm -f .claude/hooks/shell-parse.mjs',
+  'mv x .claude/hooks/y.mjs', 'mv .claude/settings.json /tmp', 'cp x .claude/hooks/', 'cp x .claude/settings.json', 'sed -i s/a/b/ .claude/settings.json', "sed -i '' s/a/b/ .claude/hooks/command-guard.mjs", 'sed -i.bak s/a/b/ .claude/settings.json',
+  'sed --in-place s/a/b/ .claude/settings.json', 'sed -ni s/a/b/p .claude/settings.json', 'perl -pi -e s/a/b/ .claude/hooks/readonly-guard.mjs', 'truncate -s 0 .claude/settings.json', 'chmod 777 .claude/hooks/command-guard.mjs', 'cat x > .claude/hooks/command-guard.mjs',
+  'cd .claude && rm settings.json', 'cd .claude/hooks && echo x > command-guard.mjs', 'cd .claude; mv settings.json x', 'rm .claude/set*', 'rm .claude/h*', 'rm .claude/*', 'rm -rf .claude', 'echo x > "$PWD/.claude/settings.json"', 'git checkout -- .claude/settings.json',
+  'git rm .claude/hooks/readonly-guard.mjs', 'git restore .claude/hooks', '/bin/rm .claude/settings.json', 'sh -c "echo x > .claude/settings.json"', 'echo x > ./.claude/hooks/shell-parse.mjs', 'dd if=x of=.claude/settings.json', 'echo x 2> .claude/settings.json',
+  'echo x &> .claude/hooks/a', 'echo x > ~/.claude/settings.json', 'rm $HOME/.claude/hooks/command-guard.mjs', 'ln -sf /dev/null .claude/settings.json', 'touch .claude/hooks/new.mjs', 'echo x > .claude/hooks/{a,b}.mjs', 'echo x >.claude/settings.json',
+  '( echo x ) > .claude/settings.json', 'git apply .claude/settings.patch .claude/settings.json',
+]
+const SELF_ALLOWED = [
+  'cat .claude/settings.json', 'git diff .claude/hooks', 'git log -- .claude/settings.json', 'git add .claude/hooks/command-guard.mjs', 'git commit -m "x" -- .claude/hooks', 'grep -n deny .claude/settings.json', 'ls .claude/hooks', 'ls -la .claude',
+  'node .claude/hooks/command-guard.mjs', 'echo x > .claude/agents/foo.md', 'cp a .claude/skills/x', 'sed -n 1p .claude/settings.json', 'sed -i s/a/b/ src/x.ts', 'rm -f dist/x', 'echo x > out.txt', 'git status', 'cat .claude/hooks/shell-parse.mjs | head',
+  'echo x > .claude/launch.json', 'diff .claude/settings.json /tmp/x', 'git show HEAD:.claude/settings.json', 'cd src && rm x', 'cd .claude && ls', 'cd .claude && cat settings.json', 'wc -l .claude/hooks/*.mjs',
+]
+const OVER_REFUSALS_ALLOWED = [
+  'test -f .env.local', 'test -e .env', '[ -f .env ]', '[ -r .env.production ]', '[[ -f .env.production ]]', 'ls .env*', 'ls -la .env', 'ls -a .env.local', 'ls .env.example .env.local', 'test -f .env.local && echo yes',
+  'cast send --help', 'cast send -h', 'grep --color KEY file', 'grep --color=auto KEY file', 'grep --color .env docs/x.md', 'grep --colour=never -n KEY src/a.ts', 'grep -n --color KEY file1 file2',
+]
+const OVER_REFUSALS_STILL_REFUSED = ['cat .env.local', 'ls .env* | xargs cat .env', 'test -f .env.local && cat .env.local', 'ls .env > .env', 'cat $(ls .env*) .env']
+const HEREDOC_COMMIT_ALLOWED = [
+  'git commit -m "$(cat <<\'EOF\'\nfeat: don\'t break the guard\n\nIt\'s fine (really) — mentions ssh host; cat .env; gh pr create\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)"',
+  'git commit -S -m "$(cat <<EOF\nfix: it\'s `fine`\nEOF\n)"',
+  'git commit -m "$(cat <<-\'EOF\'\n\tfix: don\'t\n\tEOF\n)"',
+  'git commit -m "$(cat <<\'EOT\'\nline with ) paren and \' quote\nEOT\n)" && git push -u origin chore/x',
+  'git commit -m "$(cat <<\'EOF\'\nx\nEOF\n)"',
+  'echo "$(( 1 << 2 ))"',
+]
+const HEREDOC_STILL_REFUSED = [
+  'git commit -m "$(cat <<\'EOF\'\nx\nEOF\n)" && git push -f',
+  'echo "$(cat <<\'EOF\'\ndon\'t\nEOF\n) $(ssh host)"',
+  'cat "$(cat <<EOF\n$(ssh host)\nEOF\n)"',
+  'git commit -m "$(cat <<\'EOF\'\nunterminated body\n)"',
+]
+
+describe('A77b H-5: the file-name check covers redirects of compound commands, wrappers and everything else', () => {
+  for (const c of H5_REFUSED) it(`refuses: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toEqual(expect.any(String)))
+  for (const c of H5_ALLOWED) it(`allows: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toBeNull())
+  it('the read-only agents get the same refusal through the settings-level guard (both hooks run for them)', () => {
+    for (const c of H5_REFUSED.slice(0, 8)) expect(guardDecide(c), c).toEqual(expect.any(String))
+  })
+})
+describe('A77b lows: history by glob / variable, credential helpers, ssh-copy-id, push --mirror in any form', () => {
+  for (const c of [...HISTORY_REFUSED, ...CREDENTIAL_REFUSED, ...MIRROR_REFUSED]) it(`refuses: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toEqual(expect.any(String)))
+})
+describe('A77b lows: wrappers (csh|tcsh -c, script, coproc, arch, nocorrect) and pnpm|yarn|bun X like npx X', () => {
+  for (const c of WRAPPER_REFUSED) it(`refuses: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toEqual(expect.any(String)))
+  for (const c of WRAPPER_ALLOWED) it(`allows: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toBeNull())
+})
+describe('A77b M-10: the harness does not rewrite itself through Bash', () => {
+  it('lists are big enough', () => { expect(SELF_REFUSED.length).toBeGreaterThanOrEqual(20) })
+  for (const c of SELF_REFUSED) it(`refuses: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toEqual(expect.any(String)))
+  for (const c of SELF_ALLOWED) it(`allows: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toBeNull())
+})
+describe('A77b lows: no longer over-refused (a valued flag is not a file; test/ls only name files)', () => {
+  for (const c of OVER_REFUSALS_ALLOWED) it(`allows: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toBeNull())
+  for (const c of OVER_REFUSALS_STILL_REFUSED) it(`still refuses: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toEqual(expect.any(String)))
+})
+describe('A77b M-7: a commit-message heredoc with apostrophes is parsed, and still inspected', () => {
+  for (const c of HEREDOC_COMMIT_ALLOWED) it(`allows: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toBeNull())
+  for (const c of HEREDOC_STILL_REFUSED) it(`refuses or fails closed: ${JSON.stringify(c)}`, () => {
+    let r
+    try { r = guardDecide(c) } catch { r = 'threw (the hook exits 2)' }
+    expect(r, c).toEqual(expect.any(String))
+  })
+})

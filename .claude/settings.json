@@ -1,6 +1,12 @@
 {
   "permissions": {
     "disableBypassPermissionsMode": "disable",
+    "ask": [
+      "Edit(/.claude/settings*.json)",
+      "Edit(/.claude/hooks/**)",
+      "Edit(~/.claude/settings*.json)",
+      "Edit(~/.claude/hooks/**)"
+    ],
     "deny": [
       "Bash(ssh)",
       "Bash(ssh *)",
