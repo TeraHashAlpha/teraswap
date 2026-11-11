@@ -3,97 +3,86 @@ import { spawnSync } from 'node:child_process'
 import { readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { decide } from '../.claude/hooks/readonly-guard.mjs'
 import { decide as guardDecide } from '../.claude/hooks/command-guard.mjs'
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const HOOK = path.join(ROOT, '.claude', 'hooks', 'readonly-guard.mjs')
 const AGENTS = path.join(ROOT, '.claude', 'agents')
 
-const REFUSED = [
-  'git commit -m x',
-  'git commit -S --amend',
-  'git push origin x',
-  'git push',
-  'git -C /tmp/wt push origin x',
-  'git -c user.name=x commit -m y',
-  'cd wt && git push',
-  'echo ok; git push',
-  'sh -c "git push origin x"',
-  'FOO=1 git commit -m x',
-  '/usr/bin/git push',
-  'xargs git push',
-  'git merge origin/main',
-  'git rebase origin/main',
-  'git tag v1',
-  'git reset --hard',
-  'git branch -D x',
-  'git remote add x y',
-  'gh pr create --title x',
-  'gh pr merge 5',
-  'gh pr comment 5 -b x',
-  'gh issue create',
-  'gh -R a/b pr close 5',
-  'gh api -X POST repos/a/b/issues',
-  'gh api repos/a/b --method=DELETE',
-  'gh api repos/a/b/issues -f title=x',
-  'gh release create v1',
-  'gh workflow run x',
-  'gh repo delete a/b',
-  'echo $(git push)',
+// Read-only agents (recon, auditor): everything the settings.json hook keyed on agent_type must refuse / allow.
+const RO_REFUSED = [
+  'git commit -m x', 'git commit -S --amend', 'git push origin x', 'git push', 'git -C /tmp/wt push origin x', 'git -c user.name=x commit -m y', 'cd wt && git push', 'echo ok; git push',
+  'sh -c "git push origin x"', "bash -lc 'git commit -m x'", 'eval "git push"', 'FOO=1 git commit -m x', '/usr/bin/git push', 'env git push', 'command git push', '\\git push', '"git" push', 'GIT push', 'xargs git push', 'echo $(git push)',
+  'git pull', 'git pull --rebase origin main', 'git -C wt pull', 'git am x.patch', 'git cherry-pick abc', 'git rebase origin/main', 'git revert HEAD', 'git tag v1', 'git tag -a v1 -m x', 'git config user.name x', 'git config --global alias.p push',
+  'git clean -fd', 'git clean -n', 'git restore file', 'git restore --staged file', 'git reset --hard', 'git stash', 'git apply x.patch', 'git add .', 'git rm file', 'git mv a b', 'git gc', 'git filter-branch', 'git init',
+  'git merge origin/main', 'git merge --abort', 'git merge --commit --no-commit x',
+  'git checkout -b x', 'git checkout -B x origin/main', 'git checkout -fb x', 'git checkout --orphan x', 'git checkout -- file', 'git switch -c x', 'git switch -C x', 'git switch --create x',
+  'git fetch origin a:b', 'git fetch origin +refs/heads/*:refs/remotes/o/*', 'git fetch origin pull/5/head:pr-5', 'git fetch --depth 1 origin a:b', 'git -C wt fetch origin main:main',
+  'git branch x', 'git branch -D x', 'git branch -m a b', 'git branch -c a b', 'git branch --delete x', 'git branch -u origin/main', 'git remote add x y', 'git remote remove x', 'git remote set-url origin x', 'git reflog expire --all', 'git update-ref -d refs/x',
+  'gh pr create --title x', 'gh pr merge 5', 'gh pr comment 5 -b x', 'gh pr checkout 5', 'gh pr edit 5', 'gh pr close 5', 'gh -R a/b pr close 5', 'gh issue create', 'gh issue comment 5', 'gh release create v1', 'gh workflow run x', 'gh run download 5', 'gh run rerun 5', 'gh repo delete a/b', 'gh repo clone a/b', 'gh auth login', 'gh alias set x y', 'gh gist create f',
+  'gh api -X POST repos/a/b/issues', 'gh api -XPOST x', 'gh api repos/a/b --method=DELETE', 'gh api repos/a/b/issues -f title=x', 'gh api repos/a/b/issues -ftitle=x', 'gh api x -Fn=1', 'gh api x --field=a=b', 'gh api x --input=f', 'gh api -iX PATCH x',
+  'bash', 'echo x | sh', 'eval "$CMD"',
+]
+const RO_ALLOWED = [
+  'git status', 'git log --oneline -5', 'git diff origin/main...HEAD --stat', 'git fetch origin main', 'git fetch origin', 'git fetch --depth 1 origin main', 'git fetch origin pull/5/head', 'git worktree add --detach /tmp/wt origin/main', 'git worktree add -b x /tmp/wt origin/main',
+  'git worktree remove /tmp/wt', 'git worktree remove --force /tmp/wt', 'git worktree list', 'git -C /tmp/wt rev-parse HEAD', 'git show HEAD:package.json', 'git branch --show-current', 'git branch -a', 'git branch -r --contains abc', 'git branch --list "chore/*"',
+  'git remote -v', 'git remote get-url origin', 'git log -1 --format=%H', 'git merge --no-commit origin/main', 'git merge --no-commit --no-ff x', 'git merge-base HEAD origin/main', 'git checkout --detach origin/main', 'git checkout abc123', 'git switch --detach x',
+  'git rev-list --count HEAD', 'git ls-files', 'git blame -L1,5 file', 'git grep -n "git push" docs', 'git stash list',
+  'npm ci', 'npm test', 'npx tsc --noEmit', 'npx --no-install vitest run',
+  'gh pr view 5 --json state', 'gh pr diff 5', 'gh pr list', 'gh pr status', 'gh pr checks 5', 'gh -R a/b pr checks 5', 'gh --repo a/b pr view 5', 'gh api repos/a/b/pulls/5', 'gh api repos/a/b/pulls?per_page=5', 'gh api -X GET repos/a/b', 'gh api repos/a/b -H "Accept: x" --jq .name',
+  'gh issue view 5', 'gh issue list', 'gh repo view', 'gh run view 5', 'gh run list', 'gh release view v1', 'gh codeql version', 'gh auth status', 'gh --version', 'gh',
+  'grep -rn "git push" docs', "grep -rn 'git push --force' docs", 'rg "gh pr merge" docs', 'git log --grep="git commit"', 'echo "git push"', 'echo "do not git commit here" | cat', 'git log --oneline | grep "git push"', 'ls -la', 'cat package.json',
 ]
 
-const ALLOWED = [
-  'git status',
-  'git log --oneline -5',
-  'git diff origin/main...HEAD --stat',
-  'git fetch origin main',
-  'git worktree add --detach /tmp/wt origin/main',
-  'git -C /tmp/wt rev-parse HEAD',
-  'git show HEAD:package.json',
-  'git branch --show-current',
-  'git remote -v',
-  'git log -1 --format=%H',
-  'npm ci',
-  'npm test',
-  'npx tsc --noEmit',
-  'gh pr view 5 --json state',
-  'gh pr diff 5',
-  'gh pr list',
-  'gh api repos/a/b/pulls/5',
-  'gh api repos/a/b/pulls?per_page=5',
-  'gh codeql version',
-  'gh -R a/b pr view 5',
-  'grep -rn "git push" docs',
-  'ls -la',
-]
+const { decide: roDecide, isReadOnlyAgent } = await import('../.claude/hooks/readonly-guard.mjs')
 
-describe('readonly-guard decide()', () => {
-  for (const c of REFUSED) it(`refuses: ${c}`, () => expect(decide(c), c).toEqual(expect.any(String)))
-  for (const c of ALLOWED) it(`allows: ${c}`, () => {
-    // `grep -rn "git push"` is the one accepted false positive (quoted text is flattened): documented below.
-    if (c.startsWith('grep')) return
-    expect(decide(c), c).toBeNull()
-  })
-  it('flattened quotes mean quoted `git push` text is refused (conservative, accepted)', () => {
-    expect(decide('grep -rn "git push" docs')).not.toBeNull()
+describe('readonly-guard decide() — refused', () => {
+  for (const c of RO_REFUSED) it(`refuses: ${JSON.stringify(c)}`, () => expect(roDecide(c), c).toEqual(expect.any(String)))
+})
+describe('readonly-guard decide() — allowed (a quoted "git push" is not a push)', () => {
+  for (const c of RO_ALLOWED) it(`allows: ${JSON.stringify(c)}`, () => expect(roDecide(c), c).toBeNull())
+})
+
+describe('readonly-guard keyed on agent_type', () => {
+  it('recon and auditor (also namespaced / cased) are read-only; everything else is not', () => {
+    for (const t of ['recon', 'auditor', 'Recon', 'project:auditor', ' auditor ']) expect(isReadOnlyAgent(t), t).toBe(true)
+    for (const t of ['implementer', 'Explore', 'general-purpose', 'reconnaissance', '', undefined, null, 5]) expect(isReadOnlyAgent(t), String(t)).toBe(false)
   })
 })
 
 describe('readonly-guard process protocol', () => {
   const run = (stdin) => spawnSync('node', [HOOK], { input: stdin, encoding: 'utf8' })
-  it('exit 2 + stderr on a refused command', () => {
-    const r = run(JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'git push origin x' } }))
-    expect(r.status).toBe(2)
-    expect(r.stderr).toContain('readonly-guard: refused')
+  const call = (command, agent_type) => JSON.stringify({ tool_name: 'Bash', tool_input: { command }, ...(agent_type === undefined ? {} : { agent_type }) })
+  it('blocks (exit 2 + stderr) a write for recon and auditor', () => {
+    for (const agent of ['recon', 'auditor']) {
+      const r = run(call('git pull', agent))
+      expect(r.status, agent).toBe(2)
+      expect(r.stderr).toContain('readonly-guard: refused')
+    }
   })
-  it('exit 0 on an allowed command', () => {
-    const r = run(JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'git status' } }))
-    expect(r.status).toBe(0)
+  it('lets the same command through for the implementer and for the main session (no agent_type)', () => {
+    expect(run(call('git pull', 'implementer')).status).toBe(0)
+    expect(run(call('git pull')).status).toBe(0)
+    expect(run(call('git push -u origin x', undefined)).status).toBe(0)
   })
-  it('fails closed on garbage and on a missing command', () => {
-    expect(run('not json').status).toBe(2)
-    expect(run(JSON.stringify({ tool_input: {} })).status).toBe(2)
+  it('exit 0 on an allowed command for a read-only agent', () => {
+    expect(run(call('git status', 'auditor')).status).toBe(0)
+    expect(run(call('grep -rn "git push" docs', 'recon')).status).toBe(0)
+  })
+  it('a hook error blocks: bad JSON, missing command, unterminated quote (command-guard covers non-read-only agents)', () => {
+    for (const stdin of ['not json', '', JSON.stringify({ tool_input: {} }), call('echo "x', 'recon'), call("echo 'x", 'auditor'), call('echo $(git', 'recon')]) {
+      const r = run(stdin)
+      expect(r.status, stdin).toBe(2)
+      expect(r.stderr).toContain('failing closed')
+    }
+  })
+  it('settings.json registers it on Bash for every session, wrapped so a crash blocks', () => {
+    const s = JSON.parse(readFileSync(path.join(ROOT, '.claude', 'settings.json'), 'utf8'))
+    const hooks = s.hooks.PreToolUse.filter((e) => e.matcher === 'Bash').flatMap((e) => e.hooks)
+    const h = hooks.find((x) => x.command.includes('readonly-guard.mjs'))
+    expect(h, 'readonly-guard wired in settings.json').toBeTruthy()
+    expect(h.command).toMatch(/\|\| exit 2$/)
+    expect(h.onFailure).toBe('block')
   })
 })
 
@@ -136,14 +125,14 @@ describe('.claude/agents', () => {
   }
 
   for (const name of ['recon', 'auditor']) {
-    it(`${name}: no Edit/Write/NotebookEdit in tools, and the read-only hook is attached`, () => {
+    it(`${name}: no Edit/Write/NotebookEdit in tools, and no frontmatter hook (the guard is in settings.json)`, () => {
       const { fm } = frontmatter(path.join(AGENTS, `${name}.md`))
       const tools = field(fm, 'tools').split(/[,\s]+/).filter(Boolean)
       for (const t of ['Edit', 'Write', 'NotebookEdit']) expect(tools, `${name} tools`).not.toContain(t)
       expect(fm).toContain('disallowedTools')
       expect(fm, 'MultiEdit is not a tool (A77): do not list it').not.toContain('MultiEdit')
-      expect(fm).toContain('readonly-guard.mjs')
-      expect(fm).toMatch(/PreToolUse/)
+      // A77 M-1: the guard lives in settings.json keyed on agent_type, not in frontmatter (skipped without workspace trust)
+      expect(fm).not.toMatch(/hooks:|PreToolUse|readonly-guard/)
     })
   }
 
