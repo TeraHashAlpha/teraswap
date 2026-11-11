@@ -1,3 +1,8 @@
+---
+name: adapter
+description: Use when creating or modifying a DEX liquidity-source adapter under src/lib/sources/.
+---
+
 # Skill: Creating / Modifying DEX Source Adapters
 
 Apply this skill whenever the task adds or edits a liquidity-source adapter
