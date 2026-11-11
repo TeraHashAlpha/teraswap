@@ -16,6 +16,7 @@ import {
   installBrowser,
   mountPage,
   nearIO,
+  rects,
   scrollTo,
   section,
   setMedia,
@@ -49,7 +50,7 @@ describe('entrance: plays once when the section crosses the 40 % line', () => {
   it('takes the sections over (data-nar-js) and shows none below the line', () => {
     mountPage()
     for (const id of NARRATIVE_SECTIONS) expect(section(id).hasAttribute('data-nar-js')).toBe(true)
-    expect(entered()).toEqual([])
+    expect(entered()).toEqual(['hero']) // the page opens on the hero: already above the line, so it is shown at once
     expect(enterIO().options?.rootMargin).toBe(ENTER_ROOT_MARGIN)
     expect(ENTER_ROOT_MARGIN).toBe('-40% 0px -60% 0px')
   })
@@ -58,28 +59,45 @@ describe('entrance: plays once when the section crosses the 40 % line', () => {
     mountPage()
     expect(enterIO().observed.has(section('security'))).toBe(true)
     act(() => enterIO().fire([{ target: section('security'), isIntersecting: true }]))
-    expect(entered()).toEqual(['security'])
+    expect(entered()).toEqual(['hero', 'security'])
     expect(enterIO().observed.has(section('security'))).toBe(false)
-    expect(enterIO().observed.size).toBe(4)
+    expect(enterIO().observed.size).toBe(7)
     // a section that is not crossing stays hidden
     act(() => enterIO().fire([{ target: section('docs'), isIntersecting: false }]))
     expect(section('docs').hasAttribute('data-nar-in')).toBe(false)
   })
 
   it('a section already above the line on load (deep link) is shown at once, and is not observed', () => {
-    scrollTo(-1000) // security −1000…−100, experience −100…800 (crossing), features 800…
+    scrollTo(-1000) // hero −1000…−100, performance −100…800 (crossing), why-teraswap 800…
     mountPage()
-    expect(entered()).toEqual(['security', 'experience'])
-    expect(enterIO().observed.has(section('security'))).toBe(false)
-    expect(enterIO().observed.has(section('features'))).toBe(true)
+    expect(entered()).toEqual(['hero', 'performance'])
+    expect(enterIO().observed.has(section('hero'))).toBe(false)
+    expect(enterIO().observed.has(section('why-teraswap'))).toBe(true)
   })
 
   it('a section jumped over without ever crossing the line is still shown (no hidden content left behind)', () => {
     mountPage()
-    scrollTo(-3000)
+    scrollTo(-3000) // the 4th section is the one crossing the line (−300…600); the 5th and everything after are still below
     settle()
-    expect(entered()).toEqual(['security', 'experience', 'features', 'roadmap'])
+    expect(entered()).toEqual(['hero', 'performance', 'why-teraswap', 'security'])
     expect(section('docs').hasAttribute('data-nar-in')).toBe(false)
+  })
+
+  it('the LAST section is shown once it is entirely in view, though a short docs row above the footer never reaches the line', () => {
+    mountPage()
+    scrollTo(-20000)
+    rects.docs = { top: 500, bottom: 750 } // 800 px viewport, line at 320: below the line, but wholly visible (page end)
+    expect(section('docs').hasAttribute('data-nar-in')).toBe(false)
+    settle()
+    expect(section('docs').hasAttribute('data-nar-in')).toBe(true)
+    // only the last section gets this: a short middle section below the line is not revealed early
+    cleanup()
+    installBrowser()
+    mountPage()
+    scrollTo(-20000)
+    rects.cta = { top: 500, bottom: 750 }
+    settle()
+    expect(section('cta').hasAttribute('data-nar-in')).toBe(false)
   })
 
   it('stagger: 40 ms per element, capped at index 4 — the last starts at 160 ms, the sequence ends by 320 ms', () => {
@@ -161,7 +179,7 @@ describe('prefers-reduced-motion: no stack, photos painted on the sections, text
     setMedia(REDUCED_MOTION_QUERY, false)
     mountPage()
     expect(document.querySelector('.ts-v2-nar')).not.toBeNull()
-    expect(entered()).toEqual([])
+    expect(entered()).toEqual(['hero'])
     act(() => setMedia(REDUCED_MOTION_QUERY, true))
     expect(document.querySelector('.ts-v2-nar')).toBeNull()
     expect(entered()).toEqual([...NARRATIVE_SECTIONS])
@@ -197,7 +215,7 @@ describe.each(FLAT_QUERIES)('%s: flat --bg, no photo, no credit', (query) => {
     nearAll()
     act(() => setMedia(query, false))
     expect(document.querySelector('.ts-v2-nar')).not.toBeNull()
-    expect(document.querySelectorAll('.ts-v2-nar__layer[data-loaded]')).toHaveLength(5)
+    expect(document.querySelectorAll('.ts-v2-nar__layer[data-loaded]')).toHaveLength(7)
   })
 })
 

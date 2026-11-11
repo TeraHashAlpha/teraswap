@@ -18,6 +18,7 @@ import {
   NEAR_ROOT_MARGIN,
   PHOTO_SETTLE_MS,
   SECTION_PHOTO,
+  STILL_PHOTO,
   photoFor,
   photosFor,
   pickActive,
@@ -26,7 +27,10 @@ import {
 
 // ── pure picker ────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Five stacked 900 px sections starting at `y` (their top edge relative to the viewport). */
+/** `y` that puts section `id` at the top of the viewport. */
+const atTop = (id: (typeof NARRATIVE_SECTIONS)[number]) => -900 * NARRATIVE_SECTIONS.indexOf(id)
+
+/** Nine stacked 900 px sections (the whole landing) starting at `y` (the hero's top edge relative to the viewport). */
 function rectsAt(y: number): SectionRect[] {
   return NARRATIVE_SECTIONS.map((id, i) => ({ id, top: y + i * 900, bottom: y + (i + 1) * 900 }))
 }
@@ -34,16 +38,13 @@ function rectsAt(y: number): SectionRect[] {
 describe('pickActive (mocked rects, 800 px viewport, line at 320 px)', () => {
   it('the section crossing the 40 % line is active', () => {
     expect(ACTIVE_LINE).toBe(0.4)
-    expect(pickActive(rectsAt(0), VH, false).photo).toBe('highway') // security 0–900
-    expect(pickActive(rectsAt(-900), VH, false).photo).toBe('footbridge')
-    expect(pickActive(rectsAt(-1800), VH, false).photo).toBe('tunnel')
-    expect(pickActive(rectsAt(-2700), VH, false).photo).toBe('archlight')
-    expect(pickActive(rectsAt(-3600), VH, false).photo).toBe('underpass')
+    const expected = ['overpass', 'tunnel', 'zakim', 'highway', 'footbridge', 'tunnel', 'archlight', 'highway', 'underpass']
+    expect(NARRATIVE_SECTIONS.map((id) => pickActive(rectsAt(atTop(id)), VH, false).photo)).toEqual(expected)
   })
 
   it('switches exactly when the next section\'s top passes the line (320 px), not before', () => {
-    expect(pickActive(rectsAt(-579.5), VH, false).photo).toBe('highway') // experience top at 320.5: still below the line
-    expect(pickActive(rectsAt(-580), VH, false).photo).toBe('footbridge') // top at 320 = on the line
+    expect(pickActive(rectsAt(-579.5), VH, false).photo).toBe('overpass') // performance top at 320.5: still below the line
+    expect(pickActive(rectsAt(-580), VH, false).photo).toBe('tunnel') // top at 320 = on the line
   })
 
   it('a narrative section still below the line is pre-selected while it enters (no flat gap)', () => {
@@ -51,36 +52,53 @@ describe('pickActive (mocked rects, 800 px viewport, line at 320 px)', () => {
     expect(pickActive(rects, VH, false).photo).toBe('highway')
   })
 
-  it('nothing is active when no narrative section is on screen (the opaque sections own the viewport)', () => {
+  it('nothing is active when no narrative section is on screen (past the docs, the opaque footer owns the viewport)', () => {
     expect(pickActive([{ id: 'security', top: 2000, bottom: 2900 }], VH, false).photo).toBeNull()
     expect(pickActive([{ id: 'docs', top: -3000, bottom: -100 }], VH, false).photo).toBeNull()
   })
 
-  it('an opaque section crossing the line with no narrative section below it in view → null', () => {
+  it('a section that ended above the line with none below it in view → null', () => {
     expect(pickActive([{ id: 'roadmap', top: -900, bottom: 100 }], VH, false).photo).toBeNull() // bottom 100 < line 320, none below
   })
 
+  it('the LAST section wins once it is entirely in view, even if it never reaches the line (short docs row above the footer)', () => {
+    // 900 px viewport: the line is at 360. The docs row is 250 px tall at top 600, so its top never gets above the line on a page that ends here.
+    const rects: SectionRect[] = [
+      { id: 'cta', top: -400, bottom: 600 },
+      { id: 'docs', top: 600, bottom: 850 },
+    ]
+    expect(pickActive(rects, 900, false).photo).toBe('underpass')
+    // not yet entirely in view (bottom below the viewport): the section crossing the line still owns it
+    expect(pickActive([{ id: 'cta', top: -400, bottom: 700 }, { id: 'docs', top: 700, bottom: 950 }], 900, false).photo).toBe('highway')
+    // a tall last section is not "whole in view": the 40 % line rule applies as before
+    expect(pickActive([{ id: 'cta', top: -2000, bottom: 100 }, { id: 'docs', top: 100, bottom: 1500 }], 900, false).photo).toBe('underpass')
+    expect(pickActive([{ id: 'cta', top: -900, bottom: 500 }, { id: 'docs', top: 500, bottom: 1500 }], 900, false).photo).toBe('highway')
+  })
+
   it('uses the mobile map at ≤ 600 px', () => {
-    expect(pickActive(rectsAt(-900), VH, true).photo).toBe('highway') // experience shares security's photo on mobile
-    expect(pickActive(rectsAt(-2700), VH, true).photo).toBe('tunnel') // roadmap shares features'
+    expect(pickActive(rectsAt(atTop('experience')), VH, true).photo).toBe('highway') // experience shares the previous section's photo on mobile
+    expect(pickActive(rectsAt(atTop('roadmap')), VH, true).photo).toBe('tunnel') // roadmap shares features'
   })
 })
 
 // ── the shipped map ────────────────────────────────────────────────────────────────────────────────────────────
 
 describe('section → photo map (MOTION-SPEC §2)', () => {
-  it('desktop: 5 sections, 5 distinct photos, no two neighbours share one', () => {
+  it('desktop: all 9 landing sections, 7 distinct photos, no two neighbours share one (every boundary fades)', () => {
     const photos = NARRATIVE_SECTIONS.map((s) => photoFor(s, false))
-    expect(photos).toEqual(['highway', 'footbridge', 'tunnel', 'archlight', 'underpass'])
-    expect(new Set(photos).size).toBe(5)
-    expect(photosFor(false)).toEqual(photos)
+    expect(photos).toEqual(['overpass', 'tunnel', 'zakim', 'highway', 'footbridge', 'tunnel', 'archlight', 'highway', 'underpass'])
+    expect(NARRATIVE_SECTIONS).toHaveLength(9)
+    expect(new Set(photos).size).toBe(7)
+    photos.slice(1).forEach((p, i) => expect(p, `${NARRATIVE_SECTIONS[i]} → ${NARRATIVE_SECTIONS[i + 1]}`).not.toBe(photos[i]))
+    expect(photosFor(false)).toEqual(['overpass', 'tunnel', 'zakim', 'highway', 'footbridge', 'archlight', 'underpass'])
   })
 
-  it('mobile ≤ 600 px: at most 3 photos; a section that repeats its neighbour\'s photo does not fade', () => {
+  it('mobile ≤ 600 px: 5 photos; a section that repeats its neighbour\'s photo does not fade', () => {
     const photos = NARRATIVE_SECTIONS.map((s) => photoFor(s, true))
-    expect(photos).toEqual(['highway', 'highway', 'tunnel', 'tunnel', 'underpass'])
-    expect(photosFor(true)).toEqual(['highway', 'tunnel', 'underpass'])
-    expect(photosFor(true).length).toBeLessThanOrEqual(3)
+    expect(photos).toEqual(['overpass', 'tunnel', 'zakim', 'highway', 'highway', 'tunnel', 'tunnel', 'highway', 'underpass'])
+    expect(photosFor(true)).toEqual(['overpass', 'tunnel', 'zakim', 'highway', 'underpass'])
+    // the same files the four opaque stills used to request on a phone, plus the docs photo: moving them into the stack adds no file
+    expect(new Set(photosFor(true))).toEqual(new Set([...Object.values(STILL_PHOTO), 'underpass']))
   })
 
   it('every mapped photo ships, with its photographer', () => {
@@ -123,20 +141,23 @@ describe('NarrativeStack: observers and lazy photos', () => {
     expect(crossingIO().options?.threshold).toEqual([...ACTIVE_THRESHOLDS])
     expect(ACTIVE_THRESHOLDS).toHaveLength(21)
     expect(NEAR_ROOT_MARGIN).toBe('0px 0px 100% 0px')
-    expect(crossingIO().observed.size).toBe(5)
-    expect(nearIO().observed.size).toBe(5)
+    expect(crossingIO().observed.size).toBe(9)
+    expect(nearIO().observed.size).toBe(9)
   })
 
-  it('scroll 0: five layers, none with an image — no bg-* URL exists in the DOM, nothing is active or credited', () => {
+  it('scroll 0: seven layers; only the hero\'s overpass has an image (it is on screen), and it is active and credited', () => {
     mountPage()
-    expect(document.querySelectorAll('.ts-v2-nar__layer')).toHaveLength(5)
+    expect(document.querySelectorAll('.ts-v2-nar__layer')).toHaveLength(7)
     for (const l of document.querySelectorAll('.ts-v2-nar__layer')) {
-      expect(l.hasAttribute('data-loaded')).toBe(false)
-      expect(l.getAttribute('style')).toBeNull()
+      const hero = l.getAttribute('data-photo') === 'overpass'
+      expect(l.hasAttribute('data-loaded'), l.getAttribute('data-photo')!).toBe(hero)
+      expect(l.getAttribute('style') === null, l.getAttribute('data-photo')!).toBe(!hero)
     }
-    expect(document.body.innerHTML).not.toMatch(/bg-|\.avif|\.webp|image-set/)
-    expect(activeLayers()).toEqual([])
-    expect(document.querySelector('.ts-v2-nar-credit')!.hasAttribute('data-active')).toBe(false)
+    // no other photo URL exists in the DOM
+    expect(document.body.innerHTML.match(/bg-[a-z]+-\d+/g)!.every((m) => m.startsWith('bg-overpass-'))).toBe(true)
+    expect(activeLayers()).toEqual(['overpass'])
+    expect(document.querySelector('.ts-v2-nar-credit')!.hasAttribute('data-active')).toBe(true)
+    expect(document.querySelector('.ts-v2-nar-credit')!.textContent).toBe('Photo MAG Photography / Pexels')
   })
 
   it('a layer gets image-set(AVIF, WebP) at both sizes only when its section is within one viewport', () => {
@@ -156,21 +177,25 @@ describe('NarrativeStack: observers and lazy photos', () => {
   it('exactly one layer is active; it follows the section crossing the line and the others fade out', () => {
     mountPage()
     const seen: (string | null)[][] = []
-    for (const [y, expected] of [
-      [0, ['highway']],
-      [-900, ['footbridge']],
-      [-1800, ['tunnel']],
-      [-2700, ['archlight']],
-      [-3600, ['underpass']],
+    for (const [id, photo] of [
+      ['hero', 'overpass'],
+      ['performance', 'tunnel'],
+      ['why-teraswap', 'zakim'],
+      ['security', 'highway'],
+      ['experience', 'footbridge'],
+      ['features', 'tunnel'],
+      ['roadmap', 'archlight'],
+      ['cta', 'highway'],
+      ['docs', 'underpass'],
     ] as const) {
-      scrollTo(y)
+      scrollTo(atTop(id))
       settle()
       seen.push(activeLayers())
-      expect(activeLayers()).toEqual(expected)
-      expect(layer(expected[0])!.hasAttribute('data-loaded')).toBe(true) // the active photo is always requested
+      expect(activeLayers()).toEqual([photo])
+      expect(layer(photo)!.hasAttribute('data-loaded')).toBe(true) // the active photo is always requested
     }
-    // scrolled past everything: nothing active → the layers fade out and the opaque sections own the viewport
-    scrollTo(-6000)
+    // scrolled past everything: nothing active → the layers fade out and the opaque footer owns the viewport
+    scrollTo(-9000)
     settle()
     expect(activeLayers()).toEqual([])
   })
@@ -182,30 +207,30 @@ describe('NarrativeStack: observers and lazy photos', () => {
       mountPage()
       scrollTo(0)
       settle()
-      expect(activeLayers()).toEqual(['highway'])
+      expect(activeLayers()).toEqual(['overpass'])
       expect(leavingLayers()).toEqual([]) // nothing was replaced yet
 
-      scrollTo(-900)
+      scrollTo(atTop('performance')) // the FIRST boundary, hero → Performance, fades like every later one
       settle()
-      expect(activeLayers()).toEqual(['footbridge'])
-      expect(leavingLayers()).toEqual(['highway']) // never a commit where highway is neither active nor leaving
+      expect(activeLayers()).toEqual(['tunnel'])
+      expect(leavingLayers()).toEqual(['overpass']) // never a commit where overpass is neither active nor leaving
 
-      scrollTo(-1800) // a second switch inside the settle window: both outgoing layers keep their transition
+      scrollTo(atTop('why-teraswap')) // a second switch inside the settle window: both outgoing layers keep their transition
       settle()
-      expect(leavingLayers().sort()).toEqual(['footbridge', 'highway'])
+      expect(leavingLayers().sort()).toEqual(['overpass', 'tunnel'])
 
       act(() => void vi.advanceTimersByTime(PHOTO_SETTLE_MS))
       expect(leavingLayers()).toEqual([])
-      expect(activeLayers()).toEqual(['tunnel'])
+      expect(activeLayers()).toEqual(['zakim'])
 
-      scrollTo(-6000) // nothing active: the last photo leaves
+      scrollTo(-9000) // nothing active: the last photo leaves
       settle()
       expect(activeLayers()).toEqual([])
-      expect(leavingLayers()).toEqual(['tunnel'])
+      expect(leavingLayers()).toEqual(['zakim'])
 
-      scrollTo(-1800) // scrolling back to a leaving photo makes it active again, not leaving
+      scrollTo(atTop('why-teraswap')) // scrolling back to a leaving photo makes it active again, not leaving
       settle()
-      expect(activeLayers()).toEqual(['tunnel'])
+      expect(activeLayers()).toEqual(['zakim'])
       expect(leavingLayers()).toEqual([])
     } finally {
       vi.useRealTimers()
@@ -222,34 +247,34 @@ describe('NarrativeStack: observers and lazy photos', () => {
   it('the credit follows the active photo (and keeps the last name while it fades out)', () => {
     mountPage()
     const credit = () => document.querySelector('.ts-v2-nar-credit')!
-    scrollTo(-900)
+    scrollTo(atTop('experience'))
     settle()
     expect(credit().textContent).toBe('Photo Erik Mclean / Pexels')
     expect(credit().hasAttribute('data-active')).toBe(true)
     expect(credit().hasAttribute('aria-hidden')).toBe(false)
-    scrollTo(-2700)
+    scrollTo(atTop('roadmap'))
     settle()
     expect(credit().textContent).toBe('Photo wal_ 172619 / Pexels')
-    scrollTo(-6000)
+    scrollTo(-9000)
     settle()
     expect(credit().hasAttribute('data-active')).toBe(false)
     expect(credit().getAttribute('aria-hidden')).toBe('true') // invisible → not announced
     expect(credit().textContent).toBe('Photo wal_ 172619 / Pexels')
   })
 
-  it('mobile ≤ 600 px: three layers, and requesting every section never loads more than three photos', () => {
+  it('mobile ≤ 600 px: five layers, and requesting every section never loads more than five photos', () => {
     setMobile(true)
     mountPage()
-    expect(Array.from(document.querySelectorAll('.ts-v2-nar__layer')).map((l) => l.getAttribute('data-photo'))).toEqual(['highway', 'tunnel', 'underpass'])
+    expect(Array.from(document.querySelectorAll('.ts-v2-nar__layer')).map((l) => l.getAttribute('data-photo'))).toEqual(['overpass', 'tunnel', 'zakim', 'highway', 'underpass'])
     act(() => nearIO().fire(NARRATIVE_SECTIONS.map((id) => ({ target: section(id), isIntersecting: true }))))
-    expect(document.querySelectorAll('.ts-v2-nar__layer[data-loaded]')).toHaveLength(3)
+    expect(document.querySelectorAll('.ts-v2-nar__layer[data-loaded]')).toHaveLength(5)
     expect(document.body.innerHTML).not.toMatch(/footbridge|archlight/)
   })
 
-  it('no IntersectionObserver (old browser, jsdom SSR check): renders the inert stack and does not throw', () => {
+  it('no IntersectionObserver (old browser, jsdom SSR check): renders the stack on the hero photo and does not throw', () => {
     vi.stubGlobal('IntersectionObserver', undefined)
     expect(() => mountPage()).not.toThrow()
-    expect(activeLayers()).toEqual([])
+    expect(activeLayers()).toEqual(['overpass']) // the server-rendered state: nothing moves it without an observer
   })
 })
 

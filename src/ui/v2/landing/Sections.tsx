@@ -27,8 +27,7 @@ import {
 } from '@/config/product-claims'
 import { useQuoteChainId } from '@/hooks/useChainId'
 import { Button, EyebrowLabel, HandUnderline, Surface } from '../primitives'
-import { NarrativeStill } from './NarrativeStill'
-import { STILL_PHOTO, rvAt } from './narrative'
+import { rvAt } from './narrative'
 import { RouteRace } from './RouteRace'
 import { securityStats } from './slots'
 
@@ -50,10 +49,9 @@ function SectionHead({ eyebrow, children, reveal = false }: { eyebrow: string; c
 
 export function PerformanceSection() {
   return (
-    <section id="performance" className={`ts-v2-opaque ts-v2-scrim ts-v2-scrim--race ${SECTION} overflow-hidden`}>
-      <NarrativeStill photoId={STILL_PHOTO.performance} />
+    <section id="performance" data-ts-narrative="performance" className={`ts-v2-scrim ts-v2-scrim--race ${SECTION} overflow-hidden`}>
       <div className={`${WRAP} grid items-center gap-10 lg:grid-cols-[7fr_5fr] lg:gap-16`}>
-        <div>
+        <div className="ts-v2-rv">
           <EyebrowLabel>Performance</EyebrowLabel>
           <h2 className={`mt-4 ${H2}`}>
             <span className="block">
@@ -67,7 +65,9 @@ export function PerformanceSection() {
             on every single swap. Gas costs are folded into the ranking, so the quote you see is the one your wallet actually feels.
           </p>
         </div>
-        <RouteRace />
+        <div className="ts-v2-rv" style={rvAt(1)}>
+          <RouteRace />
+        </div>
       </div>
     </section>
   )
@@ -89,15 +89,14 @@ export function DifferentSection() {
     { title: UNVERIFIED_SWAP_GATE_TITLE, desc: UNVERIFIED_SWAP_GATE_CLAIM },
   ]
   return (
-    <section id="why-teraswap" className={`ts-v2-opaque ts-v2-scrim ts-v2-scrim--center ${SECTION} overflow-hidden`}>
-      <NarrativeStill photoId={STILL_PHOTO.why} />
+    <section id="why-teraswap" data-ts-narrative="why-teraswap" className={`ts-v2-scrim ts-v2-scrim--center ${SECTION} overflow-hidden`}>
       <div className={WRAP}>
-        <SectionHead eyebrow="Why TeraSwap">
+        <SectionHead eyebrow="Why TeraSwap" reveal>
           What Makes TeraSwap <HandUnderline className="text-v2-cream">Different</HandUnderline>
         </SectionHead>
         <ol className="grid list-none gap-4 lg:grid-cols-3">
           {BLOCKS.map((b, i) => (
-            <li key={b.title}>
+            <li key={b.title} className="ts-v2-rv" style={rvAt(i)}>
               <Surface edge="rule" className="h-full py-1">
                 <span className="font-v2-display text-5xl font-bold text-v2-cream">{String(i + 1).padStart(2, '0')}</span>
                 <h3 className="mt-5 text-xl text-v2-text">{b.title}</h3>
@@ -333,25 +332,24 @@ export function FeaturesSection() {
 
 export function BottomCtaSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
-    <section className={`ts-v2-opaque ts-v2-scrim ts-v2-scrim--center ${SECTION} overflow-hidden text-center`}>
-      <NarrativeStill photoId={STILL_PHOTO.cta} />
+    <section id="cta" data-ts-narrative="cta" className={`ts-v2-scrim ts-v2-scrim--center ${SECTION} overflow-hidden text-center`}>
       <div className="relative z-10 mx-auto max-w-[900px]">
-        <h2 className={H2}>
+        <h2 className={`${H2} ts-v2-rv`}>
           <span className="block">Don&apos;t leave</span>
           <span className="block text-v2-cream">
             <HandUnderline>performance</HandUnderline>
           </span>
           <span className="block">on the table.</span>
         </h2>
-        <p className="mx-auto mt-6 max-w-[520px] text-[16px] leading-relaxed text-v2-muted">
+        <p className="ts-v2-rv mx-auto mt-6 max-w-[520px] text-[16px] leading-relaxed text-v2-muted" style={rvAt(1)}>
           Experience decentralized trading engineered to work harder than any single exchange ever could.
         </p>
-        <div className="mt-8">
+        <div className="ts-v2-rv mt-8" style={rvAt(2)}>
           <Button className="h-14 w-[220px]" onClick={onLaunchApp}>
             Launch app
           </Button>
         </div>
-        <div className="mt-6 font-v2-mono text-[11px] font-medium uppercase tracking-[1.5px] text-v2-muted">
+        <div className="ts-v2-rv mt-6 font-v2-mono text-[11px] font-medium uppercase tracking-[1.5px] text-v2-muted" style={rvAt(3)}>
           Non-custodial · {SWAP_CHAIN_LIST_LABEL} · Powered by Chainlink · {PRIVACY_BADGE}
         </div>
       </div>
