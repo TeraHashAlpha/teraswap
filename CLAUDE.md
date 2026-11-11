@@ -62,6 +62,7 @@ Consult security-knowledge **before** approving any change to contracts or fund 
 - [`docs/security/`](docs/security/) — SECURITY.md, AUDIT-TOTAL.md, PREAUDIT-REMEDIATION-REPORT.md
 - [`ROADMAP.md`](ROADMAP.md) — product roadmap
 - [`TERASWAP-EXECUTION-PLAN.md`](TERASWAP-EXECUTION-PLAN.md) — full execution plan with RICE table
+- Scoped agent context, read when you work in that tree: [`src/ui/v2/CLAUDE.md`](src/ui/v2/CLAUDE.md), [`src/app/api/CLAUDE.md`](src/app/api/CLAUDE.md), [`contracts/order-engine/CLAUDE.md`](contracts/order-engine/CLAUDE.md)
 ---
 
 ## Stack

@@ -1,4 +1,4 @@
-<!-- claude-md-sha256: 7f6fe5adfd63680fdadc0ca3f2835170d53f105c7c14accc3271e5e58a65fc16 -->
+<!-- claude-md-sha256: 9d9e36323879658049af0ae64fadaeda0131965db4a80d47e9b56b1d5550d67a -->
 # AGENTS.md — TeraSwap for Grok Build and other non-Claude coding agents
 
 Grok Build reads this file, not `CLAUDE.md`. This file exists so a second coding agent gets the same
@@ -79,3 +79,6 @@ reviewing and updating this file, then commit both files together.
 - `docs/security/GROK-DENY-CANARY-2026-08-28.md` — measured evidence that Grok's `--deny` flags do not protect
   `.env*`; read this before trusting or re-adding any Grok deny-flag enforcement claim.
 - `CLAUDE.md` — full, normative project conventions. Read it in full, not just this file.
+- `src/ui/v2/CLAUDE.md`, `src/app/api/CLAUDE.md`, `contracts/order-engine/CLAUDE.md` — scoped rules for those trees (UI v2 parity, API
+  rate-limit/proxy rules, keeper and contracts). Read the one that covers the directory you are about to touch. They are not pinned by the
+  drift guard above, which hashes only the root `CLAUDE.md`.
