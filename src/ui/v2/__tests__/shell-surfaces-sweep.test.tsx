@@ -246,9 +246,8 @@ describe('sweep · shell surfaces · fabs', () => {
     cleanup()
     const v2 = render(<><HelpFab /><MusicToggle /></>)
     const v2Names = names(v2.container)
-    // v1 names the music control by its action ("Mute background music" while on); v2 words it "Turn music off" — same control, same state.
-    const EQUIV: Record<string, string> = { 'mute background music': 'turn music off', 'unmute background music': 'turn music on' }
-    expect(v1Names.map((n) => EQUIV[n] ?? n).filter((n) => !v2Names.includes(n))).toEqual([])
+    // Owner decision (walkthrough polish): v1 and v2 word the sound control identically ("Mute sound" / "Unmute sound").
+    expect(v1Names.filter((n) => !v2Names.includes(n))).toEqual([])
   })
 })
 

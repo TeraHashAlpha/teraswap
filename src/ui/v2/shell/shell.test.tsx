@@ -347,7 +347,7 @@ describe('photo credit placement (owner review 26 Oct: never over the floating ?
     const footer = document.querySelector('[data-ts-footer]')!
     const credit = screen.getByText('Photo Phil Evenden / Pexels')
     expect(footer.contains(credit)).toBe(true)
-    const fabs = [screen.getByRole('button', { name: /music/i }), screen.getByRole('button', { name: 'Open help' })]
+    const fabs = [screen.getByRole('button', { name: /sound/i }), screen.getByRole('button', { name: 'Open help' })]
     for (const fab of fabs) {
       expect(footer.contains(fab)).toBe(false)
       expect(fab.contains(credit) || credit.contains(fab)).toBe(false)
@@ -370,7 +370,7 @@ describe('photo credit placement (owner review 26 Oct: never over the floating ?
 
   it('under 640 px the fabs sit at the bottom edge (the footer reserves that space), from sm up above the photo band', () => {
     render(<AppShell tab="swap" />)
-    for (const fab of [screen.getByRole('button', { name: /music/i }), screen.getByRole('button', { name: 'Open help' })]) {
+    for (const fab of [screen.getByRole('button', { name: /sound/i }), screen.getByRole('button', { name: 'Open help' })]) {
       expect(fab.className).toContain('bottom-3')
       expect(fab.className).toContain('sm:bottom-[calc(var(--photo-footer-band)+12px)]')
     }
@@ -577,12 +577,12 @@ describe('help drawer + fabs', () => {
     const sounds = await import('@/lib/sounds')
     const spy = vi.spyOn(sounds, 'toggleBackgroundMusic').mockReturnValueOnce(false).mockReturnValueOnce(true)
     render(<AppShell />)
-    const btn = screen.getByRole('button', { name: 'Turn music off' })
+    const btn = screen.getByRole('button', { name: 'Mute sound' })
     expect(icon(btn)).toBe('on')
     await act(async () => void fireEvent.click(btn))
-    expect(icon(screen.getByRole('button', { name: 'Turn music on' }))).toBe('off')
-    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Turn music on' })))
-    expect(icon(screen.getByRole('button', { name: 'Turn music off' }))).toBe('on')
+    expect(icon(screen.getByRole('button', { name: 'Unmute sound' }))).toBe('off')
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Unmute sound' })))
+    expect(icon(screen.getByRole('button', { name: 'Mute sound' }))).toBe('on')
     spy.mockRestore()
   })
 })

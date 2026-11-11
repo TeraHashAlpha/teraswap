@@ -168,7 +168,7 @@ describe('structure: ten sections in the pack order', () => {
     expect(footer.textContent).toContain('Photo MAG Photography · Владимир Николаевич · Phil Evenden · Oleksiy Yeshtokyn / Pexels')
     expect(footer.textContent).toContain('Smart contracts have not been externally audited. Use at your own risk.')
     expect(footer.textContent).toContain('Fee 0.7%')
-    for (const fab of [screen.getByRole('button', { name: /music/i }), screen.getByRole('button', { name: 'Open help' })]) {
+    for (const fab of [screen.getByRole('button', { name: /sound/i }), screen.getByRole('button', { name: 'Open help' })]) {
       expect(footer.contains(fab)).toBe(false)
     }
     // photos sit inside their sections (absolute), not as a second fixed layer: the four baked stills (hero · §2 · §3 · §8)

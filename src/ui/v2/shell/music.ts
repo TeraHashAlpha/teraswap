@@ -6,7 +6,7 @@ import { startBackgroundMusic, toggleBackgroundMusic } from '@/lib/sounds'
 /**
  * [ADR-025] Background music, v1 semantics on top of the SAME `sounds.ts` engine (same file, volume 0.08, loop):
  *  - ON by default; starts on the visitor's first click, keypress or scroll (browser autoplay rule);
- *  - ♫ toggles ONLY the music (`toggleBackgroundMusic()`); UI sounds are untouched by it.
+ *  - ♫ is the SOUND switch (`toggleBackgroundMusic()`): off silences the music AND every UI sound, in the engine.
  * v1 keeps this in a component mounted once at the root; the v2 shell is mounted per page, so the "started" and
  * "on" flags live at module level (they must survive a remount, or every tab change would restart muted music).
  * `startBackgroundMusic()` is idempotent, so running alongside v1's root BackgroundMusic is harmless.

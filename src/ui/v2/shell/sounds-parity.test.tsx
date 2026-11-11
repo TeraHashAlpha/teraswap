@@ -9,7 +9,7 @@
  * | first click / key / scroll              | startBackgroundMusic (BackgroundMusic.tsx)        | background.mp3 · 0.08 · loop   |
  * | ♫ off (music playing)                   | toggleBackgroundMusic → stopBackgroundMusic       | background.mp3 paused          |
  * | ♫ on                                    | toggleBackgroundMusic → startBackgroundMusic      | background.mp3 · 0.08 · loop   |
- * | UI sound while music is off             | playTouchMP3                                      | touch.mp3 still plays          |
+ * | UI sound while sound is off             | playTouchMP3 (engine flag, v1 and v2 alike)       | silence (owner: off = silence) |
  * | help / network / connect / toasts       | none in v1                                        | silence                        |
  * | waiting · quote-received · confirm · cancel | SwapBox/DCAPanel/… (B3/B5 wire them)          | NOT in the shell (source scan) |
  */
@@ -151,10 +151,10 @@ describe('sound parity — shell vs v1 (real sounds.ts, mocked audio)', () => {
     render(<AppShell />)
     act(() => void document.dispatchEvent(new MouseEvent('click', { bubbles: true }))) // music running
     log.length = 0
-    const off = screen.getByRole('button', { name: 'Turn music off' })
+    const off = screen.getByRole('button', { name: 'Mute sound' })
     expect(icon(off)).toBe('on')
     fireEvent.click(off)
-    const on = screen.getByRole('button', { name: 'Turn music on' })
+    const on = screen.getByRole('button', { name: 'Unmute sound' })
     expect(icon(on)).toBe('off')
     fireEvent.click(on)
     expect(log).toEqual(expected)
@@ -166,7 +166,7 @@ describe('sound parity — shell vs v1 (real sounds.ts, mocked audio)', () => {
     // The listener v1's root BackgroundMusic adds on `document`; the toggle must not reach it.
     const v1Start = vi.fn()
     document.addEventListener('click', v1Start)
-    fireEvent.click(screen.getByRole('button', { name: 'Turn music off' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Mute sound' }))
     document.removeEventListener('click', v1Start)
     expect(v1Start).not.toHaveBeenCalled()
     expect(log.filter((e) => e.src.includes('background')).every((e) => e.op === 'pause' || !e.loop)).toBe(true)
@@ -176,25 +176,30 @@ describe('sound parity — shell vs v1 (real sounds.ts, mocked audio)', () => {
     expect(log.some((e) => e.op === 'play')).toBe(false)
   })
 
-  it('♫ toggles ONLY the music: with it off, a tab click still plays touch.mp3', async () => {
+  it('♫ is the SOUND switch: with it off, a tab click is silent (no touch.mp3); v1 is silent too', async () => {
+    const expected = await baseline((s) => {
+      s.toggleBackgroundMusic()
+      s.playTouchMP3()
+    })
+    expect(expected).toEqual([])
     const { AppShell } = await freshPage()
     render(<AppShell />)
     act(() => void document.dispatchEvent(new MouseEvent('click', { bubbles: true })))
-    fireEvent.click(screen.getByRole('button', { name: 'Turn music off' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Mute sound' }))
     log.length = 0
     fireEvent.click(screen.getByRole('tab', { name: 'History' }))
-    expect(log).toEqual([TOUCH])
+    expect(log).toEqual(expected)
   })
 
   it('remounting the shell (tab navigation) neither restarts nor un-mutes the music', async () => {
     const { AppShell } = await freshPage()
     const first = render(<AppShell />)
     act(() => void document.dispatchEvent(new MouseEvent('click', { bubbles: true })))
-    fireEvent.click(screen.getByRole('button', { name: 'Turn music off' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Mute sound' }))
     first.unmount()
     log.length = 0
     render(<AppShell />)
-    expect(icon(screen.getByRole('button', { name: 'Turn music on' }))).toBe('off')
+    expect(icon(screen.getByRole('button', { name: 'Unmute sound' }))).toBe('off')
     act(() => void document.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     expect(log.some((e) => e.op === 'play')).toBe(false)
   })
