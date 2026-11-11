@@ -1,7 +1,7 @@
 # src/ui/v2 — UI v2 (parallel tree)
 
 Scoped to `src/ui/v2/` and `src/app/v2/`. Root rules in `/CLAUDE.md` still apply. Design record: `docs/ADR/ADR-025-ui-v2-parallel-tree.md`
-(Status: Proposed). Every test below runs in CI's `full-suite` job (`.github/workflows/ci.yml:440-468`).
+(Status: Proposed). Every test below runs in CI's `full-suite` job (`.github/workflows/ci.yml:442-470`).
 
 ## v1 stays module-identical
 - v2 imports v1's logic; it does not fork it. Nothing in `src/lib`, `src/hooks`, the wallet or v1 components is edited for v2
@@ -26,7 +26,7 @@ Scoped to `src/ui/v2/` and `src/app/v2/`. Root rules in `/CLAUDE.md` still apply
 ## USD is display-only
 - `APPROX_PRICES` / `fillUsd` are hand-edited constants. A module may import them only if it is on the display/analytics allow-list; nothing
   that gates or signs may (`src/lib/order-engine/usd-scope-guard.test.ts:1-30`). `ui/v2/dca/positions-model.ts` is on that list
-  (`usd-scope-guard.test.ts:78`) as a display-only importer. CI job `feed-resolution-guard` runs it (`ci.yml:438`).
+  (`usd-scope-guard.test.ts:78`) as a display-only importer. CI job `feed-resolution-guard` runs it (`ci.yml:440`).
 
 ## Dark only
 - v2 has no light theme: `color-scheme: dark`, no `prefers-color-scheme`, no `.light` (`src/ui/v2/tokens.test.ts:123-126`).

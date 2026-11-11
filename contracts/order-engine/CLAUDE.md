@@ -11,11 +11,11 @@ Auditor pass with 0 Critical / 0 High.
 - Admin changes sit behind the contract's own 48 h / 7 d timelocks; `pause`, `unpause` and `setOracleConfig` execute instantly by design
   (`ADR-013:53`, `docs/ADR/ADR-019-trigger-feed-timelock-asymmetry.md`).
 - Addresses come from `docs/DEPLOYMENTS.md` only, qualified by chain: one address is a different contract on different chains.
-- CI runs `forge test -vvv` here and the FeeCollector suite in `contracts/` (`.github/workflows/ci.yml:505-526`). Running `forge test`
+- CI runs `forge test -vvv` here and the FeeCollector suite in `contracts/` (`.github/workflows/ci.yml:507-528`). Running `forge test`
   rewrites the tracked `cache/solidity-files-cache.json`: `git checkout` it before you commit.
 
 ## Keeper
-- CI runs the keeper suite on Node 22 (`ci.yml:485-503`, `npm ci` + `node --test`) AND on Node 20 (`keeper-tests.yml:43`, `npm ci
+- CI runs the keeper suite on Node 22 (`ci.yml:487-505`, `npm ci` + `node --test`) AND on Node 20 (`keeper-tests.yml:43`, `npm ci
   --ignore-scripts` + `node --test`). A green run on a newer local Node is not a CI result; run `cd contracts/order-engine/executor &&
   node --test` on 20 and 22. Measured 2026-11-11 on Node 25.6.1: 1240 tests (52 top-level `*.test.mjs` files), 0 failed.
 - ADR-026 (Proposed): a miss caused by OUR infrastructure never counts against a user's order. Only an `order` miss advances

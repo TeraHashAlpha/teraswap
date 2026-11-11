@@ -18,7 +18,7 @@ everything below is `src/app/api/rpc/route.ts`; its header (`:13-56`) says why e
   (`src/lib/body-limit.ts:27-29`). Never put `trustedClientIp(req)` or a raw address in a key, a stored row or a log line (`client-ip-key.ts:110-114`).
 - The hash is HMAC-SHA256 under a daily key derived from `RATE_LIMIT_SALT` (32+ chars, server env — `client-ip-key.ts:8-14, 39-41`); IPv6
   clients are keyed by their /64 (`:26-31`). Trust of the underlying IP: `src/lib/trusted-ip.ts`, pinned by CI job `client-ip-trust-guard`
-  (`ci.yml:302-320`).
+  (`ci.yml:304-322`).
 
 ## Errors and upstream hosts
 - An error body never contains an upstream URL: provider keys live in RPC URL paths. `/api/rpc` returns fixed messages
@@ -30,7 +30,7 @@ everything below is `src/app/api/rpc/route.ts`; its header (`:13-56`) says why e
   client chunk (`.github/workflows/e2e.yml:92-129`).
 
 ## Gates fail closed
-- Body cap first: `bodySizeGuard(req, max)` → 413 (`rpc/route.ts:84-86`; CI job `api-hardening-guard`, `ci.yml:343-362`).
+- Body cap first: `bodySizeGuard(req, max)` → 413 (`rpc/route.ts:84-86`; CI job `api-hardening-guard`, `ci.yml:345-364`).
 - Unknown chain → 400 (`rpc/route.ts:155-161`). Method not on the chain's read allow-list → 403 and nothing is forwarded (`:189-196`).
   A KV outage degrades the limiter, it never lifts it (`kv-rate-limiter.ts:234-249`).
 - One documented exception: the chain-identity guard blocks only a proven `mismatch`; an unreachable upstream falls through, because an
