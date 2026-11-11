@@ -1,3 +1,8 @@
+---
+name: api-route
+description: Use when creating or modifying a Next.js App Router route under src/app/api/**/route.ts.
+---
+
 # Skill: Creating / Modifying API Routes
 
 Apply this skill whenever the task creates or modifies a Next.js App Router

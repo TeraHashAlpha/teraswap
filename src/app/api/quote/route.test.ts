@@ -19,7 +19,7 @@ vi.mock('@/lib/api', () => ({
 }))
 
 vi.mock('@/lib/kv-rate-limiter', () => ({
-  checkRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 99, resetAt: 1_000 }),
+  checkRateLimitWithin: vi.fn().mockResolvedValue({ allowed: true, remaining: 99, resetAt: 1_000 }),
   QUOTE_RATE_LIMIT: { limit: 120, windowMs: 60_000 },
 }))
 

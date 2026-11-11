@@ -44,6 +44,21 @@ export const LOG_RATE_LIMIT = { limit: 120, windowMs: 60_000 }
 // Complements (does not replace) the per-wallet DB limit in the orders route.
 export const ORDER_CREATE_RATE_LIMIT = { limit: 10, windowMs: 60_000 }
 
+// [fix/user-ip-privacy A76 S-1] /api/cow/* — the browser's CoW Protocol calls, relayed so CoW never sees the
+// visitor's IP (cow-proxy.ts). One bucket per route, key `cow-<route>:<ip hash>`:
+//  - quote 30/min: the limit-order price read (once per pair change, then once per active order card every
+//    30 s) — the same ceiling as /api/quote.
+//  - orders 10/min: every submit or cancel carries a fresh wallet signature — the same as ORDER_CREATE_RATE_LIMIT.
+//  - order-status 60/min: a CoW swap polls every 3 s (20/min) for up to 2 min, so three concurrent swaps fit.
+//  - trades 30/min: read once per filled order.
+// Degraded (KV down or slow) is half of each, per instance — checkRateLimitWithin.
+export const COW_PROXY_RATE_LIMITS = {
+  quote: { limit: 30, windowMs: 60_000 },
+  orders: { limit: 10, windowMs: 60_000 },
+  'order-status': { limit: 60, windowMs: 60_000 },
+  trades: { limit: 30, windowMs: 60_000 },
+} as const
+
 // [fix/zerox-quote-hygiene T3] Per-identity ceiling on 0x FIRM /quote builds
 // (adapters/zerox.ts fetchSwapData, invoked from api.ts's fetchSwapFromSource
 // — the swap-BUILD step, gated on a Swap click / an authenticated /v1/swap
@@ -83,6 +98,8 @@ const fallbackMap = new Map<string, FallbackEntry>()
 
 /** True once we have logged the KV outage at error level; resets on KV recovery. */
 let kvFailureAlerted = false
+/** When checkRateLimitWithin last logged a KV timeout (at most one line a minute per instance). */
+let kvTimeoutLoggedAt = 0
 
 /** Rolling counter to gate periodic cleanup of the fallback map. */
 let checkCounter = 0
@@ -161,6 +178,8 @@ export async function checkRateLimit(
   limit: number,
   windowMs: number,
   cost: number = 1,
+  /** @internal checkRateLimitWithin: true once the caller stopped waiting and already charged the fallback. */
+  abandoned?: () => boolean,
 ): Promise<RateLimitResult> {
   const units = Number.isFinite(cost) && cost >= 1 ? Math.floor(cost) : 1
   try {
@@ -223,8 +242,52 @@ export async function checkRateLimit(
       kvFailureAlerted = true
     }
 
+    // The caller gave up waiting (checkRateLimitWithin) and already charged this request to the
+    // fallback; charging it again here would halve the degraded limit a second time.
+    if (abandoned?.()) return { allowed: true, remaining: 0, resetAt: Date.now() + windowMs }
     return fallbackRateLimit(key, limit, windowMs, units)
   }
+}
+
+/**
+ * [fix/user-ip-privacy A76 S-5] How long a request waits on the limiter before it takes the degraded path.
+ * Same idea as /api/quote's KV gate (withTimeout around checkRateLimit), shorter: the RPC and CoW proxies sit on
+ * the read path of every page, and with Redis unreachable the Upstash client retries a pipeline for ~4.3 s
+ * (measured by the A76 audit) before checkRateLimit's catch path runs — added to EVERY proxied call.
+ */
+export const RATE_LIMIT_GATE_TIMEOUT_MS = 1_000
+
+/**
+ * {@link checkRateLimit} with a deadline. When the KV call has not answered within `timeoutMs`, the request is
+ * decided by the SAME in-memory fallback the catch path uses (50% of the limit, per instance) — so a hung Redis
+ * costs at most `timeoutMs`, and the endpoint is degraded, never unlimited. The KV call is left to finish in the
+ * background; if it then fails it does not charge the fallback a second time.
+ */
+export async function checkRateLimitWithin(
+  key: string,
+  limit: number,
+  windowMs: number,
+  cost: number = 1,
+  timeoutMs: number = RATE_LIMIT_GATE_TIMEOUT_MS,
+): Promise<RateLimitResult> {
+  let timedOut = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), timeoutMs)
+  })
+  try {
+    const result = await Promise.race([checkRateLimit(key, limit, windowMs, cost, () => timedOut), deadline])
+    if (result !== null) return result
+  } finally {
+    clearTimeout(timer)
+  }
+  timedOut = true
+  if (Date.now() - kvTimeoutLoggedAt > 60_000) {
+    console.error(`[RATE-LIMIT] KV did not answer within ${timeoutMs} ms — deciding by the in-memory fallback (50%).`)
+    kvTimeoutLoggedAt = Date.now()
+  }
+  const units = Number.isFinite(cost) && cost >= 1 ? Math.floor(cost) : 1
+  return fallbackRateLimit(key, limit, windowMs, units)
 }
 
 // ── Test-only exports ───────────────────────────────────
@@ -236,6 +299,7 @@ export const _internal = {
   reset: () => {
     fallbackMap.clear()
     kvFailureAlerted = false
+    kvTimeoutLoggedAt = 0
     checkCounter = 0
   },
   CLEANUP_INTERVAL,

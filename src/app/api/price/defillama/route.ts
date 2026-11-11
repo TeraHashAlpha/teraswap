@@ -18,7 +18,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { isAddress } from 'viem'
 import { fetchDefiLlamaPrice } from '@/lib/defillama'
 import { checkRateLimit, QUOTE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
-import { trustedClientIp } from '@/lib/trusted-ip'
+import { clientIpKey } from '@/lib/client-ip-key'
 import { getChainConfig, getSupportedChainIds } from '@/lib/chains/registry'
 
 const PRICE_CACHE_CONTROL = 'public, max-age=30, s-maxage=30'
@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
   // asks for at most two tokens per pair change, well under QUOTE_RATE_LIMIT. The IP is the trusted one:
   // the left-most x-forwarded-for token is client-writable and would let a caller dodge the limit.
   const rateCheck = await checkRateLimit(
-    `defillama-price:${trustedClientIp(req)}`,
+    `defillama-price:${clientIpKey(req)}`,
     QUOTE_RATE_LIMIT.limit,
     QUOTE_RATE_LIMIT.windowMs,
   )

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({ rate: vi.fn() }))
 
 vi.mock('@/lib/kv-rate-limiter', () => ({
   checkRateLimit: mocks.rate,
+  checkRateLimitWithin: mocks.rate, // [A76 S-5] the route calls the bounded variant
   RPC_RATE_LIMIT: { limit: 300, windowMs: 60_000 },
 }))
 vi.mock('@/lib/rpc-proxy-chain', () => ({ resolveProxyChainId: () => ({ chainId: 1 }) }))
@@ -33,9 +34,8 @@ const req = (body: unknown, raw?: string) =>
 beforeEach(() => {
   __resetChainIdentityCache()
   mocks.rate.mockReset().mockResolvedValue({ allowed: true, remaining: 299, resetAt: 1_000 })
-  fetchMock.mockReset().mockImplementation(async (_u: string, init?: RequestInit) => {
-    const m = JSON.parse(String(init?.body))
-    return { ok: true, status: 200, json: async () => (m.method === 'eth_chainId' ? { jsonrpc: '2.0', id: 1, result: '0x1' } : { jsonrpc: '2.0', id: 1, result: '0x1' }) }
+  fetchMock.mockReset().mockImplementation(async () => {
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: '0x1' }), { status: 200 })
   })
 })
 

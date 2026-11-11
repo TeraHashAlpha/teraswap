@@ -40,7 +40,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupportedChainIds } from '@/lib/chains/registry'
 import { checkRateLimit } from '@/lib/kv-rate-limiter'
-import { trustedClientIp } from '@/lib/trusted-ip'
+import { clientIpKey } from '@/lib/client-ip-key'
 import {
   fetchLogo,
   logoMiss,
@@ -188,7 +188,7 @@ function upgradeCoinGeckoLogo(url: string): string {
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const rateCheck = await checkRateLimit(
-    `token-logo:${trustedClientIp(req)}`,
+    `token-logo:${clientIpKey(req)}`,
     TOKEN_LOGO_RATE_LIMIT.limit,
     TOKEN_LOGO_RATE_LIMIT.windowMs,
   )

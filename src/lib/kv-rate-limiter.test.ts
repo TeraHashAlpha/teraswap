@@ -33,7 +33,7 @@ vi.mock('@/lib/kv', () => ({
   },
 }))
 
-import { checkRateLimit, _internal } from './kv-rate-limiter'
+import { checkRateLimit, checkRateLimitWithin, RATE_LIMIT_GATE_TIMEOUT_MS, _internal } from './kv-rate-limiter'
 
 // ── Setup ───────────────────────────────────────────────
 
@@ -292,5 +292,51 @@ describe('[FEAT-SERVER-RPC-ENV-SPLIT] cost units', () => {
     expect((await checkRateLimit('cx', 10, 60_000, 0)).remaining).toBe(0)
     mockPipelineExec.mockResolvedValueOnce(okPipeline(9))
     expect((await checkRateLimit('cx', 10, 60_000, NaN)).remaining).toBe(0)
+  })
+})
+
+// [fix/user-ip-privacy A76 S-1/S-5] A hung KV must not hold a request: with Redis unreachable the Upstash client retries a
+// pipeline for ~4.3 s (measured by the A76 audit) before checkRateLimit's catch path runs.
+describe('checkRateLimitWithin — bounded wait on KV', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    _internal.reset()
+    vi.useFakeTimers()
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('the deadline is 1 s', () => {
+    expect(RATE_LIMIT_GATE_TIMEOUT_MS).toBe(1_000)
+  })
+
+  it('KV healthy and fast: the KV answer, untouched', async () => {
+    mockPipelineExec.mockResolvedValueOnce(okPipeline(2))
+    await expect(checkRateLimitWithin('k', 10, 60_000)).resolves.toMatchObject({ allowed: true, remaining: 7 })
+    expect(_internal.getFallbackMap().size).toBe(0)
+  })
+
+  it('KV hung: decided by the in-memory fallback at the deadline (degraded, never unlimited)', async () => {
+    mockPipelineExec.mockImplementation(() => new Promise(() => {}))
+    const p = checkRateLimitWithin('k', 4, 60_000)
+    await vi.advanceTimersByTimeAsync(RATE_LIMIT_GATE_TIMEOUT_MS)
+    await expect(p).resolves.toMatchObject({ allowed: true, remaining: 1 }) // fallback limit = ceil(4/2) = 2
+    const second = checkRateLimitWithin('k', 4, 60_000)
+    await vi.advanceTimersByTimeAsync(RATE_LIMIT_GATE_TIMEOUT_MS)
+    await expect(second).resolves.toMatchObject({ allowed: true, remaining: 0 })
+    const third = checkRateLimitWithin('k', 4, 60_000)
+    await vi.advanceTimersByTimeAsync(RATE_LIMIT_GATE_TIMEOUT_MS)
+    await expect(third).resolves.toMatchObject({ allowed: false })
+  })
+
+  it('KV fails AFTER the deadline: the late catch path does not charge the fallback a second time', async () => {
+    let fail: (e: Error) => void = () => {}
+    mockPipelineExec.mockImplementationOnce(() => new Promise((_, reject) => (fail = reject)))
+    const p = checkRateLimitWithin('k', 10, 60_000)
+    await vi.advanceTimersByTimeAsync(RATE_LIMIT_GATE_TIMEOUT_MS)
+    await p
+    expect(_internal.getFallbackMap().get('k')?.count).toBe(1)
+    fail(new Error('ECONNREFUSED'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(_internal.getFallbackMap().get('k')?.count).toBe(1)
   })
 })

@@ -24,7 +24,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyBearerToken } from '@/lib/auth'
 import { readAllKeeperPausedStates } from '@/lib/keeper-health-monitor'
 import { checkRateLimit } from '@/lib/kv-rate-limiter'
-import { trustedClientIp } from '@/lib/trusted-ip'
+import { clientIpKey } from '@/lib/client-ip-key'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,7 +34,7 @@ const NO_STORE = { 'Cache-Control': 'no-store' }
 const KEEPERS_RATE_LIMIT = { limit: 30, windowMs: 60_000 }
 
 export async function GET(req: NextRequest) {
-  const rate = await checkRateLimit(`monitor:${trustedClientIp(req)}`, KEEPERS_RATE_LIMIT.limit, KEEPERS_RATE_LIMIT.windowMs)
+  const rate = await checkRateLimit(`monitor:${clientIpKey(req)}`, KEEPERS_RATE_LIMIT.limit, KEEPERS_RATE_LIMIT.windowMs)
   if (!rate.allowed) {
     const retryAfter = Math.max(1, Math.ceil((rate.resetAt - Date.now()) / 1000))
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429, headers: { ...NO_STORE, 'Retry-After': String(retryAfter) } })

@@ -1,3 +1,8 @@
+---
+name: supabase-migration
+description: Use when adding, altering or dropping tables, columns or policies in supabase/migrations/.
+---
+
 # Skill: Supabase Schema Migrations
 
 Apply this skill whenever the task adds, alters, or drops tables / columns /

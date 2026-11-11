@@ -21,7 +21,6 @@ import {
   cancelLimitOrder,
 } from './limit-order-api'
 import {
-  AGGREGATOR_APIS,
   NATIVE_ETH,
   WETH_ADDRESS,
   FEE_RECIPIENT,
@@ -29,7 +28,8 @@ import {
 import type { LimitOrderConfig } from './limit-order-types'
 import type { Token } from './tokens'
 
-const COW_BASE = AGGREGATOR_APIS.cowswap.base // 'https://api.cow.fi/mainnet/api/v1'
+// [fix/user-ip-privacy A76 S-1] Every CoW call is same-origin now (/api/cow/*, relayed by our server); chainId
+// omitted → mainnet (1), the book these functions always used.
 
 // ── fetch stub helpers ──────────────────────────────────────
 let fetchMock: ReturnType<typeof vi.fn>
@@ -235,7 +235,7 @@ describe('buildLimitOrderParams', () => {
 // fetchCurrentPrice
 // ════════════════════════════════════════════════════════════
 describe('fetchCurrentPrice', () => {
-  it('POSTs to `${COW_BASE}/quote` and normalizes buyAmount/sellAmount by decimals', async () => {
+  it('POSTs to /api/cow/quote?chainId=1 and normalizes buyAmount/sellAmount by decimals', async () => {
     // sell 1 WETH (1e18, 18 dec), quote buy 2000 USDC (2000e6, 6 dec) ⇒ price 2000
     fetchMock.mockResolvedValueOnce(
       jsonResponse({ quote: { buyAmount: '2000000000' } }),
@@ -250,8 +250,16 @@ describe('fetchCurrentPrice', () => {
     expect(price).toBe(2000)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0]
-    expect(url).toBe(`${COW_BASE}/quote`)
+    expect(url).toBe('/api/cow/quote?chainId=1')
     expect(init.method).toBe('POST')
+    // Only the pair and the amount leave the browser; the server builds the rest of the /quote body.
+    expect(Object.keys(JSON.parse(init.body)).sort()).toEqual(['buyToken', 'sellAmountBeforeFee', 'sellToken'])
+  })
+
+  it("asks the order's own chain (Base → chainId=8453), not always mainnet", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ quote: { buyAmount: '1' } }))
+    await fetchCurrentPrice(WETH_ADDRESS, USDC_TOKEN.address, '1000000000000000000', 18, 6, 8453)
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/cow/quote?chainId=8453')
   })
 
   it('resolves NATIVE_ETH sell/buy tokens to WETH in the request body', async () => {
@@ -326,14 +334,14 @@ describe('submitLimitOrder', () => {
     signingScheme: 'eip712',
   } as ReturnType<typeof buildLimitOrderParams>
 
-  it('POSTs to `${COW_BASE}/orders` and returns the parsed uid on ok', async () => {
+  it('POSTs to /api/cow/orders?chainId=1 and returns the parsed uid on ok', async () => {
     const UID =
       '0xabc1230000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
     fetchMock.mockResolvedValueOnce(jsonResponse(UID))
     const uid = await submitLimitOrder(ORDER_PARAMS, '0xsig')
     expect(uid).toBe(UID)
     const [url, init] = fetchMock.mock.calls[0]
-    expect(url).toBe(`${COW_BASE}/orders`)
+    expect(url).toBe('/api/cow/orders?chainId=1')
     expect(init.method).toBe('POST')
     // signature is attached to the submitted body
     expect(JSON.parse(init.body).signature).toBe('0xsig')
@@ -379,7 +387,7 @@ describe('fetchLimitOrderStatus', () => {
     expect(res.txHash).toBeUndefined()
     // only the status endpoint is hit for a non-fulfilled order
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock.mock.calls[0][0]).toBe(`${COW_BASE}/orders/${UID}`)
+    expect(fetchMock.mock.calls[0][0]).toBe(`/api/cow/order-status?chainId=1&uid=${UID}`)
   })
 
   it('filledPercent is 0 when totalSell is 0 (no divide-by-zero)', async () => {
@@ -406,7 +414,7 @@ describe('fetchLimitOrderStatus', () => {
     expect(res.filledPercent).toBe(100)
     expect(res.txHash).toBe('0xsettlement')
     expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(fetchMock.mock.calls[1][0]).toBe(`${COW_BASE}/trades?orderUid=${UID}`)
+    expect(fetchMock.mock.calls[1][0]).toBe(`/api/cow/trades?chainId=1&orderUid=${UID}`)
   })
 
   it('fulfilled order leaves txHash undefined when the trades fetch is not ok', async () => {
@@ -436,11 +444,11 @@ describe('fetchLimitOrderStatus', () => {
 describe('cancelLimitOrder', () => {
   const UID = '0xfeedface'
 
-  it('DELETEs `${COW_BASE}/orders/${uid}` and resolves on ok', async () => {
+  it('DELETEs /api/cow/orders?chainId=1&uid=<uid> and resolves on ok', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({}))
     await expect(cancelLimitOrder(UID, '0xsig')).resolves.toBeUndefined()
     const [url, init] = fetchMock.mock.calls[0]
-    expect(url).toBe(`${COW_BASE}/orders/${UID}`)
+    expect(url).toBe(`/api/cow/orders?chainId=1&uid=${UID}`)
     expect(init.method).toBe('DELETE')
     const body = JSON.parse(init.body)
     expect(body.signature).toBe('0xsig')
@@ -523,5 +531,35 @@ describe('chain-aware WETH resolution', () => {
     await fetchCurrentPrice(NATIVE_ETH, USDC_TOKEN.address, '1000000000000000000', 18, 6, MAINNET)
     const body = JSON.parse(fetchMock.mock.calls[0][1].body)
     expect(body.sellToken).toBe(WETH_ADDRESS)
+  })
+})
+
+// ════════════════════════════════════════════════════════════
+// [fix/user-ip-privacy A76 S-1] the browser never calls api.cow.fi
+// ════════════════════════════════════════════════════════════
+describe('every CoW call of this (browser) module goes to our own origin', () => {
+  const UID = '0x' + 'ab'.repeat(56)
+  const FROM = '0x1111111111111111111111111111111111111111'
+  it('quote, submit, status, trades and cancel: same-origin /api/cow/*, never a cow.fi URL', async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      url.startsWith('/api/cow/order-status')
+        ? jsonResponse({ status: 'fulfilled', sellAmount: '1', executedSellAmount: '1' })
+        : url.startsWith('/api/cow/trades')
+          ? jsonResponse([{ txHash: '0x1' }])
+          : jsonResponse(url.startsWith('/api/cow/quote') ? { quote: { buyAmount: '1' } } : UID),
+    )
+    await fetchCurrentPrice(WETH_ADDRESS, USDC_TOKEN.address, '1', 18, 6, 42161)
+    await submitLimitOrder(buildLimitOrderParams(makeConfig(), FROM, 8453), '0xsig', 8453)
+    await fetchLimitOrderStatus(UID, 8453)
+    await cancelLimitOrder(UID, '0xsig', 8453)
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]))
+    expect(urls).toEqual([
+      '/api/cow/quote?chainId=42161',
+      '/api/cow/orders?chainId=8453',
+      `/api/cow/order-status?chainId=8453&uid=${UID}`,
+      `/api/cow/trades?chainId=8453&orderUid=${UID}`,
+      `/api/cow/orders?chainId=8453&uid=${UID}`,
+    ])
+    for (const u of urls) expect(u).not.toMatch(/cow\.fi|^https?:/)
   })
 })
