@@ -3,7 +3,17 @@
 import { useEffect } from 'react'
 
 import { SUPPORT_EMAIL } from '@/lib/constants'
-import { INTEGRATED_DEX_SOURCE_LABELS, SWAP_CHAIN_LIST_LABEL, formatChainList } from '@/config/product-claims'
+import {
+  INTEGRATED_DEX_SOURCE_LABELS,
+  PRIVACY_DIRECT_NOTE,
+  PRIVACY_IP_STORAGE_NOTE,
+  PRIVACY_LOCAL_COPIES_NOTE,
+  PRIVACY_PROXY_CLAIM,
+  PRIVACY_WALLET_ADVICE,
+  PRIVACY_WALLET_STORAGE_NOTE,
+  SWAP_CHAIN_LIST_LABEL,
+  formatChainList,
+} from '@/config/product-claims'
 
 type LegalType = 'privacy' | 'terms'
 
@@ -55,14 +65,14 @@ function PrivacyPolicy() {
         When you access the Interface, we may automatically collect certain technical information,
         including device type, operating system, browser type and version, and general usage patterns.
         We use this data solely to improve Interface performance, debug errors, and enhance user experience.
-        We do not collect or store your name, email address, IP address, home address, or date of birth.
+        We do not collect or store your name, email address, home address, or date of birth. {PRIVACY_IP_STORAGE_NOTE} {PRIVACY_WALLET_STORAGE_NOTE}
       </P>
 
       <SubTitle>3.3 Local Storage</SubTitle>
       <P>
         The Interface uses your browser&rsquo;s local storage to remember your preferences, such as
         imported tokens, slippage settings, swap history, theme preferences, and active approvals.
-        This data remains exclusively on your device and is never transmitted to our servers.
+        {PRIVACY_LOCAL_COPIES_NOTE}
       </P>
 
       <SectionTitle id="pp-use">4. How We Use Your Information</SectionTitle>
@@ -77,30 +87,24 @@ function PrivacyPolicy() {
       </UL>
 
       <SectionTitle id="pp-proxy">5. Privacy Proxy &amp; IP Protection</SectionTitle>
+      <P>{PRIVACY_PROXY_CLAIM}</P>
       <P>
-        TeraSwap implements a server-side privacy proxy that shields your IP address from external
-        services. All blockchain read operations (token balances, price feeds, transaction receipts)
-        and all aggregator API requests are routed through our server-side proxy. Only our server
-        communicates with third-party RPC providers and DEX APIs — your browser never makes direct
-        requests to these services.
-      </P>
-      <P>
-        <strong className="text-cream-80">What is protected:</strong> Token balance checks, ERC-20
+        <strong className="text-cream-80">What is relayed:</strong> Token balance checks, ERC-20
         allowance reads, transaction receipt polling, Chainlink price feed queries, custom token
-        imports, and all swap/quote requests to aggregator APIs (1inch, 0x, CoW Protocol, etc.).
+        imports, token logos, and all swap/quote requests to aggregator APIs (1inch, 0x, CoW Protocol, etc.).
       </P>
       <P>
-        <strong className="text-cream-80">What is not protected (by design):</strong> Your
-        wallet&rsquo;s own RPC connection (MetaMask, Coinbase Wallet, etc.) is controlled by your
-        wallet settings. Transaction signing and submission are handled by your wallet directly.
-        We recommend using a privacy-focused RPC in your wallet settings (e.g., MEV Blocker, Flashbots
-        Protect) for maximum privacy.
+        <strong className="text-cream-80">What is not relayed (by design):</strong> {PRIVACY_DIRECT_NOTE} {PRIVACY_WALLET_ADVICE} The
+        same is true of any other connection service your wallet uses: for example MetaMask&rsquo;s, if you pair
+        the MetaMask mobile app from a browser without the extension, and Reown&rsquo;s wallet directory, if you
+        open WalletConnect&rsquo;s own wallet list.
       </P>
 
       <SectionTitle id="pp-sharing">6. Data Sharing &amp; Third Parties</SectionTitle>
       <P>
-        When you request a swap quote, the Interface sends your wallet address and transaction
-        parameters to the APIs of third-party aggregator and DEX protocols via our server-side
+        When you request a swap quote, or submit a CoW Protocol order you have signed, the Interface
+        sends your wallet address and transaction parameters (for a CoW Protocol order, the signed
+        order itself) to the APIs of third-party aggregator and DEX protocols via our server-side
         proxy. Your IP address is not exposed to these services. Each protocol has its own privacy
         policy. We encourage you to review them.
       </P>
@@ -120,8 +124,10 @@ function PrivacyPolicy() {
 
       <SectionTitle id="pp-cookies">8. Cookies &amp; Tracking</SectionTitle>
       <P>
-        The Interface does not use cookies for tracking or advertising purposes. We do not employ
-        any third-party analytics or advertising scripts. Any data stored in your browser
+        The Interface does not use cookies for tracking or advertising purposes, and it runs no
+        advertising scripts. Page views are counted by Vercel Web Analytics, our hosting
+        provider&rsquo;s analytics, which is loaded from our own domain. No third-party
+        error-reporting or session-replay service runs in your browser. Any data stored in your browser
         (via localStorage) is used solely for your convenience and remains on your device.
       </P>
 

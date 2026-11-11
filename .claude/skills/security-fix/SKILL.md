@@ -1,3 +1,8 @@
+---
+name: security-fix
+description: Use when a task references a finding id (e.g. 11-M-02, CQL-03, INC-2026-04-14-001) or modifies auth, rate-limiting or fund-flow code paths.
+---
+
 # Skill: Implementing Security Fixes
 
 Apply this skill whenever the task references a finding id (e.g. `11-M-02`,

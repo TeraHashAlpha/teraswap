@@ -21,7 +21,7 @@
 
 import { NextResponse, type NextRequest } from 'next/server'
 import { checkRateLimit, QUOTE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
-import { trustedClientIp } from '@/lib/trusted-ip'
+import { clientIpKey } from '@/lib/client-ip-key'
 import { getChainConfig, getSupportedChainIds } from '@/lib/chains/registry'
 import { normalizeAddress } from '@/lib/order-engine/normalize-address'
 import { classifyLegPrice } from '@/lib/price-quorum'
@@ -43,7 +43,7 @@ function resolveChainId(raw: string | null): number | null {
 
 export async function GET(req: NextRequest) {
   const rateCheck = await checkRateLimit(
-    `swap-price-tier:${trustedClientIp(req)}`,
+    `swap-price-tier:${clientIpKey(req)}`,
     QUOTE_RATE_LIMIT.limit,
     QUOTE_RATE_LIMIT.windowMs,
   )

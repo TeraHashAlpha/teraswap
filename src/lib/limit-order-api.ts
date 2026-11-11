@@ -6,11 +6,13 @@
  * partiallyFillable=true and user-defined buyAmount for price targets.
  */
 
-import { AGGREGATOR_APIS, NATIVE_ETH, FEE_RECIPIENT } from './constants'
-import { getWrappedNative } from './chains/registry'
+import { NATIVE_ETH, FEE_RECIPIENT } from './constants'
+import { DEFAULT_CHAIN_ID, getWrappedNative } from './chains/registry'
+import { COW_PROXY_PATHS, cowProxyUrl } from './cow-proxy-paths'
 import type { LimitOrderConfig } from './limit-order-types'
 
-const COW_BASE = AGGREGATOR_APIS.cowswap.base
+// [fix/user-ip-privacy A76 S-1] Browser code: every CoW call below goes to our own origin (/api/cow/*, relayed by
+// cow-proxy.ts), never to api.cow.fi. `chainId` omitted → mainnet, the book these functions always used.
 
 // ── Helper: resolve ETH → WETH (chain-aware) ────────────────
 // Maps the native-ETH sentinel to the wrapped-native of the order's chain so a
@@ -55,23 +57,11 @@ export async function fetchCurrentPrice(
   const src = resolveToken(sellToken, chainId)
   const dst = resolveToken(buyToken, chainId)
 
-  const res = await fetch(`${COW_BASE}/quote`, {
+  // The pair and amount only; the server builds the rest of CoW's /quote body (cow-proxy.ts buildPriceQuoteBody).
+  const res = await fetch(cowProxyUrl(COW_PROXY_PATHS.quote, chainId ?? DEFAULT_CHAIN_ID), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({
-      sellToken: src,
-      buyToken: dst,
-      sellAmountBeforeFee: sellAmount,
-      kind: 'sell',
-      from: '0x0000000000000000000000000000000000000000',
-      receiver: '0x0000000000000000000000000000000000000000',
-      appData: JSON.stringify({ appCode: 'TeraSwap', metadata: {} }),
-      appDataHash: '0x0000000000000000000000000000000000000000000000000000000000000000',
-      partiallyFillable: false,
-      sellTokenBalance: 'erc20',
-      buyTokenBalance: 'erc20',
-      signingScheme: 'eip712',
-    }),
+    body: JSON.stringify({ sellToken: src, buyToken: dst, sellAmountBeforeFee: sellAmount }),
   })
 
   if (!res.ok) return 0
@@ -149,8 +139,9 @@ export function buildLimitOrderParams(
 export async function submitLimitOrder(
   orderParams: ReturnType<typeof buildLimitOrderParams>,
   signature: string,
+  chainId: number = DEFAULT_CHAIN_ID,
 ): Promise<string> {
-  const res = await fetch(`${COW_BASE}/orders`, {
+  const res = await fetch(cowProxyUrl(COW_PROXY_PATHS.orders, chainId), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({
@@ -171,6 +162,7 @@ export async function submitLimitOrder(
 // ── Poll limit order status ──────────────────────────────────
 export async function fetchLimitOrderStatus(
   orderUid: string,
+  chainId: number = DEFAULT_CHAIN_ID,
 ): Promise<{
   status: 'open' | 'fulfilled' | 'expired' | 'cancelled' | 'presignaturePending'
   executedBuyAmount: string
@@ -178,7 +170,7 @@ export async function fetchLimitOrderStatus(
   txHash?: string
   filledPercent: number
 }> {
-  const res = await fetch(`${COW_BASE}/orders/${orderUid}`)
+  const res = await fetch(cowProxyUrl(COW_PROXY_PATHS.orderStatus, chainId, { uid: orderUid }))
 
   if (!res.ok) {
     throw new Error(`Failed to fetch order status: ${res.status}`)
@@ -196,7 +188,7 @@ export async function fetchLimitOrderStatus(
   let txHash: string | undefined
   if (order.status === 'fulfilled') {
     // Fetch settlement tx
-    const tradesRes = await fetch(`${COW_BASE}/trades?orderUid=${orderUid}`)
+    const tradesRes = await fetch(cowProxyUrl(COW_PROXY_PATHS.trades, chainId, { orderUid }))
     if (tradesRes.ok) {
       const trades = await tradesRes.json()
       txHash = trades[0]?.txHash
@@ -216,8 +208,9 @@ export async function fetchLimitOrderStatus(
 export async function cancelLimitOrder(
   orderUid: string,
   signature: string,
+  chainId: number = DEFAULT_CHAIN_ID,
 ): Promise<void> {
-  const res = await fetch(`${COW_BASE}/orders/${orderUid}`, {
+  const res = await fetch(cowProxyUrl(COW_PROXY_PATHS.orders, chainId, { uid: orderUid }), {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({

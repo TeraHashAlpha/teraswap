@@ -114,7 +114,7 @@ export function useTokenImport() {
         symbol,
         name,
         decimals,
-        logoURI: importedTokenLogo(address),
+        logoURI: importedTokenLogo(address, chainId),
         category: 'Imported',
         chainId, // [SPRINT-9P] tag the import so the store/lookups stay chain-scoped
       }

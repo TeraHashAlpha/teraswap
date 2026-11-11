@@ -80,8 +80,11 @@ const BASE: ChainConfig = {
     cowVaultRelayer: '0xC92E8bdf79f0507f65a392b0ab4667716BFE0110',
   },
   rpc: {
-    // env var name reserved; empty default keeps Base inactive until wired up.
-    primary: process.env.NEXT_PUBLIC_BASE_RPC_URL || '',
+    // [fix/user-ip-privacy] No env read here. This registry ships in the browser bundle, and a literal
+    // NEXT_PUBLIC_BASE_RPC_URL read is inlined into it at build time — the provider key with it. The
+    // browser reads Base through /api/rpc?chainId=8453 (rpc-proxy-url.ts); the server resolves its
+    // upstream in rpc-env.ts (RPC_URL_8453, then the deprecated NEXT_PUBLIC name, then the fallback below).
+    primary: '',
     fallbacks: ['https://mainnet.base.org'],
   },
   blockExplorer: 'https://basescan.org',
@@ -128,8 +131,9 @@ const ARBITRUM: ChainConfig = {
     cowVaultRelayer: '0xC92E8bdf79f0507f65a392b0ab4667716BFE0110', // cross-chain deterministic
   },
   rpc: {
-    // env var name reserved; empty default keeps Arbitrum inactive until wired up (Base pattern).
-    primary: process.env.NEXT_PUBLIC_ARBITRUM_RPC_URL || '',
+    // [fix/user-ip-privacy] No env read here (see Base above): browser -> /api/rpc?chainId=42161,
+    // server -> rpc-env.ts (RPC_URL_42161, then the deprecated NEXT_PUBLIC name, then the fallback below).
+    primary: '',
     fallbacks: ['https://arb1.arbitrum.io/rpc'],
   },
   blockExplorer: 'https://arbiscan.io',

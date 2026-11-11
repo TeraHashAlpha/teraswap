@@ -118,17 +118,35 @@ export const SWAP_CHAIN_NAMES: readonly string[] = SWAP_CHAINS.map((c) => c.name
 export const SWAP_CHAIN_LIST_LABEL = formatChainList(SWAP_CHAIN_NAMES)
 
 // ── Privacy claims, scoped to what the code does ─────────────────────────────
-// Proof: RPC reads go through /api/rpc and quotes through /api/quote (DocsPage "Privacy" table;
-// useTokenImport -> /api/rpc per the C8 recon row). [fix/functional-chain-ui C8] The DCA DefiLlama
-// price lookup now goes through /api/price/defillama and Trust Wallet logos through /api/proxy/logo.
-// Still NOT proxied: other token logos (catalog logoURI; /api/token-logo answers with a 302 to the
-// logo CDN, which the browser then loads) and the wallet connection. DocsPage "Graceful Degradation":
-// the client falls back to direct RPC when the proxy is unreachable. So "never exposed" / "zero
-// leaks" are NOT claimed anywhere.
+// [fix/user-ip-privacy] The owner's wording (2026-11-06), one sentence per constant so every surface
+// — Help, Docs, the Privacy Policy, the landing pages, v1 and v2 — says the SAME thing. What backs each:
+//   RELAY (PRIVACY_PROXY_CLAIM): browser RPC reads on every chain go to /api/rpc[?chainId=] (wagmi
+//     transports, chains/clients.ts; wagmiConfig.browser-transports.test.ts), quotes and swaps to
+//     /api/quote and /api/swap, a signed CoW order and its status/trades to /api/cow/* (A76 S-1:
+//     adapters/cow.ts, limit-order-api.ts → cow-proxy.ts), token logos to /api/token-logo and /api/proxy/logo. The CSP allows
+//     no other host without a wallet (csp-policy.js) and CI measures it (e2e/third-party-hosts).
+//   WALLET (PRIVACY_DIRECT_NOTE / PRIVACY_WALLET_ADVICE): the wallet's own RPC and broadcast never
+//     touch our origin; the WalletConnect relay is the first wallet host in the CSP.
+//   IP (PRIVACY_IP_STORAGE_NOTE): no IP column in the database; rate-limit keys and log lines carry
+//     HMAC(IP, daily salt) only (client-ip-key.ts, client-ip-key.routes.test.ts).
+//   WALLET ADDRESSES (PRIVACY_WALLET_STORAGE_NOTE): orders, swaps and wallet_activity rows hold them.
+// No surface claims "never exposed" / "zero leaks": the wallet's side is said out loud instead.
+// The chain names in the first sentence are typed (owner wording); product-claims.test.ts fails if
+// the chain registry and that sentence ever disagree.
 export const PRIVACY_PROXY_CLAIM =
-  "RPC reads and aggregator quote requests are routed through a server-side proxy, so those providers see our server's IP rather than yours."
+  "TeraSwap's server relays all RPC reads on Ethereum, Base and Arbitrum, every aggregator quote and swap request, every CoW Protocol order you sign and its status checks, and token logos, so those providers see our server's IP address, not yours."
 export const PRIVACY_DIRECT_NOTE =
-  "Token logos and your wallet's own connection are requested directly by your browser, and the client falls back to direct RPC if the proxy is unreachable."
+  "Your wallet's own RPC connection and the transactions it broadcasts are outside our control; the WalletConnect relay sees your connection once you choose a WalletConnect wallet."
+export const PRIVACY_WALLET_ADVICE = 'Use a privacy RPC in your wallet settings if that matters to you.'
+export const PRIVACY_IP_STORAGE_NOTE =
+  'We do not store IP addresses in our database; our hosting and rate-limiting layers process them transiently, and our rate limiter only ever sees a one-way hash.'
+export const PRIVACY_WALLET_STORAGE_NOTE = 'We do store wallet addresses for orders, swap history and activity.'
+// [fix/user-ip-privacy A76 S-2] Privacy §3.3 (v1 == v2), the Auditor's wording. It replaces "This data remains
+// exclusively on your device and is never transmitted to our servers", which was true of the localStorage COPY of the
+// swap history but read as "your swaps never reach our server" — while every swap is POSTed to /api/log-swap and every
+// order to /api/orders, stored with the wallet address, and read back by /api/history for the History tab.
+export const PRIVACY_LOCAL_COPIES_NOTE =
+  'These copies stay in your browser and are never uploaded as such; separately, every swap and order you make is sent to our server and stored with your wallet address (see 3.2) — that server record is what the History tab shows.'
 export const PRIVACY_BADGE = 'Proxied RPC & quotes'
 
 export const SITE_META_DESCRIPTION =

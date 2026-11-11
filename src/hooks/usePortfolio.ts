@@ -4,7 +4,7 @@ import { fmtToken } from '@/lib/format'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAccount, useBalance } from 'wagmi'
 import { formatUnits } from 'viem'
-import { DEFAULT_TOKENS, isNativeETH, type Token, type TokenCategory } from '@/lib/tokens'
+import { DEFAULT_TOKENS, importedTokenLogo, isNativeETH, type Token, type TokenCategory } from '@/lib/tokens'
 import { useActiveChainId } from '@/hooks/useChainId'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { getChainTokenList } from '@/lib/chains/tokens'
@@ -72,8 +72,16 @@ const DEFAULT_BY_ADDRESS = (() => {
   return m
 })()
 
-function logo1inch(address: string): string {
-  return `https://tokens.1inch.io/${address.toLowerCase()}.png`
+/**
+ * Logo for a DISCOVERED (non-catalog) holding. [fix/user-ip-privacy] Always a same-origin URL: the
+ * discovery route's own `logoURI` is kept only when it is one of our paths (a catalog token's), and
+ * anything else — the provider's metadata hands back a URL on its own image CDN — is replaced by our
+ * `/api/token-logo` resolver for this chain. The fallback used to be 1inch's token-image host, loaded
+ * straight by the browser.
+ */
+function discoveredTokenLogo(address: string, chainId: number, logoURI: string | null | undefined): string {
+  if (typeof logoURI === 'string' && logoURI.startsWith('/') && !logoURI.startsWith('//')) return logoURI
+  return importedTokenLogo(address, chainId)
 }
 
 interface _RawBalance {
@@ -347,7 +355,7 @@ export function usePortfolio(): PortfolioData {
           symbol: d.symbol,
           name: d.name,
           decimals: d.decimals,
-          logoURI: d.logoURI || logo1inch(d.address),
+          logoURI: discoveredTokenLogo(d.address, activeChainId, d.logoURI),
           category: 'Other' as TokenCategory,
         }
         out.push({
@@ -367,7 +375,7 @@ export function usePortfolio(): PortfolioData {
       }
     }
     return out
-  }, [useAlchemyPath, discovery.tokens, multicallBalances, nativeEthBalance, chainTokens, curatedByAddress])
+  }, [useAlchemyPath, discovery.tokens, multicallBalances, nativeEthBalance, chainTokens, curatedByAddress, activeChainId])
 
   // ── Step 2: fetch USD prices ───────────────────────────
   const [prices, setPrices] = useState<Record<string, number>>({})

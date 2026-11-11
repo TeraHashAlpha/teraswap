@@ -21,6 +21,8 @@ const HOSTS = [
   'coin-images.coingecko.com',
   'tokens.coingecko.com',
   'token-icons.llamao.fi',
+  // [fix/user-ip-privacy] imported tokens + the portfolio's discovered-token fallback used to load this in an <img>.
+  'tokens.1inch.io',
 ]
 
 const SERVER_ALLOWLIST = new Set([
@@ -142,6 +144,15 @@ describe('[C8] no browser-direct third-party hosts', () => {
       .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
       .join('\n')
     expect(code).not.toMatch(/\.redirect\(|\b30[1278]\b|[Ll]ocation/)
+  })
+
+  // [fix/user-ip-privacy] The two places that built a 1inch image URL now build the same-origin route URL.
+  it('imported tokens and discovered portfolio holdings get a same-origin logo URL', () => {
+    const tokens = SOURCES.find((f) => f.path === 'src/lib/tokens.ts')!
+    expect(tokens.text).toMatch(/export const importedTokenLogo = \(address: string, chainId: number = 1\): string => logo\(address, chainId\)/)
+    const portfolio = SOURCES.find((f) => f.path === 'src/hooks/usePortfolio.ts')!
+    expect(portfolio.text).toMatch(/logoURI: discoveredTokenLogo\(d\.address, activeChainId, d\.logoURI\)/)
+    expect(portfolio.text).not.toMatch(/d\.logoURI \|\|/)
   })
 
   it('client code takes no value import from the server-side DefiLlama module', () => {

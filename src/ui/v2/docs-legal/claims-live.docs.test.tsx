@@ -44,6 +44,10 @@ vi.mock('@/config/product-claims', async () => {
     PRIVACY_BADGE: 'ZZ-BADGE-9014',
     PRIVACY_DIRECT_NOTE: 'ZZ-DIRECTNOTE-9015',
     PRIVACY_PROXY_CLAIM: 'ZZ-PROXYCLAIM-9016',
+    // [fix/user-ip-privacy] three more privacy sentences the Docs render (owner wording, 2026-11-06)
+    PRIVACY_IP_STORAGE_NOTE: 'ZZ-IPSTORAGE-9030',
+    PRIVACY_WALLET_ADVICE: 'ZZ-WALLETADVICE-9031',
+    PRIVACY_WALLET_STORAGE_NOTE: 'ZZ-WALLETSTORAGE-9032',
     PRICE_DEVIATION_BLOCK_PCT: '9.017%',
     PRICE_DEVIATION_WARN_PCT: '9.018%',
     QUOTE_TIMEOUT_SEC: 9019,
@@ -63,8 +67,9 @@ vi.mock('@/config/product-claims', async () => {
 
 import { DocsTabV2 } from './DocsTabV2'
 
-/** One row per product-claims symbol DocsPage/DocsTabV2 imports — 26 render a unique literal; 3 are functions
- *  checked separately below (chainNameFor, chainlinkFeedCountFor, isOrderTypeLive). 26 + 3 = 29. */
+/** One row per product-claims symbol DocsPage/DocsTabV2 imports — 29 render a unique literal (26 + the three privacy
+ *  sentences added by fix/user-ip-privacy); 3 are functions checked separately below (chainNameFor,
+ *  chainlinkFeedCountFor, isOrderTypeLive). 29 + 3 = 32. */
 const SYMBOL_FAKES: readonly [string, string][] = [
   ['INTEGRATED_DEX_SOURCE_COUNT', '9001'],
   ['INTEGRATED_DEX_SOURCES_CLAIM', 'ZZ-CLAIM-9002'],
@@ -83,6 +88,9 @@ const SYMBOL_FAKES: readonly [string, string][] = [
   ['PRIVACY_BADGE', 'ZZ-BADGE-9014'],
   ['PRIVACY_DIRECT_NOTE', 'ZZ-DIRECTNOTE-9015'],
   ['PRIVACY_PROXY_CLAIM', 'ZZ-PROXYCLAIM-9016'],
+  ['PRIVACY_IP_STORAGE_NOTE', 'ZZ-IPSTORAGE-9030'],
+  ['PRIVACY_WALLET_ADVICE', 'ZZ-WALLETADVICE-9031'],
+  ['PRIVACY_WALLET_STORAGE_NOTE', 'ZZ-WALLETSTORAGE-9032'],
   ['PRICE_DEVIATION_BLOCK_PCT', '9.017%'],
   ['PRICE_DEVIATION_WARN_PCT', '9.018%'],
   ['QUOTE_TIMEOUT_SEC', '9019'],
@@ -98,7 +106,7 @@ const SYMBOL_FAKES: readonly [string, string][] = [
 
 afterEach(cleanup)
 
-describe('Docs claims are live reads of product-claims (29 symbols), not hardcoded', () => {
+describe('Docs claims are live reads of product-claims (32 symbols), not hardcoded', () => {
   it.each(SYMBOL_FAKES)('%s: its unique fake value renders in v2', (_symbol, fake) => {
     const { container } = render(<DocsTabV2 />)
     expect(container.textContent ?? '').toContain(fake)
