@@ -26,6 +26,7 @@ import { bodySizeGuard } from '@/lib/body-limit'
 import { kv } from '@/lib/kv'
 import { forceDisable, getStatus } from '@/lib/source-state-machine'
 import { verifyBearerToken } from '@/lib/auth'
+import { clientIpKey } from '@/lib/client-ip-key'
 
 export const dynamic = 'force-dynamic'
 
@@ -119,7 +120,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const tooLarge = bodySizeGuard(req)
   if (tooLarge) return tooLarge
   // ① Rate limit
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+  // [fix/user-ip-privacy] Was the raw LEFT-MOST x-forwarded-for token: client-writable (anyone could dodge the
+  // limit or burn someone else's bucket — trusted-ip.ts) and stored / logged as a raw IP. Now the keyed hash of the
+  // TRUSTED client IP.
+  const ip = clientIpKey(req)
   if (isRateLimited(ip)) {
     return NextResponse.json(
       { error: 'rate limited' },

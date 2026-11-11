@@ -28,7 +28,7 @@ export default defineConfig({
   retries: 0,
   timeout: 90_000,
   reporter: [['list']],
-  use: { baseURL, ...devices['Desktop Chrome'], bypassCSP: true /* the L2 RPC hosts the CSP would refuse are stubbed in rig.ts */, launchOptions: { executablePath: process.env.PW_CHROMIUM || undefined } },
+  use: { baseURL, ...devices['Desktop Chrome'], bypassCSP: true /* rig.ts stubs every off-origin request; the CSP itself is exercised by e2e/third-party-hosts */, launchOptions: { executablePath: process.env.PW_CHROMIUM || undefined } },
   webServer: process.env.V2_BASE_URL
     ? undefined
     : { command: `npx next start -p ${PORT}`, cwd: REPO_ROOT, url: baseURL, reuseExistingServer: true, timeout: 120_000, env: { UI_V2_ENABLED: 'true', NEXT_TELEMETRY_DISABLED: '1' } },

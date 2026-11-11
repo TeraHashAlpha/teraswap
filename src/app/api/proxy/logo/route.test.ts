@@ -22,6 +22,7 @@ vi.mock('@/lib/kv-rate-limiter', () => ({
 }))
 
 import { GET } from './route'
+import { hashClientIp } from '@/lib/client-ip-key'
 
 const USDC_LC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
 const USDC_CS = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
@@ -139,12 +140,12 @@ describe('/api/proxy/logo — per-IP rate limit (same limiter + limit as GET /ap
     expect(limited.headers.get('x-ratelimit-reset')).toBe('1700000060000')
     expect(await limited.json()).toEqual({ error: 'Rate limit exceeded. Try again in a minute.' })
     expect(fetchMock).toHaveBeenCalledTimes(30)
-    expect(mockCheckRateLimit).toHaveBeenLastCalledWith('logo:198.51.100.9', 30, 60_000)
+    expect(mockCheckRateLimit).toHaveBeenLastCalledWith(`logo:${hashClientIp('198.51.100.9')}`, 30, 60_000)
   })
 
   it('never lets a throttled response be cached in place of the logo', async () => {
     upstream(PNG, { status: 200, headers: { 'Content-Type': 'image/png' } })
-    hits.set('logo:198.51.100.9', 30)
+    hits.set(`logo:${hashClientIp('198.51.100.9')}`, 30)
     const limited = await GET(req({ chainId: '1', address: USDC_LC }, ip('198.51.100.9')))
     expect(limited.status).toBe(429)
     expect(limited.headers.get('cache-control')).toBe('no-store')
@@ -152,7 +153,7 @@ describe('/api/proxy/logo — per-IP rate limit (same limiter + limit as GET /ap
 
   it('buckets per IP: one caller hitting the limit does not throttle another', async () => {
     upstream(PNG, { status: 200, headers: { 'Content-Type': 'image/png' } })
-    hits.set('logo:198.51.100.9', 30)
+    hits.set(`logo:${hashClientIp('198.51.100.9')}`, 30)
     expect((await GET(req({ chainId: '1', address: USDC_LC }, ip('198.51.100.9')))).status).toBe(429)
     expect((await GET(req({ chainId: '1', address: USDC_LC }, ip('203.0.113.5')))).status).toBe(200)
   })
@@ -160,7 +161,7 @@ describe('/api/proxy/logo — per-IP rate limit (same limiter + limit as GET /ap
   it('keys on the trusted IP, not a client-written x-forwarded-for token', async () => {
     upstream(PNG, { status: 200, headers: { 'Content-Type': 'image/png' } })
     await GET(req({ chainId: '1', address: USDC_LC }, { ...ip('198.51.100.9'), 'x-forwarded-for': '6.6.6.6, 198.51.100.9' }))
-    expect(mockCheckRateLimit.mock.calls[0][0]).toBe('logo:198.51.100.9')
+    expect(mockCheckRateLimit.mock.calls[0][0]).toBe(`logo:${hashClientIp('198.51.100.9')}`)
   })
 
   it('leaves the allowed path untouched: same 200 body and the 24 h public cache headers', async () => {

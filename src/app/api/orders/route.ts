@@ -24,6 +24,7 @@ import {
   PUBLIC_ORDER_STATUSES,
   ORDERS_READ_HEADER_ISSUED,
   ORDERS_READ_HEADER_SIGNATURE,
+  ORDER_POLL_MAX_HASHES,
 } from '@/lib/order-engine/read-auth'
 import { getDcaFreezeState } from '@/lib/dca-freeze'
 import { checkRateLimit, ORDER_CREATE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
@@ -67,6 +68,8 @@ const ORDER_TYPE_LABEL = ['limit', 'stop_loss', 'dca'] as const
 const PRICE_CONDITION_LABEL = ['above', 'below'] as const
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
+/** [A76 S-6] An order hash as the poll sends it (keccak256 of the signed order). */
+const ORDER_HASH_RE = /^0x[0-9a-fA-F]{64}$/
 const MAX_EXPIRY_DAYS = 90
 const MAX_ACTIVE_ORDERS = 20
 // [API-02] MIN_ORDER_AMOUNT (= contract's 10_000) is now imported from order-engine/config.ts —
@@ -782,6 +785,21 @@ export async function GET(req: NextRequest) {
   // Support comma-separated statuses: ?status=active,executing,partially_filled
   const statuses = (status ?? '').split(',').map(s => s.trim()).filter(Boolean)
 
+  // [fix/user-ip-privacy A76 S-6] ?hashes=<h1>,<h2>,… — the status poll (useOrderEngine → fetchActiveOrders) asks for
+  // the orders the browser is TRACKING, by order hash, whatever their status now. It used to ask for the wallet's 50
+  // newest rows in seven statuses: an order older than the 50 newest (a long DCA under many later orders) never got
+  // its update, and every tick re-read up to 50 terminal rows the browser had no use for. No status filter here, so
+  // the read needs the ownership proof below (it can include live strategy).
+  const hashesParam = req.nextUrl.searchParams.get('hashes')
+  let hashes: string[] | null = null
+  if (hashesParam !== null) {
+    const list = [...new Set(hashesParam.split(',').map(h => h.trim()).filter(Boolean))]
+    if (list.length === 0 || list.length > ORDER_POLL_MAX_HASHES || !list.every(h => ORDER_HASH_RE.test(h))) {
+      return NextResponse.json({ error: `hashes must be 1-${ORDER_POLL_MAX_HASHES} order hashes (0x + 64 hex)` }, { status: 400 })
+    }
+    hashes = list
+  }
+
   // [AUDIT-W6 / W6-M-01] Reads that include ACTIVE/PENDING order strategy
   // (targetPrice / amounts / type, pre-execution) require proof of wallet
   // ownership — one lightweight session signature (read-auth.ts), same trust
@@ -818,7 +836,8 @@ export async function GET(req: NextRequest) {
     .select('*')
     .eq('wallet', wallet.toLowerCase())
     .order('created_at', { ascending: false })
-    .limit(50)
+  // [A76 S-6] By hash: exactly the tracked rows (at most one per hash). Otherwise: the 50 newest, as before.
+  query = hashes ? query.in('order_hash', hashes).limit(hashes.length) : query.limit(50)
 
   if (statuses.length === 1) {
     query = query.eq('status', statuses[0])

@@ -22,11 +22,14 @@ import { buildOrdersReadTypedData, ORDERS_READ_HEADER_ISSUED, ORDERS_READ_HEADER
 let listRows: Array<Record<string, unknown>> = []
 let singleRow: Record<string, unknown> | null = null
 const statusFilters: Array<unknown> = []
+/** [A76 S-6] Every builder call, in order, for asserting the query's shape. */
+const queryCalls: Array<[string, unknown[]]> = []
 
 function makeBuilder() {
   const builder: Record<string, unknown> = {}
   const chain = (name: string) =>
     ((...args: unknown[]) => {
+      queryCalls.push([name, args])
       if (name === 'eq' && args[0] === 'status') statusFilters.push(args[1])
       if (name === 'in' && args[0] === 'status') statusFilters.push(args[1])
       return builder
@@ -60,6 +63,7 @@ vi.mock('@/lib/dca-freeze', () => ({
 
 import { GET, POST } from './route'
 import { GET as GET_BY_ID } from './[id]/route'
+import { hashClientIp } from '@/lib/client-ip-key'
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 // Published Anvil/Hardhat default account #0 key — a throwaway local-dev
@@ -87,6 +91,7 @@ beforeEach(() => {
   listRows = [{ id: 'o1', wallet: WALLET.toLowerCase(), status: 'active', target_price: '123' }]
   singleRow = null
   statusFilters.length = 0
+  queryCalls.length = 0
   rpcMock.mockClear()
   mockCheckRateLimit.mockClear()
   mockCheckRateLimit.mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 })
@@ -155,6 +160,49 @@ describe('GET /api/orders — active/pending strategy requires proof-of-ownershi
 })
 
 // ── GET /api/orders/[id] — same boundary for single-row reads ──────────────
+// [fix/user-ip-privacy A76 S-6] The status poll asks by order hash: exactly the tracked rows, whatever their status —
+// not the wallet's 50 newest rows (an older tracked order fell out of that window and was never updated).
+describe('GET /api/orders?hashes= — the poll reads the tracked orders by hash [A76 S-6]', () => {
+  const H1 = '0x' + '11'.repeat(32)
+  const H2 = '0x' + '22'.repeat(32)
+  const calls = (name: string) => queryCalls.filter(([n]) => n === name).map(([, a]) => a)
+
+  it('queries wallet + order_hash IN (the hashes), limit = their count, no status filter and no 50-row window', async () => {
+    listRows = [{ id: 'o-old', wallet: WALLET.toLowerCase(), order_hash: H1, status: 'failed' }]
+    const res = await GET(getReq(`wallet=${WALLET}&hashes=${H1},${H2},${H1}`, await readAuthHeaders()))
+    expect(res.status).toBe(200)
+    expect((await res.json()).orders).toEqual(listRows)
+    expect(calls('eq')).toContainEqual(['wallet', WALLET.toLowerCase()])
+    expect(calls('in')).toEqual([['order_hash', [H1, H2]]])
+    expect(calls('limit')).toEqual([[2]])
+    expect(statusFilters).toEqual([])
+  })
+
+  it('needs the session signature (a by-hash read can include live strategy)', async () => {
+    const res = await GET(getReq(`wallet=${WALLET}&hashes=${H1}`))
+    expect(res.status).toBe(401)
+    expect(queryCalls).toEqual([])
+  })
+
+  it.each([
+    ['empty', ''],
+    ['not a hash', 'abc'],
+    ['short', '0x1234'],
+    ['too many', Array.from({ length: 51 }, (_, i) => '0x' + i.toString(16).padStart(64, '0')).join(',')],
+  ])('%s hashes → 400, nothing queried', async (_label, hashes) => {
+    const res = await GET(getReq(`wallet=${WALLET}&hashes=${hashes}`, await readAuthHeaders()))
+    expect(res.status).toBe(400)
+    expect(queryCalls).toEqual([])
+  })
+
+  it('without hashes the list read is unchanged: the 50 newest', async () => {
+    const res = await GET(getReq(`wallet=${WALLET}&status=active`, await readAuthHeaders()))
+    expect(res.status).toBe(200)
+    expect(calls('limit')).toEqual([[50]])
+    expect(calls('in')).toEqual([])
+  })
+})
+
 describe('GET /api/orders/[id] — protected statuses need proof [W6-M-01]', () => {
   const params = { params: Promise.resolve({ id: 'o1' }) }
 
@@ -206,7 +254,7 @@ describe('POST /api/orders — per-IP rate limit + body cap', () => {
   it('keys the limit by IP with the orders: prefix', async () => {
     mockCheckRateLimit.mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60_000 })
     await POST(postReq('{}', { 'x-forwarded-for': '9.9.9.9, 10.0.0.1' }))
-    expect(mockCheckRateLimit).toHaveBeenCalledWith('orders:10.0.0.1', expect.any(Number), expect.any(Number))
+    expect(mockCheckRateLimit).toHaveBeenCalledWith(`orders:${hashClientIp('10.0.0.1')}`, expect.any(Number), expect.any(Number))
   })
 
   // [CHORE-API-HARDENING-2 / P3a] clientIp() (body-limit.ts) now delegates to
@@ -219,7 +267,7 @@ describe('POST /api/orders — per-IP rate limit + body cap', () => {
     await POST(postReq('{}', { 'x-forwarded-for': 'attacker-controlled-spoof, 203.0.113.5' }))
     const key = mockCheckRateLimit.mock.calls.at(-1)?.[0]
     expect(key).not.toBe('orders:attacker-controlled-spoof')
-    expect(key).toBe('orders:203.0.113.5')
+    expect(key).toBe(`orders:${hashClientIp('203.0.113.5')}`)
   })
 
   it('returns 413 for an oversized body (content-length) [W6-L-01]', async () => {
