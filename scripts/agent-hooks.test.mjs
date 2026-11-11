@@ -491,3 +491,27 @@ describe('A77b M-7: a commit-message heredoc with apostrophes is parsed, and sti
     expect(r, c).toEqual(expect.any(String))
   })
 })
+
+describe('runbook (A77b M-7, M-8): allow-lists as tables, owner path, completed "cannot stop"', () => {
+  const rb = readFileSync(path.join(ROOT, 'docs', 'Runbooks', 'agent-harness.md'), 'utf8')
+  it('has the allow-list section with a table for gh, cast, forge and git', () => {
+    expect(rb).toContain('## Allow-lists')
+    for (const needle of ['**`gh`**', '**`cast`**', '**`forge`**', '**`git` for `recon` and `auditor`**', '`erc20 transfer\\|approve`', '`merge` | `--no-commit …`, `--abort`, `--quit`']) expect(rb, needle).toContain(needle)
+    expect((rb.match(/^\| ---|^\|---/gm) ?? []).length).toBeGreaterThanOrEqual(4)
+  })
+  it('tells the owner how to run a refused legitimate command (one line, own terminal)', () => {
+    expect(rb).toContain('## When a refused command is legitimate')
+    expect(rb).toMatch(/ONE line in your own terminal/)
+  })
+  it('"What this cannot stop" names every residual the owner listed', () => {
+    const section = rb.slice(rb.indexOf('## What this cannot stop'), rb.indexOf('The backstops are outside'))
+    for (const needle of ['Script files', 'interpreters', 'Aliases', 'shell functions', 'run time', 'Recursive reads', 'Exotic shells', 'redirects', 'read-only agents', 'not the Bash tool']) expect(section, needle).toContain(needle)
+  })
+  it('agent files describe the allow-list, not the old deny list', () => {
+    for (const f of ['recon.md', 'auditor.md']) {
+      const t = readFileSync(path.join(AGENTS, f), 'utf8')
+      expect(t, f).toContain('`checkout --detach`')
+      expect(t, f).not.toContain('gh codeql')
+    }
+  })
+})
