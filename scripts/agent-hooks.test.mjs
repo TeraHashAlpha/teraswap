@@ -19,7 +19,7 @@ const RO_REFUSED = [
   'git checkout -b x', 'git checkout -B x origin/main', 'git checkout -fb x', 'git checkout --orphan x', 'git checkout -- file', 'git switch -c x', 'git switch -C x', 'git switch --create x',
   'git fetch origin a:b', 'git fetch origin +refs/heads/*:refs/remotes/o/*', 'git fetch origin pull/5/head:pr-5', 'git fetch --depth 1 origin a:b', 'git -C wt fetch origin main:main',
   'git branch x', 'git branch -D x', 'git branch -m a b', 'git branch -c a b', 'git branch --delete x', 'git branch -u origin/main', 'git remote add x y', 'git remote remove x', 'git remote set-url origin x', 'git reflog expire --all', 'git update-ref -d refs/x',
-  'gh pr create --title x', 'gh pr merge 5', 'gh pr comment 5 -b x', 'gh pr checkout 5', 'gh pr edit 5', 'gh pr close 5', 'gh -R a/b pr close 5', 'gh issue create', 'gh issue comment 5', 'gh release create v1', 'gh workflow run x', 'gh run download 5', 'gh run rerun 5', 'gh repo delete a/b', 'gh repo clone a/b', 'gh auth login', 'gh alias set x y', 'gh gist create f',
+  'gh pr create --title x', 'gh pr merge 5', 'gh pr comment 5 -b x', 'gh pr edit 5', 'gh pr close 5', 'gh -R a/b pr close 5', 'gh issue create', 'gh issue comment 5', 'gh release create v1', 'gh workflow run x', 'gh run download 5', 'gh run rerun 5', 'gh repo delete a/b', 'gh repo clone a/b', 'gh auth login', 'gh alias set x y', 'gh gist create f',
   'gh api -X POST repos/a/b/issues', 'gh api -XPOST x', 'gh api repos/a/b --method=DELETE', 'gh api repos/a/b/issues -f title=x', 'gh api repos/a/b/issues -ftitle=x', 'gh api x -Fn=1', 'gh api x --field=a=b', 'gh api x --input=f', 'gh api -iX PATCH x',
   'bash', 'echo x | sh', 'eval "$CMD"',
 ]
@@ -29,7 +29,7 @@ const RO_ALLOWED = [
   'git remote -v', 'git log -1 --format=%H', 'git merge --no-commit origin/main', 'git merge --no-commit --no-ff x', 'git merge --abort', 'git merge --quit', 'git checkout --detach origin/main',
   'git ls-files', 'git blame -L1,5 file', 'git grep -n "git push" docs', 'git config --get remote.origin.url', 'git tag -l "v*"', 'git describe --tags',
   'npm ci', 'npm test', 'npx tsc --noEmit', 'npx --no-install vitest run',
-  'gh pr view 5 --json state', 'gh pr diff 5', 'gh pr list', 'gh pr status', 'gh pr checks 5', 'gh -R a/b pr checks 5', 'gh --repo a/b pr view 5', 'gh api repos/a/b/pulls/5', 'gh api repos/a/b/pulls?per_page=5', 'gh api -X GET repos/a/b', 'gh api repos/a/b -H "Accept: x" --jq .name',
+  'gh pr view 5 --json state', 'gh pr diff 5', 'gh pr list', 'gh pr status', 'gh pr checks 5', 'gh pr checkout 5', 'gh -R a/b pr checks 5', 'gh --repo a/b pr view 5', 'gh api repos/a/b/pulls/5', 'gh api repos/a/b/pulls?per_page=5', 'gh api -X GET repos/a/b', 'gh api repos/a/b -H "Accept: x" --jq .name',
   'gh issue view 5', 'gh issue list', 'gh repo view', 'gh run view 5', 'gh run list', 'gh --version', 'gh',
   'grep -rn "git push" docs', "grep -rn 'git push --force' docs", 'rg "gh pr merge" docs', 'git log --grep="git commit"', 'echo "git push"', 'echo "do not git commit here" | cat', 'git log --oneline | grep "git push"', 'ls -la', 'cat package.json',
 ]
@@ -371,9 +371,8 @@ describe('allow-list: gh', () => {
   it('lists are big enough to mean something', () => { expect(GH_UNLISTED.length).toBeGreaterThanOrEqual(20) })
   for (const c of GH_PERMITTED) it(`permits: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toBeNull())
   for (const c of GH_UNLISTED) it(`refuses: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toEqual(expect.any(String)))
-  it('read-only agents lose `pr checkout` (it writes a local branch) and keep the rest', () => {
-    expect(roDecide('gh pr checkout 5')).toEqual(expect.any(String))
-    for (const c of GH_PERMITTED.filter((x) => x !== 'gh pr checkout 5')) expect(roDecide(c), c).toBeNull()
+  it('read-only agents get the same gh list (the A77b report lists `pr checkout` as allowed for all)', () => {
+    for (const c of GH_PERMITTED) expect(roDecide(c), c).toBeNull()
     for (const c of GH_UNLISTED) expect(roDecide(c), c).toEqual(expect.any(String))
   })
 })
@@ -514,4 +513,55 @@ describe('runbook (A77b M-7, M-8): allow-lists as tables, owner path, completed 
       expect(t, f).not.toContain('gh codeql')
     }
   })
+})
+
+// ---------------------------------------------------------------------------------------------------------------
+// The owner's A77b report (pasted 2026-11-11 15:13): every "must be refused" line exits 2 through BOTH hooks exactly as
+// settings.json wires them, every "must be allowed" line exits 0.
+const A77B_REFUSED = {
+  'H-5': ['while read l; do echo "$l"; done < .env', '(cat) < .env.local', '{ cat; } < .env'],
+  'H-6': ['gh auth token', 'gh auth status --show-token', 'gh auth status -t', 'gh auth refresh', 'gh auth login', 'gh auth setup-git'],
+  'H-7': ['cast erc20 transfer', 'cast erc20 approve', 'cast erc20-token transfer', 'cast erc20 t', 'cast erc20 a'],
+  'M-6': ['gh pr -t view merge 5 --squash', 'gh pr view merge 5', 'gh pr view 5 merge', 'gh pr checks 5 close', 'gh issue view 5 comment'],
+  'M-10': ['echo "{}" > .claude/settings.json', 'rm .claude/hooks/command-guard.mjs'],
+  lows: [
+    'grep --color KEY .env', 'git push --m', 'git -c remote.origin.mirror=true push', 'csh -c "ssh x"', 'tcsh -c "ssh x"', 'arch ssh x', 'script -q /dev/null ssh x', 'nocorrect ssh x', 'coproc ssh x', 'ssh-copy-id x', 'pnpm pm2 list',
+    'git-credential-osxkeychain get', 'cat ~/.zsh_h*', 'cat ~/.zsh_sessions/x.history', 'cat $HISTFILE',
+    'git push origin "$BRANCH"', // by design (runbook "Known gaps")
+  ],
+}
+const A77B_M9_READONLY_REFUSED = ['git checkout .', 'git checkout -f main', 'git switch --discard-changes', 'git worktree add -b x']
+const A77B_ALLOWED_ALL = ['test -f .env.local', 'ls .env*', 'gh pr checkout 5', 'cast send --help']
+const A77B_HEREDOC_COMMIT = 'git commit -m "$(cat <<\'EOF\'\nfeat: x\n\nit\'s fine\nEOF\n)"' // commit stays refused for recon/auditor by design
+const A77B_ALLOWED_READONLY = ['git merge --abort', 'git merge --quit', 'git tag -l', 'git config --get user.name']
+
+/** The exit code the harness sees: both PreToolUse hooks of settings.json, each as `node … || exit 2`; any 2 blocks. */
+function hookExit(command, agentType) {
+  const input = JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, ...(agentType ? { agent_type: agentType } : {}) })
+  for (const h of ['command-guard.mjs', 'readonly-guard.mjs']) {
+    const r = spawnSync('sh', ['-c', `node "${path.join(ROOT, '.claude', 'hooks', h)}" || exit 2`], { input, encoding: 'utf8' })
+    if (r.status !== 0) return r.status
+  }
+  return 0
+}
+
+describe('A77b report probes — refused (exit 2 through both hooks, main session and every agent type)', () => {
+  for (const [id, cmds] of Object.entries(A77B_REFUSED)) {
+    for (const c of cmds) {
+      it(`${id}: ${JSON.stringify(c)}`, () => {
+        expect(guardDecide(c), c).toEqual(expect.any(String))
+        for (const agent of [undefined, 'implementer', 'recon', 'auditor']) expect(hookExit(c, agent), `${agent}: ${c}`).toBe(2)
+      })
+    }
+  }
+  for (const c of A77B_M9_READONLY_REFUSED) {
+    it(`M-9 (auditor and recon): ${JSON.stringify(c)}`, () => {
+      for (const agent of ['recon', 'auditor']) expect(hookExit(c, agent), `${agent}: ${c}`).toBe(2)
+    })
+  }
+})
+describe('A77b report probes — allowed (exit 0)', () => {
+  it('M-7: heredoc commit with an apostrophe (main session and implementer)', () => { for (const agent of [undefined, 'implementer']) expect(hookExit(A77B_HEREDOC_COMMIT, agent)).toBe(0) })
+  for (const c of A77B_ALLOWED_ALL) it(`all agents: ${JSON.stringify(c)}`, () => { for (const agent of [undefined, 'implementer', 'recon', 'auditor']) expect(hookExit(c, agent), `${agent}: ${c}`).toBe(0) })
+  for (const c of A77B_ALLOWED_READONLY) it(`auditor and recon: ${JSON.stringify(c)}`, () => { for (const agent of ['recon', 'auditor']) expect(hookExit(c, agent), `${agent}: ${c}`).toBe(0) })
 })

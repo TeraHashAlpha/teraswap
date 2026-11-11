@@ -254,11 +254,12 @@ function gitReason(c) {
 
 /** gh: group -> actions. `api` is separate (provable GET only). */
 export const GH_ALLOWED = { pr: ['view', 'diff', 'checks', 'list', 'status', 'checkout'], run: ['view', 'list'], repo: ['view'], issue: ['view', 'list'] }
+const GH_WRITE_VERBS = new Set(['merge', 'close', 'create', 'new', 'delete', 'edit', 'comment', 'review', 'ready', 'reopen', 'rerun', 'cancel', 'lock', 'unlock', 'update-branch', 'develop', 'transfer', 'pin', 'unpin', 'archive', 'rename', 'sync', 'fork', 'clone', 'set', 'remove', 'approve'])
 const GH_BARE = new Set(['--version', '--help', '-h'])
 
 /**
  * @param {string[]} argv
- * @param {{readonly?: boolean}} [opts] readonly: also drop `pr checkout` (it writes a local branch)
+ * @param {{readonly?: boolean}} [opts] kept for the read-only guard; the A77b report lists `gh pr checkout` as allowed for all agents
  * @returns {string|null}
  */
 export function ghAllowReason(argv, { readonly = false } = {}) {
@@ -280,7 +281,11 @@ export function ghAllowReason(argv, { readonly = false } = {}) {
   const action = argv[k + 1]
   if (!actions) return `gh ${group} is not on the gh allow-list (pr view|diff|checks|list|status|checkout, run view|list, repo view, issue view|list, api GET)`
   if (action === undefined || action.startsWith('-')) return `gh ${group} ${action ?? ''}: the action must directly follow the command (no flag in between)`.replace('  ', ' ')
-  if (!actions.includes(action) || (readonly && group === 'pr' && action === 'checkout')) return `gh ${group} ${action} is not on the ${readonly ? 'read-only ' : ''}gh allow-list`
+  if (!actions.includes(action)) return `gh ${group} ${action} is not on the ${readonly ? 'read-only ' : ''}gh allow-list`
+  // A77b M-6: a write verb anywhere after the action is refused too (`gh pr view 5 merge`, `gh pr view merge 5`): cobra
+  // may take an earlier word as a flag value, and a read command has no reason to carry one.
+  const verb = argv.slice(k + 2).find((t) => GH_WRITE_VERBS.has(t))
+  if (verb) return `gh ${group} ${action} … ${verb}: a write verb after the action`
   return null
 }
 

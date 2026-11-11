@@ -56,7 +56,7 @@ Decisions to confirm: `git push` args that start with an expansion are refused; 
 **4. Evidence (re-run after the A77-rows commit).** Suite 468 files / 8998 pass (`npm test`, 0 fail); `check:bash3-compat` OK (4 files); `gen-claude-state.mjs --check` current (no regen needed); eslint on the touched files clean; diff 26 files vs origin/main (5 commits); compare https://github.com/TeraHashAlpha/teraswap/compare/main...chore/agent-harness (no PR opened). Not re-run: `agent-verify.sh --keeper` (Node 20/22 absent here).
 
 ## Round 4 — A77b fixes (0C/3H): 4 signed commits on 962a533, no force-push
-**Premise gap, OPEN:** the A77b report was not in the session; probes come from the goal text and my A77b notes. Owner asked for it (answer supersedes this). Docs re-read: `Edit()` covers Write, `ask` is denied in `-p`, only exit 2 blocks, `agent_type` confirmed.
+**Premise gap, CLOSED 15:13:** the owner pasted the A77b report; every probe in it is now a test (`A77b report probes`, exit 2/0 through both hooks for main, implementer, recon, auditor). Report vs. my reconstruction: one gap (M-6 second clause, a write verb after the action: `gh pr view 5 merge` passed) fixed; `gh pr checkout` is allowed for recon/auditor too, as the report lists it. Docs re-read: `Edit()` covers Write, `ask` is denied in `-p`, only exit 2 blocks, `agent_type` confirmed.
 
 **1. Finding → commit → test** (`scripts/agent-hooks.test.mjs`)
 - H-6, H-7, M-6, M-8, M-9 → 3ffae67 → `allow-list: gh|cast|forge|git`, `A77b M-6`
@@ -68,8 +68,9 @@ Decisions to confirm: `git push` args that start with an expansion are refused; 
 - gh: `pr view|diff|checks|list|status|checkout`, `run view|list`, `repo view`, `issue view|list`, `api` GET; only `-R` before the command (48 unlisted refused)
 - cast: read subcommands + `<≤3 words> --help` (34 refused); forge: no `--broadcast|--resume|create` (20)
 - recon/auditor git: the goal's list, no `-c`/`--output` (73 refused)
+- Report-driven: a write verb after the action is refused (`gh pr view 5 merge`); `commit` stays refused for recon/auditor by design (heredoc test runs for main/implementer).
 - To confirm: now refused `gh auth status|release|workflow|codeql`, `git merge-base|rev-list|stash list|remote get-url`; added `gh --version`, `config --get-all`.
 
 **3. Still prose:** scripts/interpreters, aliases, run-time names and env prefixes, recursive reads, exotic wrappers, redirect writes by recon/auditor outside `.claude/`, non-Bash tools (runbook "What this cannot stop").
 
-**4. Evidence:** `npm test` 468 files / 9511 pass; bash3-compat OK; `gen-claude-state --check` current; parity OK; live: auditor + implementer denied/allowed via `claude -p`, recon via the exact hook commands (model declined). `--keeper` not run (no Node 20/22). `git diff --stat origin/main`: 26 files, +3336/−4. Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...chore/agent-harness
+**4. Evidence:** `npm test` 468 files / 9561 pass (re-run after the report); bash3-compat OK; `gen-claude-state --check` current; parity OK; live: auditor + implementer denied/allowed via `claude -p`, recon via the exact hook commands (model declined). `--keeper` not run (no Node 20/22). `git diff --stat origin/main`: 26 files, +3411/−4. Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...chore/agent-harness

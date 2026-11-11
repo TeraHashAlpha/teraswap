@@ -11,7 +11,7 @@ Two layers, both in `.claude/settings.json`. A refusal in either one stops the c
 | Piece | What it does | Enforced by tooling | Stays prose (agent discipline) |
 |---|---|---|---|
 | `.claude/hooks/command-guard.mjs` + `shell-parse.mjs` | PreToolUse hook on `Bash` for EVERY session and agent. Tokenises the command (splits on `&&` `\|\|` `;` `\|` newlines, strips quotes, backslashes, `env`, `command`, `VAR=x`, `sudo`, `timeout`, `arch`, `nocorrect`, `xargs`, `npx X` / `pnpm X` / `yarn X` / `bunx X`, reduces argv0 to its lower-cased basename, recurses into `sh\|bash\|zsh\|csh\|tcsh\|fish -c`, `eval`, `$( )` (heredoc bodies skipped), backticks, `find -exec`). **Allow-lists** (below) for `gh`, `cast`, `forge`. **Deny rules** for: `ssh` `scp` `sftp` `ssh-add` `ssh-copy-id` and `rsync` over ssh; `pm2`; keychain `security`; `git credential*` and `git-credential-*`; every `git push` force / mirror (any abbreviation, or via `-c`/`git config remote.*.mirror`) / delete form; `npm audit … fix`; `script` and `coproc`; any word or redirect target (of every command, compound closers and wrappers included) whose basename is `.env` or `.env.*` (except `.env.example`, and except for `test`, `[`, `[[`, `ls`, which only name files), shell-history files by name, glob, brace or `$HISTFILE`; and writes to the harness itself (`.claude/settings*.json`, `.claude/hooks/`: `>` `>>` `tee` `rm` `mv` `cp` `sed -i` `truncate` `chmod`, `git checkout\|restore\|rm`…). A quoted mention (commit message, grep pattern) is not an access | the hook | what is listed under "What this cannot stop" |
-| `.claude/hooks/readonly-guard.mjs` | PreToolUse hook on `Bash`, acts only when the hook input's `agent_type` is `recon` or `auditor` (the docs give PreToolUse no agent-type matcher; the script keys on the field). On top of the guard above, `git` is an **allow-list** for them and `gh pr checkout` is dropped (below). Allows quoted mentions | the hook | writes through Bash itself |
+| `.claude/hooks/readonly-guard.mjs` | PreToolUse hook on `Bash`, acts only when the hook input's `agent_type` is `recon` or `auditor` (the docs give PreToolUse no agent-type matcher; the script keys on the field). On top of the guard above, `git` is an **allow-list** for them (below). Allows quoted mentions | the hook | writes through Bash itself |
 | `.claude/settings.json` | `permissions.deny` patterns (second layer) for the same families, `.env*` and history files for the Read/Edit tools, `permissions.ask` on `Edit(/.claude/settings*.json)` and `Edit(/.claude/hooks/**)` (project and `~/.claude`; the docs: `Edit(...)` covers Write, and an `ask` call is denied in `claude -p`), no `allow`, bypass mode disabled; the two hooks, each run as `node … \|\| exit 2` with `onFailure: "block"` because the docs say any other exit code, a crash or a timeout lets the call proceed | Claude Code | — |
 | `scripts/agent-settings.test.mjs`, `scripts/agent-hooks.test.mjs` | Table-driven: Table A (spellings that must be refused), Table B (actions that must stay allowed), the fail-closed protocol, the wiring in `settings.json` | `npm test` | — |
 | `.claude/agents/implementer.md` | Sonnet, full edit tools; rules: dedicated worktree, real `npm ci`, feedback in first commit, SSH-signed noreply, no CI polling, no force-push, no PR, ask on false premise, fixed REPORT, exit clause | tool list + the two layers | everything behavioural |
@@ -24,11 +24,11 @@ Two layers, both in `.claude/settings.json`. A refusal in either one stops the c
 
 Two rounds of deny-lists each left new spellings, so the riskiest tools run only in the listed forms; everything else is refused. Over-refusing a rare legitimate command is accepted; under-refusing is not.
 
-**`gh`** (all agents; read-only agents lose `pr checkout`). The one flag allowed before the command is `-R/--repo`; no flag may sit between command and action (`gh pr -t view merge 5` is `gh pr merge 5`: cobra takes `view` as the value of `-t`).
+**`gh`** (all agents, read-only included). The one flag allowed before the command is `-R/--repo`; no flag may sit between command and action (`gh pr -t view merge 5` is `gh pr merge 5`: cobra takes `view` as the value of `-t`).
 
 | Command | Permitted |
 |---|---|
-| `gh pr` | `view` `diff` `checks` `list` `status` `checkout` |
+| `gh pr` | `view` `diff` `checks` `list` `status` `checkout` (a write verb anywhere after the action is refused) |
 | `gh run` | `view` `list` |
 | `gh repo` | `view` |
 | `gh issue` | `view` `list` |
