@@ -35,9 +35,14 @@ describe('lintGoal', () => {
     expect(rules(head + 'a'.repeat(MAX_CHARS - head.length + 1))).toContain('length')
   })
 
-  it('fails when line 1 is not CONTROL:', () => {
+  it('fails when the first non-empty line is not CONTROL:', () => {
     expect(rules('NO CI polling\nCONTROL: x\nExit = y')).toContain('control-line')
-    expect(rules('\nCONTROL: x\nExit = y')).toContain('control-line')
+    expect(rules('\n  \nsome preface\nCONTROL: x\nExit = y')).toContain('control-line')
+    expect(rules('')).toContain('control-line')
+  })
+  it('leading blank lines before CONTROL: are fine (first NON-EMPTY line counts)', () => {
+    expect(rules('\n\nCONTROL: x · Exit = y')).toEqual([])
+    expect(rules('\nCONTROL: READ-ONLY · Exit = report')).toContain('audit-verdict')
   })
 
   it('fails without an Exit = clause', () => {

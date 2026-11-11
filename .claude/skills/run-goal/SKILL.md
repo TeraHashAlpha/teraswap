@@ -6,7 +6,7 @@ description: Use when starting or resuming a /goal for a TeraSwap task — lints
 # Run a goal
 
 1. **Lint the goal text first:** save it to a file and run `node scripts/goal-lint.mjs FILE`. Fix every `FAIL` line before starting
-   (≤ 4000 chars, line 1 `CONTROL:`, an `Exit =` clause, no banned phrases, risky commands only on Do-NOT lines, audits say `ANY verdict`).
+   (≤ 4000 chars, first non-empty line `CONTROL:`, an `Exit =` clause, no banned phrases, risky commands only on Do-NOT lines, audits say `ANY verdict`).
 2. **Pick the agent** (model tiers: `docs/Prompts/_PROMPT-TEMPLATE.md` §0):
    - implementation / chore → `implementer`
    - read-only investigation → `recon`

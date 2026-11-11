@@ -5,7 +5,7 @@
 //
 // Rules (each violation prints `FAIL <rule>: <detail>`):
 //   length          more than 4000 characters
-//   control-line    line 1 does not start with `CONTROL:`
+//   control-line    the first non-empty line does not start with `CONTROL:`
 //   exit-clause     no `Exit =` anywhere
 //   banned-phrase   contains "no Monitor" or "CI-poll" (case-insensitive)
 //   risky-command   names pm2, ssh or `cast send` outside a Do-NOT line
@@ -33,12 +33,13 @@ const BANNED = [/no monitor/i, /ci-poll/i]
 export function lintGoal(text) {
   const out = []
   const lines = text.split('\n')
+  const first = lines.find((l) => l.trim() !== '') ?? ''
 
   if (text.length > MAX_CHARS) {
     out.push({ rule: 'length', detail: `${text.length} chars > ${MAX_CHARS}` })
   }
-  if (!lines[0].startsWith('CONTROL:')) {
-    out.push({ rule: 'control-line', detail: 'line 1 must start with "CONTROL:"' })
+  if (!first.startsWith('CONTROL:')) {
+    out.push({ rule: 'control-line', detail: 'first non-empty line must start with "CONTROL:"' })
   }
   if (!text.includes('Exit =')) {
     out.push({ rule: 'exit-clause', detail: 'no "Exit =" clause' })
@@ -60,7 +61,7 @@ export function lintGoal(text) {
     }
   })
 
-  if (/READ-ONLY/.test(lines[0]) && !text.includes('ANY verdict')) {
+  if (/READ-ONLY/.test(first) && !text.includes('ANY verdict')) {
     out.push({ rule: 'audit-verdict', detail: 'audit goal (READ-ONLY) must say the report is the exit on "ANY verdict"' })
   }
   return out

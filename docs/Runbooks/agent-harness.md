@@ -15,7 +15,7 @@
 | `.claude/agents/auditor.md` | Opus, no Edit/Write/NotebookEdit, guard hook, detached worktree for build/test, `C/H/M/L` with `file:line`, last line `VERDICT: …`, the report is the exit | tools + hook | detached-worktree discipline, verdict format |
 | `.claude/hooks/readonly-guard.mjs` | PreToolUse hook (exit 2 = block) refusing `git commit\|push\|merge\|rebase\|tag\|reset\|…` and any `gh` outside a read list. Fails closed | hook | `bash -c`/`eval`/aliases can evade it |
 | `scripts/agent-verify.sh` | One command → fixed EVIDENCE block: suite, lint delta, tsc, build, v1/v2 parity, rpc-budget; `--codeql` (full security-extended, head vs base), `--keeper` (CI's Node majors). Failure or missing tool = FAIL + non-zero exit. Never polls CI, never prints env values | script | pasting the block verbatim |
-| `scripts/goal-lint.mjs FILE` | Lints a `/goal` text: ≤ 4000 chars, line 1 `CONTROL:`, has `Exit =`, no `no Monitor` / `CI-poll`, `pm2`/`ssh`/`cast send` only on Do-NOT lines, audit goals (`READ-ONLY`) say `ANY verdict` | script | — |
+| `scripts/goal-lint.mjs FILE` | Lints a `/goal` text: ≤ 4000 chars, first non-empty line `CONTROL:`, has `Exit =`, no `no Monitor` / `CI-poll`, `pm2`/`ssh`/`cast send` only on Do-NOT lines, audit goals (`READ-ONLY`) say `ANY verdict` | script | — |
 | `.claude/skills/*/SKILL.md` | `adapter`, `api-route`, `security-fix`, `supabase-migration` (moved from flat files, content unchanged), plus `run-goal`, `audit-pr` | harness loads them | — |
 | `.github/pull_request_template.md` | what/why, evidence block, "Auditor required?", feedback path — for the owner's DRAFT PR | — | — |
 
@@ -43,12 +43,12 @@ scripts/agent-verify.sh                    # default checks
 scripts/agent-verify.sh --codeql --keeper  # security-relevant or keeper changes
 ```
 
-`--keeper` needs every Node major in `.github/workflows/keeper-tests.yml` installed locally (e.g. `brew install node@20`); it never substitutes another version
+`--keeper` runs the keeper suite on every Node major CI uses (22 in `ci.yml`'s `keeper-suite` job, 20 in `keeper-tests.yml`), looked up via PATH, brew, nvm, fnm and volta. A missing major is FAIL with a one-line `brew install node@N …` hint; it never substitutes another version
 (local Node 25 hides cancelled tests). `--codeql` needs `gh extension install github/gh-codeql`.
 
 ## Known gaps / owner decisions
 
-- `scripts/*.sh` is gitignored (`.gitignore:49`); `agent-verify.sh` was force-added. A `!scripts/agent-verify.sh` exception (like grok-dispatch/guard) would make that permanent.
-- `_PROMPT-TEMPLATE.md` §1's CONTROL header says `NO CI-poll`, which `goal-lint` rejects by rule. Write `NO CI polling` in goals; the template needs the same edit.
+- `scripts/*.sh` is gitignored (`.gitignore:49`); `agent-verify.sh` now has a `!scripts/agent-verify.sh` exception (like grok-dispatch/guard), so it is no longer force-add only.
+- `_PROMPT-TEMPLATE.md` §1's CONTROL header used to say `NO CI-poll`, which `goal-lint` rejects; the template now says `NO CI polling` (owner decision 2026-11-11).
 - Subagent frontmatter hooks need the folder's workspace trust accepted, otherwise they are skipped (docs).
 - When Claude Code changes the schema, update `.claude/**` and re-run `npm test` (the tests pin the contract).
