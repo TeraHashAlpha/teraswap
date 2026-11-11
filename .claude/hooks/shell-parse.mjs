@@ -9,15 +9,19 @@
 //
 // It splits on && || ; | |& & newlines and ( ) , removes quotes and backslashes, decodes $'..', recurses into
 // $( ), backticks, <( ), heredoc bodies with an unquoted delimiter, `sh|bash|zsh -c`, `eval`, `env -S`,
-// `find -exec`, `xargs`, `npx X`, `sudo`, `timeout` and friends. Unparseable input THROWS (callers fail closed).
+// `find -exec`, `xargs`, `npx X`, `sudo`, `timeout` and friends. Unparseable input THROWS (callers fail closed): an
+// unterminated quote, an unknown redirection operator, nesting deeper than 3 — each error names the construct (A77c).
 // An expansion ($VAR, ${..}, $(..), $((..)), `..`) is replaced by the marker EXP: its value is unknowable here.
 // It is a lexer for refusing accidents and drift, not a shell: see "What this cannot stop" in
 // docs/Runbooks/agent-harness.md.
 
 export const EXP = ''
-const MAX_DEPTH = 8
+const MAX_DEPTH = 3
 
-export class ParseError extends Error {}
+/** Thrown for anything the lexer cannot classify; the hooks turn it into exit 2 ("failing closed"). */
+export class ParseError extends Error {
+  constructor(construct) { super(`cannot classify the command: ${construct}`) }
+}
 
 const RESERVED = new Set(['{', '}', '!', 'if', 'then', 'else', 'elif', 'fi', 'while', 'until', 'do', 'done', 'select', 'esac', 'function'])
 const ASSIGN = /^[A-Za-z_][A-Za-z0-9_]*\+?=/
@@ -54,6 +58,7 @@ function scanParen(src, i) {
       if (j >= src.length) throw new ParseError('unterminated double quote')
       continue
     }
+    if (c === '<' && src[j + 1] === '<' && src[j + 2] === '<') { j += 2; continue } // here-string `<<<`: its operand is an ordinary word
     if (c === '<' && src[j + 1] === '<' && src[j + 2] !== '<' && src[j - 1] !== '<') {
       // A heredoc inside $( ): its body may hold apostrophes and parentheses (audit A77b M-7), so skip it whole.
       let k = j + 2
@@ -126,16 +131,17 @@ function decodeAnsiC(s) {
   })
 }
 
-// "git push" style redirections: an operator that takes the NEXT word (>, >>, 2>, <, &>) vs. a self-contained one (>out, 2>&1).
-const REDIR_NEEDS_TARGET = /^[\d&]*[<>]+&?$/
-const REDIR_SELF = /^[\d&]*[<>]+(?:&\d+|&-|.+)$/
+// Redirection operators are lexed as words of their own (`x>f` is `x`, `>`, `f`). One that takes the NEXT word as its
+// target (`>` `>>` `>|` `>&` `<` `<&` `<>` `2>` `&>` `&>>`) vs. a self-contained one (`2>&1`, `>&2`, `<&-`).
+const REDIR_NEEDS_TARGET = /^(?:\d+|&)?(?:<>|<&?|>>?[|&]?)$/
+const REDIR_SELF = /^\d*[<>]&(?:\d+-?|-)$/
+const REDIR_BASE_OK = new Set(['<', '>', '>>', '>|', '>&', '<&', '<>'])
 function stripRedirects(words) {
   const out = []
   const redirs = [] // operators and targets (here-strings excluded: their operand is a string, not a file)
   for (let i = 0; i < words.length; i++) {
     const w = words[i]
     if (/^<<<$/.test(w)) { i++; continue }
-    // `>>` also matches REDIR_SELF (it is `>` + `>`), so the operator-with-a-separate-target form is tested first.
     if (REDIR_NEEDS_TARGET.test(w)) { redirs.push(w); if (words[i + 1] !== undefined) redirs.push(words[i + 1]); i++; continue }
     if (REDIR_SELF.test(w)) { redirs.push(w); continue }
     out.push(w)
@@ -145,7 +151,7 @@ function stripRedirects(words) {
 
 /** @returns {{words: string[], argv: string[], redirs: string[]}[]} one entry per simple command, substitutions flattened in */
 export function parseCommands(src, depth = 0) {
-  if (depth > MAX_DEPTH) throw new ParseError('nesting too deep')
+  if (depth > MAX_DEPTH) throw new ParseError(`nesting deeper than ${MAX_DEPTH} ($( ), backticks, sh -c, eval)`)
   const n = src.length
   const cmds = []
   let words = []
@@ -309,7 +315,14 @@ export function parseCommands(src, depth = 0) {
         i = end
         continue
       }
-      if (c === '<' && src[i + 1] === '<' && src[i + 2] !== '<') {
+      if (c === '<' && src[i + 1] === '<' && src[i + 2] === '<') { // here-string: BEFORE heredocs, or `<<< "$(...)"` is read as a heredoc delimiter
+        if (src[i + 3] === '<') throw new ParseError('unknown operator "<<<<"')
+        endWord()
+        words.push('<<<')
+        i += 3
+        continue
+      }
+      if (c === '<' && src[i + 1] === '<') {
         endWord()
         i += 2
         let strip = false
@@ -331,15 +344,35 @@ export function parseCommands(src, depth = 0) {
         pending.push({ delim, strip, expand: !quoted })
         continue
       }
-      cur += c
-      inWord = true
-      i++
+      // A redirection operator ends the word before it (`x>f`, `done<f`, `cat<f`); `2>f` and `&>f` keep their fd / `&` prefix.
+      let prefix = ''
+      if (inWord && (/^\d+$/.test(cur) || cur === '&')) { prefix = cur; cur = ''; inWord = false } else endWord()
+      let op = c
+      let j = i + 1
+      if (c === '>') {
+        if (src[j] === '>') op += src[j++]
+        if (src[j] === '|' || src[j] === '&') op += src[j++]
+      } else if (src[j] === '&' || src[j] === '>') op += src[j++]
+      if (src[j] === '<' || src[j] === '>' || !REDIR_BASE_OK.has(op) || (prefix === '&' && op !== '>' && op !== '>>')) {
+        throw new ParseError(`unknown redirection operator "${prefix}${op}${src[j] === '<' || src[j] === '>' ? src[j] : ''}"`)
+      }
+      if (op.endsWith('&')) { // `>&2`, `2>&1`, `<&-`: a file descriptor, not a file
+        const fd = /^(?:\d+-?|-)/.exec(src.slice(j))
+        if (fd) { op += fd[0]; j += fd[0].length }
+      }
+      words.push(prefix + op)
+      i = j
       continue
     }
     if (c === '&') {
       if (src[i + 1] === '&') { endCmd(); i += 2; continue }
-      const prev = src[i - 1]
-      if (prev === '>' || prev === '<' || src[i + 1] === '>') { cur += c; inWord = true; i++; continue }
+      if (src[i + 1] === '>') { // `&>file`, `&>>file`: the `&` is the operator's prefix
+        if (inWord) endWord()
+        cur = '&'
+        inWord = true
+        i++
+        continue
+      }
       endCmd()
       i++
       continue
@@ -394,7 +427,7 @@ export function inspect(command) {
   const problems = []
 
   const walk = (str, depth) => {
-    if (depth > MAX_DEPTH) throw new ParseError('nesting too deep')
+    if (depth > MAX_DEPTH) throw new ParseError(`nesting deeper than ${MAX_DEPTH} ($( ), backticks, sh -c, eval)`)
     for (const c of parseCommands(str, depth)) {
       // Redirect targets are checked for EVERY simple command, compound-command closers (`done < .env`, `) < f`, `} < f`)
       // and wrappers (`sh -c '…' < .env`) included: handle() may return before it ever pushes this command (A77b H-5).
@@ -522,7 +555,7 @@ export function inspect(command) {
       cmds.push({ argv: a, words, base })
       return
     }
-    problems.push('wrapper nesting too deep')
+    problems.push('a chain of more than 64 wrappers (sudo env nohup ...) cannot be classified')
   }
 
   walk(String(command), 0)

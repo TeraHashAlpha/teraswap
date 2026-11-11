@@ -11,9 +11,10 @@
 // a second layer.
 
 import { readFileSync } from 'node:fs'
+import { posix } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { EXP, baseName, inspect } from './shell-parse.mjs'
-import { rawScan } from './raw-scan.mjs'
+import { rawScan, globMatchesAny } from './raw-scan.mjs'
 
 // git global options that take a separate value.
 export const GIT_VALUE_OPTS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--super-prefix', '--config-env', '--attr-source'])
@@ -101,6 +102,10 @@ function envPathReason(word, { nameOnly = false } = {}) {
     cands.push(x)
     const eq = x.indexOf('=')
     if (eq >= 0) cands.push(x.slice(eq + 1))
+    if (x.startsWith('@')) cands.push(x.slice(1)) // curl -d @.env
+    // an attached flag value: `base64 -i.env`, `grep -f.env`, `head -n1.env` (every split point inside the flag cluster)
+    const flag = /^-[A-Za-z0-9]+/.exec(x)
+    if (flag && !x.startsWith('--')) for (let k = 2; k <= flag[0].length; k++) cands.push(x.slice(k))
   }
   for (const c of cands) {
     const b = baseName(c)
@@ -126,7 +131,8 @@ const NAME_ONLY = new Set(['test', '[', '[[', 'ls'])
 // rules in settings.json; this covers a Bash word or redirect target.
 const PROTECTED_RE = /(?:^|[/=:])\.claude\/(?:settings[^/]*\.json|hooks(?:\/|$))/i
 const PROTECTED_DIR_NAMES = ['settings.json', 'settings.local.json', 'hooks']
-const WRITER_BASES = new Set(['tee', 'rm', 'mv', 'cp', 'truncate', 'chmod', 'chown', 'ln', 'install', 'dd', 'touch', 'unlink', 'shred', 'rsync', 'patch', 'sponge', 'ed', 'ex', 'vi', 'vim', 'nano', 'ditto'])
+const WRITER_BASES = new Set(['tee', 'rm', 'mv', 'cp', 'truncate', 'chmod', 'chown', 'ln', 'install', 'dd', 'touch', 'unlink', 'shred', 'rsync', 'patch', 'sponge', 'ed', 'ex', 'vi', 'vim', 'nano', 'ditto', 'curl', 'wget', 'tar', 'bsdtar', 'unzip', 'zip', 'gzip', 'gunzip', 'mkdir', 'cpio', 'pax'])
+const FIND_WRITE_PRIMARIES = new Set(['-delete', '-fprint', '-fprint0', '-fprintf', '-fls'])
 const GIT_TREE_WRITERS = new Set(['checkout', 'restore', 'rm', 'mv', 'apply', 'clean', 'reset', 'am', 'stash', 'switch', 'cherry-pick', 'revert', 'merge', 'rebase', 'pull'])
 
 function inPlaceFlag(argv) {
@@ -135,44 +141,54 @@ function inPlaceFlag(argv) {
 function canWrite(c) {
   const { base, argv } = c
   if (WRITER_BASES.has(base)) return true
+  if (base === 'find' && argv.some((t) => FIND_WRITE_PRIMARIES.has(t))) return true // `find .claude -delete`
   if ((base === 'sed' || base === 'gsed' || base === 'perl' || base === 'ruby') && inPlaceFlag(argv)) return true
   if (base === 'git') return GIT_TREE_WRITERS.has(gitParts(argv).sub)
   return false
 }
-function protectedWord(w, inClaudeDir, inHooksDir) {
-  for (const x of expandBraces(w.replace(/^\d*>{1,2}[|&]?/, ''))) {
-    if (PROTECTED_RE.test(x)) return true
-    // a glob on the directory segment: .claude/set*, .claude/h*, .claude/*, or the directory itself
-    const m = /(?:^|[/=:])\.claude(?:\/([^/]*))?\/?$/.exec(x)
-    if (m) {
-      if (m[1] === undefined || m[1] === '') return true // `.claude` itself: rm -rf .claude
-      if (/[*?[]/.test(m[1])) {
-        const re = new RegExp(`^${m[1].replace(/[.+^${}()|\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`)
-        if (PROTECTED_DIR_NAMES.some((n) => re.test(n))) return true
+/** Normalise a path word: `//`, `/./`, `a/../b`; a relative one is resolved against the (tracked) working directory. */
+function resolvePath(y, cwd) {
+  if (y === '') return y
+  const p = posix.normalize(y)
+  if (p.startsWith('/') || p.startsWith('~') || !cwd) return p
+  return posix.join(cwd, p)
+}
+function protectedWord(w, ctx) {
+  const { inClaudeDir, inHooksDir, cwd } = ctx
+  for (const x0 of expandBraces(w.replace(/^(?:\d+|&)?>{1,2}[|&]?/, ''))) {
+    for (const y of [x0, ...(x0.includes('=') ? [x0.slice(x0.indexOf('=') + 1)] : [])]) {
+      const x = resolvePath(y, cwd)
+      if (PROTECTED_RE.test(x)) return true
+      // a glob on the directory segment: .claude/set*, .claude/h*, .claude/*, or the directory itself
+      const m = /(?:^|[/=:])\.claude(?:\/([^/]*))?\/?$/.exec(x)
+      if (m) {
+        if (m[1] === undefined || m[1] === '') return true // `.claude` itself: rm -rf .claude
+        if (/[*?[]/.test(m[1])) {
+          const re = new RegExp(`^${m[1].replace(/[.+^${}()|\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`)
+          if (PROTECTED_DIR_NAMES.some((n) => re.test(n))) return true
+        }
       }
+      // a glob that can BE the `.claude` segment: .cl*, .c?aude, .{cl,x}aude/...
+      if (x.split('/').some((seg) => seg.startsWith('.') && /[*?[]/.test(seg) && globMatchesAny(seg, ['.claude']))) return true
+      if (inHooksDir && !x.includes('/') && x !== '') return true // `cd .claude/hooks && echo x > command-guard.mjs`
+      if (inClaudeDir && !x.includes('/') && (PROTECTED_DIR_NAMES.includes(x.toLowerCase()) || /^settings[^/]*\.json$/i.test(x))) return true
     }
-    if (inHooksDir && !x.includes('/') && x !== '') return true // `cd .claude/hooks && echo x > command-guard.mjs`
-    if (inClaudeDir && !x.includes('/') && (PROTECTED_DIR_NAMES.includes(x.toLowerCase()) || /^settings[^/]*\.json$/i.test(x))) return true
   }
   return false
 }
-/** Redirect targets that WRITE (> >> >| &> &>>), from the operator/target words of one simple command. */
+/** Redirect targets that WRITE (`>` `>>` `>|` `>&` `<>` `&>` `&>>`, optionally fd-prefixed): the word after each such operator. */
 function writeTargets(redirs) {
   const out = []
   for (let i = 0; i < redirs.length; i++) {
-    const w = redirs[i]
-    let m = /^[\d&]*>{1,2}\|?$/.exec(w)
-    if (m) { if (redirs[i + 1] !== undefined) out.push(redirs[++i]); continue }
-    m = /^[\d&]*>{1,2}\|?(?!&)(.+)$/.exec(w)
-    if (m && !/^&/.test(m[1])) out.push(m[1])
+    if (/^(?:\d+|&)?(?:>>?[|&]?|<>)$/.test(redirs[i]) && redirs[i + 1] !== undefined) out.push(redirs[++i])
   }
   return out
 }
 function selfProtectionReason(c, ctx) {
   const targets = c.redirOnly ? writeTargets(c.words) : []
-  for (const t of targets) if (protectedWord(t, ctx.inClaudeDir, ctx.inHooksDir)) return `a redirect writes ${t}: the harness (.claude/settings*.json, .claude/hooks/) is changed by the owner, not through Bash`
+  for (const t of targets) if (protectedWord(t, ctx)) return `a redirect writes ${t}: the harness (.claude/settings*.json, .claude/hooks/) is changed by the owner, not through Bash`
   if (!c.redirOnly && canWrite(c)) {
-    for (const w of c.words) if (protectedWord(w, ctx.inClaudeDir, ctx.inHooksDir)) return `${c.base} could write or delete ${w}: the harness (.claude/settings*.json, .claude/hooks/) is changed by the owner, not through Bash`
+    for (const w of c.words) if (protectedWord(w, ctx)) return `${c.base} could write or delete ${w}: the harness (.claude/settings*.json, .claude/hooks/) is changed by the owner, not through Bash`
   }
   return null
 }
@@ -330,7 +346,7 @@ function rsyncReason(argv) {
   return null
 }
 
-/** Reason to refuse one effective command, or null. @param {{inClaudeDir?: boolean, inHooksDir?: boolean}} [ctx] */
+/** Reason to refuse one effective command, or null. @param {{inClaudeDir?: boolean, inHooksDir?: boolean, cwd?: string|null}} [ctx] */
 export function commandReason(c, ctx = {}) {
   const { argv, base } = c
 
@@ -383,11 +399,21 @@ export function commandReason(c, ctx = {}) {
   }
 }
 
-/** @returns {string|null} a refusal reason, or null if the command may run. Throws on unparseable input. */
-export function decide(command) {
-  // Layer 0 (A77c H-8..H-10): a raw-text scan that does not parse, so a parser gap cannot hide a forbidden name.
-  const raw = rawScan(command)
-  if (raw) return raw
+/** The working directory after a `cd` / `pushd` (null = unknown: `cd`, `cd -`, `cd "$X"`). Relative until the hook cwd is known. */
+function nextCwd(prev, c) {
+  const target = c.argv.slice(1).find((t) => !t.startsWith('-') || t === '-')
+  if (target === undefined || target === '-' || target.includes(EXP)) return null
+  if (target.startsWith('/') || target.startsWith('~')) return posix.normalize(target)
+  return prev ? posix.join(prev, target) : posix.normalize(target)
+}
+
+/**
+ * Layer 1 only (the tokenizer + per-command rules); `decide` runs layer 0 first.
+ * @param {string} command
+ * @param {{cwd?: string}} [opts] cwd: the hook input's `cwd` (it follows Claude's `cd`); relative paths are resolved against it
+ * @returns {string|null} a refusal reason, or null if the command may run. Throws on unparseable input.
+ */
+export function decideParsed(command, { cwd } = {}) {
   // $HISTFILE names the history file without spelling it; the parser would turn it into an unknown expansion.
   if (/\$\{?!?HISTFILE\b/.test(command)) return '$HISTFILE is the shell-history file'
   const { cmds, problems } = inspect(command)
@@ -395,11 +421,21 @@ export function decide(command) {
   // `cd .claude && rm settings.json`: relative names count once the command line has moved into .claude
   const inClaudeDir = cmds.some((c) => ['cd', 'pushd'].includes(c.base) && c.words.some((w) => /(?:^|\/)\.claude(?:\/|$)/i.test(w)))
   const inHooksDir = cmds.some((c) => ['cd', 'pushd'].includes(c.base) && c.words.some((w) => /(?:^|\/)\.claude\/hooks(?:\/|$)/i.test(w)))
+  let dir = typeof cwd === 'string' && cwd !== '' ? posix.normalize(cwd) : null
   for (const c of cmds) {
-    const why = commandReason(c, { inClaudeDir, inHooksDir })
+    if (c.base === 'cd' || c.base === 'pushd') dir = nextCwd(dir, c)
+    const why = commandReason(c, { inClaudeDir, inHooksDir, cwd: dir })
     if (why) return why
   }
   return null
+}
+
+/** @returns {string|null} a refusal reason, or null if the command may run. Throws on unparseable input. */
+export function decide(command, opts = {}) {
+  // Layer 0 (A77c H-8..H-10): a raw-text scan that does not parse, so a parser gap cannot hide a forbidden name.
+  const raw = rawScan(command)
+  if (raw) return raw
+  return decideParsed(command, opts)
 }
 
 function main() {
@@ -407,7 +443,7 @@ function main() {
     const input = JSON.parse(readFileSync(0, 'utf8'))
     const command = input?.tool_input?.command
     if (typeof command !== 'string') throw new Error('no tool_input.command')
-    const why = decide(command)
+    const why = decide(command, { cwd: input?.cwd })
     if (why) {
       process.stderr.write(`command-guard: refused — ${why}. Report the manual step to the owner instead. See docs/Runbooks/agent-harness.md.\n`)
       process.exit(2)

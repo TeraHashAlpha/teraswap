@@ -125,7 +125,7 @@ function globRe(g) {
   }
   try { return new RegExp(`^${re}$`) } catch { return /^/ } // an unreadable glob counts as a match: fail closed
 }
-const globMatchesAny = (glob, names) => expandBraces(glob).some((g) => { const re = globRe(g); return names.some((n) => re.test(n)) })
+export const globMatchesAny = (glob, names) => expandBraces(glob).some((g) => { const re = globRe(g); return names.some((n) => re.test(n)) })
 
 const SECRET_DOT_NAMES = ['.claude', '.env', '.env.local', '.env.production', '.env.development', '.env.test', '.zsh_history', '.zhistory', '.bash_history', '.sh_history', '.history', '.histfile', '.python_history', '.node_repl_history', '.zsh_sessions']
 const CLAUDE_CHILDREN = ['settings.json', 'settings.local.json', 'hooks']
