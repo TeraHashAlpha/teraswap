@@ -4,6 +4,7 @@
 // `env gh pr create`, `gh api repos/x -ftitle=y`, `FOO=1 git push --force`) slip past them. This hook tokenises the
 // command (shell-parse.mjs) and decides on the parsed argv, then recurses into `sh -c`, `eval`, `xargs`, `npx X`...
 // Protocol (https://code.claude.com/docs/en/hooks): tool-call JSON on stdin; exit 2 + stderr = block.
+// Layer 0 (raw-scan.mjs) runs before any of this and does not parse; this file and the tokenizer are layer 1.
 // Fails CLOSED: any parse/IO error exits 2, and settings.json wraps the call in `|| exit 2` + `onFailure: "block"`
 // because the docs say any other exit code or a crash lets the tool call proceed.
 // Not a sandbox: see "What this cannot stop" in docs/Runbooks/agent-harness.md. The permissions.deny patterns stay as
@@ -12,6 +13,7 @@
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { EXP, baseName, inspect } from './shell-parse.mjs'
+import { rawScan } from './raw-scan.mjs'
 
 // git global options that take a separate value.
 export const GIT_VALUE_OPTS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--super-prefix', '--config-env', '--attr-source'])
@@ -383,6 +385,9 @@ export function commandReason(c, ctx = {}) {
 
 /** @returns {string|null} a refusal reason, or null if the command may run. Throws on unparseable input. */
 export function decide(command) {
+  // Layer 0 (A77c H-8..H-10): a raw-text scan that does not parse, so a parser gap cannot hide a forbidden name.
+  const raw = rawScan(command)
+  if (raw) return raw
   // $HISTFILE names the history file without spelling it; the parser would turn it into an unknown expansion.
   if (/\$\{?!?HISTFILE\b/.test(command)) return '$HISTFILE is the shell-history file'
   const { cmds, problems } = inspect(command)
