@@ -1,8 +1,8 @@
 # TeraSwap
 
-Multi-chain meta-aggregator — live on Ethereum Mainnet, Base, and Arbitrum One (see `docs/DEPLOYMENTS.md`); all pricing, gating, RPC, and router logic MUST be chain-aware — 8 liquidity sources (12 adapters registered; Odos, Balancer, OpenOcean, and Bebop disabled/permanently disabled — Odos: vendor shutdown 2026-07-30 [permanent]; Balancer: dead SOR endpoint, 0 production quotes since 2026-07-02; OpenOcean/Bebop: no vendor key access, disabled 2026-09-03 per INC-2026-09-03-001, written re-enable criteria apply), conditional orders (Limit/SL/TP/DCA), MEV protection via CoW Protocol, gasless approvals via Permit2. Smart contracts: TeraSwapFeeCollector + TeraSwapOrderExecutor v2 (Solidity 0.8.28, Foundry).
+Multi-chain meta-aggregator on Ethereum Mainnet (1), Base (8453) and Arbitrum One (42161) — contracts per chain in `docs/DEPLOYMENTS.md`, the only source for addresses. All pricing, gating, RPC and router logic MUST be chain-aware. 12 adapters are registered (`src/lib/adapters/index.ts:15-19`); 4 are in `DISABLED_SOURCES` (`src/lib/constants.ts:202-232`: Balancer — dead SOR endpoint; Odos — vendor shutdown 2026-07-30, permanent; OpenOcean and Bebop — no vendor key, INC-2026-09-03-001), leaving 8 liquidity sources live. Each disabled entry carries its own written re-enable criterion. Also: conditional orders through OrderExecutor (UI v2 shows Limit and SL/TP as "Soon" — `src/ui/v2/__tests__/parity-sweep.test.tsx:12-13`), CoW Protocol as an ordinary source (the "Force MEV Protection" toggle is retired — `src/ui/v2/swap/retire-force-mev.swap.test.tsx:3-7`), Permit2 approvals (`src/ui/v2/modals/permit2-sheet.test.tsx`). Contracts: TeraSwapFeeCollector + TeraSwapOrderExecutor (Solidity 0.8.28, Foundry — `contracts/foundry.toml:6`, `contracts/order-engine/foundry.toml:5`).
 
-**State:** Phase 1 complete. FeeCollector V2 minimumOutput (P68) is deployed and live on Ethereum Mainnet. TeraSwap now also runs on Base (FeeCollector + OrderExecutor V3 live) and Arbitrum One (FeeCollector live; OrderExecutor V3 deployed 2026-08-04 but not yet operational — no whitelisted executor, oracle floor unconfigured) — see `docs/DEPLOYMENTS.md`. Sprint packets have progressed through Sprint 48 (Arbitrum DCA prep, PR #323); current work ships as named `fix/*`/`feat/*`/`chore/*` branches rather than sequential sprint numbers (most recently merged: `chore/audit-overrides-2026-09-09` PR #485, `fix/dca-no-feed-fail-closed` PR #484). 3814 TS + 138 Foundry tests passing. 9 CI workflows (`ci`, `codeql`, `daily-health-report`, `e2e`, `gitleaks`, `keeper-tests`, `monitoring-watchdog`, `security-audit`, `token-catalog-refresh`).
+**State:** see "Current state" at the bottom — every number there was measured on the date it names.
 
 ---
 
@@ -26,6 +26,13 @@ Multi-chain meta-aggregator — live on Ethereum Mainnet, Base, and Arbitrum One
 - **Bash compatibility:** every `.sh` in this repo must run on macOS stock bash 3.2.57 — no `${var,,}` / `${var^^}`, no `declare -A`, no `mapfile` / `readarray`, no `globstar`. Lowercase via `tr '[:upper:]' '[:lower:]'`.
 - **Grok Build launch:** in this repo Grok is launched ONLY via `scripts/grok-dispatch.sh` or from a shell that sourced `scripts/grok-guard.sh`. A bare `grok` here has no credential guard. Their `--deny` flags (`Read(.env*)`, `Bash(security*)`, `Bash(git credential-*)`) do NOT protect `.env*` — measured (`docs/security/GROK-DENY-CANARY-2026-08-28.md`): Grok routes around a denied read by choosing a different command, because a `Bash(...)` deny rule matches the invoked command name, not its arguments, so `Bash(*.env*)` cannot match `cat .env.canary`. Only `--deny "Bash(*)"` actually refuses, and that blocks the whole shell — unusable for real work, so there is no usable middle. Treat those three flags as speed bumps and intent signals only, never as enforcement. What actually holds: (a) `--deny "Bash(*)"`, when acceptable to run unusable-for-real-work; (b) running in a git worktree that does not contain `.env*` at all — `scripts/grok-dispatch.sh` creates its worktree outside this repo (`${TS_WORKTREE_BASE:-$HOME/ts-worktrees}`, never under `.claude/worktrees/`, which is still inside the repo and reachable via `../../../`).
 - **Marketing:** all marketing content goes to `dex-aggregator 2.marketing/`, NEVER in this repo.
+- **Git references:** outside sprint packets, cite a change by its PR number (`PR #675`) and nothing else — branch names get recreated and commit hashes change under squash/rebase.
+- **PRs:** the owner opens and merges every PR; an agent never opens, merges, approves or closes one. A PR that needs an Auditor pass is opened as Draft — say "Auditor required" in the report.
+- **Branches:** never force-push a branch that has an open PR (it rewrites history under review); any other force-push needs the owner's explicit word (rule 15).
+- **Alerts:** never dismiss, close or suppress a security alert (CodeQL, Dependabot, gitleaks). Fix it, or report it to the owner with the evidence.
+- **CI:** NO CI polling — no `gh run watch`, no sleep-and-check loops. Push, report the compare link, stop; the owner reads CI.
+- **Secrets:** never print, echo or log a secret value. Check an env var by NAME (`[ -n "${NAME:-}" ]`) and report set/unset.
+- **Owner-terminal only:** `ssh` to any host, `pm2`, and `cast send` (any on-chain write) run only in the owner's terminal. The agent prepares the exact command and stops.
 
 ---
 
@@ -33,7 +40,7 @@ Multi-chain meta-aggregator — live on Ethereum Mainnet, Base, and Arbitrum One
 
 When running as a Managed Agent, these stores are mounted automatically:
 
-- `/mnt/memory/config` → **dex-config** (RO) — 11 sources, contracts deployed, rate limits, architecture
+- `/mnt/memory/config` → **dex-config** (RO) — sources, contracts deployed, rate limits, architecture
 - `/mnt/memory/security` → **security-knowledge** (RW) — audit findings, incidents, ADRs, remediations, threat model
 - `/mnt/memory/ops` → **ops-state** (RW) — health stack H1–H6, kill-switch, sprint progress, deploys
 - `/mnt/memory/arch` → **architect-brain** (RW) — design decisions, roadmap, conventions, prompt templates
@@ -46,23 +53,29 @@ Consult security-knowledge **before** approving any change to contracts or fund 
 ## Key references
 
 - [`ARCHITECT-INDEX.md`](ARCHITECT-INDEX.md) — master index of all architectural artifacts
-- [`docs/ADR/`](docs/ADR/) — architectural decision records (ADR-001 to ADR-005+)
-- [`docs/Prompts/`](docs/Prompts/) — sprint packets (Prompts 21–68+)
-- [`Audits/`](Audits/) — audit reports, external analysis, incident reports
-- [`docs/Runbooks/`](docs/Runbooks/) — operational procedures (KV troubleshooting, Worker deploy, rate limiter, signed commits)
+- [`docs/DEPLOYMENTS.md`](docs/DEPLOYMENTS.md) — contracts, wallets and keeper signers per chain (source of truth for addresses)
+- [`docs/ADR/`](docs/ADR/) — architectural decision records, ADR-001 to ADR-026 (status is in each file's header)
+- [`docs/Prompts/`](docs/Prompts/) — sprint packets (`SPRINT-*.md`, highest numbered: `SPRINT-48-ARBITRUM-DCA-PREP.md`) and prompt packets
+- [`docs/feedback/`](docs/feedback/) — one feedback file per branch (see the convention below)
+- [`Audits/`](Audits/) — audit reports, external analysis, incident reports (`Audits/Incidents/`)
+- [`docs/Runbooks/`](docs/Runbooks/) — operational procedures (executor operations, deploys, KV troubleshooting, monitoring alerts, signed commits, ...)
 - [`docs/security/`](docs/security/) — SECURITY.md, AUDIT-TOTAL.md, PREAUDIT-REMEDIATION-REPORT.md
-- [`ROADMAP.md`](ROADMAP.md) — product roadmap (Phase 1 ✅, Phase 2–4 planned)
+- [`ROADMAP.md`](ROADMAP.md) — product roadmap
 - [`TERASWAP-EXECUTION-PLAN.md`](TERASWAP-EXECUTION-PLAN.md) — full execution plan with RICE table
-
+- Scoped agent context, read when you work in that tree: [`src/ui/v2/CLAUDE.md`](src/ui/v2/CLAUDE.md), [`src/app/api/CLAUDE.md`](src/app/api/CLAUDE.md), [`contracts/order-engine/CLAUDE.md`](contracts/order-engine/CLAUDE.md)
 ---
 
 ## Stack
 
-- **Frontend:** Next.js 16, React 18, TypeScript 5.5, Tailwind 3.4, Wagmi 2.19, Viem 2.47, RainbowKit 2.1, Zustand 4.5
-- **Backend:** Next.js API Routes on Vercel (serverless), Upstash Redis (@upstash/redis) for rate limiting + state
-- **Blockchain:** Solidity 0.8.28, Foundry, OrderExecutor v2 + FeeCollector on Ethereum Mainnet, Chainlink oracles (29 feeds)
-- **Monitoring:** Cloudflare Worker cron → POST tick, GitHub Actions watchdog, Telegram alerts (@teraswap_monitor_bot), Sentry
-- **Infra:** Vercel (deploy), Supabase (PostgreSQL + RLS + real-time), Cloudflare (DNS + Worker), GitHub Actions CI (8 jobs)
+Versions from `package.json:42-76` (exact pins).
+
+- **Frontend:** Next.js 16.4.3 (App Router), React 18.3.1, TypeScript ~5.9.3, Tailwind 3.4.19, wagmi 2.19.5, viem 2.57.3, RainbowKit 2.2.10, Zustand 4.5.7, TanStack Query 5.104.5; tests on vitest 4.1.12
+- **Backend:** Next.js API routes on Vercel (45 `route.ts` under `src/app/api`), Upstash Redis (`@upstash/redis` 1.39.0) for rate limiting + state, Supabase (`@supabase/supabase-js` 2.118.0; schema in `supabase/`)
+- **Blockchain:** Solidity 0.8.28 / Foundry (`contracts/`, `contracts/order-engine/`); Chainlink feed registry per chain in `src/lib/chains/chainlink-feeds.ts`; contracts per chain in the state section below
+- **Keeper:** self-hosted Node process, one instance per chain (`contracts/order-engine/executor/executor.js:40-44`), tests via `node --test`
+- **Browser → server:** on-chain reads go through `/api/rpc` (Ethereum, Base, Arbitrum — `src/app/api/rpc/route.ts:20-27`), CoW Protocol through `/api/cow/*` (`src/lib/kv-rate-limiter.ts:47-48`); the CSP `connect-src` is `'self'` plus wallet hosts only (`csp-policy.js:12-13`) and the CI job `third-party-hosts` fails any other host (`.github/workflows/e2e.yml:93-99`)
+- **Monitoring:** Cloudflare Worker scheduler (ADR-003), GitHub Actions watchdog (`monitoring-watchdog.yml`), Telegram alerts (`@teraswap_monitor_bot` — `docs/Runbooks/MONITORING-ALERTS.md:17`), Sentry (`@sentry/nextjs`)
+- **Infra:** Vercel (`vercel.json`), Supabase, Cloudflare (DNS + Worker, `workers/`), GitHub Actions CI — Node 22 for the app jobs, Node 20 in `keeper-tests.yml`
 
 ---
 
@@ -133,28 +146,65 @@ preserved for historical reference; do not append to it or resurrect it at the r
 
 ---
 
-## Current state (updated 2026-09-09)
+## Current state (measured 2026-11-11 at origin/main, PR #675)
 
-- **Sprint 9B:** DONE — P66 (contract), P67 (frontend), P68 (mainnet deploy) all shipped; FeeCollector V2
-  minimumOutput live on Ethereum Mainnet (`0x47f2…7459`, verified on-chain — `docs/DEPLOYMENTS.md`).
-- **Multi-chain rollout since 9B:** Base — FeeCollector + OrderExecutor V3 live. Arbitrum One — FeeCollector live
-  (prod flip 2026-07-20); OrderExecutor V3 deployed 2026-08-04 but **not operational** (no whitelisted executor,
-  oracle floor unconfigured — `docs/DEPLOYMENTS.md`). Sprint packets progressed through Sprint 48 (Arbitrum DCA
-  prep, PR #323, shipped DARK); current work ships as named `fix/*`/`feat/*`/`chore/*` branches rather than
-  sequential sprint numbers.
-- **Token catalog (2026-09-12):** Arbitrum's search catalog is now generated by the SAME shared
-  `tokens:sync` pipeline as Base/mainnet (`scripts/token-catalog/build.ts` — uniswap / coingecko /
-  1inch / trustwallet / arbitrumBridge[Arbitrum-only canonical bridged list] + DefiLlama, >=2-source
-  agreement, catalog-guard PASS) — 227 tokens (up from the 5-token hand-curated
-  `ARBITRUM-ADDRESS-MANIFEST.json` manifest), 0 fatal/0 warn guard findings. The 5 manifest launch
-  tokens are now `CORE_TOKENS[42161]` (always present, still guard-validated at the same addresses);
-  the old manifest pipeline (`arbitrum-catalog.ts`/`.generated.ts`/`generate-arbitrum-catalog.mjs`) is
-  kept, marked superseded, not deleted. Native USDC and bridged USDC.e ship as two distinct,
-  list-tagged entries (no silent merge). Weekly cron (`token-catalog-refresh.yml`) now covers 42161.
-- **Open findings:** every internal audit pass recorded in `docs/security/AUDIT-TOTAL.md` through its last entry
-  (2026-07-29) is 0C/0H. Not re-verified for anything logged after that date.
-- **Known tech debt:** SC-02 (DCA dust), FE-01 (localStorage → Web Crypto V2) — status not re-verified this pass.
-  npm audit (measured 2026-09-09): 0 Critical, 0 High, 25 Moderate.
-- **Test/CI reality (2026-09-09):** 3814 TS tests (265 files) + 138 Foundry tests passing. 9 CI workflows: `ci`,
-  `codeql`, `daily-health-report`, `e2e`, `gitleaks`, `keeper-tests`, `monitoring-watchdog`, `security-audit`,
-  `token-catalog-refresh`.
+Each line names what proves it. Re-measure before relying on a number; a line this file cannot prove is not here.
+The block below is generated from the repo and checked in CI (`node scripts/gen-claude-state.mjs --check`, `lint` job); the bullets after
+it are hand-measured on the date above.
+
+<!-- state:begin -->
+<!-- Generated by scripts/gen-claude-state.mjs from repo content only (no date, no sha). Do not edit by hand:
+     node scripts/gen-claude-state.mjs --write && node scripts/check-agents-parity.mjs --write -->
+
+**Contracts** — copied from the "Contracts" table of `docs/DEPLOYMENTS.md`. One address can be a different contract on another chain:
+always qualify by chain. Operational status and the checks behind each row are in that file's "Verified facts" column.
+
+| Role | Chain | Address |
+|------|-------|---------|
+| FeeCollector V2 (instant swaps) | Ethereum Mainnet (1) | `0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459` |
+| FeeCollector (instant swaps) | Base (8453) | `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130` |
+| FeeCollector V1 (frozen) | Ethereum Mainnet (1) | `0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD` |
+| OrderExecutor (conditional orders) | Ethereum Mainnet (1) | `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130` |
+| OrderExecutor (conditional orders) | Base (8453) | `0x135B339902Ea4E0fB4CF059961dc8856bA1D2598` |
+| OrderExecutor V3 (conditional orders, oracle floor) | Base (8453) | `0x686b4f812291F4De238E59ED00BA6dD6129e60a0` |
+| FeeCollector (instant swaps) | Arbitrum One (42161) | `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130` |
+| OrderExecutor V3 (conditional orders, oracle floor) | Arbitrum One (42161) | `0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459` |
+| OrderExecutor (testnet) | Sepolia (11155111) | `0xeFC31ADb…f130` + `0xa298e6ed9CF510b708a1F16c9729Bd69c6ee00f2` |
+
+**Workflows** (10, `.github/workflows/`): CI (`ci.yml`), CodeQL (`codeql.yml`), Daily health report (`daily-health-report.yml`), Dependabot auto-merge (`dependabot-auto-merge.yml`), E2E (real-render) (`e2e.yml`), Gitleaks (`gitleaks.yml`), Keeper Tests (`keeper-tests.yml`), Monitoring Watchdog (`monitoring-watchdog.yml`), Security Audit (`security-audit.yml`), Token catalog refresh (`token-catalog-refresh.yml`)
+
+**ADRs** (`docs/ADR/`): 26 files, ADR-001 to ADR-026; latest `ADR-026-infra-failures-dont-burn-orders`, Status: Proposed
+
+**Test files:** vitest 464 (the `include` globs of `vitest.config.ts`) · keeper node:test 52 · Foundry 3
+<!-- state:end -->
+
+- **Chains:** Ethereum Mainnet (1), Base (8453), Arbitrum One (42161), plus a Sepolia testnet row — `docs/DEPLOYMENTS.md`, whose per-row
+  "Verified facts" say whether each deployed contract is operational and when that was checked (the file's own header says it was
+  verified on-chain 2026-06-13, with later rows dated individually). Contracts per chain: the generated block above.
+- **UI v2:** a parallel tree (`src/ui/v2/`, `src/app/v2/`) behind one server-side switch in `src/proxy.ts` — `UI_V2_ENABLED=true`, or a
+  signed `ts_ui` cookie (ADR-025, Status: Proposed). v1 never imports v2 (`src/ui/v2/isolation.test.ts`). Content parity v1 ⊆ v2 is
+  gated by `src/ui/v2/__tests__/parity-sweep.test.tsx`. Scoped rules: `src/ui/v2/CLAUDE.md`.
+- **Visitor privacy:** browser RPC reads go through `/api/rpc` (per-chain read-only method allow-list, `src/app/api/rpc/route.ts:24-28`),
+  CoW through `/api/cow/*`; rate-limit buckets use an HMAC of the client IP, never the address (`src/lib/client-ip-key.ts:1-8`); the CSP
+  `connect-src` is `'self'` plus wallet hosts (`csp-policy.js:12`); CI job `third-party-hosts` records every cross-origin request on
+  v1 and v2 for all three chains and fails on any host outside its allow-list (`.github/workflows/e2e.yml:93-99`).
+- **Keeper (`contracts/order-engine/executor/`):** ADR-026 (Proposed): a miss caused by our infrastructure does not count against a
+  user's order — only `order` misses advance the 8-miss ladder (`retry-policy.js:40-57`, ADR-026 Decision 2); ADR-024 (Accepted): DCA floor price quorum,
+  skip the cycle, never the order; per-chain gas tiers (`gas-tier.js:1-17`); one instance per chain, verified against the chain at
+  boot (`executor.js:46-60`). Scoped rules: `contracts/order-engine/CLAUDE.md`.
+- **Supply chain:** the CI `audit` job runs `scripts/audit-gate.mjs` (`ci.yml:73-86`). `audit-allowlist.json` holds 6 entries; every
+  entry carries `expires`, and an expired or undated entry blocks (`audit-allowlist.json` `$comment`; `scripts/audit-gate-lib.mjs:5-9`).
+  Earliest expiry: 2026-11-22.
+- **Force-MEV retired (owner decision 2026-11-06):** the toggle, its notice and the "Use Gasless Route" CTA are gone from v1 and v2; CoW
+  stays an ordinary, ranked source. The test header records why: CoW's free quote API has answered 429 to our servers since 2026-10-29
+  (`src/ui/v2/swap/retire-force-mev.swap.test.tsx:3-7`).
+- **Token catalog:** one shared pipeline, `npm run tokens:sync` (`scripts/token-catalog/build.ts`), writes
+  `src/config/generated/token-catalog.{1,8453,42161}.json` (994 / 450 / 376 entries); `token-catalog-refresh.yml` runs it Mondays 06:00 UTC.
+  `src/lib/chains/arbitrum-catalog*.ts` is the superseded manifest pipeline, kept in place.
+- **CI:** `ci.yml` job `full-suite` runs the whole vitest suite with no file list (`ci.yml:442-470`); the per-file guard jobs are additive.
+  ADR-025 and ADR-026 are Proposed, ADR-013 and ADR-024 Accepted (their `Status` lines).
+- **Tests (real runs, Node 25.6.1 on the owner's Mac, 2026-11-11):** `CI=true npx vitest run` → 8249 tests in 463 files, 0 failed;
+  keeper `node --test` in `contracts/order-engine/executor` → 1240 tests, 0 failed; `forge test` as CI runs it (`ci.yml:520-527`) → 119
+  (order-engine) + 19 (FeeCollector) = 138, 0 failed. CI runs the keeper suite on Node 22 (`ci.yml:487-498`) and Node 20 (`keeper-tests.yml:43`).
+- **Open findings:** `docs/security/AUDIT-TOTAL.md` (1606 lines) has no entry dated after 2026-10-11 (`AUDIT-TOTAL.md:1589`). Read it, and the
+  latest `docs/Prompts/` packet, before any fund-flow change (Do NOT 2 and 5); this file does not claim a current open-finding count.

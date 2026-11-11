@@ -46,6 +46,8 @@ jobs:
         run: npm run lint
       - name: AGENTS.md parity guard
         run: npm run check:agents-parity
+      - name: CLAUDE.md state-block guard
+        run: node scripts/gen-claude-state.mjs --check
       - name: Bash 3.2 compatibility guard
         run: npm run check:bash3-compat
       - name: Status-palette CVD contrast guard
