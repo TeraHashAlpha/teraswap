@@ -8,12 +8,19 @@
 // commit message) is not a command and is allowed.
 // Protocol (https://code.claude.com/docs/en/hooks): JSON on stdin; exit 2 + stderr = block. Fails CLOSED (settings.json
 // adds `|| exit 2` + onFailure block: any other exit code or a crash would let the call proceed).
+// A77d H-11: where a git command runs matters. `checkout --detach`, `merge` (any form but --abort/--quit) and
+// `worktree remove --force` move HEAD, the index or another worktree of the checkout they run in, so they are refused
+// when the effective directory (the hook's `cwd`, a leading `cd DIR &&`, `git -C DIR`) is the MAIN checkout (its `.git`
+// is a directory) or cannot be determined; in a linked worktree (`.git` is a file) they stay allowed. `git fetch`
+// updating remote-tracking refs and tags is by design (owner ruling). Read-only agents work in a linked worktree.
 // Not a sandbox: Bash redirects (`echo x > f`), `sed -i`, scripts and interpreters can still write — those agents have
 // no Edit/Write tools and the rest is prose. See "What this cannot stop" in docs/Runbooks/agent-harness.md.
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join, posix } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { inspect } from './shell-parse.mjs'
+import { EXP, inspect } from './shell-parse.mjs'
 import { ghAllowReason } from './command-guard.mjs'
 
 export const READONLY_AGENT_TYPES = new Set(['recon', 'auditor'])
@@ -52,14 +59,81 @@ function onlyFlags(args, flags, valued, { positionals = 'none' } = {}) {
   return null
 }
 
-/** Refusal reason for one effective git command, or null. */
-function gitReason(c) {
+
+// ---------------------------------------------------------------------------------------------------------------
+// Where does the command run? (A77d H-11)
+
+/** 'main' (a `.git` DIRECTORY above it), 'linked' (a `.git` FILE above it) or 'unknown' (relative path, no `.git`). */
+export function checkoutKind(dir) {
+  if (typeof dir !== 'string' || !dir.startsWith('/')) return 'unknown'
+  let base = dir
+  try { base = realpathSync(dir) } catch { /* a directory that does not exist yet: judge the string */ }
+  for (let cur = base; ; cur = dirname(cur)) {
+    try {
+      const st = statSync(join(cur, '.git'))
+      return st.isDirectory() ? 'main' : st.isFile() ? 'linked' : 'unknown'
+    } catch { /* no `.git` here: keep climbing */ }
+    if (cur === '/' || cur === dirname(cur)) return 'unknown'
+  }
+}
+
+/** `dir` moved by one `cd`/`-C` argument; null when it cannot be known (variable, no base for a relative path). */
+function moveDir(dir, target) {
+  if (typeof target !== 'string' || target === '' || target.includes(EXP)) return null
+  if (target === '~' || target.startsWith('~/')) return posix.normalize(join(homedir(), target.slice(1)))
+  if (target.startsWith('~')) return null
+  if (target.startsWith('/')) return posix.normalize(target)
+  return dir ? posix.normalize(posix.join(dir, target)) : null
+}
+
+const CD_WORD = String.raw`'[^']*'|"[^"$` + '`' + String.raw`\\]*"|[^\s;&|<>()$` + '`' + String.raw`\\'"]+`
+const CD_PREFIX = new RegExp(String.raw`^\s*(?:cd|pushd)\s+(?:-[LP]\s+)*(?:--\s+)?(${CD_WORD})\s*&&\s*`)
+
+/**
+ * The directory the commands of `command` start in: the hook `cwd` moved by each LEADING `cd DIR &&` (only `&&`: after
+ * `cd X; …` a failed cd leaves the shell where it was). Any other `cd`/`pushd`/`popd` (a subshell, `|| cd`, inside
+ * `sh -c`), `env -C`/`sudo -D`/`--chdir`, `GIT_DIR`/`GIT_WORK_TREE` makes it unknown (null).
+ */
+export function startDir(command, cmds, cwd) {
+  let dir = typeof cwd === 'string' && cwd.startsWith('/') ? posix.normalize(cwd) : null
+  let rest = String(command)
+  let consumed = 0
+  for (;;) {
+    const m = CD_PREFIX.exec(rest)
+    if (!m) break
+    dir = moveDir(dir, m[1].replace(/^(['"])(.*)\1$/s, '$2'))
+    rest = rest.slice(m[0].length)
+    consumed++
+  }
+  const cds = cmds.filter((c) => ['cd', 'pushd', 'popd'].includes(c.base)).length
+  if (cds !== consumed) return null
+  if (/(?:^|[\s;&|(])(?:g?env|sudo|doas)\b[^;&|\n]*\s(?:-C|-D|--chdir)(?:[\s=]|$)/.test(command)) return null
+  if (/\bGIT_(?:DIR|WORK_TREE)\b/i.test(command)) return null
+  return dir
+}
+
+/** The three forms that change the checkout they run in; null if allowed in `dir`, else the reason. */
+function checkoutScopedReason(what, c, dir, cDirs, usesGitDirOpts) {
+  if (usesGitDirOpts) return `git ${what} with --git-dir/--work-tree: the checkout it changes cannot be determined`
+  let eff = dir
+  for (const t of cDirs) eff = moveDir(eff, t)
+  if (eff === null) return `git ${what}: the directory it runs in cannot be determined (a variable, a cd other than a leading \`cd DIR &&\`, env -C): use \`git -C <linked worktree>\``
+  const kind = checkoutKind(eff)
+  if (kind === 'linked') return null
+  return `git ${what} in ${kind === 'main' ? 'the MAIN checkout' : 'a directory that is not a linked worktree'} (${eff}) changes its HEAD, index or worktrees: read-only agents work in a linked worktree (\`git worktree add --detach <path> <commit>\`, then \`git -C <path> …\`)`
+}
+
+/** Refusal reason for one effective git command, or null. @param {string|null} dir the directory the command starts in */
+function gitReason(c, dir) {
   const { argv } = c
   let j = 1
+  const cDirs = []
+  let usesGitDirOpts = false
   for (; j < argv.length && argv[j].startsWith('-'); j++) {
     const t = argv[j]
-    if (GIT_GLOBAL_OK.has(t) || /^--(git-dir|work-tree)=/.test(t)) continue
-    if (GIT_GLOBAL_VALUED.has(t)) { j++; continue }
+    if (/^--(git-dir|work-tree)=/.test(t)) { usesGitDirOpts = true; continue }
+    if (GIT_GLOBAL_OK.has(t)) continue
+    if (GIT_GLOBAL_VALUED.has(t)) { if (t === '-C') cDirs.push(argv[j + 1]); else usesGitDirOpts = true; j++; continue }
     return `git ${t} is not a permitted global option for a read-only agent (-c / --exec-path / --config-env can run commands)`
   }
   const sub = argv[j]
@@ -102,7 +176,11 @@ function gitReason(c) {
     case 'worktree': {
       const action = args[0]
       if (action === 'list') return args.slice(1).every((t) => ['--porcelain', '-v', '--verbose', '-z'].includes(t)) ? null : no('worktree list with that flag')
-      if (action === 'remove') return args.slice(1).every((t) => t === '-f' || t === '--force' || !t.startsWith('-')) && args.length >= 2 ? null : no('worktree remove with that flag')
+      if (action === 'remove') {
+        if (!(args.slice(1).every((t) => t === '-f' || t === '--force' || !t.startsWith('-')) && args.length >= 2)) return no('worktree remove with that flag')
+        // A77d H-11: a forced removal run from the main checkout can drop any worktree, locked or dirty ones included
+        return args.some((t) => t === '-f' || t === '--force') ? checkoutScopedReason('worktree remove --force', c, dir, cDirs, usesGitDirOpts) : null
+      }
       if (action === 'add') {
         const bad = onlyFlags(args.slice(1), WORKTREE_ADD_FLAGS, new Set(), { positionals: 'any' })
         if (bad) return no(`worktree add (${bad}; -b/-B would create a branch)`)
@@ -114,14 +192,16 @@ function gitReason(c) {
     case 'checkout': {
       const flags = args.filter((t) => t.startsWith('-'))
       const pos = args.filter((t) => !t.startsWith('-'))
-      return args.includes('--detach') && flags.every((t) => t === '--detach' || t === '-q') && pos.length <= 1 && !pos.includes('.') ? null : no('anything but `checkout --detach [<commit>]`')
+      if (!(args.includes('--detach') && flags.every((t) => t === '--detach' || t === '-q') && pos.length <= 1 && !pos.includes('.'))) return no('anything but `checkout --detach [<commit>]`')
+      return checkoutScopedReason('checkout --detach', c, dir, cDirs, usesGitDirOpts) // A77d H-11: it detaches the HEAD of the checkout it runs in
     }
     case 'merge': {
       if (args.length === 1 && (args[0] === '--abort' || args[0] === '--quit')) return null
       const bad = onlyFlags(args, MERGE_FLAGS, new Set(), { positionals: 'any' })
       if (bad) return no(bad)
       if (!args.includes('--no-commit')) return no('`merge` without --no-commit (creates a commit)')
-      return args.includes('--no-ff') ? null : no('`merge --no-commit` without --no-ff (a fast-forward moves the checked-out branch)')
+      if (!args.includes('--no-ff')) return no('`merge --no-commit` without --no-ff (a fast-forward moves the checked-out branch)')
+      return checkoutScopedReason('merge', c, dir, cDirs, usesGitDirOpts) // A77d H-11: it changes the index and worktree of the checkout it runs in
     }
     default: return no(`\`${sub}\``)
   }
@@ -131,12 +211,17 @@ function ghReason(c) {
   return ghAllowReason(c.argv, { readonly: true })
 }
 
-/** @returns {string|null} a refusal reason, or null if a read-only agent may run it. Throws on unparseable input. */
-export function decide(command) {
+/**
+ * @param {string} command
+ * @param {{cwd?: string}} [opts] cwd: the hook input's `cwd`. Without one, checkout/merge/worktree-remove-force are refused (fail closed).
+ * @returns {string|null} a refusal reason, or null if a read-only agent may run it. Throws on unparseable input.
+ */
+export function decide(command, { cwd } = {}) {
   const { cmds, problems } = inspect(command)
   if (problems.length > 0) return problems[0]
+  const dir = startDir(command, cmds, cwd)
   for (const c of cmds) {
-    const why = c.base === 'git' ? gitReason(c) : c.base === 'gh' ? ghReason(c) : null
+    const why = c.base === 'git' ? gitReason(c, dir) : c.base === 'gh' ? ghReason(c) : null
     if (why) return why
   }
   return null
@@ -155,7 +240,7 @@ function main() {
     const command = input?.tool_input?.command
     if (typeof command !== 'string') throw new Error('no tool_input.command')
     if (!isReadOnlyAgent(input.agent_type)) return
-    const why = decide(command)
+    const why = decide(command, { cwd: input.cwd ?? process.env.CLAUDE_PROJECT_DIR })
     if (why) {
       process.stderr.write(`readonly-guard: refused — ${why}. The ${input.agent_type} agent reports; it never commits, pushes or writes to GitHub.\n`)
       process.exit(2)

@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterAll } from 'vitest'
 import { spawnSync } from 'node:child_process'
-import { readFileSync, readdirSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { decide as guardDecide, decideParsed, castAllowReason } from '../.claude/hooks/command-guard.mjs'
@@ -10,6 +11,17 @@ import { rawScan, normalise, loneCommitRemainder, isPureReader, LAYER0_RULES } f
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const HOOK = path.join(ROOT, '.claude', 'hooks', 'readonly-guard.mjs')
 const AGENTS = path.join(ROOT, '.claude', 'agents')
+
+// Two real directories for the read-only guard's "where does it run" rule (A77d H-11): a MAIN checkout (`.git` is a
+// directory) and a LINKED worktree (`.git` is a file). Hermetic: the answer must not depend on which checkout runs the suite.
+const FIXTURE = realpathSync(mkdtempSync(path.join(tmpdir(), 'ro-guard-')))
+const MAIN = path.join(FIXTURE, 'main')
+const WT = path.join(FIXTURE, 'wt')
+mkdirSync(path.join(MAIN, '.git'), { recursive: true })
+mkdirSync(path.join(MAIN, 'src'))
+mkdirSync(path.join(WT, 'src'), { recursive: true })
+writeFileSync(path.join(WT, '.git'), `gitdir: ${MAIN}/.git/worktrees/wt\n`)
+afterAll(() => rmSync(FIXTURE, { recursive: true, force: true }))
 
 // Read-only agents (recon, auditor): everything the settings.json hook keyed on agent_type must refuse / allow.
 const RO_REFUSED = [
@@ -41,13 +53,97 @@ const RO_ALLOWED = [
   'grep -rn "git push" docs', "grep -rn 'git push --force' docs", 'rg "gh pr merge" docs', 'git log --grep="git commit"', 'echo "git push"', 'echo "do not git commit here" | cat', 'git log --oneline | grep "git push"', 'ls -la', 'cat package.json',
 ]
 
-const { decide: roDecide, isReadOnlyAgent } = await import('../.claude/hooks/readonly-guard.mjs')
+const { decide: roDecide, isReadOnlyAgent, checkoutKind, startDir } = await import('../.claude/hooks/readonly-guard.mjs')
 
 describe('readonly-guard decide() — refused', () => {
-  for (const c of RO_REFUSED) it(`refuses: ${JSON.stringify(c)}`, () => expect(roDecide(c), c).toEqual(expect.any(String)))
+  for (const c of RO_REFUSED) it(`refuses: ${JSON.stringify(c)}`, () => expect(roDecide(c, { cwd: WT }), c).toEqual(expect.any(String)))
 })
 describe('readonly-guard decide() — allowed (a quoted "git push" is not a push)', () => {
-  for (const c of RO_ALLOWED) it(`allows: ${JSON.stringify(c)}`, () => expect(roDecide(c), c).toBeNull())
+  for (const c of RO_ALLOWED) it(`allows: ${JSON.stringify(c)}`, () => expect(roDecide(c, { cwd: WT }), c).toBeNull())
+})
+
+// A77d H-11: `checkout --detach`, `merge` and `worktree remove --force` change the checkout they run in. hookExit() is
+// defined further down (function declaration, hoisted); every case runs through the decision AND the wired hook.
+const H11_FORMS = ['git checkout --detach origin/main', 'git merge --no-commit --no-ff origin/main', 'git worktree remove --force /tmp/ro-guard-x']
+const inDir = (c, dir) => c.replace(/^git /, `git -C ${dir} `)
+describe('A77d H-11 — read-only git respects where it runs', () => {
+  for (const c of H11_FORMS) {
+    describe(c, () => {
+      it('refused with the hook cwd = the main checkout (and a subdirectory of it)', () => {
+        for (const cwd of [MAIN, path.join(MAIN, 'src')]) {
+          expect(roDecide(c, { cwd }), `${cwd}: ${c}`).toMatch(/MAIN checkout/)
+          for (const agent of ['recon', 'auditor']) expect(hookExit(c, agent, cwd), `${agent} ${cwd}`).toBe(2)
+        }
+      })
+      it('refused with `cd MAIN &&` in front, from a linked worktree', () => {
+        expect(roDecide(`cd ${MAIN} && ${c}`, { cwd: WT }), c).toMatch(/MAIN checkout/)
+        expect(hookExit(`cd ${MAIN} && ${c}`, 'recon', WT)).toBe(2)
+      })
+      it('refused with `git -C MAIN`, from a linked worktree', () => {
+        expect(roDecide(inDir(c, MAIN), { cwd: WT }), c).toMatch(/MAIN checkout/)
+        expect(hookExit(inDir(c, MAIN), 'auditor', WT)).toBe(2)
+      })
+      it('allowed with the hook cwd = a linked worktree (and a subdirectory of it)', () => {
+        for (const cwd of [WT, path.join(WT, 'src')]) {
+          expect(roDecide(c, { cwd }), `${cwd}: ${c}`).toBeNull()
+          for (const agent of ['recon', 'auditor']) expect(hookExit(c, agent, cwd), `${agent} ${cwd}`).toBe(0)
+        }
+      })
+      it('allowed with `cd WORKTREE &&` and with `git -C WORKTREE`, even when the hook cwd is the main checkout', () => {
+        expect(roDecide(`cd ${WT} && ${c}`, { cwd: MAIN }), c).toBeNull()
+        expect(roDecide(inDir(c, WT), { cwd: MAIN }), c).toBeNull()
+        expect(hookExit(`cd ${WT} && ${c}`, 'recon', MAIN)).toBe(0)
+        expect(hookExit(inDir(c, WT), 'auditor', MAIN)).toBe(0)
+      })
+      it('the implementer and the main session are not read-only: allowed in the main checkout', () => {
+        for (const agent of [undefined, 'implementer']) expect(hookExit(c, agent, MAIN), String(agent)).toBe(0)
+      })
+    })
+  }
+  it('merge --abort / --quit, fetch, `worktree add --detach` and `worktree remove` (no --force) stay allowed in the main checkout', () => {
+    for (const c of ['git merge --abort', 'git merge --quit', 'git fetch origin main', 'git fetch --all --tags', 'git worktree add --detach /tmp/ro-guard-w origin/main', 'git worktree remove /tmp/ro-guard-x', 'git status']) {
+      expect(roDecide(c, { cwd: MAIN }), c).toBeNull()
+      expect(hookExit(c, 'recon', MAIN), c).toBe(0)
+    }
+  })
+  it('the other merge forms stay refused everywhere (any form but --abort/--quit changes the checkout)', () => {
+    for (const c of ['git merge origin/main', 'git merge --no-commit origin/main', 'git merge --ff-only origin/main']) {
+      for (const cwd of [MAIN, WT]) expect(roDecide(c, { cwd }), `${cwd}: ${c}`).toEqual(expect.any(String))
+    }
+  })
+  it('an undeterminable directory is refused (fail closed): no cwd, a variable, a cd that is not a leading `&&`, env -C, GIT_DIR, --git-dir', () => {
+    const c = H11_FORMS[1]
+    expect(roDecide(c), 'no cwd').toMatch(/cannot be determined/)
+    expect(roDecide(c, { cwd: 'relative/dir' }), 'relative cwd').toMatch(/cannot be determined/)
+    for (const x of [`cd $D && ${c}`, `(cd ${WT}); ${c}`, `cd ${WT}; ${c}`, `cd ${WT} || cd ${MAIN}; ${c}`, `sh -c "cd ${WT} && ${c}"`, `env -C ${WT} ${c}`, `GIT_DIR=${WT}/.git ${c}`, `GIT_WORK_TREE=${WT} ${c}`,
+      c.replace('git ', `git --git-dir=${WT}/.git `), c.replace('git ', `git --work-tree ${WT} `), `git -C $D merge --no-commit --no-ff x`]) {
+      expect(roDecide(x, { cwd: WT }), x).toMatch(/cannot be determined|--git-dir/)
+    }
+  })
+  it('-C is cumulative and relative to the hook cwd; a directory without `.git` above it is not a linked worktree', () => {
+    expect(roDecide(`git -C src ${H11_FORMS[0].slice(4)}`, { cwd: MAIN }), 'relative -C into main').toMatch(/MAIN checkout/)
+    expect(roDecide(`cd ${WT} && cd ${MAIN} && ${H11_FORMS[1]}`, { cwd: WT }), 'two leading cds resolve in order').toMatch(/MAIN checkout/)
+    expect(roDecide(`git -C ${FIXTURE} -C wt ${H11_FORMS[0].slice(4)}`, { cwd: MAIN }), '-C a -C b').toBeNull()
+    expect(roDecide(`git -C /nonexistent-ro-guard ${H11_FORMS[0].slice(4)}`, { cwd: WT }), 'no .git above').toMatch(/not a linked worktree/)
+  })
+  it('checkoutKind: `.git` directory = main, `.git` file = linked, nothing = unknown', () => {
+    expect(checkoutKind(MAIN)).toBe('main')
+    expect(checkoutKind(path.join(MAIN, 'src'))).toBe('main')
+    expect(checkoutKind(WT)).toBe('linked')
+    expect(checkoutKind(path.join(WT, 'src'))).toBe('linked')
+    expect(checkoutKind(path.join(WT, 'not-created-yet'))).toBe('linked')
+    expect(checkoutKind('relative')).toBe('unknown')
+    expect(checkoutKind(undefined)).toBe('unknown')
+  })
+  it('startDir applies only leading `cd DIR &&`', () => {
+    const cmds = (c) => inspect(c).cmds
+    const one = (c) => startDir(c, cmds(c), '/base')
+    expect(one('git status')).toBe('/base')
+    expect(one('cd /a && cd b && git status')).toBe('/a/b')
+    expect(one('cd "/a b" && git status')).toBe('/a b')
+    expect(one('cd /a; git status')).toBeNull()
+    expect(one('git status && cd /a')).toBeNull()
+  })
 })
 
 describe('readonly-guard keyed on agent_type', () => {
@@ -315,7 +411,7 @@ describe('A77 H-4 (owner) — refused for auditor and recon', () => {
 describe('A77 Table B (owner) — allowed', () => {
   for (const c of A77_TABLE_B_ALL) it(`all agents allow: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toBeNull())
   for (const c of A77_TABLE_B_READONLY) it(`auditor/recon allow: ${JSON.stringify(c)}`, () => {
-    expect(roDecide(c), c).toBeNull()
+    expect(roDecide(c, { cwd: WT }), c).toBeNull()
     expect(guardDecide(c), c).toBeNull()
   })
 })
@@ -385,7 +481,7 @@ describe('allow-list: gh', () => {
   for (const c of GH_PERMITTED) it(`permits: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toBeNull())
   for (const c of GH_UNLISTED) it(`refuses: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toEqual(expect.any(String)))
   it('read-only agents get the same gh list, minus `pr checkout` (A77c H-11: it creates or moves a local branch)', () => {
-    for (const c of GH_PERMITTED.filter((x) => !x.includes('pr checkout'))) expect(roDecide(c), c).toBeNull()
+    for (const c of GH_PERMITTED.filter((x) => !x.includes('pr checkout'))) expect(roDecide(c, { cwd: WT }), c).toBeNull()
     for (const c of GH_UNLISTED) expect(roDecide(c), c).toEqual(expect.any(String))
     for (const c of ['gh pr checkout 5', 'gh -R a/b pr checkout 5', 'gh --repo=a/b pr checkout 5 --detach']) expect(roDecide(c), c).toMatch(/pr checkout/)
   })
@@ -406,7 +502,7 @@ describe('allow-list: forge', () => {
 })
 describe('allow-list: git for read-only agents (recon, auditor)', () => {
   it('lists are big enough', () => { expect(RO_GIT_UNLISTED.length).toBeGreaterThanOrEqual(20) })
-  for (const c of RO_GIT_PERMITTED) it(`permits: ${JSON.stringify(c)}`, () => { expect(roDecide(c), c).toBeNull(); expect(guardDecide(c), c).toBeNull() })
+  for (const c of RO_GIT_PERMITTED) it(`permits: ${JSON.stringify(c)}`, () => { expect(roDecide(c, { cwd: WT }), c).toBeNull(); expect(guardDecide(c), c).toBeNull() })
   for (const c of RO_GIT_UNLISTED) it(`refuses: ${JSON.stringify(c)}`, () => expect(roDecide(c), c).toEqual(expect.any(String)))
   it('the implementer and the main session are not held to the git list', () => {
     for (const c of ['git commit -m x', 'git add .', 'git worktree add -b x /tmp/w origin/main', 'git stash', 'git rebase main']) expect(guardDecide(c), c).toBeNull()
@@ -565,7 +661,7 @@ const A77B_HEREDOC_COMMIT = 'git commit -m "$(cat <<\'EOF\'\nfeat: x\n\nit\'s fi
 const A77B_ALLOWED_READONLY = ['git merge --abort', 'git merge --quit', 'git tag -l', 'git config --get user.name', 'git merge-base HEAD origin/main', 'git rev-list --count HEAD', 'git merge --no-commit --no-ff origin/main', 'git worktree add --detach /tmp/w origin/main']
 
 /** The exit code the harness sees: both PreToolUse hooks of settings.json, each as `node … || exit 2`; any 2 blocks. */
-function hookExit(command, agentType, cwd) {
+function hookExit(command, agentType, cwd = WT) { // default: a linked worktree, where the agents are meant to work
   const input = JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, ...(agentType ? { agent_type: agentType } : {}), ...(cwd ? { cwd } : {}) })
   for (const h of ['command-guard.mjs', 'readonly-guard.mjs']) {
     const r = spawnSync('sh', ['-c', `node "${path.join(ROOT, '.claude', 'hooks', h)}" || exit 2`], { input, encoding: 'utf8' })
@@ -868,7 +964,7 @@ describe('A77c commit 2 — the owner\'s remaining exit-2 probes through both ho
   })
   it('read-only parser: here-string operands are inspected too', () => {
     for (const c of ['cat <<< "$(git push)"', 'echo x <<< "$(git pull)"', 'cat <<<"$(git add .)"', 'cat <<< "$(gh pr create)"']) expect(roDecide(c), c).toEqual(expect.any(String))
-    for (const c of ['cat <<< "$(git status)"', 'cat <<< hello']) expect(roDecide(c), c).toBeNull()
+    for (const c of ['cat <<< "$(git status)"', 'cat <<< hello']) expect(roDecide(c, { cwd: WT }), c).toBeNull()
   })
 })
 
