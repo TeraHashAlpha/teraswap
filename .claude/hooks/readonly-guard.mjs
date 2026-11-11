@@ -58,7 +58,8 @@ function gitReason(c) {
       if (FETCH_VALUED.has(args[k])) { k++; continue }
       if (!args[k].startsWith('-')) pos.push(args[k])
     }
-    return pos.slice(1).some((t) => t.includes(':')) ? 'git fetch with a src:dst refspec writes local refs' : null
+    // `git fetch origin a:b` and `git fetch a:b` (an scp-style remote or a bare refspec) write refs; scheme:// URLs are remotes.
+    return pos.some((t) => t.includes(':') && !/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(t)) ? 'git fetch with a src:dst refspec writes local refs' : null
   }
   return null
 }

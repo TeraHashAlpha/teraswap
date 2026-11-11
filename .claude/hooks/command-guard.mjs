@@ -83,6 +83,17 @@ export function ghApiWriteReason(args) {
   return null
 }
 
+// Interpreters take their program as an argument ("node -e ….env…"): look for a secrets-file name INSIDE the text.
+// `process.env.HOME`, `os.environ` and `import.meta.env` do not match: the dot must follow a non-word character.
+const INTERPRETERS = /^(node|nodejs|deno|bun|python[0-9.]*|perl|ruby|php|lua|osascript|awk|gawk|mawk)$/
+const ENV_IN_TEXT = /(?:^|[^A-Za-z0-9_-])(\.env(?:\.[A-Za-z0-9_.-]*)?)(?![A-Za-z0-9_-])/g
+const HISTORY_IN_TEXT = /(?:^|[^A-Za-z0-9_-])(\.(?:zsh_history|zhistory|bash_history|sh_history|histfile|python_history|node_repl_history))(?![A-Za-z0-9_-])/g
+function embeddedSecretReason(word) {
+  for (const m of word.matchAll(ENV_IN_TEXT)) if (m[1].toLowerCase() !== '.env.example') return `${m[1]} named inside an interpreter program`
+  for (const m of word.matchAll(HISTORY_IN_TEXT)) return `${m[1]} named inside an interpreter program`
+  return null
+}
+
 function envPathReason(word) {
   const w = word.replace(/^\d*[<>]+&?/, '')
   const cands = [w]
@@ -206,6 +217,12 @@ export function commandReason(c) {
   for (const w of rest) {
     const why = envPathReason(w)
     if (why) return why
+  }
+  if (INTERPRETERS.test(base)) {
+    for (const w of rest.slice(1)) {
+      const why = embeddedSecretReason(w)
+      if (why) return why
+    }
   }
 
   switch (base) {

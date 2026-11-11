@@ -269,3 +269,51 @@ describe('command-guard process protocol (fails closed)', () => {
     expect(wrapped.status).toBe(2)
   })
 })
+
+// ---------------------------------------------------------------------------------------------------------------
+// The owner's A77 tables, as pasted on 2026-11-11 (descriptive rows made concrete). These are the acceptance rows:
+// TABLE_A/TABLE_B above are the wider rebuilt tables.
+const A77_TABLE_A = {
+  'ssh/scp/ssh-add': ['/usr/bin/ssh host', 'env ssh host', '"ssh" host', '\\ssh host', 'sh -c "ssh x"', 'sftp host', 'rsync -e ssh a host:b'],
+  pm2: ['env pm2 ls', 'npx pm2 ls', './node_modules/.bin/pm2 ls'],
+  'cast send': ['env cast send 0x0 "f()"', '/usr/local/bin/cast send 0x0 "f()"', 'cast --rpc-url x send 0x0', 'cast publish 0xab', 'forge script S.s.sol --broadcast'],
+  'keychain security': ['/usr/bin/security find-generic-password -s x', 'env security x', 'sh -c "security x"'],
+  'force-push': ['sh -c "git push -f"', 'git push -uf origin x', "git push origin '+x'", '/usr/bin/git push -f', 'env git push -f', 'git push --mirror', 'git push origin :x', 'git push --delete origin x'],
+  'gh pr writes': ['gh pr new', 'env gh pr merge 5', '/opt/homebrew/bin/gh pr merge 5', 'sh -c "gh pr merge 5"', 'gh pr edit 5', 'gh pr review 5', 'gh pr comment 5'],
+  'gh api writes': ['gh api -f a=b repos/a/b', 'gh api -F a=b repos/a/b', 'gh api -ftitle=x repos/a/b'],
+  'npm audit fix': ['npm --prefix . audit fix', 'npm audit --force fix', 'sh -c "npm audit fix"'],
+  '.env*': ['grep x .env', 'awk 1 .env', 'node -e "require(\'fs\').readFileSync(\'.env\',\'utf8\')"', 'node -e "console.log(require(\'fs\').readFileSync(\'./.env.local\'))"', 'python3 -c "print(open(\'/abs/.env\').read())"', 'node -e "require(\'dotenv\').config({path:\'.env.production\'})"'],
+  'shell history': ['fc -l'],
+}
+const A77_H4_READONLY = ['git pull', 'git fetch a:b', 'git checkout -b x', 'git config user.name x', 'git clean -fdx', 'git restore file', 'gh api -ftitle=x repos/a/b', 'gh api --field=a=b repos/a/b', 'gh api --input=f repos/a/b']
+const A77_TABLE_B_ALL = [
+  'git commit -m x', 'git push', 'git push origin chore/x', 'git worktree add /tmp/w origin/main', 'git worktree remove /tmp/w', 'npm ci', 'npm test', 'npm run build', 'npx vitest run', 'forge test', 'cast call 0x0 "f()"',
+  'gh pr view 5', 'gh pr diff 5', 'scripts/codeql-local.sh', 'cat .env.example', 'git commit -m "fix: push --force handling, ssh and .env docs"',
+  'node -e "console.log(process.env.HOME)"', 'node -e "console.log(require(\'fs\').readFileSync(\'.env.example\',\'utf8\'))"', 'python3 -c "import os; print(os.environ.get(\'HOME\'))"',
+]
+const A77_TABLE_B_READONLY = ['gh pr checks 5', 'git merge --no-commit origin/main', 'grep -rn "git push" docs', ...A77_TABLE_B_ALL.filter((c) => !/^git (commit|push)/.test(c))]
+
+describe('A77 Table A (owner) — every "Not denied" spelling is now refused', () => {
+  for (const [family, cmds] of Object.entries(A77_TABLE_A)) {
+    for (const c of cmds) it(`${family}: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toEqual(expect.any(String)))
+  }
+})
+describe('A77 H-4 (owner) — refused for auditor and recon', () => {
+  for (const c of A77_H4_READONLY) it(`refuses: ${JSON.stringify(c)}`, () => expect(roDecide(c), c).toEqual(expect.any(String)))
+  it('commit and push stay blocked for them by design', () => {
+    for (const c of ['git commit -m x', 'git push', 'git push origin chore/x']) expect(roDecide(c), c).toEqual(expect.any(String))
+  })
+})
+describe('A77 Table B (owner) — allowed', () => {
+  for (const c of A77_TABLE_B_ALL) it(`all agents allow: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toBeNull())
+  for (const c of A77_TABLE_B_READONLY) it(`auditor/recon allow: ${JSON.stringify(c)}`, () => {
+    expect(roDecide(c), c).toBeNull()
+    expect(guardDecide(c), c).toBeNull()
+  })
+})
+describe('A77 accepted residual (runbook only, not a test failure)', () => {
+  it('"via an npm script" and "via a script file" are not seen by the guard; the runbook says so', () => {
+    for (const c of ['npm run force-push', 'bash ./push-force.sh', 'sh push-force.sh', 'source ./push-force.sh']) expect(guardDecide(c), c).toBeNull()
+    expect(readFileSync(path.join(ROOT, 'docs', 'Runbooks', 'agent-harness.md'), 'utf8')).toMatch(/script file/)
+  })
+})
