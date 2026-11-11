@@ -406,6 +406,13 @@ const WRAPPERS = {
   sudo: { valued: ['-u', '-g', '-h', '-p', '-C', '-D', '-R', '-T', '-U', '-r', '-t', '--user', '--group', '--host', '--prompt', '--chdir', '--chroot'] },
   doas: { valued: ['-u', '-C'] },
   caffeinate: { valued: ['-t', '-w'] },
+  // GNU coreutils as Homebrew installs them (A77c L-3): `gtimeout 5 ssh host` is `timeout 5 ssh host`.
+  gtimeout: { valued: ['-s', '--signal', '-k', '--kill-after'], positional: 1 },
+  gnice: { valued: ['-n', '--adjustment'] },
+  gnohup: { valued: [] },
+  gstdbuf: { valued: ['-i', '-o', '-e', '--input', '--output', '--error'] },
+  gtime: { valued: [] },
+  gxargs: { valued: ['-a', '-d', '-E', '-I', '-J', '-L', '-n', '-P', '-R', '-S', '-s', '--arg-file', '--delimiter', '--max-args', '--max-procs', '--max-lines', '--max-chars'] },
   xargs: { valued: ['-a', '-d', '-E', '-I', '-J', '-L', '-n', '-P', '-R', '-S', '-s', '--arg-file', '--delimiter', '--max-args', '--max-procs', '--max-lines', '--max-chars'] },
 }
 const RUNNER_VALUED = ['-p', '--package', '-w', '--workspace', '--cache', '--registry', '--prefix', '--userconfig']
@@ -444,7 +451,7 @@ export function inspect(command) {
       if (isAllExp(a[0])) { problems.push('the command name is built from an expansion'); return }
       const base = baseName(a[0])
 
-      if (base === 'env') {
+      if (base === 'env' || base === 'genv') {
         let k = 1
         for (; k < a.length; k++) {
           const t = a[k]

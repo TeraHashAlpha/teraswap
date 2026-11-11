@@ -871,3 +871,54 @@ describe('A77c commit 2 — the owner\'s remaining exit-2 probes through both ho
     for (const c of ['cat <<< "$(git status)"', 'cat <<< hello']) expect(roDecide(c), c).toBeNull()
   })
 })
+
+// ---------------------------------------------------------------------------------------------------------------
+// A77c commit 4 — runbook and lows (L-1 no placeholders, L-2 the Read deny also stops Bash readers, L-3 gtimeout-style wrappers).
+describe('A77c L-3: GNU-prefixed coreutils wrappers (Homebrew) are unwrapped by layer 1 like their BSD names', () => {
+  for (const c of ['gtimeout 5 ssh host', 'gnohup ssh host', 'gstdbuf -oL ssh host', 'genv ssh host', 'genv FOO=1 ssh host', 'gxargs ssh', 'gtime ssh host', 'gnice -n 5 git push -f', 'gtimeout 5 gnohup genv ssh host', 'gtimeout -k 2 5 pm2 ls', 'gtimeout 5 gh pr merge 5', 'gtimeout 5 cast send 0x0']) {
+    it(`layer 1 alone refuses: ${JSON.stringify(c)}`, () => expect(decideParsed(c), c).toEqual(expect.any(String)))
+  }
+  for (const c of ['gtimeout 60 npm test', 'gnice -n 5 npm test', 'genv FOO=1 npm test', 'gnohup npm run build', 'gxargs echo', 'gtimeout 5 git status']) {
+    it(`allows: ${JSON.stringify(c)}`, () => expect(decideParsed(c), c).toBeNull())
+  }
+})
+
+describe('A77c runbook: no placeholders, the three layers in five lines, the line-105 correction', () => {
+  const rb = readFileSync(path.join(ROOT, 'docs', 'Runbooks', 'agent-harness.md'), 'utf8')
+  it('L-1: no ellipsis placeholder anywhere in the runbook, the agent files or the skills', () => {
+    expect(rb).not.toContain('…')
+    for (const dir of ['agents', 'skills']) {
+      for (const f of readdirSync(path.join(ROOT, '.claude', dir), { recursive: true }).filter((x) => String(x).endsWith('.md'))) {
+        expect(readFileSync(path.join(ROOT, '.claude', dir, String(f)), 'utf8'), `${dir}/${f}`).not.toContain('…')
+      }
+    }
+  })
+  it('the three layers are summarised in five lines (heading sentence + one line per layer + the wiring line)', () => {
+    const start = rb.indexOf('Three layers;')
+    expect(start).toBeGreaterThan(0)
+    const block = rb.slice(start, rb.indexOf('\n\n', start)).split('\n')
+    expect(block).toHaveLength(5)
+    expect(block[1]).toMatch(/Layer 0, raw-text scan/)
+    expect(block[2]).toMatch(/Layer 1, parser and rules/)
+    expect(block[3]).toMatch(/Layer 2, `permissions\.deny`/)
+  })
+  it('L-2: the Read/Edit deny rules are described as also stopping recognised Bash readers and redirect targets', () => {
+    const line = rb.split('\n').find((l) => l.startsWith('- **Recursive reads')) ?? ''
+    expect(line).not.toMatch(/cover the Read and Edit tools only/)
+    for (const needle of ['`cat`', '`head`', '`tail`', '`sed`', '`tee`', 'redirects', 'sandbox']) expect(line, needle).toContain(needle)
+  })
+  it('L-3: wrappers are listed under "What this cannot stop"', () => {
+    const section = rb.slice(rb.indexOf('## What this cannot stop'), rb.indexOf('The backstops are outside'))
+    for (const needle of ['gtimeout', 'gnice', 'watch', 'parallel', 'flock', 'chpst', 'setpriv']) expect(section, needle).toContain(needle)
+  })
+  it('documents layer 0: the rules, the one exemption and that it over-refuses', () => {
+    const section = rb.slice(rb.indexOf('## Layer 0'), rb.indexOf('## Allow-lists'))
+    expect(section.length).toBeGreaterThan(500)
+    for (const needle of ['.env.example', '--show-token', 'git-credential', '--upload-pack', 'zsh_history', '`--broadcast`', 'The one exemption', 'lone `git commit`', 'over-refuses on purpose', 'src/env.ts']) expect(section, needle).toContain(needle)
+    expect((section.match(/^\| (env|harness|credentials|cast|push|gh writes|remote shells|history) \|/gm) ?? []).length).toBe(8)
+  })
+  it('the cwd and cd handling and the parser fail-closed rule are documented', () => {
+    expect(rb).toMatch(/resolved against the hook's `cwd`/)
+    expect(rb).toMatch(/nesting deeper than 3/)
+  })
+})
