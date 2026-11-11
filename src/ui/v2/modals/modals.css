@@ -19,6 +19,17 @@
   .ts-sheet-grab { display: block; width: 40px; height: 2px; margin: 0 auto 18px; background: var(--hairline-ring); }
 }
 
+/* Drawer placement (the Help Center, S-3/A75b): v1's right-edge drawer — flush right, full height, 420 px, a left hairline — from 1024 px up;
+   a bottom sheet (full width, grab bar, TOP hairline in place of the left one) only below it. Not tied to the 600 px phone breakpoint above. */
+.ts-sheet-root[data-placement='drawer'] { align-items: flex-end; padding: 0; }
+.ts-sheet-root[data-placement='drawer'] .ts-sheet { max-width: none; max-height: 88vh; padding: 12px 20px calc(env(safe-area-inset-bottom, 0px) + 20px); border-left: 0; border-top: 1px solid var(--hairline); }
+.ts-sheet-root[data-placement='drawer'] .ts-sheet-grab { display: block; width: 40px; height: 2px; margin: 0 auto 18px; background: var(--hairline-ring); }
+@media (min-width: 1024px) {
+  .ts-sheet-root[data-placement='drawer'] { justify-content: flex-end; align-items: stretch; padding: 0; }
+  .ts-sheet-root[data-placement='drawer'] .ts-sheet { max-width: 420px; max-height: none; height: 100%; padding: 24px 26px 26px; border-top: 0; border-left: 1px solid var(--hairline); }
+  .ts-sheet-root[data-placement='drawer'] .ts-sheet-grab { display: none; }
+}
+
 /* Lists inside a sheet: hairline separators, no row boxes. */
 .ts-sheet-row { border-bottom: 1px solid var(--hairline); }
 .ts-sheet-row:last-child { border-bottom: 0; }

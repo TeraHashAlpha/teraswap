@@ -75,6 +75,8 @@ vi.mock('@/lib/tokens', async () => {
     DEFAULT_TOKENS: TOKENS,
     isNativeETH: (t: { address: string }) => t.address.toLowerCase() === NATIVE_ETH.toLowerCase(),
     CATEGORY_DISPLAY_ORDER: ['Native', 'Stablecoin', 'Wrapped BTC'],
+    // [fix/user-ip-privacy] the real helper's exact output (src/lib/tokens.ts `importedTokenLogo`).
+    importedTokenLogo: (address: string, chainId = 1) => `/api/token-logo?chainId=${chainId}&address=${address.toLowerCase()}`,
   }
 })
 
@@ -384,6 +386,49 @@ describe('usePortfolio', () => {
     )
     const unk = result.current.tokens.find((t) => t.token.symbol === 'UNK')!
     expect(unk.token.category).toBe('Other')
+  })
+
+  // [fix/user-ip-privacy] A discovered (non-catalog) holding must never carry a third-party image URL: the browser
+  // would load it and hand the visitor's IP to that host. The fallback used to be 1inch's image host, and the
+  // provider's own metadata `logo` (a URL on its CDN) was passed through untouched.
+  it.each([
+    ['no logo from discovery', null],
+    ['a provider-CDN logo from discovery', 'https://static.alchemyapi.io/images/assets/825.png'],
+    ['a protocol-relative logo', '//evil.example/logo.png'],
+    ['a plain http logo', 'http://img.example/logo.png'],
+    ['a data: URI', 'data:image/png;base64,AAAA'],
+  ])('discovered holding with %s gets the same-origin /api/token-logo URL', async (_label, logoURI) => {
+    discoveryAvailable(
+      [{ address: UNK.toLowerCase(), symbol: 'UNK', name: 'Unk', decimals: 18, logoURI, balance: String(1n * 10n ** 18n), isDefault: false }],
+      {},
+    )
+    const { result } = renderHook(() => usePortfolio())
+    await waitFor(() => expect(result.current.tokens.find((t) => t.token.symbol === 'UNK')).toBeDefined())
+    const unk = result.current.tokens.find((t) => t.token.symbol === 'UNK')!
+    expect(unk.token.logoURI).toBe(`/api/token-logo?chainId=1&address=${UNK.toLowerCase()}`)
+  })
+
+  it('discovered holding keeps a same-origin logo path the discovery route already returned', async () => {
+    discoveryAvailable(
+      [{ address: UNK.toLowerCase(), symbol: 'UNK', name: 'Unk', decimals: 18, logoURI: '/tokens/unk.png', balance: String(1n * 10n ** 18n), isDefault: false }],
+      {},
+    )
+    const { result } = renderHook(() => usePortfolio())
+    await waitFor(() => expect(result.current.tokens.find((t) => t.token.symbol === 'UNK')).toBeDefined())
+    expect(result.current.tokens.find((t) => t.token.symbol === 'UNK')!.token.logoURI).toBe('/tokens/unk.png')
+  })
+
+  it('discovered holding on Base asks the logo route for Base, not mainnet', async () => {
+    accountMock = { ...accountMock, chain: { id: 8453, name: 'base' } }
+    discoveryAvailable(
+      [{ address: UNK.toLowerCase(), symbol: 'UNK', name: 'Unk', decimals: 18, logoURI: null, balance: String(1n * 10n ** 18n), isDefault: false }],
+      {},
+    )
+    const { result } = renderHook(() => usePortfolio())
+    await waitFor(() => expect(result.current.tokens.find((t) => t.token.symbol === 'UNK')).toBeDefined())
+    expect(result.current.tokens.find((t) => t.token.symbol === 'UNK')!.token.logoURI).toBe(
+      `/api/token-logo?chainId=8453&address=${UNK.toLowerCase()}`,
+    )
   })
 
   it('Alchemy 503: falls back to the multicall path (Sprint 31 behaviour)', async () => {
@@ -738,5 +783,87 @@ describe('usePortfolio — chain-aware [E-3]', () => {
       expect(priceCalls.length).toBeGreaterThan(0)
       expect(String(priceCalls[0][0])).toContain('chainId=8453')
     }, { timeout: 5000 })
+  })
+})
+
+// ─── [fix/v1-maintenance C3] hidden-tab polling ───────────
+
+describe('usePortfolio — hidden-tab polling [fix/v1-maintenance C3]', () => {
+  const setVisibility = (state: 'visible' | 'hidden') => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
+    document.dispatchEvent(new Event('visibilitychange'))
+  }
+  const calls = (prefix: string) => fetchMock.mock.calls.filter((a: unknown[]) => String(a[0]).startsWith(prefix)).length
+  const discovery = () => calls('/api/portfolio/tokens')
+  const prices = () => calls('/api/portfolio/prices')
+  const settle = async () => { await act(async () => { await vi.advanceTimersByTimeAsync(0) }) }
+  const advance = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms) }) }
+
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => {
+    vi.useRealTimers()
+    // back to jsdom's own (visible) value
+    delete (document as unknown as Record<string, unknown>).visibilityState
+  })
+
+  it('baseline: a visible tab polls discovery and prices every 60 s', async () => {
+    renderHook(() => usePortfolio())
+    await settle()
+    const d0 = discovery(); const p0 = prices()
+    expect(d0).toBeGreaterThan(0); expect(p0).toBeGreaterThan(0)
+    await advance(60_000)
+    expect(discovery()).toBe(d0 + 1)
+    expect(prices()).toBe(p0 + 1)
+  })
+
+  it('a hidden tab makes no discovery or price requests, however long it stays hidden', async () => {
+    renderHook(() => usePortfolio())
+    await settle()
+    setVisibility('hidden')
+    const d0 = discovery(); const p0 = prices()
+    await advance(5 * 60_000)
+    expect(discovery()).toBe(d0)
+    expect(prices()).toBe(p0)
+  })
+
+  it('becoming visible again refreshes exactly once, then the 60 s cadence resumes', async () => {
+    renderHook(() => usePortfolio())
+    await settle()
+    setVisibility('hidden')
+    await advance(5 * 60_000)
+    const d0 = discovery(); const p0 = prices()
+    setVisibility('visible')
+    await settle()
+    expect(discovery()).toBe(d0 + 1)
+    expect(prices()).toBe(p0 + 1)
+    await advance(60_000)
+    expect(discovery()).toBe(d0 + 2)
+    expect(prices()).toBe(p0 + 2)
+  })
+
+  it('mounted while hidden: the initial load still happens, but no timer runs until the tab is visible', async () => {
+    setVisibility('hidden')
+    renderHook(() => usePortfolio())
+    await settle()
+    const d0 = discovery(); const p0 = prices()
+    expect(d0).toBeGreaterThan(0); expect(p0).toBeGreaterThan(0)
+    await advance(3 * 60_000)
+    expect(discovery()).toBe(d0)
+    expect(prices()).toBe(p0)
+    setVisibility('visible')
+    await settle()
+    expect(discovery()).toBe(d0 + 1)
+    expect(prices()).toBe(p0 + 1)
+  })
+
+  it('unmounting removes the visibilitychange listener (no request after unmount)', async () => {
+    const { unmount } = renderHook(() => usePortfolio())
+    await settle()
+    unmount()
+    const d0 = discovery(); const p0 = prices()
+    setVisibility('hidden'); setVisibility('visible')
+    await advance(2 * 60_000)
+    expect(discovery()).toBe(d0)
+    expect(prices()).toBe(p0)
   })
 })

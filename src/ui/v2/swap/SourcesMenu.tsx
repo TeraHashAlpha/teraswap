@@ -62,7 +62,6 @@ export function SourcesMenu({ excluded, onToggle }: { excluded: Set<string>; onT
                   >
                     <span aria-hidden="true" className={`ts-swap-check ${on ? 'is-on' : ''}`}>{on ? '✓' : ''}</span>
                     <span className="flex-1">{meta.label}</span>
-                    {meta.mevProtected && <span className="font-v2-mono text-[10px] uppercase tracking-[1.5px] text-v2-cream">MEV</span>}
                     {meta.isDirect && <span className="font-v2-mono text-[10px] uppercase tracking-[1.5px] text-v2-amber">Direct</span>}
                   </button>
                 </li>

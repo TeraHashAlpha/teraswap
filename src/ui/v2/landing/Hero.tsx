@@ -19,7 +19,8 @@ import { playTouchMP3 } from '@/lib/sounds'
 import { findToken, type Token } from '@/lib/tokens'
 import { safeBigInt } from '@/lib/utils'
 import { Button, EyebrowLabel, HandUnderline, Surface } from '../primitives'
-import { PhotoBackground } from '../photos/PhotoBackground'
+import { NarrativeStill } from './NarrativeStill'
+import { STILL_PHOTO } from './narrative'
 import { heroStats } from './slots'
 
 /**
@@ -109,7 +110,7 @@ export function Hero({ onLaunchApp }: { onLaunchApp: () => void }) {
 
   return (
     <section id="hero" className="ts-v2-opaque ts-v2-scrim relative overflow-hidden px-4 pb-16 pt-8 sm:px-8 sm:pb-24 sm:pt-16">
-      <PhotoBackground photoId="trails" section />
+      <NarrativeStill photoId={STILL_PHOTO.hero} eager />
       {/* Under lg both columns are `contents`, so the four blocks order themselves as pack m01 does (copy · stats · chips ·
           preview); from lg up they are the 7/5 columns of pack 10a. */}
       <div className="relative z-10 mx-auto grid max-w-[1240px] items-start gap-10 lg:grid-cols-[7fr_5fr] lg:gap-16">
@@ -124,8 +125,8 @@ export function Hero({ onLaunchApp }: { onLaunchApp: () => void }) {
             </span>
           </h1>
           <p className="mt-8 max-w-xl text-[16px] leading-relaxed text-v2-muted sm:text-[18px]">
-            TeraSwap compares {INTEGRATED_DEX_SOURCE_COUNT_WORDS} liquidity sources for every trade, verifies the price against
-            Chainlink oracles, and offers MEV-protected routes via CoW Protocol.
+            TeraSwap compares {INTEGRATED_DEX_SOURCE_COUNT_WORDS} liquidity sources for every trade and verifies the price against
+            Chainlink oracles.
           </p>
           <div className="mt-8 flex flex-col items-stretch gap-4 sm:flex-row sm:items-center sm:gap-6">
             <Button
@@ -152,7 +153,7 @@ export function Hero({ onLaunchApp }: { onLaunchApp: () => void }) {
               'Powered by Chainlink',
               PRIVACY_BADGE,
             ].map((chip) => (
-              <span key={chip} className="border-l-2 border-v2-cream pl-2">
+              <span key={chip} className="border-l-2 ts-v2-accent-stroke pl-2">
                 {chip}
               </span>
             ))}

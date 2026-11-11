@@ -28,6 +28,8 @@ import {
   PRICE_DEVIATION_BLOCK_PCT,
   PRICE_DEVIATION_WARN_PCT,
   SWAP_CHAIN_LIST_LABEL,
+  UNVERIFIED_SWAP_GATE_CLAIM,
+  UNVERIFIED_SWAP_GATE_TITLE,
   VERIFICATION_CHECK_COUNT,
   chainNameFor,
   chainlinkFeedCountFor,
@@ -417,7 +419,27 @@ function DiffOracleShieldIcon() {
   )
 }
 
-function DiffMEVBotIcon() {
+/** Item 03 since feat/retire-force-mev: a shield over a striped barrier (the unverified-swap size gate). Decorative. */
+function DiffGateIcon() {
+  return (
+    <svg
+      width="96" height="96" viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" strokeWidth="1.5"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    >
+      <path d="M12 2 L20 5.5 V12 C20 16.6 16.6 20.4 12 22 C7.4 20.4 4 16.6 4 12 V5.5 Z" />
+      <rect x="7" y="10.5" width="10" height="3" rx="0.6" />
+      <line x1="9" y1="13.5" x2="11" y2="10.5" />
+      <line x1="12.5" y1="13.5" x2="14.5" y2="10.5" />
+    </svg>
+  )
+}
+
+/**
+ * @deprecated [feat/retire-force-mev, owner 2026-11-06] Was item 03's icon ("MEV Protection on CoW Routes", retired). No
+ * consumer; kept (exported, rule #4 — deprecate, never delete) in case the item returns.
+ */
+export function DiffMEVBotIcon() {
   return (
     <svg
       width="96" height="96" viewBox="0 0 24 24"
@@ -449,10 +471,11 @@ function DifferentiationSection() {
       desc: `Every quote is checked against Chainlink price feeds before execution. Deviations above ${PRICE_DEVIATION_BLOCK_PCT} are blocked automatically — before your trade happens, not after.`,
     },
     {
+      // [feat/retire-force-mev, owner 2026-11-06] Replaces "MEV Protection on CoW Routes" (retired claim).
       num: '03',
-      icon: <DiffMEVBotIcon />,
-      title: 'MEV Protection on CoW Routes',
-      desc: 'When a swap routes through CoW Protocol, execution is an intent-based batch auction — solvers compete to give you the best outcome, with no in-block ordering window for a front-running or sandwich bot to exploit.',
+      icon: <DiffGateIcon />,
+      title: UNVERIFIED_SWAP_GATE_TITLE,
+      desc: UNVERIFIED_SWAP_GATE_CLAIM,
     },
   ]
 
@@ -588,16 +611,15 @@ function SecuritySection() {
           style={{ textShadow: BODY_TEXT_SHADOW }}
         >
           <p>
-            MEV bots never sleep — but neither does our protection. Through our native integration with
-            CoW Protocol, real-time Chainlink price validation, and an independent DefiLlama oracle layer,
-            swaps that route through CoW execute via batch auctions that remove the in-block ordering window
-            front-running and sandwich attacks depend on.
+            Every quote is checked before you sign: real-time Chainlink price validation and an independent
+            DefiLlama oracle layer flag or block prices that stray from the market, and swaps no Chainlink feed
+            can verify are size-gated.
           </p>
           <p className="mt-4">
             Your privacy matters too. {PRIVACY_PROXY_CLAIM} {PRIVACY_DIRECT_NOTE}
           </p>
           <p className="mt-4 text-center font-semibold text-cream">
-            MEV-protected CoW routes. Proxied RPC and quote requests.
+            Oracle-checked quotes. Proxied RPC and quote requests.
           </p>
           <p className="mt-4">
             TeraSwap was built around one non-negotiable principle:{' '}

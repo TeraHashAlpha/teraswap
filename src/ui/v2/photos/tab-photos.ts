@@ -1,4 +1,5 @@
 import type { V2TabId } from '../shell/tab-paths'
+import type { V2DocsLegalPage } from '../shell/docs-legal-paths'
 import { NARRATIVE_PHOTOS, type NarrativePhoto, type NarrativePhotoId } from './narrative'
 
 /**
@@ -23,4 +24,19 @@ export const TAB_PHOTO: Record<V2TabId, NarrativePhotoId> = {
 
 export function photoForTab(tab: V2TabId): NarrativePhoto {
   return NARRATIVE_PHOTOS[TAB_PHOTO[tab]]
+}
+
+/**
+ * [feat/ui-v2-docs-legal] Docs/Terms/Privacy are not app tabs, so they get their own map, not a TAB_PHOTO entry.
+ * Owner decision (5 Nov): temporary placeholders reusing existing tab photos — round 9 photos replace them later.
+ * Kept here, next to TAB_PHOTO, so the whole photo-per-page assignment lives in one place.
+ */
+export const DOCS_LEGAL_PHOTO: Record<V2DocsLegalPage, NarrativePhotoId> = {
+  docs: 'overpass', // Analytics overpass
+  terms: 'archnight', // Orders arch-night
+  privacy: 'footbridge', // History footbridge
+}
+
+export function photoForDocsLegalPage(page: V2DocsLegalPage): NarrativePhoto {
+  return NARRATIVE_PHOTOS[DOCS_LEGAL_PHOTO[page]]
 }

@@ -9,6 +9,18 @@
 .ts-swap-quote { grid-area: quote; min-width: 0; padding-top: 16px; margin-top: 8px; }
 .ts-swap-cta { grid-area: cta; min-width: 0; padding-top: 20px; padding-bottom: 8px; }
 
+/* Mobile (m02 / m04): the primary CTA is pinned to the foot of the screen while the form scrolls. `fixed`, not `sticky`: both cards are
+   single-column grids whose CTA sits in the LAST grid area, so a sticky box would have no scroll range of its own. The footer's bottom padding
+   (pb-20) already reserves this band at the end of the page. The ? and ♫ buttons ride above the dock; sheets (z 80) and the help drawer (z 70) cover it. */
+@media (max-width: 639px) {
+  .ts-v2 .ts-cta-dock {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 55;
+    padding: 12px 16px calc(env(safe-area-inset-bottom, 0px) + 12px);
+    background: linear-gradient(to top, var(--bg) 68%, transparent);
+  }
+  .ts-v2:has([data-cta-dock]) [data-ts-fab] { bottom: calc(env(safe-area-inset-bottom, 0px) + 92px); }
+}
+
 @media (min-width: 960px) {
   .ts-swap {
     grid-template-columns: minmax(0, 440px) minmax(0, 420px); justify-content: center; align-items: start;
@@ -30,7 +42,7 @@
 .ts-swap-val { text-align: right; min-width: 0; }
 .ts-swap-route { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
 .ts-rule-t { border-top: 1px solid var(--hairline); padding-top: 8px; }
-.ts-rule-l { border-left: 1px solid var(--hairline); }
+.ts-rule-l { border-left: 1px solid var(--c-accent-green); } /* a list rule: platform green (design review 1) */
 
 /* Compare disclosure: the rows sit indented under ONE hairline. */
 .ts-swap-compare-list { margin: 0 0 0 4px; padding: 0 0 0 16px; list-style: none; }

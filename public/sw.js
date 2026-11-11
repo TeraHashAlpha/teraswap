@@ -57,6 +57,14 @@ self.addEventListener('fetch', (event) => {
     return // Let the browser handle it normally (network only)
   }
 
+  // [S-2, A75b] Everything below (the cache-first asset branch AND the HTML fallback) is for THIS origin only. The asset branch
+  // matched on pathname alone, so it also answered cross-origin token logos / CDN fonts / any host's `/_next/static/` path, and its
+  // fetch ran under the worker's connect-src (which omits those hosts) -> a synthetic 504 for an image the page may load itself.
+  // A cross-origin request is the browser's: no respondWith, no cache.
+  if (url.origin !== self.location.origin) {
+    return
+  }
+
   // Cache-first for static assets (fonts, images, JS/CSS bundles)
   if (
     url.pathname.startsWith('/icons/') ||
@@ -89,6 +97,16 @@ self.addEventListener('fetch', (event) => {
         })
       })
     )
+    return
+  }
+
+  // [L-7, A75] Everything past this point is the "network-first HTML page" fallback — it must only ever handle a
+  // SAME-ORIGIN NAVIGATION. The app also makes direct cross-origin GETs (e.g. the public-RPC reads Base/Arbitrum
+  // dial straight from the browser; only mainnet goes through /api/rpc) and same-origin non-navigation fetches
+  // this file does not otherwise recognise — intercepting those and falling back to `caches.match('/')` on
+  // failure would silently hand back the cached HTML shell in place of the real response. Leave them to the
+  // browser entirely (no respondWith at all).
+  if (request.mode !== 'navigate' || url.origin !== self.location.origin) {
     return
   }
 

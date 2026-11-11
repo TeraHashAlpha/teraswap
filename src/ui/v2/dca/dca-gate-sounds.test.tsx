@@ -5,9 +5,14 @@
  *   (5b) the sounds table: the same sounds.ts calls as v1's DCAPanel for the same actions and the same engine events (v1 vs v2, one harness);
  *   a11y: names, groups, pressed state, tabs; the review sheet's focus trap / Esc is asserted in dca-review.test.tsx (B4 Sheet).
  */
+import { useEffect } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor, act } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BASE, h, offchainInfo, resetHarness } from './dca-harness'
+import { compareContent } from '../__tests__/content-parity'
+
+const nav = vi.hoisted(() => ({ push: vi.fn() }))
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: nav.push }) }))
 
 vi.mock('wagmi', async () => {
   const { h } = await import('./dca-harness')
@@ -92,6 +97,9 @@ import { DcaCard } from './DcaCard'
 import type { AutonomousOrder } from '@/lib/order-engine'
 import { OrderType } from '@/lib/order-engine'
 
+// The file mocks '../shell/toasts' for the sound tables; the explorer-link assertions need the REAL provider.
+const { V2ToastProvider, useV2Toast: useActualV2Toast } = await vi.importActual<typeof import('../shell/toasts')>('../shell/toasts')
+
 const weth = () => findChainToken(getWrappedNative(BASE), BASE)!
 
 beforeEach(() => {
@@ -116,6 +124,34 @@ describe('(5a) chain gate', () => {
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('DCA runs on Base and Arbitrum One.')
     expect([screen.getByRole('button', { name: 'Switch to Base' }).textContent, screen.getByRole('button', { name: 'Switch to Arbitrum One' }).textContent]).toEqual(v1Buttons)
     expect(document.body.textContent).not.toMatch(/soon/i)
+  })
+
+  it("content parity: every visible text node of v1's ComingSoonPanel(dca) is in the gate (the teaser title and description included)", () => {
+    h.account = { ...h.account, isConnected: false, chain: undefined }
+    const v1 = render(<ComingSoonPanel mode="dca" chainId={1} onSwap={() => {}} />)
+    const v1Root = v1.container.cloneNode(true) as HTMLElement
+    cleanup()
+    const v2 = render(<DcaNetworkGate />)
+    const r = compareContent(v1Root, v2.container, [{ text: '⟳', reason: "v1's teaser icon: decorative; the gate is a hero without a glyph" }])
+    expect(r.missingText).toEqual([])
+    expect(r.missingHrefs).toEqual([])
+    expect(r.staleAllow).toEqual([])
+  })
+
+  it("v1's \"Swap Now →\" is there and does what v1's onSwap does: go to the Swap tab (and play nothing)", () => {
+    h.account = { ...h.account, isConnected: false, chain: undefined }
+    const onSwap = vi.fn()
+    render(<ComingSoonPanel mode="dca" chainId={1} onSwap={onSwap} />)
+    const v1Label = screen.getByRole('button', { name: /^Swap Now/ }).textContent
+    fireEvent.click(screen.getByRole('button', { name: /^Swap Now/ }))
+    expect(onSwap).toHaveBeenCalledTimes(1)
+    cleanup()
+    h.soundLog.length = 0
+    render(<DcaNetworkGate />)
+    expect(screen.getByRole('button', { name: /^Swap Now/ }).textContent).toBe(v1Label)
+    fireEvent.click(screen.getByRole('button', { name: /^Swap Now/ }))
+    expect(nav.push).toHaveBeenCalledExactlyOnceWith('/swap')
+    expect(h.soundLog).toEqual([])
   })
 
   it("the chain list is the SAME source as v1's: DCA_CHAINS, named by the registry (v1's panel and the v2 gate list equal chains)", () => {
@@ -219,7 +255,6 @@ describe('(5b) sounds: the same sounds.ts calls as v1 for the same actions', () 
   const ORDER_EVENTS = [
     { type: 'order_created', orderId: 'o', orderHash: '0x1' },
     { type: 'dca_execution', orderId: 'o', executionNumber: 2 },
-    { type: 'order_filled', orderId: 'o', txHash: '0xabc' },
     { type: 'order_cancelled', orderId: 'o' },
     { type: 'order_error', orderId: 'o', error: 'boom' },
     { type: 'order_error', orderId: 'o', error: 'New DCA orders are temporarily paused…' },
@@ -235,6 +270,62 @@ describe('(5b) sounds: the same sounds.ts calls as v1 for the same actions', () 
     render(<DcaCard chainId={BASE} />)
     expect(h.soundLog).toEqual(v1Sounds)
     expect(h.toast.mock.calls.map((c) => c[0])).toEqual(v1Toast)
+  })
+
+  // [L-3, A75] order_filled is split out: v1's own toast (DCAPanel.tsx) omits `chainId` and so falls back to
+  // ToastProvider's hard `?? 1` (always Etherscan, wrong for a Base/Arbitrum DCA order — a v1 bug this PR does not
+  // touch). v2 passes the order's OWN chain explicitly — the one the DcaCard instance is scoped to, not whatever is
+  // currently selected — so the explorer link is never wrong and never drifts if the wallet switches network while
+  // the toast is still on screen (toasts.tsx:135's `t.chainId ?? selectedChain` only needs the override supplied).
+  it('order_filled → the same sound and toast copy as v1, PLUS the order\'s own chainId (v1 has none)', () => {
+    const event = { type: 'order_filled', orderId: 'o', txHash: '0xabc' } as const
+    h.engine.latestEvent = event
+    render(<DCAPanel chainId={BASE} />)
+    const v1Sounds = [...h.soundLog]
+    const [v1Toast] = h.toast.mock.calls.map((c) => c[0]) as [Record<string, unknown>]
+    cleanup()
+    h.soundLog.length = 0
+    h.toast.mockClear()
+    render(<DcaCard chainId={BASE} />)
+    const [v2Toast] = h.toast.mock.calls.map((c) => c[0]) as [Record<string, unknown>]
+    expect(h.soundLog).toEqual(v1Sounds)
+    expect(v1Toast.chainId).toBeUndefined()
+    expect(v2Toast).toEqual({ ...v1Toast, chainId: BASE })
+  })
+
+  // [L-3, A75b] The event ALREADY carries the filled order's own chain (types.ts order_filled.chainId; GET /api/orders is
+  // wallet-wide, so a fill on the OTHER L2 does reach a card scoped to this one). The card's selected chain is only the
+  // fallback for a legacy event with none. Run through the REAL v2 toast so the assertion is the link's hostname.
+  describe('order_filled explorer link follows the filled order\'s chain, not the card\'s', () => {
+    const linkFor = (toastArg: Record<string, unknown>) => {
+      const Fire = () => {
+        const { toast } = useActualV2Toast()
+        useEffect(() => void toast(toastArg as never), []) // eslint-disable-line react-hooks/exhaustive-deps
+        return null
+      }
+      render(<V2ToastProvider><Fire /></V2ToastProvider>)
+      return new URL(screen.getByText('View on explorer ↗').getAttribute('href')!).hostname
+    }
+    const fillToast = (cardChain: number, event: Record<string, unknown>) => {
+      h.engine.latestEvent = event
+      render(<DcaCard chainId={cardChain} />)
+      const [t] = h.toast.mock.calls.map((c) => c[0]) as [Record<string, unknown>]
+      cleanup()
+      return t
+    }
+    it.each([
+      ['Arbitrum fill on a Base card', BASE, 42161, 'arbiscan.io'],
+      ['Base fill on an Arbitrum card', 42161, BASE, 'basescan.org'],
+    ])('%s', (_n, cardChain, orderChain, host) => {
+      const t = fillToast(cardChain, { type: 'order_filled', orderId: 'o', txHash: '0xabc', chainId: orderChain })
+      expect(t.chainId).toBe(orderChain)
+      expect(linkFor(t)).toBe(host)
+    })
+    it('a legacy event with no chainId falls back to the card\'s chain', () => {
+      const t = fillToast(BASE, { type: 'order_filled', orderId: 'o', txHash: '0xabc' })
+      expect(t.chainId).toBe(BASE)
+      expect(linkFor(t)).toBe('basescan.org')
+    })
   })
 
   it('Cancel / Remove rows → playClick, as v1\'s dashboard', () => {

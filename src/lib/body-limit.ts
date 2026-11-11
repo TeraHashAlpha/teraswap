@@ -8,7 +8,7 @@
  * validation still bound what a request can do downstream).
  */
 import { NextResponse } from 'next/server'
-import { trustedClientIp } from './trusted-ip'
+import { clientIpKey } from './client-ip-key'
 
 /** Default cap for JSON API bodies — matches the swap route's 10 KB. */
 export const DEFAULT_MAX_BODY_BYTES = 10_000
@@ -18,11 +18,14 @@ export const DEFAULT_MAX_BODY_BYTES = 10_000
  *  but finitely. */
 export const RPC_MAX_BODY_BYTES = 262_144 // 256 KB
 
-/** Per-IP extraction shared by rate-limit call sites.
- *  [CHORE-API-HARDENING-2 / P3a] Delegates to trustedClientIp — the left-most
- *  x-forwarded-for token is attacker-controlled on Vercel; see trusted-ip.ts. */
+/** Per-client bucket name shared by rate-limit call sites.
+ *  [CHORE-API-HARDENING-2 / P3a] Derived from trustedClientIp — the left-most
+ *  x-forwarded-for token is attacker-controlled on Vercel; see trusted-ip.ts.
+ *  [fix/user-ip-privacy] Returns the KEYED HASH of that IP (client-ip-key.ts), never the address:
+ *  every caller only builds a rate-limit key from it, and the raw IP used to end up in Upstash and,
+ *  on a Redis outage, in the function logs. The name is kept so the call sites do not change. */
 export function clientIp(req: Request): string {
-  return trustedClientIp(req)
+  return clientIpKey(req)
 }
 
 /**

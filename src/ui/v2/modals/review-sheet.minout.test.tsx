@@ -9,6 +9,9 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import TransactionPreviewV1 from '@/components/TransactionPreview'
 import { buildQuoteView } from '../swap/quote-model'
+import { getChainTokenList } from '@/lib/chains'
+import { getCanonicalUsdc } from '@/lib/chains/tokens'
+import type { Token } from '@/lib/tokens'
 import { ETH, USDC, fixtureMeta } from '../swap/test-fixtures'
 import { ReviewSheet, type ReviewPending } from './ReviewSheet'
 import { buildReviewModel, decodedMinimumOutput } from './review-model'
@@ -134,6 +137,65 @@ describe('direct route (not via the FeeCollector): the decoded router floor', ()
   it('decodedMinimumOutput returns the exact bigint (no float round-trip) at 30 digits', () => {
     const big = 123_456_789_012_345_678_901_234_567_890n
     expect(decodedMinimumOutput({ amountOutMin: big.toString(), tokenOut: USDC.address.toUpperCase() }, USDC.address.toLowerCase())).toBe(big)
+  })
+})
+
+/**
+ * [A70b-era audit A69b S-1] The 1 / 8453 / 42161 matrix for a direct (0x) route. The decoded-floor path has no chain branch today, so this
+ * can only fail if a chain-specific divergence is introduced (a buy token compared against another chain's address, a decimals assumption):
+ * each chain brings its OWN native sell token, its OWN canonical USDC (different address, same 6 decimals) and the 0x AllowanceHolder as
+ * router, and v1's TransactionPreview and v2's ReviewSheet must hand the formatter the SAME bigint.
+ */
+describe.each([1, 8453, 42161])('direct route on chain %i: v1 == v2, the decoded router floor as a bigint', (chainId) => {
+  const sell = getChainTokenList(chainId).find((t) => t.symbol === 'ETH') as Token
+  const buy = getCanonicalUsdc(chainId) as Token
+  const ALLOWANCE_HOLDER = '0x0000000000001fF3684f28c67538d4D072C22734' // 0x v2's router, the same address on every chain
+  const floor = ROUTER_FLOOR + BigInt(chainId) // a different integer per chain, so a stale value from another chain cannot pass
+  const chainModel = () => {
+    const view = buildQuoteView({ meta, tokenIn: sell, tokenOut: buy, amountIn: '1', slippage: 0.3, chainId, tokenInUsdPrice: 2490, tokenOutUsdPrice: 1, gasEstimate })
+    return buildReviewModel({ view, meta, tokenIn: sell, tokenOut: buy, amountIn: '1', slippage: 0.3, tier: null })
+  }
+  const pending = () => pendingFor({ routerAddress: ALLOWANCE_HOLDER, tokenOutAddress: buy.address, decimalsOut: buy.decimals })
+  const formattedOnChain = () => {
+    h.preview = decoded({ tokenIn: sell.address, tokenOut: buy.address, amountOutMin: floor.toString() })
+    const p = pending()
+    const m = chainModel()
+    h.fmt.length = 0
+    render(<TransactionPreviewV1 {...v1Props(p)} tokenIn={sell} tokenOut={buy} />)
+    const v1 = [...h.fmt]
+    cleanup()
+    h.fmt.length = 0
+    render(<ReviewSheet model={m} pending={p} onConfirm={() => {}} onCancel={() => {}} />)
+    return { v1, v2: [...h.fmt] }
+  }
+
+  it("the chain's own USDC is a different token from mainnet's (the matrix really varies the buy token)", () => {
+    expect(buy.decimals).toBe(6)
+    if (chainId !== 1) expect(buy.address.toLowerCase()).not.toBe(USDC.address.toLowerCase())
+  })
+
+  it('the SAME bigint reaches the formatter in both, and the row shows it', () => {
+    const { v1, v2 } = formattedOnChain()
+    expect(v1).toEqual([{ v: floor, d: 6 }])
+    expect(v2).toEqual(v1)
+    expect(screen.getByTestId('review-min').textContent?.replace(/[   ]/g, ' ')).toContain('USDC')
+    expect(screen.queryByText('Enforced on-chain')).toBeNull()
+  })
+
+  it("a decoded buy token from ANOTHER chain's catalogue hides the row in both (v1 compares the address, not the symbol)", () => {
+    const other = getCanonicalUsdc(chainId === 1 ? 8453 : 1) as Token
+    h.preview = decoded({ tokenIn: sell.address, tokenOut: other.address, amountOutMin: floor.toString() })
+    const p = pending()
+    const m = chainModel() // built first: its own formatting is not what is being counted
+    h.fmt.length = 0
+    render(<TransactionPreviewV1 {...v1Props(p)} tokenIn={sell} tokenOut={buy} />)
+    const v1 = [...h.fmt]
+    cleanup()
+    h.fmt.length = 0
+    render(<ReviewSheet model={m} pending={p} onConfirm={() => {}} onCancel={() => {}} />)
+    expect(v1).toEqual([])
+    expect(h.fmt).toEqual([])
+    expect(screen.queryByTestId('review-min')).toBeNull()
   })
 })
 

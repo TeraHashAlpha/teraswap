@@ -98,14 +98,18 @@ describe('below-the-fold claims', () => {
     expect(container.textContent).not.toMatch(/OpenOcean|Balancer/)
   })
 
-  it('C5-C7 copy: scoped MEV claim, permit-scoped gasless claim, OrderExecutor model, new tagline', async () => {
+  it('C5-C7 copy: no MEV promise (retired 2026-11-06), permit-scoped gasless claim, OrderExecutor model, new tagline', async () => {
     const BelowFold = await loadBelowFold()
     const { container } = render(<BelowFold onLaunchApp={() => {}} />)
     const text = container.textContent ?? ''
     expect(text).not.toMatch(/zero front-running|eliminate front-running|entirely|100%|ever\.|Ethereum Elite|CoW Protocol solvers compete to fill|CoW limit order is auto-submitted/i)
     expect(text).toContain('Exact-Amount Approvals')
     expect(text).not.toMatch(/gasless approvals|Permit2 technology|off-chain signing/i)
-    expect(text).toContain('When a swap routes through CoW Protocol')
+    // [feat/retire-force-mev, owner 2026-11-06] "MEV Protection on CoW Routes" → the unverified-swap size gate (item 03).
+    expect(text).not.toContain('When a swap routes through CoW Protocol')
+    expect(text).not.toMatch(/MEV[ -]protect/i)
+    expect(text).toContain('03Unverified-Swap Size Gate')
+    expect(text).toContain('Oracle-checked quotes. Proxied RPC and quote requests.')
     expect(text).toContain('OrderExecutor')
     expect(text).toContain('-hour timelock')
     expect(text).toContain('Built for every EVM trader.')

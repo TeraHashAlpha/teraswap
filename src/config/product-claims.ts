@@ -25,6 +25,7 @@ import {
   DISABLED_SOURCES,
   FEE_BPS,
   FEE_PERCENT,
+  MEV_PREFERENCE_THRESHOLD,
   PERMIT2_MAX_DEADLINE_SEC,
   PERMIT2_MAX_EXPIRATION_SEC,
   PRICE_DEVIATION_BLOCK,
@@ -117,21 +118,52 @@ export const SWAP_CHAIN_NAMES: readonly string[] = SWAP_CHAINS.map((c) => c.name
 export const SWAP_CHAIN_LIST_LABEL = formatChainList(SWAP_CHAIN_NAMES)
 
 // ── Privacy claims, scoped to what the code does ─────────────────────────────
-// Proof: RPC reads go through /api/rpc and quotes through /api/quote (DocsPage "Privacy" table;
-// useTokenImport -> /api/rpc per the C8 recon row). [fix/functional-chain-ui C8] The DCA DefiLlama
-// price lookup now goes through /api/price/defillama and Trust Wallet logos through /api/proxy/logo.
-// Still NOT proxied: other token logos (catalog logoURI; /api/token-logo answers with a 302 to the
-// logo CDN, which the browser then loads) and the wallet connection. DocsPage "Graceful Degradation":
-// the client falls back to direct RPC when the proxy is unreachable. So "never exposed" / "zero
-// leaks" are NOT claimed anywhere.
+// [fix/user-ip-privacy] The owner's wording (2026-11-06), one sentence per constant so every surface
+// — Help, Docs, the Privacy Policy, the landing pages, v1 and v2 — says the SAME thing. What backs each:
+//   RELAY (PRIVACY_PROXY_CLAIM): browser RPC reads on every chain go to /api/rpc[?chainId=] (wagmi
+//     transports, chains/clients.ts; wagmiConfig.browser-transports.test.ts), quotes and swaps to
+//     /api/quote and /api/swap, a signed CoW order and its status/trades to /api/cow/* (A76 S-1:
+//     adapters/cow.ts, limit-order-api.ts → cow-proxy.ts), token logos to /api/token-logo and /api/proxy/logo. The CSP allows
+//     no other host without a wallet (csp-policy.js) and CI measures it (e2e/third-party-hosts).
+//   WALLET (PRIVACY_DIRECT_NOTE / PRIVACY_WALLET_ADVICE): the wallet's own RPC and broadcast never
+//     touch our origin; the WalletConnect relay is the first wallet host in the CSP.
+//   IP (PRIVACY_IP_STORAGE_NOTE): no IP column in the database; rate-limit keys and log lines carry
+//     HMAC(IP, daily salt) only (client-ip-key.ts, client-ip-key.routes.test.ts).
+//   WALLET ADDRESSES (PRIVACY_WALLET_STORAGE_NOTE): orders, swaps and wallet_activity rows hold them.
+// No surface claims "never exposed" / "zero leaks": the wallet's side is said out loud instead.
+// The chain names in the first sentence are typed (owner wording); product-claims.test.ts fails if
+// the chain registry and that sentence ever disagree.
 export const PRIVACY_PROXY_CLAIM =
-  "RPC reads and aggregator quote requests are routed through a server-side proxy, so those providers see our server's IP rather than yours."
+  "TeraSwap's server relays all RPC reads on Ethereum, Base and Arbitrum, every aggregator quote and swap request, every CoW Protocol order you sign and its status checks, and token logos, so those providers see our server's IP address, not yours."
 export const PRIVACY_DIRECT_NOTE =
-  "Token logos and your wallet's own connection are requested directly by your browser, and the client falls back to direct RPC if the proxy is unreachable."
+  "Your wallet's own RPC connection and the transactions it broadcasts are outside our control; the WalletConnect relay sees your connection once you choose a WalletConnect wallet."
+export const PRIVACY_WALLET_ADVICE = 'Use a privacy RPC in your wallet settings if that matters to you.'
+export const PRIVACY_IP_STORAGE_NOTE =
+  'We do not store IP addresses in our database; our hosting and rate-limiting layers process them transiently, and our rate limiter only ever sees a one-way hash.'
+export const PRIVACY_WALLET_STORAGE_NOTE = 'We do store wallet addresses for orders, swap history and activity.'
+// [fix/user-ip-privacy A76 S-2] Privacy §3.3 (v1 == v2), the Auditor's wording. It replaces "This data remains
+// exclusively on your device and is never transmitted to our servers", which was true of the localStorage COPY of the
+// swap history but read as "your swaps never reach our server" — while every swap is POSTed to /api/log-swap and every
+// order to /api/orders, stored with the wallet address, and read back by /api/history for the History tab.
+export const PRIVACY_LOCAL_COPIES_NOTE =
+  'These copies stay in your browser and are never uploaded as such; separately, every swap and order you make is sent to our server and stored with your wallet address (see 3.2) — that server record is what the History tab shows.'
 export const PRIVACY_BADGE = 'Proxied RPC & quotes'
 
 export const SITE_META_DESCRIPTION =
-  `Maximum liquidity. Verified prices. TeraSwap is an EVM meta-aggregator on ${SWAP_CHAIN_LIST_LABEL} that compares quotes across ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources — with multi-oracle price protection (Chainlink + DefiLlama), MEV-protected routing via CoW Protocol, and a server-side proxy for RPC and quote requests.`
+  `Maximum liquidity. Verified prices. TeraSwap is an EVM meta-aggregator on ${SWAP_CHAIN_LIST_LABEL} that compares quotes across ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources — with multi-oracle price protection (Chainlink + DefiLlama) and a server-side proxy for RPC and quote requests.`
+
+// ── MEV / CoW protection: RETIRED claim ──────────────────────────────────────
+/**
+ * [feat/retire-force-mev] TeraSwap makes NO MEV-related promise. CoW Protocol is an ordinary liquidity source (queried, ranked,
+ * selected when it answers and wins); its batch auction may be described neutrally as CoW's own mechanism, never as a TeraSwap
+ * guarantee. `retired-claims.test.ts` greps every user-facing string in src/ and fails on a protection claim.
+ */
+export const MEV_PROTECTION_CLAIM = {
+  live: false,
+  retiredOn: '2026-11-06',
+  reason:
+    "CoW Protocol's free quote API has answered 429 to TeraSwap's servers since 2026-10-29 (a paid tier is required) and the owner decided not to pay; the Force MEV toggle and every MEV-related promise were removed.",
+} as const
 
 export type OrderTypeId = 'instant' | 'dca' | 'limit' | 'takeProfit' | 'stopLoss'
 
@@ -238,6 +270,24 @@ export const UNVERIFIED_SWAP_WARN_USD_LABEL = `$${UNVERIFIED_SWAP_WARN_USD.toLoc
 export const UNVERIFIED_SWAP_BLOCK_USD_LABEL = `$${UNVERIFIED_SWAP_BLOCK_USD.toLocaleString('en-US')}`
 export const PERMIT2_MAX_DEADLINE_MIN = PERMIT2_MAX_DEADLINE_SEC / 60
 export const PERMIT2_MAX_EXPIRATION_HOURS = PERMIT2_MAX_EXPIRATION_SEC / 3600
+
+/**
+ * [feat/retire-force-mev, owner 2026-11-06] Landing §3 "What Makes TeraSwap Different" item 03 (replaces the retired MEV item).
+ * Enforced by v1 SwapBox (`oracleWarnThreshold` / `oracleBlocked`) and v2 `lifecycle/gates.ts`, same two constants.
+ */
+export const UNVERIFIED_SWAP_GATE_TITLE = 'Unverified-Swap Size Gate'
+export const UNVERIFIED_SWAP_GATE_CLAIM =
+  `When no Chainlink feed can verify a token's price, swaps above ${UNVERIFIED_SWAP_WARN_USD_LABEL} show a strong warning and swaps above ${UNVERIFIED_SWAP_BLOCK_USD_LABEL} are blocked.`
+
+/**
+ * Smart CoW promotion (a ranking rule, src/lib/mev-preference.ts): CoW is selected when within MEV_PREFERENCE_THRESHOLD of the
+ * best output AND the gasless engine recommends it. The quote-card annotation reads the threshold from the constant (it used to
+ * say a stale "0.3%").
+ */
+export const SMART_COW_THRESHOLD_PCT = formatPercent(MEV_PREFERENCE_THRESHOLD)
+export const SMART_COW_SELECTED_LABEL = '· auto-selected (gasless)'
+export const SMART_COW_SELECTED_TITLE =
+  `CoW Protocol's quote was within ${SMART_COW_THRESHOLD_PCT} of the highest quote and its gasless route was recommended, so TeraSwap selected it.`
 
 /** "Prices older than 60 min are rejected" — a limit, not a polling cadence. */
 export const CHAINLINK_STALENESS_CLAIM =

@@ -12,10 +12,9 @@
  */
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { formatUnits } from 'viem'
-import { compareContent, normalize, type AllowedRemoval } from '../__tests__/content-parity'
+import { compareContent } from '../__tests__/content-parity'
 import { explorerTxUrl } from '@/lib/chains/tokens'
-import { fmtDate, fmtToken } from '@/lib/format'
+import { fmtDate } from '@/lib/format'
 import type { AutonomousOrder } from '@/lib/order-engine'
 import { fake, resetFake } from '../dca/dca-engine-fake'
 import { A1, A3, ALL_ORDERS, BASE, E1, FILLS, H1, H2, H3, L1, L2, NOW, ORDER_META, PRICES, S1, T1, order as mkOrder } from '../dca/positions-fixtures'
@@ -50,7 +49,8 @@ vi.mock('@/lib/sounds', () => ({
 
 import OrderDashboard from '@/components/OrderDashboard'
 import { OrdersTab } from './OrdersTab'
-import { amountInText, emptyText, receivedText, targetLabel, timeLeftText, v1AmountInText } from './orders-model'
+import { amountInText, emptyText, receivedText, targetLabel, timeLeftText } from './orders-model'
+import { allowFor, remapV1 } from './orders-remap'
 
 /** The explorer host an order on each chain must link to (asserted on the parsed URL's hostname). */
 const EXPLORER_HOST: Record<number, string> = { 1: 'etherscan.io', 8453: 'basescan.org', 42161: 'arbiscan.io' }
@@ -81,54 +81,6 @@ afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })
-
-/** v1's glyphs: printed as text in v1, drawn `aria-hidden` (still visible) in v2 — the swap tab's rule; the words beside them stay. */
-const GLYPHS = ['🔗', '📋', '⟳', '⇅', '🎯', '🛡️', '📎', '⏱', '⛽']
-function allowFor(v1: HTMLElement): AllowedRemoval[] {
-  const text = v1.textContent ?? ''
-  return GLYPHS.filter((g) => text.includes(g)).map((g) => ({ text: g, reason: 'decorative glyph: aria-hidden in v2, still drawn' }))
-}
-
-/** The instants an order (and its fills / meta) prints, for the date remap. */
-function instants(o: AutonomousOrder): number[] {
-  const out = [o.createdAt, o.executedAt, o.expiresAt].filter((t): t is number => typeof t === 'number' && t > 0)
-  for (const f of FILLS[o.id] ?? []) for (const t of [f.executed_at, f.created_at]) if (t) out.push(Date.parse(t))
-  const meta = ORDER_META[o.id]?.executed_at
-  if (typeof meta === 'string') out.push(Date.parse(meta))
-  return out
-}
-
-/** Apply the documented format remap to a clone of v1's DOM (see the header). */
-function remapV1(root: HTMLElement, orders: AutonomousOrder[]): HTMLElement {
-  const clone = root.cloneNode(true) as HTMLElement
-  const amount = new Map<string, string>()
-  const dates = new Set<string>()
-  for (const o of orders) {
-    amount.set(normalize(v1AmountInText(o)), amountInText(o))
-    if (o.amountOut) amount.set(normalize(formatUnits(BigInt(o.amountOut), o.tokenOutDecimals || 18)), fmtToken(BigInt(o.amountOut), o.tokenOutDecimals || 18))
-    for (const t of instants(o)) {
-      const d = new Date(t)
-      dates.add(normalize(d.toLocaleDateString()))
-      dates.add(normalize(d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })))
-      dates.add(normalize(d.toLocaleDateString([], { month: 'short', day: 'numeric' })))
-    }
-  }
-  const walker = clone.ownerDocument.createTreeWalker(clone, NodeFilter.SHOW_TEXT)
-  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-    const t = normalize(n.textContent ?? '')
-    if (amount.has(t)) n.textContent = amount.get(t) as string
-    else if (dates.has(t)) n.textContent = ''
-  }
-  for (const a of Array.from(clone.querySelectorAll('a[href]'))) {
-    // v1 links every tx to mainnet's explorer; pick those out by parsed host + path segment (the base only lets a relative href parse)
-    const u = new URL(a.getAttribute('href') as string, 'https://app.invalid')
-    const [, segment, hash] = u.pathname.split('/')
-    if (u.hostname !== 'etherscan.io' || segment !== 'tx' || !hash) continue
-    const owner = orders.find((o) => o.txHash === hash || (FILLS[o.id] ?? []).some((f) => f.tx_hash === hash) || ORDER_META[o.id]?.tx_hash === hash)
-    if (owner) a.setAttribute('href', explorerTxUrl(hash, owner.chainId ?? 1))
-  }
-  return clone
-}
 
 /** format.ts groups thousands with a thin space (U+2009); the expected strings below are typed with a plain one. */
 const plain = (s: string | null | undefined) => (s ?? '').replace(/\u2009/g, ' ')

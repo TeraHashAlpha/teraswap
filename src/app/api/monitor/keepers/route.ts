@@ -12,15 +12,19 @@
  * hammering the Supabase reads costs a 429, not a database round-trip per request.
  *
  * Response: { status: 'OK' | 'PAUSED' | 'UNKNOWN', chains: [{ chainId, active, readable, paused,
- * pausedSince }] } — UNKNOWN when any ACTIVE chain could not be read (no Supabase, or the migration
+ * pausedSince, infraMissOrders24h, infraMissStatus }] } — UNKNOWN when any ACTIVE chain could not be read (no Supabase, or the migration
  * 20261031120000_keeper_runtime_config_paused.sql is not applied yet) or none could; never OK then.
+ * [ADR-026] infraMissOrders24h = orders the keeper could not attempt for OUR reasons in the last 24 h;
+ * [A73 S-4] infraMissStatus is tri-state: 'ok' (a number), 'missing' (migration
+ * 20261104120000_orders_infra_miss.sql not applied — the report shows ℹ️), 'error' (the read failed —
+ * the report shows ⚠️). Neither changes `status` — those orders were NOT counted against.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyBearerToken } from '@/lib/auth'
 import { readAllKeeperPausedStates } from '@/lib/keeper-health-monitor'
 import { checkRateLimit } from '@/lib/kv-rate-limiter'
-import { trustedClientIp } from '@/lib/trusted-ip'
+import { clientIpKey } from '@/lib/client-ip-key'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,7 +34,7 @@ const NO_STORE = { 'Cache-Control': 'no-store' }
 const KEEPERS_RATE_LIMIT = { limit: 30, windowMs: 60_000 }
 
 export async function GET(req: NextRequest) {
-  const rate = await checkRateLimit(`monitor:${trustedClientIp(req)}`, KEEPERS_RATE_LIMIT.limit, KEEPERS_RATE_LIMIT.windowMs)
+  const rate = await checkRateLimit(`monitor:${clientIpKey(req)}`, KEEPERS_RATE_LIMIT.limit, KEEPERS_RATE_LIMIT.windowMs)
   if (!rate.allowed) {
     const retryAfter = Math.max(1, Math.ceil((rate.resetAt - Date.now()) / 1000))
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429, headers: { ...NO_STORE, 'Retry-After': String(retryAfter) } })

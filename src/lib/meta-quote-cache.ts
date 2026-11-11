@@ -32,6 +32,14 @@ import { kv } from './kv'
 import type { MetaQuoteResult } from './adapters'
 
 const KV_GATE_TIMEOUT_MS = 3_000
+/**
+ * [fix/quote-limiter-music-toggle] How long ONE cache read or write may wait on Redis. Capped by (never above)
+ * KV_GATE_TIMEOUT_MS. The route's KV waits are SEQUENTIAL — halt check (3 s) + limiter (1 s) + cache read +
+ * cache write — so with Redis hung the old 3 s here made a quote take ~10 s before any source was contacted
+ * (measured: 10.0 s). A healthy Upstash read answers in tens of ms; a cache that has not answered in 500 ms is a
+ * miss, and the live fetch is what the visitor is waiting for. See also the write skip in getMetaQuoteCached.
+ */
+const CACHE_KV_TIMEOUT_MS = 500
 const QUOTE_CACHE_TTL_SECONDS = 12
 
 export interface MetaQuoteCacheKeyInput {
@@ -52,17 +60,18 @@ export function metaQuoteCacheKey({
   return `quote:cache:v1:${chain}:${src.toLowerCase()}:${dst.toLowerCase()}:${amount}:${srcDecimals}:${dstDecimals}:${exclude}`
 }
 
-async function getCachedMetaQuote(key: string): Promise<MetaQuoteResult | null> {
+/** `timedOut`: Redis did not answer within CACHE_KV_TIMEOUT_MS (a plain error is a miss, not a timeout). */
+async function getCachedMetaQuote(key: string): Promise<{ value: MetaQuoteResult | null; timedOut: boolean }> {
   try {
-    return await withTimeout(kv.get<MetaQuoteResult>(key), KV_GATE_TIMEOUT_MS)
-  } catch {
-    return null
+    return { value: await withTimeout(kv.get<MetaQuoteResult>(key), CACHE_KV_TIMEOUT_MS), timedOut: false }
+  } catch (e) {
+    return { value: null, timedOut: e instanceof Error && e.message === 'Timeout' }
   }
 }
 
 async function setCachedMetaQuote(key: string, value: MetaQuoteResult): Promise<void> {
   try {
-    await withTimeout(kv.set(key, value, { ex: QUOTE_CACHE_TTL_SECONDS }), KV_GATE_TIMEOUT_MS)
+    await withTimeout(kv.set(key, value, { ex: QUOTE_CACHE_TTL_SECONDS }), CACHE_KV_TIMEOUT_MS)
   } catch {
     // Best-effort — a cache-write failure must never fail the request.
   }
@@ -154,7 +163,7 @@ export async function getMetaQuoteCached(
   fetcher: () => Promise<MetaQuoteResult>,
 ): Promise<{ result: MetaQuoteResult; cacheHeader: string }> {
   const cacheKey = metaQuoteCacheKey(keyInput)
-  const cached = await getCachedMetaQuote(cacheKey)
+  const { value: cached, timedOut: readTimedOut } = await getCachedMetaQuote(cacheKey)
   if (cached) {
     return { result: cached, cacheHeader: 'hit' }
   }
@@ -163,12 +172,15 @@ export async function getMetaQuoteCached(
   const cacheHeader = dampened.source === 'fresh' ? 'miss' : `miss-dampened-${dampened.source}`
   // Only the leader of a fresh fetch writes through to KV — a coalesced/local-cache hit
   // already holds a value that either came from (or was just written to) KV moments ago.
-  if (dampened.source === 'fresh') await setCachedMetaQuote(cacheKey, dampened.result)
+  // A read that TIMED OUT means Redis is not answering: skip the write rather than wait a second bound for it.
+  if (dampened.source === 'fresh' && !readTimedOut) await setCachedMetaQuote(cacheKey, dampened.result)
   return { result: dampened.result, cacheHeader }
 }
 
 // ── Test-only exports ───────────────────────────────────────
 export const _internal = {
+  CACHE_KV_TIMEOUT_MS,
+  KV_GATE_TIMEOUT_MS,
   MAX_DAMPENER_CACHE_ENTRIES,
   DAMPENER_TTL_MS,
   QUOTE_CACHE_TTL_SECONDS,

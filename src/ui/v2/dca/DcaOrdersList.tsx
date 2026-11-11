@@ -127,7 +127,7 @@ export function DcaPositionCard({ order, latestEvent, connectedChainId, onCancel
     <article className="ts-dca-row ts-dca-pos" data-testid="dca-order-row" data-order-id={order.id} data-status={status}>
       <div className="ts-dca-pos-ring">
         {isFailed ? (
-          <p data-testid="failed-banner" className="max-w-[280px] border-l-2 border-v2-red pl-3 text-[13px] text-v2-red">{failedOrderReason(order.error)}</p>
+          <p data-testid="failed-banner" className="max-w-[280px] border-l-2 ts-v2-accent-stroke pl-3 text-[13px] text-v2-red">{failedOrderReason(order.error)}</p>
         ) : (
           <NextBuyRing progress={ringProgress(order)} accent={accent} reduced={reduced}>
             <span className="contents" data-testid="order-next-buy"><CountdownText view={view} /></span>

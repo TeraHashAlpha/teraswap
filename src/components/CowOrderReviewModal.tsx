@@ -46,14 +46,14 @@ export default function CowOrderReviewModal({ order, onConfirm, onCancel }: Prop
   const receiverIsSelf = message.receiver.toLowerCase() === account.toLowerCase()
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label="Review MEV-protected order">
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label="Review CoW Protocol order">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
 
       <div className="relative flex max-h-[85vh] w-full animate-slide-up flex-col overflow-hidden rounded-t-2xl border border-cream-08 bg-surface-secondary shadow-2xl shadow-black/40 sm:max-h-[85vh] sm:max-w-md sm:animate-fade-slide-in sm:rounded-2xl">
         <div className="mx-auto mt-3 mb-1 h-1 w-10 shrink-0 rounded-full bg-cream-15 sm:hidden" />
 
         <div className="shrink-0 border-b border-cream-08 px-5 py-4">
-          <h2 className="text-base font-display font-semibold text-cream">Review MEV-Protected Order</h2>
+          <h2 className="text-base font-display font-semibold text-cream">Review CoW Protocol Order</h2>
           <p className="mt-0.5 text-xs text-cream-50">
             You&apos;re about to <strong>sign a CoW Protocol order</strong> (no on-chain transaction). Verify the
             exact terms below — this is precisely what your wallet will sign.
@@ -105,8 +105,8 @@ export default function CowOrderReviewModal({ order, onConfirm, onCancel }: Prop
           </div>
 
           <div className="mt-1 rounded-lg border border-success/20 bg-success/5 px-3 py-2 text-[11px] text-success">
-            &#10003; MEV-protected via CoW Protocol — solvers compete in a batch auction; you&apos;re shielded
-            from frontrunning/sandwich attacks. Your wallet signs this order off-chain; no gas to submit.
+            &#10003; Settled via CoW Protocol — solvers compete in a batch auction. Your wallet signs this
+            order off-chain; no gas to submit.
           </div>
         </div>
 

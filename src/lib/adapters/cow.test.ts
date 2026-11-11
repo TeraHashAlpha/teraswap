@@ -15,7 +15,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 // real KV call — the monitor's own alert logic is covered by cow-fee-monitor.test.ts.
 vi.mock('@/lib/cow-fee-monitor', () => ({ recordCowFeeZeroing: vi.fn(async () => {}) }))
 
-import cowAdapter, { pollCowOrderStatus } from './cow'
+import cowAdapter, { pollCowOrderStatus, submitCowOrder, __resetCow429LogForTests } from './cow'
 import { FEE_RECIPIENT, FEE_BPS, NATIVE_ETH } from '@/lib/constants'
 
 const VALID_QUOTE = {
@@ -250,6 +250,53 @@ describe('pollCowOrderStatus — poll fetches are time-bounded [RQ-2026-06-11]',
 })
 
 
+// [fix/user-ip-privacy A76 S-1] submitCowOrder / pollCowOrderStatus run in the BROWSER (useSwap, v1 and v2, after the
+// wallet signed). They must talk to our own origin only: the site's CSP has no CoW host, and a direct call to
+// api.cow.fi hands CoW the visitor's IP. Before this fix both called `${getCowApiBase(chainId)}/…`.
+describe('CoW submit + poll go through /api/cow/*, never api.cow.fi [A76 S-1]', () => {
+  const UID = '0x' + 'cd'.repeat(56)
+  const ORDER = {
+    ...VALID_QUOTE,
+    sellToken: VALID_QUOTE.sellToken as `0x${string}`,
+    buyToken: VALID_QUOTE.buyToken as `0x${string}`,
+    appDataHash: VALID_QUOTE.appDataHash as `0x${string}`,
+    receiver: VALID_QUOTE.receiver as `0x${string}`,
+    kind: 'sell' as const,
+    sellTokenBalance: 'erc20' as const,
+    buyTokenBalance: 'erc20' as const,
+    from: '0x2222222222222222222222222222222222222222' as `0x${string}`,
+    quoteId: 7,
+    signingScheme: 'eip712' as const,
+  }
+  afterEach(() => vi.restoreAllMocks())
+
+  it.each([1, 8453, 42161])('chain %i: the signed order is POSTed to /api/cow/orders?chainId=<chain>', async (chainId) => {
+    const spy = vi.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify(UID), { status: 201 }))
+    await expect(submitCowOrder(ORDER, '0x' + '1'.repeat(130), chainId)).resolves.toBe(UID)
+    const [url, init] = spy.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`/api/cow/orders?chainId=${chainId}`)
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toMatchObject({ signature: '0x' + '1'.repeat(130), from: ORDER.from, quoteId: 7 })
+  })
+
+  it("a rejected submit keeps CoW's description in the error", async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify({ errorType: 'InsufficientBalance', description: 'order owner must have funds' }), { status: 400 }))
+    await expect(submitCowOrder(ORDER, '0x' + '1'.repeat(130), 8453)).rejects.toThrow('CoW order submit 400: order owner must have funds')
+  })
+
+  it('the poll reads /api/cow/order-status, then /api/cow/trades once filled', async () => {
+    const spy = vi.spyOn(global, 'fetch').mockImplementation(async (input) =>
+      String(input).startsWith('/api/cow/order-status')
+        ? new Response(JSON.stringify({ status: 'fulfilled' }), { status: 200 })
+        : new Response(JSON.stringify([{ txHash: '0xabc', executedBuyAmount: '42' }]), { status: 200 }),
+    )
+    await expect(pollCowOrderStatus(UID, 10_000, 42161)).resolves.toEqual({ status: 'fulfilled', txHash: '0xabc', executedBuyAmount: '42' })
+    const urls = spy.mock.calls.map((c) => String(c[0]))
+    expect(urls).toEqual([`/api/cow/order-status?chainId=42161&uid=${UID}`, `/api/cow/trades?chainId=42161&orderUid=${UID}`])
+    for (const u of urls) expect(u).not.toMatch(/cow\.fi|^https?:/)
+  })
+})
+
 describe('cow adapter — 429 Retry-After reaches the circuit breaker (fix/monitor-self-source-alerts)', () => {
   const SELL = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
   const BUY = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'
@@ -287,5 +334,62 @@ describe('cow adapter — 429 Retry-After reaches the circuit breaker (fix/monit
     reply429({ 'Retry-After': 'Wed, 21 Oct 2026 07:28:00 GMT' })
     const err = await cowAdapter.fetchQuote({ src: SELL, dst: BUY, amount: '1000000' }).catch((e: unknown) => e)
     expect((err as Error).message).not.toContain('retryAfterMs')
+  })
+})
+
+
+describe('cow adapter — the first 429 of the process is logged ONCE, structured [feat/retire-force-mev C3]', () => {
+  const SELL = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+  const BUY = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'
+  const body = JSON.stringify({ errorType: 'RateLimited', description: 'x'.repeat(400) })
+  const reply = () =>
+    vi.spyOn(global, 'fetch').mockImplementation(async () =>
+      new Response(body, {
+        status: 429,
+        headers: { 'Content-Type': 'application/json', 'Retry-After': '30', 'X-RateLimit-Limit': '10', 'RateLimit-Policy': '10;w=1', 'CF-Ray': '8d1-FRA', Server: 'cloudflare', 'X-Api-Key-Echo': 'should-not-appear' },
+      }),
+    )
+  const firstLines = (warn: ReturnType<typeof vi.spyOn>) =>
+    warn.mock.calls.map((c: unknown[]) => String(c[0])).filter((l: string) => l.includes('cow_quote_429_first'))
+
+  beforeEach(() => __resetCow429LogForTests())
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllEnvs()
+  })
+
+  it('one JSON line: status, Retry-After, the allowlisted rate-limit/cf-ray/server headers, region, ≤ 200 body chars', async () => {
+    vi.stubEnv('VERCEL_REGION', 'iad1')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    reply()
+    await expect(cowAdapter.fetchQuote({ src: SELL, dst: BUY, amount: '1000000' })).rejects.toThrow(/CoW 429/)
+    const lines = firstLines(warn)
+    expect(lines).toHaveLength(1)
+    const j = JSON.parse(lines[0])
+    expect(j).toMatchObject({ event: 'cow_quote_429_first', status: 429, retryAfter: '30', region: 'iad1', endpoint: 'https://api.cow.fi/mainnet/api/v1/quote' })
+    expect(j.headers).toEqual({ 'retry-after': '30', 'x-ratelimit-limit': '10', 'ratelimit-policy': '10;w=1', 'cf-ray': '8d1-FRA', server: 'cloudflare' })
+    expect(j.body).toHaveLength(200)
+    expect(lines[0]).not.toContain('should-not-appear') // only allowlisted response headers; nothing from the request
+  })
+
+  it('a second 429 in the same process logs nothing more', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    reply()
+    await cowAdapter.fetchQuote({ src: SELL, dst: BUY, amount: '1000000' }).catch(() => {})
+    await cowAdapter.fetchQuote({ src: SELL, dst: BUY, amount: '1000000' }).catch(() => {})
+    expect(firstLines(warn)).toHaveLength(1)
+  })
+
+  it('the request shape is unchanged: POST <base>/quote, headers Content-Type + Accept only', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const spy = reply()
+    await cowAdapter.fetchQuote({ src: SELL, dst: BUY, amount: '1000000' }).catch(() => {})
+    const [url, init] = spy.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://api.cow.fi/mainnet/api/v1/quote')
+    expect(init.method).toBe('POST')
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json', Accept: 'application/json' })
+    expect(Object.keys(JSON.parse(String(init.body))).sort()).toEqual(
+      ['appData', 'buyToken', 'buyTokenBalance', 'from', 'kind', 'partiallyFillable', 'sellAmountBeforeFee', 'sellToken', 'sellTokenBalance', 'signingScheme'].sort(),
+    )
   })
 })

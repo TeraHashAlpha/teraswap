@@ -137,7 +137,7 @@ The executor itself does NOT push alerts. Alerting goes through the existing Ter
 | Gas-cap hit (no execution despite triggered order) | Supabase: `order_executions` row with `status='skipped'` and `reason` containing `gas` | Manual audit |
 | Execution failure streak | Repeated rows with `status='failed'` for the same order | Manual audit |
 | Process OOM / crash loop | PM2 logs, `pm2 status` | Host-level monitoring (out of scope here) |
-| RPC provider rejects the key (allowlist / invalid key / 401 / 403) | Keeper itself (`rpc-auth.js`, INC-2026-10-30-001) | Telegram `🔐 RPC AUTH REJECTED — Urgency: HIGH`: once at boot (rate-limited across pm2 restarts), or once after 3 consecutive rejections at runtime, then at most hourly; one `RPC auth recovered` when it clears. State: `/health` `paused: "rpc-auth"`, `/metrics` `teraswap_executor_paused{reason="rpc-auth"} 1`, heartbeat `alive but PAUSED`, Supabase `keeper_runtime_config.paused` → monitor tick alert `keeper-paused-<chain>` (hourly) + daily report ❌ "Keeper state" row (`GET /api/monitor/keepers`). Fix: § 7 |
+| RPC provider rejects the key (allowlist / invalid key / 401 / 403) | Keeper itself (`rpc-auth.js`, INC-2026-10-30-001) | Telegram `🔐 RPC AUTH REJECTED — Urgency: HIGH`: once at boot (rate-limited across pm2 restarts), or once after 3 consecutive rejections at runtime, then at most hourly; one `RPC auth recovered` once EVERY origin that was refused (event watcher `getBlockNumber` / `getLogs` / `poll`, `balance-read`, `cycle`) has answered once [A71b S-1]. State: `/health` `paused: "rpc-auth"`, `/metrics` `teraswap_executor_paused{reason="rpc-auth"} 1`, heartbeat `alive but PAUSED`, Supabase `keeper_runtime_config.paused` → monitor tick alert `keeper-paused-<chain>` (hourly) + daily report ❌ "Keeper state" row (`GET /api/monitor/keepers`). [A74 S-10/S-11] A streak that sees no new auth error for 15 min ages out, and a paused cycle (it attempts nothing) reports nothing for `cycle` — so after the key is fixed the pause can take up to 15 min to clear if `cycle` was one of the refused origins. [A74 S-12] The boot-alert rate limit (`~/.teraswap-keeper`) is refused — every boot alerts — when HOME is group/other-writable, or the state file is a link/hard link/not ours: `chmod go-w ~`. Fix: § 7 |
 
 **Where to look first:**
 - `pm2 status` and `pm2 logs teraswap-executor` for process health.
@@ -215,15 +215,15 @@ keeper (the key sits inside a URL path in a host env file). Every keeper RPC cal
      (macOS and Linux `grep`/`sed`; pinned by `contracts/order-engine/executor/runbook-rpc-inventory.test.mjs`):
      ```bash
      cd contracts/order-engine/executor
-     HOST='<provider-host>'
+     HOST='<provider-host>'   # hostnames are case-insensitive: both greps below use -i (-iF)
      # (a) every assignment whose value is a URL — `VAR=…`, `VAR = …`, `export VAR=…`, indented, quoted
      #     or not. Prints "file  VAR  scheme://host": never the userinfo, path or query (where keys live).
      grep -HE "^[[:space:]]*(export[[:space:]]+)?[A-Za-z0-9_]+[[:space:]]*=[[:space:]]*[\"']?[A-Za-z][A-Za-z0-9+.-]*://" .env.executor* \
        | sed -E "s|^([^:]+):[[:space:]]*(export[[:space:]]+)?([A-Za-z0-9_]+)[[:space:]]*=[[:space:]]*[\"']?([A-Za-z][A-Za-z0-9+.-]*)://([^/?#@\"' ]*@)?([^/?#\"' ]*).*|\1  \3  \4://\6|" \
-       | grep -F "$HOST"
+       | grep -iF "$HOST"
      # (b) every line that names the host in ANY shape (a URL list, a commented-out line, …).
      #     Prints "file:line  VAR" only — a line (b) lists that (a) did not is a consumer (a) missed.
-     grep -HnF "$HOST" .env.executor* \
+     grep -HniF "$HOST" .env.executor* \
        | sed -E "s|^([^:]+:[0-9]+):[[:space:]]*(export[[:space:]]+)?([A-Za-z0-9_]*).*|\1  \3|"
      ```
    - Vercel, **Production + Preview + Development**: Project → Settings → Environment Variables, search
@@ -254,6 +254,48 @@ keeper (the key sits inside a URL path in a host env file). Every keeper RPC cal
 6. **Only then** restrict or revoke the old key. A key that ever appeared in a log, alert or chat is
    revoked, not merely restricted: an Origin allowlist is a header check that any non-browser client
    can satisfy.
+
+---
+
+## 8. What happens to orders during an outage (ADR-026)
+
+**Rule:** a miss caused by OUR infrastructure never counts against a user's order. The keeper tags
+every miss (`retry-policy.js classifyMissCause`) and only an `order` miss advances
+`orders.consecutive_failures` toward `MAX_CYCLE_FAILURES` (8) → `failed`.
+
+| Cause | Examples | What the keeper does |
+|---|---|---|
+| **infra** (ours) | RPC key rejected (`rpc-auth`), provider 5xx / 429 / timeout / socket anywhere in the error chain — a provider's error page included, whatever it says, and a provider-internal JSON-RPC error (−32603) that carries no revert data (`rpc-transport`; if its body carries the provider's auth words, e.g. “not on whitelist”, it is `rpc-auth` [A73d L-2]), keeper wallet out of gas (`keeper-gas`), the keeper's tx nonce rejected by the node — stale after a restart / a concurrent send; heals on the next cycle (`keeper-nonce`), a sent tx whose receipt could not be read (`receipt-unavailable`), `/api/swap` 5xx / 429 / unreachable / wrong-router calldata (`swap-api:*`), a keeper config gap (`keeper-config`), an unrecognised throw before any tx (`unclassified`) | Order stays **active**; `consecutive_failures` untouched; row gets `last_attempt_at` + `last_infra_miss_at` / `last_infra_miss_reason`; log line `infra miss (<reason>) — NOT counted (n/8)`; retried on the next healthy cycle (after the ladder's own backoff only if the order was already mid-ladder). |
+| **order** (the order's) | mined revert, simulated revert (slippage / minOut / floor), allowance / balance / nonce, expiry, `/api/swap` answered with no route for the pair | Exactly as before: counted (or failed now for a permanent cause), `no_route_after_retries` / `min_output_unreachable` at the cap. |
+
+**While `paused: rpc-auth`** (3 consecutive key rejections, § 4 / § 7) the cycle logs
+`PAUSED (rpc-auth): N active order(s) NOT attempted — no lock, no tx, no retry count` and does nothing
+else; the cycle-start balance read and the event watcher keep probing, so the pause clears by itself
+once the key works (one `RPC auth recovered` alert) and the next cycle attempts again.
+
+**DCA during an outage:** nothing is back-filled and nothing is executed twice. The contract's
+`dcaLastExecution + dcaInterval` gate is the only thing that decides whether a chunk is due, so after
+a 2.5-interval outage the first healthy cycle fills ONE chunk and the next one comes a full interval
+after that fill. Limit / stop-loss orders simply fill on the first healthy cycle whose price condition
+holds, within their expiry. An order that expires DURING the outage is recorded `expired` as before.
+
+**Reading it afterwards:**
+- Daily report row `Orders with infra misses (24 h)` — LIVE orders (active / executing) only — (⚠️ when
+  > 0, with an attention bullet; ℹ️ `unknown` until migration `20261104120000_orders_infra_miss.sql` is
+  applied; ⚠️ `error` when the read itself failed) — source `GET /api/monitor/keepers` →
+  `chains[].infraMissOrders24h` + `infraMissStatus`.
+- Keeper `/health` → `stats.infraMisses` (misses not counted this process) and `stats.pausedCycles`.
+- Supabase (read-only): `SELECT id, order_type, status, consecutive_failures, last_attempt_at,
+  last_infra_miss_at, last_infra_miss_reason FROM orders WHERE chain_id = <id> AND status IN ('active', 'executing') AND last_infra_miss_at > now() - interval '24 hours';`
+- pm2 log: `infra miss (<reason>)` lines, one per attempted cycle (attempts space out at the ladder's
+  cadence — 30 s, 60 s, … ≤ 30 min — while the infra misses persist).
+- Telegram `🛠️ Ops issue: infra-miss-streak` (critical tier): one order has missed ~10 min / 20 cycles
+  in a row for an UNRECOGNISED infra reason (`unclassified`, `swap-api:misroute`, `keeper-config`) — that
+  is the keeper or `/api/swap`, not the order; read that order's log lines. Repeats at most hourly.
+
+**Nothing to do for the orders themselves** once the cause is fixed (§ 5 restart, § 7 key swap, gas
+top-up): they resume on their own. What to check is that the cause IS fixed — a persistent infra
+miss is never capped, so it keeps retrying (and logging) until the order fills or expires.
 
 ---
 

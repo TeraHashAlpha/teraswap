@@ -297,6 +297,9 @@ export function startEventWatcher(publicClient, contracts, monitor = null, rpcAu
         }
       }
 
+      // [A71b S-1] The processing phase is its own origin (`event-watcher:poll`, see rpcCall above): a
+      // poll that got this far ended its streak, or a pause could never clear once it holds one.
+      if (rpcAuth) await rpcAuth.onRpcSuccess("event-watcher:poll")
       lastBlock = currentBlock
       consecutiveFailures = 0
       backoffMs = INITIAL_BACKOFF_MS

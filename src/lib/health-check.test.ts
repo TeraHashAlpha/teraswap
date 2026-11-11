@@ -37,3 +37,25 @@ describe('runHealthCheck — infra vs source', () => {
     expect(r.kind).toBeUndefined()
   })
 })
+
+describe('runHealthCheck — HTTP 429 is rate-limited, never healthy [feat/retire-force-mev C3]', () => {
+  it('an aggregator 429 → ok:false, kind "rate-limited", Retry-After seconds kept (it used to read as healthy: status < 500)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 429, ok: false, headers: new Headers({ 'retry-after': '30' }) }))
+    const r = await runHealthCheck(COW)
+    expect(r).toMatchObject({ ok: false, kind: 'rate-limited', error: 'HTTP 429 (rate-limited)', retryAfterSec: 30 })
+  })
+
+  it('a non-numeric Retry-After is dropped, never NaN', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 429, ok: false, headers: new Headers({ 'retry-after': 'Wed, 21 Oct 2026 07:28:00 GMT' }) }))
+    const r = await runHealthCheck(COW)
+    expect(r.kind).toBe('rate-limited')
+    expect(r).not.toHaveProperty('retryAfterSec')
+  })
+
+  it("CoW's GET probe answering 405 is still \"reachable\" (unchanged)", async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 405, ok: false }))
+    const r = await runHealthCheck(COW)
+    expect(r.ok).toBe(true)
+    expect(r.kind).toBeUndefined()
+  })
+})

@@ -19,6 +19,7 @@ const h = vi.hoisted(() => ({
   blockCalls: [] as unknown[],
   dcaLive: new Set<number>([8453]),
   limitLive: false,
+  crashSwap: false,
 }))
 
 vi.mock('wagmi', () => ({
@@ -47,7 +48,12 @@ vi.mock('@rainbow-me/rainbowkit', async () => {
 })
 vi.mock('next/navigation', () => ({ usePathname: () => h.pathname, useRouter: () => ({ push: h.push }) }))
 // B3: these tests are about the shell, not the Swap card (its own tests mock the hooks it reads): the Swap tab pane is a placeholder here.
-vi.mock('../swap/SwapCard', () => ({ SwapCard: () => <section data-tab-pane="swap" aria-busy="true" /> }))
+vi.mock('../swap/SwapCard', () => ({
+  SwapCard: () => {
+    if (h.crashSwap) throw new Error('boom')
+    return <section data-tab-pane="swap" aria-busy="true" />
+  },
+}))
 // B6a: likewise the DCA form (its own tests mock the hooks it reads): on a live DCA chain the pane is a placeholder here.
 vi.mock('../dca/DcaCard', () => ({ DcaCard: () => <section data-tab-pane="dca" aria-busy="true" /> }))
 // B7: likewise the Orders tab (its own tests run it on v1's engine contract): here the pane is a stub.
@@ -55,6 +61,8 @@ vi.mock('../orders/OrdersTab', () => ({ OrdersTab: () => <section data-tab-pane=
 vi.mock('../history/HistoryTab', () => ({ HistoryTab: () => <section data-tab-pane="history" aria-busy="true" /> }))
 // B8: likewise the Portfolio tab (its own tests run it on v1's usePortfolio contract): here the pane is a stub.
 vi.mock('../portfolio/PortfolioTab', () => ({ PortfolioTab: () => <section data-tab-pane="portfolio" aria-busy="true" /> }))
+// B9: likewise the Analytics tab (its own tests run it on v1's three reads): here the pane is a stub.
+vi.mock('../analytics/AnalyticsTab', () => ({ AnalyticsTab: () => <section data-tab-pane="analytics" aria-busy="true" /> }))
 vi.mock('@/ui/v2/font-loader', () => ({ v2FontClassNames: 'font-vars', v2BodyFontFamily: 'body-font' }))
 // Base / Arbitrum FeeCollectors are env-driven (unset under test) → every chain would be "coming soon".
 // Only that gate is overridden, as in v1's ChainSelector test.
@@ -80,6 +88,7 @@ vi.mock('@/lib/order-engine', async () => {
 import { FOOTER_RISK_LINE } from '@/components/Footer'
 import { COPYRIGHT_YEAR, PLATFORM_FEE_LABEL } from '@/config/product-claims'
 import { useDisconnectedChainSelection } from '@/hooks/useChainId'
+import { useSwapHistory } from '@/hooks/useSwapHistory'
 import { helpSections } from '@/lib/help-content'
 import { SUPPORT_EMAIL } from '@/lib/constants'
 import { AppShell } from './AppShell'
@@ -88,6 +97,7 @@ import { resetMusicStateForTests } from './music'
 /** Which speaker the ♫ button shows (round-6 icons replaced the ♫ / ✕ glyphs). */
 const icon = (btn: HTMLElement) => btn.querySelector('svg[data-music-icon]')?.getAttribute('data-music-icon')
 import { V2_RISK_LINE } from './Footer'
+import { escapeRegExp } from '@/test-utils/escape-regexp'
 import { NETWORK_SUBTITLE, shellChains } from './chains'
 
 beforeEach(() => {
@@ -100,6 +110,7 @@ beforeEach(() => {
   h.limitLive = false
   process.env.NEXT_PUBLIC_DCA_ENABLED = 'true' // v1's launch flag: the gate is `flag && !DCA_CHAINS.includes(chain)`
   h.push.mockClear()
+  h.crashSwap = false
   h.switchChain.mockClear()
   useDisconnectedChainSelection.setState({ chainId: null })
   resetMusicStateForTests()
@@ -197,11 +208,20 @@ describe('tabs', () => {
     }
   })
 
-  it('Limit / SL/TP lose "Soon" when v1\'s isLimitLive gate says live', () => {
-    h.limitLive = true
-    render(<AppShell />)
-    expect(screen.getByRole('tab', { name: 'Limit' }).hasAttribute('disabled')).toBe(false)
-    expect(screen.queryByText('Soon')).toBeNull()
+  it('Limit / SL/TP stay disabled "Soon" even when v1\'s isLimitLive gate says live — v2 has no pane for them (owner decision)', () => {
+    for (const chain of [1, 8453, 42161]) {
+      cleanup()
+      h.limitLive = true
+      useDisconnectedChainSelection.setState({ chainId: chain })
+      render(<AppShell />)
+      for (const name of ['Limit', 'SL/TP']) {
+        const tab = screen.getByRole('tab', { name: new RegExp(`^${name.replace('/', '\\/')}`) })
+        expect(tab.hasAttribute('disabled')).toBe(true)
+        expect(tab.textContent).toMatch(/soon/i)
+        fireEvent.click(tab)
+      }
+      expect(h.push).not.toHaveBeenCalled() // the skeleton TabPane is never reachable from the strip
+    }
   })
 
   it('the tab in the URL is active; clicking another navigates to its path', () => {
@@ -237,19 +257,29 @@ describe('DCA tab', () => {
     expect(useDisconnectedChainSelection.getState().chainId).toBe(42161)
   })
 
-  it('on a DCA chain, or with the launch flag off, the plain pane shows — no claim, never "Soon"', () => {
+  it('on a DCA chain, the plain pane shows — no claim, never "Soon"', () => {
     h.pathname = '/dca'
     useDisconnectedChainSelection.setState({ chainId: 8453 })
     render(<AppShell />)
     expect(document.querySelector('[data-dca-gate]')).toBeNull()
     expect(document.querySelector('[data-tab-pane="dca"]')).not.toBeNull()
-    cleanup()
-    useDisconnectedChainSelection.setState({ chainId: null })
-    process.env.NEXT_PUBLIC_DCA_ENABLED = 'false'
+  })
+
+  // [H-1, A75] Required test: NEXT_PUBLIC_DCA_ENABLED unset. With the launch flag off, isDcaLive and
+  // shouldShowDcaGate are BOTH false on every chain — the tab used to fall all the way through to the permanent
+  // empty skeleton. It must show v1's ComingSoonPanel instead; the tab STRIP's own label still never says "Soon"
+  // (unaffected — that is the DCA tab's own, deliberate difference from Limit/SL-TP, pinned in 'tabs' above).
+  it('with the launch flag unset, v1\'s ComingSoonPanel shows on a DCA chain — never the skeleton, never a bare unclaimed pane', () => {
+    h.pathname = '/dca'
+    h.dcaLive = new Set() // the real isDcaLive would also say false for every chain once the flag is off
+    useDisconnectedChainSelection.setState({ chainId: 8453 })
+    delete process.env.NEXT_PUBLIC_DCA_ENABLED
     render(<AppShell />)
     expect(document.querySelector('[data-dca-gate]')).toBeNull()
-    expect(screen.queryByText(/DCA runs on/)).toBeNull()
-    expect(document.querySelector('[data-tab-pane="dca"]')?.textContent).not.toMatch(/soon/i)
+    expect(document.querySelector('.ts-v2-skeleton')).toBeNull()
+    expect(screen.getByText('Smart DCA Engine')).toBeTruthy()
+    expect(screen.getByText('Coming Soon')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Swap Now/ })).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'DCA' }).textContent).not.toMatch(/soon/i)
   })
 })
@@ -282,6 +312,21 @@ describe('DCA tab · per selected network (the gate, never the skeleton, when DC
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(heading)
     expect(screen.getByText(`${NAMES[chainId]} is selected. Switch network to create or manage DCA positions.`)).toBeTruthy()
     expect(screen.getAllByRole('button', { name: /^Switch to / }).map((b) => b.textContent)).toEqual(buttons)
+  })
+
+  // [H-1, A75] Arbitrum is in DCA_CHAINS (the allowlist) but, per docs/DEPLOYMENTS.md, OrderExecutorV3 is not yet
+  // operational there — the network is neither "wrong" (so the gate never shows, confirmed above) nor live, so
+  // v1's ComingSoonPanel must carry the tab, never the permanent skeleton.
+  it('chain 42161: neither the gate nor the live card — v1\'s ComingSoonPanel, never the skeleton', () => {
+    h.pathname = '/dca'
+    h.dcaLive = new Set([8453]) // Arbitrum's v3 executor is not wired (real isDcaLive would also say false)
+    useDisconnectedChainSelection.setState({ chainId: 42161 })
+    render(<AppShell />)
+    expect(document.querySelector('[data-dca-gate]')).toBeNull()
+    expect(document.querySelector('.ts-v2-skeleton')).toBeNull()
+    expect(screen.getByText('Smart DCA Engine')).toBeTruthy()
+    expect(screen.getByText('Coming Soon')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Swap Now/ })).toBeTruthy()
   })
 
   it('connected on Ethereum: the buttons call wagmi switchChain', () => {
@@ -356,6 +401,21 @@ describe('panes', () => {
     expect(pane?.querySelectorAll('.ts-v2-skeleton').length).toBe(0)
   })
 
+  // [L-1, owner decision: BUILD in v2] v1's SwapHistory sits below SwapBox on the Swap tab (page.tsx); v2's
+  // RecentSwaps is its sibling here, below the Swap card — not v1's SwapHistory itself (own component, own test).
+  it('swap carries v1\'s "Recent swaps" below the card, same shared store — hidden until there is a record', () => {
+    useSwapHistory.setState({ records: [] })
+    render(<AppShell tab="swap" />)
+    expect(screen.queryByText(/Recent swaps/)).toBeNull()
+    cleanup()
+    useSwapHistory.setState({
+      records: [{ id: 'r1', date: '2026-11-05', tokenIn: 'ETH', tokenOut: 'USDC', amountIn: '1', amountOut: '2487.6842', txHash: '0xabc', status: 'confirmed', chainId: 1 }],
+    })
+    render(<AppShell tab="swap" />)
+    expect(screen.getByText('Recent swaps (1)')).toBeTruthy()
+    useSwapHistory.setState({ records: [] })
+  })
+
   it('dca mounts the DCA card (B6a) on a live DCA chain, not the placeholder', () => {
     useDisconnectedChainSelection.setState({ chainId: 8453 })
     render(<AppShell tab="dca" />)
@@ -364,20 +424,37 @@ describe('panes', () => {
     expect(pane?.querySelectorAll('.ts-v2-skeleton').length).toBe(0)
   })
 
-  it.each(['orders', 'history', 'portfolio'] as const)('%s mounts its B7/B8 tab, not the placeholder', (tab) => {
+  it.each(['orders', 'history', 'portfolio', 'analytics'] as const)('%s mounts its B7/B8/B9 tab, not the placeholder', (tab) => {
     render(<AppShell tab={tab} />)
     const pane = document.querySelector(`[data-tab-pane="${tab}"]`)
     expect(pane).not.toBeNull() // the stubbed tab above; the real ones are tested in orders/ and history/
     expect(pane?.querySelectorAll('.ts-v2-skeleton').length).toBe(0)
   })
 
-  it.each(['limit', 'sltp', 'analytics'] as const)('%s is a Skeleton placeholder', (tab) => {
+  // [H-1, A75] A direct /limit or /sltp visit has no real pane (owner decision: stays "Soon") — it must render
+  // v1's ComingSoonPanel, the same teaser the DCA gate's sibling modes use, never the permanent empty skeleton.
+  it.each(['limit', 'sltp'] as const)('%s renders v1\'s ComingSoonPanel, never the skeleton', (tab) => {
     useDisconnectedChainSelection.setState({ chainId: 8453 })
     render(<AppShell tab={tab} />)
     const pane = document.querySelector(`[data-tab-pane="${tab}"]`)
     expect(pane).not.toBeNull()
-    expect(pane?.querySelectorAll('.ts-v2-skeleton').length).toBeGreaterThan(0)
-    expect(pane?.textContent).toBe('')
+    expect(pane?.querySelectorAll('.ts-v2-skeleton').length).toBe(0)
+    expect(pane?.hasAttribute('aria-busy')).toBe(false)
+    expect(pane?.textContent).not.toBe('')
+    expect(screen.getByText(tab === 'limit' ? 'Limit Orders' : 'Take Profit')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Swap Now/ })).toBeTruthy()
+  })
+
+  it('direct /limit and /sltp visits never leave the skeleton up regardless of chain', () => {
+    for (const chainId of [1, 8453, 42161]) {
+      cleanup()
+      useDisconnectedChainSelection.setState({ chainId })
+      for (const tab of ['limit', 'sltp'] as const) {
+        cleanup()
+        render(<AppShell tab={tab} />)
+        expect(document.querySelector('.ts-v2-skeleton')).toBeNull()
+      }
+    }
   })
 })
 
@@ -434,9 +511,6 @@ describe('footer', () => {
   })
 })
 
-// Backslash is in the class so a literal `\` in a title is escaped too (CodeQL js/incomplete-sanitization).
-const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
-
 describe('help drawer + fabs', () => {
   it('? opens the drawer with v1\'s help sections; Esc, ✕ and the overlay close it', () => {
     render(<AppShell />)
@@ -446,14 +520,45 @@ describe('help drawer + fabs', () => {
     for (const s of helpSections) expect(within(dialog).getByRole('button', { name: new RegExp(escapeRegExp(s.title)) })).toBeTruthy()
     expect(within(dialog).getByRole('link', { name: 'Email support' }).getAttribute('href')).toBe(`mailto:${SUPPORT_EMAIL}`)
     expect(within(dialog).getByRole('link', { name: '@TeraHash on X' }).getAttribute('href')).toBe('https://x.com/TeraHash')
-    fireEvent.keyDown(window, { key: 'Escape' })
+    // [feat/ui-v2-docs-legal] the drawer links to Docs/Terms/Privacy (recon/docs-v2: it had none).
+    expect(within(dialog).getByRole('link', { name: 'Docs' }).getAttribute('href')).toBe('/docs')
+    expect(within(dialog).getByRole('link', { name: 'Terms' }).getAttribute('href')).toBe('/terms')
+    expect(within(dialog).getByRole('link', { name: 'Privacy' }).getAttribute('href')).toBe('/privacy')
+    // [L-6, A75] built on modals/Sheet now: Esc is a capturing document listener, not a window one.
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Open help' }))
     fireEvent.click(screen.getByRole('button', { name: 'Close help' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Open help' }))
-    fireEvent.click(document.querySelector('[aria-hidden="true"].fixed.inset-0') as HTMLElement)
+    fireEvent.click(document.querySelector('[data-sheet-backdrop]') as HTMLElement)
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  // [L-6, A75] "build the drawer on modals/Sheet (focus trap + restore)": the drawer used to manage its own Esc
+  // listener and a single focus-on-open call, with no Tab trap and no focus restore on close. Sheet gives it both.
+  it('focus restore: closing the drawer (by any route) returns focus to the "Open help" fab', () => {
+    render(<AppShell />)
+    const fab = screen.getByRole('button', { name: 'Open help' })
+    fab.focus() // jsdom's fireEvent.click does not itself move focus, unlike a real browser click
+    fireEvent.click(fab)
+    expect(document.activeElement).not.toBe(fab)
+    fireEvent.click(screen.getByRole('button', { name: 'Close help' }))
+    expect(document.activeElement).toBe(fab)
+  })
+
+  it('focus trap: Tab from the last focusable control wraps to the first; Shift+Tab from the first wraps to the last', () => {
+    render(<AppShell />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open help' }))
+    const dialog = screen.getByRole('dialog')
+    const focusables = () => Array.from(dialog.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled])'))
+    const first = focusables()[0]
+    const last = focusables()[focusables().length - 1]
+    last.focus()
+    fireEvent.keyDown(last, { key: 'Tab' })
+    expect(document.activeElement).toBe(first)
+    fireEvent.keyDown(first, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(last)
   })
 
   it('search filters the sections, and an answer expands on click', () => {
@@ -478,6 +583,22 @@ describe('help drawer + fabs', () => {
     expect(icon(screen.getByRole('button', { name: 'Turn music on' }))).toBe('off')
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Turn music on' })))
     expect(icon(screen.getByRole('button', { name: 'Turn music off' }))).toBe('on')
+    spy.mockRestore()
+  })
+})
+
+// [L-2, A75] v1 copy: SwapBox is wrapped in SwapErrorBoundary (page.tsx:131) so a rendering crash shows a reset
+// button instead of taking down the whole page. AppShell wraps {pane} the same way — every tab, not only Swap,
+// since v2 consolidates them behind one shell.
+describe('pane error boundary (L-2, v1 copy: SwapErrorBoundary)', () => {
+  it('a crash in the pane shows v1\'s reset UI, not a blank page — the shell (header, tabs) survives', () => {
+    h.crashSwap = true
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    render(<AppShell tab="swap" />)
+    expect(screen.getByText('Something went wrong')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Reset & Try Again' })).toBeTruthy()
+    expect(screen.getByRole('banner')).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Swap' })).toBeTruthy()
     spy.mockRestore()
   })
 })

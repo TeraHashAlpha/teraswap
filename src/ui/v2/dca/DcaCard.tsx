@@ -139,7 +139,6 @@ export function DcaCreate({ form, onReviewReady }: { form: DcaForm; onReviewRead
           {form.hasNativeOnly && <p className="mt-1 text-[12px] text-v2-muted">{WRAP_HINT}</p>}
           {form.hasImported && !form.routeBlock && (
             <p className="mt-1 text-[12px] text-v2-amber" data-testid="dca-imported-notice">
-              <span aria-hidden="true">⚠️ </span>
               {IMPORTED_NOTICE}
             </p>
           )}
@@ -169,19 +168,19 @@ export function DcaCreate({ form, onReviewReady }: { form: DcaForm; onReviewRead
         <div className="mt-3 flex flex-col gap-2">
           {form.depegHardBlocked && (
             <Notice tone="red" testId="dca-depeg-block">
-              <span className="font-semibold">&#9888; DCA blocked — {form.depegCheck.symbol} depeg.</span> {form.depegCheck.message}
+              <span className="font-semibold">DCA blocked — {form.depegCheck.symbol} depeg.</span> {form.depegCheck.message}
               <span className="mt-1 block text-v2-red/80">{DEPEG_BLOCK_TAIL}</span>
             </Notice>
           )}
           {form.depegUnverified && tokenIn && tokenOut && hasAmount && (
             <Notice tone="red" testId="dca-depeg-unverified">
-              <span className="font-semibold">&#9888; DCA paused — price not verified.</span> {form.depegCheck.message}
+              <span className="font-semibold">DCA paused — price not verified.</span> {form.depegCheck.message}
               <span className="mt-1 block text-v2-red/80">{DEPEG_UNVERIFIED_TAIL}</span>
             </Notice>
           )}
           {form.depegConsentNeeded && (
             <Notice tone="amber" testId="dca-depeg-consent">
-              <span className="font-semibold">&#9888; Possible depeg:</span> {form.depegCheck.message}
+              <span className="font-semibold">Possible depeg:</span> {form.depegCheck.message}
               <label className="mt-2 flex min-h-[44px] items-center gap-2 text-v2-amber/90">
                 <input
                   type="checkbox"
@@ -202,12 +201,12 @@ export function DcaCreate({ form, onReviewReady }: { form: DcaForm; onReviewRead
             <Notice tone="red" testId="dca-oracle-block">
               {oracleReason === 'extreme-deviation' ? (
                 <>
-                  <span className="font-semibold">&#9888; DCA blocked — price moved too far from the oracle.</span> {form.oracleGate.detail}
+                  <span className="font-semibold">DCA blocked — price moved too far from the oracle.</span> {form.oracleGate.detail}
                   <span className="mt-1 block text-v2-red/80">{ORACLE_DEVIATION_TAIL}</span>
                 </>
               ) : (
                 <>
-                  <span className="font-semibold">&#9888; DCA blocked — price could not be verified.</span> {form.oracleGate.detail}
+                  <span className="font-semibold">DCA blocked — price could not be verified.</span> {form.oracleGate.detail}
                   <span className="mt-1 block text-v2-red/80">{oracleIntegrityTail(buySymbol)}</span>
                 </>
               )}
@@ -215,7 +214,7 @@ export function DcaCreate({ form, onReviewReady }: { form: DcaForm; onReviewRead
           )}
           {form.submitBlock && (
             <Notice tone="red" testId="dca-submit-block">
-              <span className="font-semibold">&#9888; DCA not started.</span> {form.submitBlock}
+              <span className="font-semibold">DCA not started.</span> {form.submitBlock}
             </Notice>
           )}
         </div>
@@ -379,7 +378,7 @@ export function DcaCreate({ form, onReviewReady }: { form: DcaForm; onReviewRead
             </div>
           )}
 
-          <div className="pt-5">
+          <div className="pt-5 ts-cta-dock" data-cta-dock="">
             <Button
               variant="primary"
               className="w-full"
@@ -467,6 +466,13 @@ export function DcaCard({ chainId }: { chainId: number }) {
     reset(structural ? undefined : { reviewOnly: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the draft alone: `reset` is a new function every render
   }, [draftKey, priceKey])
+  // [A70b S-2] A review that reopens after a price moved under a frozen / signing order (a 409, or a tier change) carries the floor of the OLD
+  // prices: its key is stored on it, and it closes the moment it differs from the form's. (A review opened at the current prices never differs.)
+  const reviewPriceKey = lc.review?.priceKey
+  const closeReview = lc.closeReview
+  useEffect(() => {
+    if (lc.phase === 'review' && reviewPriceKey !== undefined && reviewPriceKey !== priceKey) closeReview()
+  }, [lc.phase, reviewPriceKey, priceKey, closeReview])
   // v1 latches `frozen` on the freeze-403 inside its event effect; the same latch, set while rendering the event in (no effect-set).
   const [seenEvent, setSeenEvent] = useState(latestEvent)
   if (latestEvent !== seenEvent) {
@@ -488,7 +494,11 @@ export function DcaCard({ chainId }: { chainId: number }) {
     }
     if (latestEvent.type === 'order_filled') {
       playSwapConfirmMP3()
-      toast({ type: 'success', title: 'DCA complete!', description: 'All DCA buys executed successfully.', txHash: latestEvent.txHash, duration: 10000 })
+      // [L-3, A75/A75b] v1 omits chainId here (falls back to ToastProvider's hard `?? 1`, wrong for a Base/Arbitrum
+      // order — a v1 bug this PR does not touch). v2 names the FILLED ORDER's own chain: the event carries it
+      // (types.ts order_filled.chainId) and GET /api/orders is wallet-wide, so a fill on the other L2 does reach this
+      // card. The card's selected chain is only the fallback for a legacy event with none.
+      toast({ type: 'success', title: 'DCA complete!', description: 'All DCA buys executed successfully.', txHash: latestEvent.txHash, chainId: latestEvent.chainId ?? chainId, duration: 10000 })
       if (address) {
         trackTrade({ type: 'dca_buy', wallet: address, tokenIn: '', tokenInAddress: '', tokenOut: '', tokenOutAddress: '', amountIn: '0', amountOut: '0', volumeUsd: 0, source: 'teraswap_order_engine', txHash: latestEvent.txHash || '' })
       }

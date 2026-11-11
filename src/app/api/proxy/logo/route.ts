@@ -23,7 +23,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAddress, isAddress } from 'viem'
 import { checkRateLimit, QUOTE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
-import { trustedClientIp } from '@/lib/trusted-ip'
+import { clientIpKey } from '@/lib/client-ip-key'
 import { fetchLogo, logoMiss, logoResponse } from '@/lib/logo-proxy'
 
 /** chainId → Trust Wallet `blockchains/<folder>`. A Map so no key can reach a prototype property. */
@@ -48,7 +48,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // logos never reach this function, so only misses count; the 429 is no-store so a throttled
   // request is never pinned in the CDN or the browser cache in place of the logo.
   const rateCheck = await checkRateLimit(
-    `logo:${trustedClientIp(req)}`,
+    `logo:${clientIpKey(req)}`,
     QUOTE_RATE_LIMIT.limit,
     QUOTE_RATE_LIMIT.windowMs,
   )

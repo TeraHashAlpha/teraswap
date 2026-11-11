@@ -138,3 +138,20 @@ This runbook codifies the verification step that should have caught it on day 1.
 - Incident 2026-04-14-002 — full post-mortem
 - Runbook `docs/Runbooks/KV-troubleshooting.md`
 - `src/lib/kv-rate-limiter.ts` — code under test
+
+## Client IPs are hashed (`fix/user-ip-privacy`)
+
+Per-IP keys are no longer `ratelimit:<route>:<ip>`. They are `ratelimit:<route>:<32 hex>`, where the hex is
+`HMAC-SHA256(daily key, ip)` and the daily key is `HMAC-SHA256(RATE_LIMIT_SALT, "teraswap-rate-limit-ip:" + UTC date)`
+(`src/lib/client-ip-key.ts`). Consequences when verifying or debugging:
+
+- **You cannot look a client up by IP in Upstash, and a log line never shows one.** To find a client's bucket,
+  compute the hash for that IP and day with the same `RATE_LIMIT_SALT`.
+- **Set `RATE_LIMIT_SALT` in Vercel (Production + Preview), 32+ random characters, Sensitive.** Without it every
+  function instance draws its own random salt: limits still apply inside an instance, but a client is counted
+  separately on each one. One `[RATE-LIMIT] RATE_LIMIT_SALT is not set …` warning per instance says so.
+- Bucket names change at 00:00 UTC, so each client's window restarts once a day.
+- The four routes that used to key on the left-most `x-forwarded-for` token (`/api/portfolio/prices`,
+  `/api/portfolio/tokens`, `/api/oracle-coverage`, `/api/admin/kill-switch`) now use the trusted client IP like
+  every other route.
+

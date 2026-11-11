@@ -3,14 +3,16 @@ import {
   rabbyWallet,
   metaMaskWallet,
   coinbaseWallet,
-  walletConnectWallet,
   ledgerWallet,
   injectedWallet,
 } from '@rainbow-me/rainbowkit/wallets'
+import { lazyWalletConnectWallet } from '@/lib/lazy-walletconnect'
 import { mainnet, base, arbitrum } from 'wagmi/chains'
 import { fallback } from 'wagmi'
 import type { Transport } from 'viem'
 import { guardedHttp } from '@/lib/rpc-guarded-transport'
+import { proxyRpcUrl } from '@/lib/rpc-proxy-url'
+import { serverRpcUrl } from '@/lib/rpc-env'
 
 // ── RPC Configuration with Fallback ──────────────────────
 // Primary: user-configured RPC (e.g. Alchemy, Infura)
@@ -31,8 +33,12 @@ function buildMainnetTransport(): Transport {
   const transports: Transport[] = []
 
   // In browser: always use /api/rpc as primary (hides user IP, avoids CORS).
+  // [fix/user-ip-privacy] Absolute same-origin URL (proxyRpcUrl): wagmi's WalletConnect connector
+  // copies this transport URL into the provider's rpcMap, and WalletConnect refuses a relative one
+  // ("Provided URL is not compatible with HTTP connection: /api/rpc") while it builds the session's
+  // EVM provider. Same request as before, in a form the wallet SDK accepts.
   if (typeof window !== 'undefined') {
-    transports.push(guardedHttp('/api/rpc', mainnet.id, { timeout: 10_000 }))
+    transports.push(guardedHttp(proxyRpcUrl(mainnet.id), mainnet.id, { timeout: 10_000 }))
   } else if (primaryRpc) {
     // Server-only: hit the configured RPC directly (no IP to protect).
     transports.push(guardedHttp(primaryRpc, mainnet.id, { timeout: 10_000 }))
@@ -67,6 +73,24 @@ function buildMainnetTransport(): Transport {
   return fallback(transports, { retryCount: 2 })
 }
 
+/**
+ * [fix/user-ip-privacy] Base / Arbitrum transport.
+ *
+ * Browser: our own proxy and nothing else — `/api/rpc?chainId=<id>`, exactly like mainnet. It used to
+ * be the provider URL from NEXT_PUBLIC_{BASE,ARBITRUM}_RPC_URL (and a public endpoint behind it), so
+ * every L2 read handed the visitor's IP, and the key in that URL, to the provider. There is no direct
+ * fallback in the browser: a second entry here would be a third-party host again.
+ *
+ * Server (this module is evaluated once without `window` because of `ssr: true`): the server resolver,
+ * `serverRpcUrl` — RPC_URL_<id> first. The NEXT_PUBLIC_* L2 names are no longer read in this file.
+ */
+function buildL2Transport(chainId: number): Transport {
+  if (typeof window !== 'undefined') {
+    return guardedHttp(proxyRpcUrl(chainId), chainId, { timeout: 10_000 })
+  }
+  return guardedHttp(serverRpcUrl(chainId), chainId, { timeout: 10_000 })
+}
+
 // [BUGFIX] Validate WalletConnect projectId — empty string causes silent failures
 const walletConnectProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? ''
 if (!walletConnectProjectId && typeof window !== 'undefined') {
@@ -88,7 +112,9 @@ if (!walletConnectProjectId && typeof window !== 'undefined') {
 // in Reown. See FEEDBACK.
 export const WALLETCONNECT_METADATA = {
   appName: 'TeraSwap',
-  appDescription: 'Ethereum & Base meta-aggregator — best swap price across 11 liquidity sources, with MEV protection.',
+  // [feat/retire-force-mev, owner 2026-11-06] ", with MEV protection" removed (retired claim). The stale "Ethereum & Base" /
+  // "11" are pre-existing and out of this change's scope — see docs/feedback/feat-retire-force-mev.md.
+  appDescription: 'Ethereum & Base meta-aggregator — best swap price across 11 liquidity sources.',
   appUrl: 'https://www.teraswap.app',
   appIcon: 'https://www.teraswap.app/apple-touch-icon.png',
 } as const
@@ -100,10 +126,14 @@ export const WALLETCONNECT_METADATA = {
 // catch-all that covers D'CENT and ANY WalletConnect wallet via QR / deep-link.
 // The list has no platform branch, so mobile and desktop render the identical set.
 // getDefaultConfig still builds a SINGLE provider/Core from this list (9K holds).
+// [fix/user-ip-privacy] `lazyWalletConnectWallet` IS RainbowKit's walletConnectWallet (same id, same two
+// connectors); only its "official modal" connector waits to be chosen before it creates its provider,
+// because creating it made every visitor's browser call api.web3modal.org and pulse.walletconnect.org
+// on page load. See lazy-walletconnect.ts.
 export const WALLET_GROUPS = [
   {
     groupName: 'Recommended',
-    wallets: [rabbyWallet, metaMaskWallet, coinbaseWallet, walletConnectWallet],
+    wallets: [rabbyWallet, metaMaskWallet, coinbaseWallet, lazyWalletConnectWallet],
   },
   {
     groupName: 'More',
@@ -114,7 +144,7 @@ export const WALLET_GROUPS = [
 // [P219] Multi-chain: mainnet stays the default (first in the array, so wallets
 // connect to it by default). Base is added so users can switch, but swaps stay
 // gated behind "Coming Soon" until a Base FeeCollector is deployed (ChainSelector).
-// Base uses the public RPC for now (NEXT_PUBLIC_BASE_RPC_URL overrides).
+// [fix/user-ip-privacy] Base and Arbitrum read through /api/rpc?chainId=<id> (buildL2Transport).
 //
 // `config` is a MODULE SINGLETON — created exactly once per runtime so there is a
 // single WalletConnect Core/provider instance. Do NOT recreate it per-render
@@ -125,15 +155,13 @@ export const config = getDefaultConfig({
   projectId: walletConnectProjectId,
   chains: [mainnet, base, arbitrum],
   wallets: WALLET_GROUPS,
+  // [fix/user-ip-privacy] WalletConnect CORE telemetry (error events to pulse.walletconnect.org/batch) off.
+  // This is already RainbowKit's default; it is stated here so a default change upstream cannot turn it on.
+  walletConnectParameters: { telemetryEnabled: false },
   transports: {
     [mainnet.id]: buildMainnetTransport(),
-    [base.id]: fallback([
-      guardedHttp(process.env.NEXT_PUBLIC_BASE_RPC_URL || 'https://mainnet.base.org', base.id, { timeout: 10_000 }),
-    ]),
-    [arbitrum.id]: fallback([
-      guardedHttp(process.env.NEXT_PUBLIC_ARBITRUM_RPC_URL || 'https://arb1.arbitrum.io/rpc', arbitrum.id, { timeout: 10_000 }),
-      guardedHttp('https://arb1.arbitrum.io/rpc', arbitrum.id),
-    ]),
+    [base.id]: buildL2Transport(base.id),
+    [arbitrum.id]: buildL2Transport(arbitrum.id),
   },
   // [feat/frontend-rpc-diet] viem splits a Multicall3 into calldata chunks of `batchSize` bytes — default 1 024, i.e.
   // ~5 balanceOf reads per eth_call — so refreshing a 30-token balance list cost ~6 provider calls instead of 1.

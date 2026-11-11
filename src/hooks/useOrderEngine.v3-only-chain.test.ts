@@ -424,6 +424,25 @@ describe('[third gate] Arbitrum One (42161) — v3-only: create, confirm, cancel
 // wallet is connected to only ONE chain at a time. THE RULE: cancel resolves its executor + domain
 // from the order's OWN chain_id, never the wallet's active one — a mismatch requests a chain switch
 // and, failing that, refuses by name. Never falls through to the active chain.
+// [fix/user-ip-privacy A76 S-6] The status poll asks for the orders the browser tracks — the hashes of its locally live
+// orders — not for the wallet's 50 newest rows.
+describe('[A76 S-6] the status poll asks for the locally live orders by hash', () => {
+  it('passes exactly the hashes of the live orders (not the terminal one), and re-polls with them', async () => {
+    const live = makeV3Row(ARBITRUM, 'row-live')
+    const done = { ...makeV3Row(ARBITRUM, 'row-done'), order_hash: '0x' + 'bb'.repeat(32), status: 'executed' as const }
+    mockFetchUserOrders.mockResolvedValue([live, done])
+    const { result } = renderHook(() => useOrderEngine())
+    await settleLoad()
+    expect(result.current.orders).toHaveLength(2)
+    await act(async () => { await vi.advanceTimersByTimeAsync(250) }) // this file runs on fake timers (ORDER_POLL_INTERVAL_MS = 100)
+    expect(mockFetchActiveOrders.mock.calls.length).toBeGreaterThan(0)
+    for (const [wallet, hashes] of mockFetchActiveOrders.mock.calls) {
+      expect(String(wallet).toLowerCase()).toBe(ADDRESS.toLowerCase())
+      expect(hashes).toEqual([live.order_hash])
+    }
+  })
+})
+
 describe('[fix/cross-chain-order-cancel] cancel follows the ORDER chain, never the wallet chain', () => {
   it('Base order + wallet on Arbitrum → cancel requests a switch to Base; a REFUSED switch refuses the cancel, no tx to any executor', async () => {
     useChainIdMock.mockReturnValue(ARBITRUM)

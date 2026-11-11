@@ -6,6 +6,7 @@ import {
   getCowApiBase,
 } from '@/lib/constants'
 import { getWrappedNative } from '@/lib/chains/registry'
+import { COW_PROXY_PATHS, cowProxyUrl } from '@/lib/cow-proxy-paths'
 import { clampSlippage, withTimeout } from './shared'
 import { safeBigInt } from '@/lib/utils'
 import type {
@@ -125,6 +126,58 @@ function isAppDataRejection(status: number, desc: string): boolean {
   return d.includes('appdata') || d.includes('app data') || d.includes('partnerfee') || d.includes('partner fee')
 }
 
+// ── [feat/retire-force-mev C3] The first 429 of this process is logged ONCE, structured ─────────────────────────────
+// Recon (docs/feedback/recon-cowswap-429.md) could not capture a real 429 from production — only the breaker's `[CB]` line.
+// This line carries what CoW answered: status, Retry-After, rate-limit / cf-ray / server headers (an allowlist — no cookies),
+// the Vercel region, and ≤ 200 body chars. Nothing from the REQUEST is logged (CoW quotes carry no key anyway).
+let cow429Logged = false
+const COW_429_HEADERS = ['retry-after', 'x-ratelimit-limit', 'x-ratelimit-remaining', 'x-ratelimit-reset', 'ratelimit', 'ratelimit-policy', 'ratelimit-limit', 'ratelimit-remaining', 'ratelimit-reset', 'cf-ray', 'cf-cache-status', 'server', 'via'] as const
+
+function logFirstCow429(res: Response, rawBody: string, endpoint: string): void {
+  if (cow429Logged) return
+  cow429Logged = true
+  const headers: Record<string, string> = {}
+  for (const name of COW_429_HEADERS) {
+    const v = res.headers?.get?.(name)
+    if (v) headers[name] = v.slice(0, 200)
+  }
+  res.headers?.forEach?.((v, k) => {
+    if (/ratelimit/i.test(k) && !(k in headers)) headers[k] = v.slice(0, 200)
+  })
+  console.warn(JSON.stringify({
+    event: 'cow_quote_429_first',
+    status: res.status,
+    retryAfter: res.headers?.get?.('retry-after') ?? null,
+    headers,
+    region: (typeof process !== 'undefined' && process.env?.VERCEL_REGION) || null,
+    endpoint,
+    body: rawBody.slice(0, 200),
+  }))
+}
+
+/** @internal tests only — re-arm the once-per-process 429 line. */
+export function __resetCow429LogForTests(): void {
+  cow429Logged = false
+}
+
+/** An error response's body: the raw text (for the 429 line) and its JSON object (for the existing description mapping). */
+async function readCowErrorBody(res: Response): Promise<{ err: Record<string, unknown>; raw: string }> {
+  let raw = ''
+  try {
+    raw = typeof res.text === 'function' ? await res.text() : JSON.stringify(await res.json())
+  } catch {
+    raw = ''
+  }
+  let err: Record<string, unknown> = {}
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object') err = parsed as Record<string, unknown>
+  } catch {
+    /* non-JSON body — same as the old res.json().catch(() => ({})) */
+  }
+  return { err, raw }
+}
+
 /**
  * POST /quote with the partner-fee appData. FAIL-SOFT: if (and ONLY if) CoW rejects the partnerFee
  * appData schema, retry ONCE with the fee-free appData so quoting never breaks over the fee — and
@@ -144,7 +197,7 @@ async function postCowQuoteWithFeeFallback(
   let res = await post(buildCowAppData(true))
   if (res.ok) return res.json()
 
-  let err = await res.json().catch(() => ({}))
+  let { err, raw } = await readCowErrorBody(res)
   let desc = String(err.description || err.errorType || '')
   if (isAppDataRejection(res.status, desc)) {
     // Never break CoW quoting over the fee — drop the partnerFee and retry once.
@@ -163,7 +216,7 @@ async function postCowQuoteWithFeeFallback(
     }
     res = await post(buildCowAppData(false))
     if (res.ok) return res.json()
-    err = await res.json().catch(() => ({}))
+    ;({ err, raw } = await readCowErrorBody(res))
     desc = String(err.description || err.errorType || '')
   }
   const e = new Error(desc || 'quote failed') as Error & { cowStatus?: number; cowRetryAfterMs?: number }
@@ -174,6 +227,7 @@ async function postCowQuoteWithFeeFallback(
   if (res.status === 429) {
     const sec = Number(res.headers.get('retry-after'))
     if (Number.isFinite(sec) && sec > 0) e.cowRetryAfterMs = Math.round(sec * 1000)
+    logFirstCow429(res, raw, `${base}/quote`)
   }
   throw e
 }
@@ -228,7 +282,7 @@ async function fetchCowSwapQuote(
     toAmount: quote.buyAmount,
     estimatedGas: 0,
     gasUsd: 0,
-    routes: ['CoW Protocol (MEV Protected)'],
+    routes: ['CoW Protocol'],
   }
 }
 
@@ -306,7 +360,7 @@ async function fetchCowSwapOrder(
     toAmount: quote.buyAmount,
     estimatedGas: 0,
     gasUsd: 0,
-    routes: ['CoW Protocol (MEV Protected)'],
+    routes: ['CoW Protocol'],
     cowOrderParams: { ...cowOrderParams, buyAmount: minBuyAmount },
   }
 }
@@ -317,15 +371,17 @@ async function fetchCowSwapOrder(
  * [10-L-02] orderParams is typed via CowOrderParams so any caller passing
  * a misshapen object fails at compile time. The validator in
  * fetchCowSwapOrder guarantees the runtime shape for the happy path.
+ *
+ * [fix/user-ip-privacy A76 S-1] Runs in the BROWSER (useSwap, after the wallet signed), so it posts to our own
+ * origin — /api/cow/orders relays the order to CoW's orderbook for `chainId` (cow-proxy.ts). It used to post to
+ * api.cow.fi directly, which handed CoW the visitor's IP and is refused by the site's CSP.
  */
 export async function submitCowOrder(
   orderParams: CowOrderParams,
   signature: string,
   chainId: number = CHAIN_ID,
 ): Promise<string> {
-  const base = getCowApiBase(chainId)
-
-  const res = await fetch(`${base}/orders`, {
+  const res = await fetch(cowProxyUrl(COW_PROXY_PATHS.orders, chainId), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({
@@ -358,6 +414,9 @@ export async function submitCowOrder(
 
 /**
  * Poll CoW order status until filled or expired.
+ *
+ * [fix/user-ip-privacy A76 S-1] Browser-side, like submitCowOrder: the status and the settlement are read through
+ * /api/cow/order-status and /api/cow/trades on our own origin, never from api.cow.fi.
  */
 export async function pollCowOrderStatus(
   orderUid: string,
@@ -371,7 +430,6 @@ export async function pollCowOrderStatus(
    *  without touching the post-execution validator. */
   executedBuyAmount?: string
 }> {
-  const base = getCowApiBase(chainId)
   const start = Date.now()
   const pollInterval = 3000
   // [RQ-2026-06-11] Bound each poll request — a stalled connection used to hang
@@ -380,11 +438,11 @@ export async function pollCowOrderStatus(
 
   while (Date.now() - start < maxWaitMs) {
     try {
-      const res = await withTimeout(fetch(`${base}/orders/${orderUid}`), pollFetchTimeoutMs)
+      const res = await withTimeout(fetch(cowProxyUrl(COW_PROXY_PATHS.orderStatus, chainId, { uid: orderUid })), pollFetchTimeoutMs)
       if (res.ok) {
         const order = await res.json()
         if (order.status === 'fulfilled') {
-          const tradesRes = await withTimeout(fetch(`${base}/trades?orderUid=${orderUid}`), pollFetchTimeoutMs)
+          const tradesRes = await withTimeout(fetch(cowProxyUrl(COW_PROXY_PATHS.trades, chainId, { orderUid })), pollFetchTimeoutMs)
           const trades = tradesRes.ok ? await tradesRes.json() : []
           return {
             status: 'fulfilled',

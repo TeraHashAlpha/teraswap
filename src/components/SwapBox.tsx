@@ -30,7 +30,6 @@ import type { SwapPriceLeg } from '@/lib/swap-price-tier'
 import { useDepegCheck } from '@/hooks/useDepegCheck'
 import { evaluatePriceGate } from '@/lib/price-gate'
 import { evaluatePairOracle } from '@/lib/chainlink'
-import InfoTooltip from '@/components/InfoTooltip'
 import { useSwapHistory } from '@/hooks/useSwapHistory'
 import { setParticleTurbo } from './ParticleNetwork'
 // analytics-tracker removed (dead code — server-side /api/analytics is the source of truth)
@@ -40,11 +39,12 @@ import { useSplitRoute } from '@/hooks/useSplitRoute'
 import { useSplitSwap } from '@/hooks/useSplitSwap'
 import SplitRouteVisualizer from './SplitRouteVisualizer'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
-import { DEFAULT_SLIPPAGE, ETHERSCAN_TX, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD, PRICE_IMPACT_CONSENT_TOLERANCE, DEPEG_CONSENT_TOLERANCE } from '@/lib/constants'
+import { DEFAULT_SLIPPAGE, COW_VAULT_RELAYER, AGGREGATOR_META, UNVERIFIED_SWAP_WARN_USD, UNVERIFIED_SWAP_BLOCK_USD, MEV_PREFERENCE_THRESHOLD, PRICE_IMPACT_CONSENT_TOLERANCE, DEPEG_CONSENT_TOLERANCE } from '@/lib/constants'
 import { isTrustedSpender } from '@/lib/trusted-addresses'
 import { useQuoteChainId } from '@/hooks/useChainId'
-import { isChainActive, getChainConfig, remapTokenToChain } from '@/lib/chains'
+import { isChainActive, getChainConfig, remapPairToChain } from '@/lib/chains'
 import { isUsdStablecoin } from '@/lib/chains/stablecoins'
+import { explorerTxUrl } from '@/lib/chains/tokens'
 import { estimateSwapUsd } from '@/lib/swap-usd-estimate'
 import { estimateMevSavings } from '@/lib/mev-savings'
 import { selectBestWithMevPreference } from '@/lib/mev-preference'
@@ -75,31 +75,8 @@ export default function SwapBox() {
   const [isAutoSlippage, setIsAutoSlippage] = useState(true)
   const [showSlippage, setShowSlippage] = useState(false)
   const [spender, setSpender] = useState<`0x${string}` | undefined>()
-  const [mevProtected, setMevProtected] = useState(false)
-  // [hotfix-ui] Dismissal flag for the MEV-exposure hint below the swap
-  // button. Persisted in localStorage so a user who's already decided
-  // they don't want MEV protection isn't pestered every session.
-  const MEV_HINT_DISMISSED_KEY = 'teraswap:mev-hint-dismissed'
-  const [mevHintDismissed, setMevHintDismissed] = useState(false)
-  useEffect(() => {
-    // localStorage read happens in a useEffect so SSR doesn't crash on
-    // the missing `window`. Default to "not dismissed" until we know.
-    try {
-      if (localStorage.getItem(MEV_HINT_DISMISSED_KEY) === '1') {
-        setMevHintDismissed(true)
-      }
-    } catch {
-      // Storage disabled / private mode — treat as not dismissed.
-    }
-  }, [])
-  const dismissMevHint = useCallback(() => {
-    setMevHintDismissed(true)
-    try {
-      localStorage.setItem(MEV_HINT_DISMISSED_KEY, '1')
-    } catch {
-      // Persisting failed — session-only dismissal is still useful.
-    }
-  }, [])
+  // [feat/retire-force-mev, owner 2026-11-06] The Force MEV Protection toggle, its "No MEV-protected quote" notice and the
+  // "CoW Protocol available… Enable" strip (with its localStorage dismissal) are retired. CoW stays an ordinary source.
   const [excludedSources, setExcludedSources] = useState<Set<string>>(new Set())
   // Tracks whether priceCheck data is stale relative to the current sell amount.
   // Set true when the amount changes; cleared once a fresh `meta` (quote) resolves.
@@ -200,19 +177,25 @@ export default function SwapBox() {
   // Decimals come from the quote itself, never from the (possibly already
   // flipped) selected token — raw `toAmount` is only meaningful at its own scale.
   const quoteDecimalsOut = matchedRawMeta?.identity.decimalsOut ?? null
-  const { meta, smartMevApplied, mevExposedBest } = useMemo(
-    () => selectBestWithMevPreference(scopeToExecutable(matchedRawMeta, activeChainId), mevProtected, AGGREGATOR_META, MEV_PREFERENCE_THRESHOLD),
-    [matchedRawMeta, mevProtected, activeChainId],
+  // The 2nd argument (the retired force toggle) is deprecated and ignored; `false` was its default.
+  const { meta, smartMevApplied } = useMemo(
+    () => selectBestWithMevPreference(scopeToExecutable(matchedRawMeta, activeChainId), false, AGGREGATOR_META, MEV_PREFERENCE_THRESHOLD),
+    [matchedRawMeta, activeChainId],
   )
 
   // [SPRINT-9E] Re-resolve the selected tokens to the ACTIVE chain's addresses
   // whenever the chain changes. The defaults (findToken) are mainnet addresses;
   // without this, Base would quote e.g. MAINNET USDC (0xA0b8…) on chainId 8453 →
   // every source rejects it ("1inch 400: not valid token") → "No valid quotes".
-  // remapTokenToChain is a no-op on mainnet (same address) so mainnet is unchanged.
+  // remapPairToChain is a no-op on mainnet (same address) so mainnet is unchanged.
+  // [fix/chain-switch-token-fallback] A leg with no home on the new chain (mainnet SNX → Arbitrum) used to be
+  // KEPT, address and all; now the pair falls back to the chain's default pair — never a foreign address.
+  const pairRef = useRef({ tokenIn, tokenOut })
+  pairRef.current = { tokenIn, tokenOut }
   useEffect(() => {
-    setTokenIn((t) => remapTokenToChain(t, activeChainId))
-    setTokenOut((t) => remapTokenToChain(t, activeChainId))
+    const next = remapPairToChain(pairRef.current.tokenIn, pairRef.current.tokenOut, activeChainId)
+    setTokenIn(next.tokenIn)
+    setTokenOut(next.tokenOut)
     // [review F1] A chain switch is a new trade — drop any prior price-impact consent.
     setAcceptedDeviation(null)
     setAcceptedDepeg(null) // [SPRINT-9W-oracle] drop depeg consent too
@@ -272,7 +255,7 @@ export default function SwapBox() {
     () => Object.fromEntries((meta?.all ?? []).map((q) => [q.source, q.toAmount])),
     [meta],
   )
-  const { status: swapStatus, txHash, errorMessage: swapError, priceGuardBlocked, priceGuardDeviation, unpricedAckRequired, simulationPassed, simulationSkipped, fallbackNotice, pendingSwap, pendingCowOrder, mevSurplusActualWei, execute: executeSwap, confirmSwap, confirmCowOrder, reset: resetSwap } =
+  const { status: swapStatus, txHash, txChainId, errorMessage: swapError, priceGuardBlocked, priceGuardDeviation, unpricedAckRequired, simulationPassed, simulationSkipped, fallbackNotice, pendingSwap, pendingCowOrder, mevSurplusActualWei, execute: executeSwap, confirmSwap, confirmCowOrder, reset: resetSwap } =
     useSwap(tokenIn, tokenOut, amountIn, slippage, quoteToAmountBySource, bestNonCowGasUsd)
 
   // [SPRINT-9S S2] Direction-agnostic execution price. Derive the USD price of the NON-stable
@@ -408,7 +391,7 @@ export default function SwapBox() {
         ? Number(formatUnits(successOutBig, tokenOut.decimals))
         : null
       const successOutDisplay = successOutNum !== null ? fmtToken(successOutNum) : '—'
-      toast({ type: 'success', title: 'Swap confirmed!', description: `${amountIn} ${tokenIn.symbol} → ${successOutDisplay} ${tokenOut.symbol}${savingsLine}`, txHash, duration: 10000 })
+      toast({ type: 'success', title: 'Swap confirmed!', description: `${amountIn} ${tokenIn.symbol} → ${successOutDisplay} ${tokenOut.symbol}${savingsLine}`, txHash, chainId: txChainId, duration: 10000 })
       swapToastId.current = null
 
       // numeric-format-allow: stored in swap history (addRecord), not display
@@ -842,43 +825,6 @@ export default function SwapBox() {
           )}
         </div>
 
-        {/* Force MEV Protection toggle (smart preference is the default —
-            this toggle is the manual override for users who want CoW only) */}
-        <div className="mb-3 flex items-center justify-between rounded-lg border border-cream-08 bg-surface-tertiary/50 px-3 py-2">
-          <div className="flex items-center gap-2">
-            <span className="text-[12px] font-semibold text-cream-65">
-              Force MEV Protection
-            </span>
-            <InfoTooltip
-              className="text-[10px]"
-              label="MEV protection info"
-              content="Always route through CoW Protocol regardless of price. When off, TeraSwap automatically prefers MEV-protected routes when pricing is competitive."
-            />
-          </div>
-          <button
-            onClick={() => setMevProtected(!mevProtected)}
-            className="relative flex h-6 w-10 items-center rounded-full transition-colors"
-            style={{ backgroundColor: mevProtected ? '#C8B89A' : 'rgba(200,184,154,0.15)' }}
-            aria-label="Toggle force MEV protection"
-          >
-            {/* [P135] Invisible hit-area extender on mobile — pushes the
-                tap region out to ~44px on every side without changing the
-                painted track. Children events bubble back to the button. */}
-            <span aria-hidden="true" className="absolute -inset-2 sm:inset-0" />
-            <span
-              className="h-4 w-4 rounded-full bg-white shadow-sm transition-all duration-200"
-              style={{ marginLeft: mevProtected ? '20px' : '4px' }}
-            />
-          </button>
-        </div>
-
-        {/* No MEV-safe quote warning (force mode only) */}
-        {mevProtected && !meta && matchedRawMeta && !quoteLoading && (
-          <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-300">
-            No MEV-protected quote available. CoW Protocol may be temporarily unavailable. Try disabling Force MEV Protection or wait a moment.
-          </div>
-        )}
-
         {/* Quote Breakdown */}
         {meta && tokenIn && tokenOut && hasAmount && (
           <div id="quote-breakdown" className="mb-4">
@@ -887,10 +833,10 @@ export default function SwapBox() {
                 ✦ Smart-routed via CoW{' '}
                 {meta.gasless && meta.gasless.gasSavingsUsd >= 0.5
                   ? `(gasless, ~${fmtUsd(meta.gasless.gasSavingsUsd)} saved)`
-                  : '(MEV protected)'}
+                  : '(gasless)'}
               </p>
             )}
-            <QuoteBreakdown meta={meta} chainId={activeChainId} tokenIn={tokenIn} tokenOut={tokenOut} amountIn={amountIn} slippage={slippage} countdown={countdown} priceCheck={pairCheck} priceTier={priceTier} tokenInUsdPrice={priceCheck.chainlinkPrice} tokenOutUsdPrice={tokenOutPriceCheck.chainlinkPrice} approvalPlan={approvalPlan} onEditSlippage={() => setShowSlippage(true)} gasEstimate={gasEstimateFn} smartMevApplied={smartMevApplied} mevExposedBest={mevExposedBest} onUseGasless={() => setMevProtected(true)} onRefresh={refreshQuote} refreshing={quoteLoading} />
+            <QuoteBreakdown meta={meta} chainId={activeChainId} tokenIn={tokenIn} tokenOut={tokenOut} amountIn={amountIn} slippage={slippage} countdown={countdown} priceCheck={pairCheck} priceTier={priceTier} tokenInUsdPrice={priceCheck.chainlinkPrice} tokenOutUsdPrice={tokenOutPriceCheck.chainlinkPrice} approvalPlan={approvalPlan} onEditSlippage={() => setShowSlippage(true)} gasEstimate={gasEstimateFn} smartMevApplied={smartMevApplied} onRefresh={refreshQuote} refreshing={quoteLoading} />
           </div>
         )}
         {/* Quote loading skeleton */}
@@ -1130,35 +1076,6 @@ export default function SwapBox() {
           </button>
         )}
 
-        {/* [hotfix-ui] MEV-exposure hint — replaces the old amber-banner
-            advisory that lived inside QuoteBreakdown. The signal is the
-            same (current best route isn't MEV-protected) but the visual
-            is now a single muted line of text: no warning icon, no
-            background box, no border. The "Enable" link flips the
-            existing Force MEV Protection toggle in one click; the "×"
-            persists the dismissal in localStorage so users who've
-            decided MEV protection isn't for them aren't pestered. */}
-        {mevExposedBest && !mevHintDismissed && (
-          <div className="mt-2 flex items-center justify-center gap-2 text-[12px] text-cream-35">
-            <span>CoW Protocol available for MEV protection.</span>
-            <button
-              type="button"
-              onClick={() => setMevProtected(true)}
-              className="-my-3 inline-flex min-h-[44px] items-center font-medium text-cream-65 underline-offset-2 transition hover:text-cream hover:underline sm:my-0 sm:min-h-0"
-            >
-              Enable
-            </button>
-            <button
-              type="button"
-              onClick={dismissMevHint}
-              className="-my-3 inline-flex h-11 w-11 items-center justify-center text-cream-35 transition hover:text-cream-65 sm:m-0 sm:h-auto sm:w-auto"
-              aria-label="Dismiss MEV protection hint"
-            >
-              ×
-            </button>
-          </div>
-        )}
-
         {/* Pre-swap simulation status */}
         {simulationPassed === true && (swapStatus === 'swapping' || swapStatus === 'success') && (
           <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-emerald-400/80">
@@ -1187,11 +1104,14 @@ export default function SwapBox() {
           </div>
         )}
 
-        {/* Pending tx link — show Etherscan link while waiting for confirmation */}
+        {/* Pending tx link — chain-aware explorer link while waiting for confirmation.
+            [fix/tx-links-remaining] txChainId is the chain this tx was actually SENT on
+            (captured at send time by useSwap), never the live/active wallet chain — a
+            chain switch mid-confirmation must not repaint this link to the wrong explorer. */}
         {swapStatus === 'swapping' && txHash && (
           <div className="mt-3 text-center text-sm">
-            <a href={`${ETHERSCAN_TX}${txHash}`} target="_blank" rel="noopener noreferrer" className="text-cream-35 transition hover:text-cream hover:underline">
-              Transaction sent — track on Etherscan &#8599;
+            <a href={explorerTxUrl(txHash, txChainId ?? activeChainId)} target="_blank" rel="noopener noreferrer" className="text-cream-35 transition hover:text-cream hover:underline">
+              Transaction sent — track on explorer &#8599;
             </a>
           </div>
         )}
@@ -1200,7 +1120,7 @@ export default function SwapBox() {
         {swapStatus === 'success' && txHash && (
           <div className="mt-3 space-y-2">
             <div className="text-center text-sm">
-              <a href={`${ETHERSCAN_TX}${txHash}`} target="_blank" rel="noopener noreferrer" className="text-cream-65 transition hover:text-cream hover:underline">View on Etherscan &#8599;</a>
+              <a href={explorerTxUrl(txHash, txChainId ?? activeChainId)} target="_blank" rel="noopener noreferrer" className="text-cream-65 transition hover:text-cream hover:underline">View on explorer &#8599;</a>
             </div>
             {/* Share button — "I just saved X% via TeraSwap" */}
             {meta && meta.all.length > 1 && tokenIn && tokenOut && (() => {

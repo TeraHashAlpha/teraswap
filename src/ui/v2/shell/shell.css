@@ -30,3 +30,17 @@ body:has([data-ts-ui="v2"]) button[aria-label$="background music"] { display: no
   position: absolute; top: 1rem; display: flex; align-items: center; height: 1.6rem;
   font-family: var(--font-mono); font-size: 18px; line-height: 1; color: var(--text); pointer-events: none;
 }
+
+/* ── Mobile tap targets (feat/ui-v2-mobile-parity): every control is at least 44 × 44 CSS px on a phone. The header logo and the footer
+   links are anchors that would otherwise be one text line tall; in-sentence links keep their line (WCAG 2.5.8 inline exception). ───────── */
+@media (max-width: 639px) {
+  .ts-v2 :is(button, [role='tab'], [role='switch'], [role='checkbox'], summary) { min-width: 44px; min-height: 44px; }
+  .ts-v2 header > a, .ts-v2 [data-ts-footer] a { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; }
+}
+
+/* ── Reduced motion: the page body's colour transition belongs to v1's global stylesheet; under v2 it stops too. ─────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  body:has([data-ts-ui="v2"]) { transition: none; }
+  /* the ♫ and ? buttons: v1's global `button` rule sets the 0.15 s colour transition that Tailwind's `motion-reduce:transition-none` loses to */
+  .ts-v2 [data-ts-fab] { transition: none !important; }
+}

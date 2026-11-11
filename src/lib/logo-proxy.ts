@@ -18,6 +18,7 @@
  */
 
 import { NextResponse } from 'next/server'
+import { readBodyCapped } from './read-body-capped'
 
 /** The only hosts a logo may be fetched from. Exact hostnames, never suffix matches. */
 const LOGO_HOSTS: ReadonlySet<string> = new Set([
@@ -69,31 +70,6 @@ export function isAllowedLogoUrl(raw: string): boolean {
   )
 }
 
-/** Read a body incrementally and give up as soon as it exceeds `max` bytes. */
-async function readCapped(res: Response, max: number): Promise<Uint8Array<ArrayBuffer> | null> {
-  const reader = res.body?.getReader()
-  if (!reader) return null
-  const chunks: Uint8Array[] = []
-  let total = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    total += value.byteLength
-    if (total > max) {
-      await reader.cancel().catch(() => {})
-      return null
-    }
-    chunks.push(value)
-  }
-  const out = new Uint8Array(new ArrayBuffer(total))
-  let offset = 0
-  for (const chunk of chunks) {
-    out.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return out
-}
-
 /**
  * Fetch one logo from an allow-listed host. Returns null on EVERYTHING that is not a small raster
  * image — a disallowed URL, a non-2xx, a timeout, a wrong content-type, an oversized body. Never
@@ -120,7 +96,7 @@ export async function fetchLogo(url: string): Promise<FetchedLogo | null> {
       if (!ALLOWED_CONTENT_TYPES.has(contentType)) return null
       if (Number(upstream.headers.get('content-length') ?? 0) > MAX_LOGO_BYTES) return null
 
-      const body = await readCapped(upstream, MAX_LOGO_BYTES)
+      const body = await readBodyCapped(upstream, MAX_LOGO_BYTES)
       return body ? { body, contentType } : null
     }
   } catch {

@@ -60,6 +60,11 @@ export interface PreparedReview {
   /** The legs the consent copy names (affectedSymbols). */
   symbols: string[]
   minAmountOut: string
+  /**
+   * [A70b S-2] The price key (`priceKey`) the draft's floor was derived at. A review that is on screen — or that REOPENS after a 409 — while the
+   * form's key has moved on would print the floor of the old prices; the card closes it (`DcaCard`).
+   */
+  priceKey: string
 }
 
 export type PrepareResult = { ok: true; review: PreparedReview } | { ok: false }
@@ -71,6 +76,12 @@ export interface PrepareOptions {
    * whose box is ticked on the sheet in front of the user right now.
    */
   ack?: WeakerTier
+  /**
+   * [A70b S-3] With an `ack`: the pair-floor info of the review the user ticked (the tier the server answered when the review opened). v1 never
+   * consults a cached tier once one is acknowledged (`tier = ack`, DCAPanel.tsx:890); the tier cached when the pair was SELECTED can be
+   * stricter (a failed lookup there classifies as `unpriced`) and would send the user back to a consent they were never shown.
+   */
+  info?: PairFloorInfo
   /**
    * v1 starts the waiting loop at the top of every `handleCreate` (:825). The review's Create on the on-chain tier is the one press
    * where the loop the form press started is still running and v1 starts nothing new. Default true.
@@ -300,7 +311,7 @@ export function useDcaForm(chainId: number, paused: boolean) {
    * returns early (a banner or consent explains why) and `{ ok: true, review }` where v1 would build the config and sign — B6b's cue.
    */
   async function prepare(opts: PrepareOptions = {}): Promise<PrepareResult> {
-    const { ack, startSound = true } = opts
+    const { ack, startSound = true, info: ackInfo } = opts
     if (!canCreate || !tokenIn || !tokenOut) return { ok: false }
     if (!scheduleFit.fits || minChunkGuard.blocked || depegBlocking || oracleBlocked) return { ok: false }
     setRouteBlock(null)
@@ -346,7 +357,7 @@ export function useDcaForm(chainId: number, paused: boolean) {
     }
     // The server is asked afresh (v1 does not trust the preview); its answer is the tier the sheet asks consent for. With an `ack` it is
     // not asked again (v1: "a confirmed ack is the tier the user just accepted") — the server re-classifies on POST and 409s if it differs.
-    let info: PairFloorInfo = pairFloor ?? { tier: 'onchain-feed', legs: { in: { registered: null, priced: null }, out: { registered: null, priced: null } }, registeredFeedCount: null, effectiveCap: null }
+    let info: PairFloorInfo = (ack ? ackInfo : undefined) ?? pairFloor ?? { tier: 'onchain-feed', legs: { in: { registered: null, priced: null }, out: { registered: null, priced: null } }, registeredFeedCount: null, effectiveCap: null }
     if (v3Enabled && !ack) info = await fetchPairFloorInfo({ chainId, tokenIn: tokenIn.address, tokenOut: tokenOut.address })
 
     let minAmountOut: string
@@ -379,7 +390,7 @@ export function useDcaForm(chainId: number, paused: boolean) {
       dcaInterval: interval.seconds, dcaTotal: parts,
       ...(v3Enabled && ack ? { floorAck: { tier: ack, acknowledgedAt: new Date().toISOString() } } : {}),
     })
-    return { ok: true, review: { draft, info, symbols: affectedSymbols(info, tokenIn.symbol, tokenOut.symbol), minAmountOut } }
+    return { ok: true, review: { draft, info, symbols: affectedSymbols(info, tokenIn.symbol, tokenOut.symbol), minAmountOut, priceKey } }
   }
 
   // Every price `prepare()` reads into the draft (the floor derivation's four prices; `priceInUsd` is `livePriceIn`).

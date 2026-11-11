@@ -280,9 +280,12 @@ describe("boot gate — one alert per cooldown across pm2 restarts", () => {
   })
 
   test("an explicit file round-trips on the real filesystem (default location: rpc-auth-boot-gate.test.mjs)", () => {
-    const dir = mkdtempSync(join(tmpdir(), "rpc-auth-gate-"))
-    tempDirs.push(dir)
-    const file = join(dir, "gate.json")
+    // [A74 S-12] The production check is strict: the state directory's PARENT must not be group/other-writable.
+    // The state directory therefore goes INSIDE our own 0700 mkdtemp dir — never directly under os.tmpdir(),
+    // which is /tmp (mode 1777) on Linux CI runners and would be (correctly) refused as an untrusted parent.
+    const root = mkdtempSync(join(tmpdir(), "rpc-auth-gate-"))
+    tempDirs.push(root)
+    const file = join(root, "state", "gate.json")
     assert.equal(createBootAlertGate({ chainId: 1, file }).check().send, true)
     assert.equal(createBootAlertGate({ chainId: 1, file }).check().send, false)
     assert.equal(JSON.parse(readFileSync(file, "utf-8")).suppressed, 1)

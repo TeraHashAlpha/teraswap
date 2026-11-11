@@ -15,6 +15,8 @@
 // the generic message masked the real cause (e.g. an expiry). This module
 // separates transient from permanent and surfaces the actual terminal reason.
 
+import { classifyRpcError, RPC_AUTH } from "./rpc-auth.js"
+
 // ─── Canonical terminal reason codes ──────────────────────────────────────
 // These exact snake_case strings are the shared contract with the UI: the
 // keeper writes them to orders.error and src/lib/order-engine/failed-reason.ts
@@ -33,6 +35,358 @@ export const FAILURE_REASON = {
   // order ef85438b: a signed floor ~1.59x above market, 516 reverts). The keeper stops trying
   // and records why; it NEVER cancels and never moves funds.
   MIN_OUTPUT_UNREACHABLE: "min_output_unreachable",
+}
+
+// ─── Miss CAUSE: infra vs order ───────────────────────────────────────────────────────────────
+// [fix/infra-failures-dont-burn-orders / ADR-026] Owner decision: a failure caused by OUR
+// infrastructure must not count against a user's order. Every miss is therefore tagged with WHY the
+// keeper did not fill it, and only an `order` miss advances the ladder (consecutive_failures →
+// MAX_CYCLE_FAILURES → 'failed'). INC-2026-10-30-001: a ~20 h RPC allowlist outage would have burnt
+// every active order's 8 misses and marked it 'failed' with no_route_after_retries — a lie.
+//
+//   infra — the keeper itself could not complete the attempt (no tx sent): RPC auth/allowlist
+//           (rpc-auth.js classifyRpcError, reused), RPC transport / timeout / 5xx / 429, the keeper
+//           paused, Supabase or /api/swap unreachable, the keeper wallet out of gas, the keeper's tx
+//           nonce rejected by the node, a keeper config gap, or a SENT tx whose receipt could not be
+//           fetched (the chain decides; the next cycle re-reads it through canExecute).
+//   order — the ORDER is why it did not fill: a revert (mined or simulated) attributable to the
+//           order (slippage / minOut / floor, allowance, balance, nonce), expiry, or our API
+//           answered and there is no acceptable route for this pair.
+// Ambiguous: infra ONLY when no tx was sent; any sent-and-reverted tx is order. `order` needs
+// POSITIVE evidence; a miss with no evidence at all keeps today's counting (order:unknown) so an
+// untouched call site can never silently stop counting.
+export const MISS_CAUSE = Object.freeze({ INFRA: "infra", ORDER: "order" })
+
+// Where an `infra` miss is recorded (orders row; migration
+// supabase/migrations/20261104120000_orders_infra_miss.sql, mirrored in contracts/order-engine/schema.sql,
+// applied MANUALLY by the owner). Additive and nullable: NULL = never missed for an infra reason.
+// NOT `orders.error` — the UI reads any non-null `error` as a failed order (DcaOrdersList.tsx).
+export const INFRA_MISS_COLUMNS = Object.freeze(["last_infra_miss_at", "last_infra_miss_reason"])
+
+/**
+ * The exact Supabase `orders` patch for an `infra` miss: the order stays ACTIVE, the count is NOT
+ * touched (consecutive_failures is deliberately absent), last_attempt_at records the attempt (owner
+ * ask) and the two infra columns record when/why for the 24 h visibility count.
+ * @param {string} nowIso
+ * @param {string} reason — classifyMissCause's label (short, secret-free)
+ */
+export function buildInfraMissPatch(nowIso, reason) {
+  return { status: "active", updated_at: nowIso, last_attempt_at: nowIso, last_infra_miss_at: nowIso, last_infra_miss_reason: String(reason) }
+}
+
+/** The same patch without the infra columns — the executor's re-send when PostgREST rejects them. Never mutates. */
+export function stripInfraMissColumns(patch) {
+  const out = { ...patch }
+  for (const col of INFRA_MISS_COLUMNS) delete out[col]
+  return out
+}
+
+/** Does a PostgREST error body name one of OUR infra columns (PGRST204 "Could not find the '…' column")? */
+export function isInfraMissColumnRejection(body) {
+  if (typeof body !== "string" || body.length === 0) return false
+  return INFRA_MISS_COLUMNS.some((col) => body.includes(col))
+}
+
+/**
+ * [A73d L-1] How many `cause` links ANY walk of an error chain reads. ONE constant for collectErrorMeta
+ * (the cause rules) and collectErrorText (isFloorRevert, the permanent signatures): the two halves of
+ * one classification must see the same links, and neither may walk a hostile chain to its end.
+ */
+const MAX_CAUSE_DEPTH = 10
+
+/** Error-chain metadata for the cause rules below. Never throws; cycle-safe; depth-bounded. */
+function collectErrorMeta(err) {
+  const names = []
+  const statuses = []
+  const codes = []
+  const parts = []
+  const seen = new Set()
+  let revertData = false
+  let e = err
+  // [A73c S-14] An error object can be hostile to READ — an accessor that throws, a revoked Proxy as
+  // a `cause`. The walk ends at the hostile link and the miss is classified on what was read so far
+  // (nothing readable ⇒ `unclassified`, an unrecognised infra miss): never a throw out of the failure
+  // handler, which would abort the cycle for every other order.
+  try {
+    for (let depth = 0; e != null && depth < MAX_CAUSE_DEPTH; depth++) {
+      if (typeof e !== "object") {
+        parts.push(String(e))
+        break
+      }
+      if (seen.has(e)) break
+      seen.add(e)
+      if (typeof e.name === "string") names.push(e.name)
+      if (typeof e.status === "number") statuses.push(e.status)
+      if (typeof e.code === "string" || typeof e.code === "number") codes.push(String(e.code))
+      for (const k of ["shortMessage", "message", "details", "reason"]) if (typeof e[k] === "string") parts.push(e[k])
+      if (Array.isArray(e.metaMessages)) for (const m of e.metaMessages) if (typeof m === "string") parts.push(m)
+      // [A73c S-12] Hex revert data (at least a 4-byte selector) on any link — the only proof that a
+      // contract actually returned something: viem keeps the node's `data` on RpcRequestError (a hex
+      // string, or a wallet-style nested { data: 0x… }) and the raw input on ContractFunctionRevertedError.raw.
+      if ([e.data, e.raw, e.data && typeof e.data === "object" ? e.data.data : null].some(isHexRevertData)) revertData = true
+      e = e.cause
+    }
+  } catch {
+    /* a hostile link ends the walk: classify on what was read so far */
+  }
+  return { names, statuses, codes, revertData, text: parts.join(" \n ").toLowerCase() }
+}
+
+const isHexRevertData = (d) => typeof d === "string" && /^0x[0-9a-f]{8}/i.test(d)
+
+// [A73b S-7] A revert needs POSITIVE evidence somewhere in the `cause` chain: a name matching /Revert/
+// (viem ContractFunctionRevertedError, ExecutionRevertedError) or revert text. viem's WRAPPERS —
+// ContractFunctionExecutionError, CallExecutionError, EstimateGasExecutionError,
+// TransactionExecutionError — wrap EVERY failure of a contract call (a provider 503, a timeout, the
+// node's "insufficient funds" / "nonce too low") and are evidence of nothing; naming them here turned
+// every wrapped keeper-side miss into `order:revert` (A73b S-7 / S-8; wrapped-viem-errors.test.mjs
+// pins the real shapes at both executor sites).
+const REVERT_NAME = /Revert/
+const REVERT_TEXT = /execution reverted|\breverted\b/
+// The KEEPER wallet cannot pay for gas (viem InsufficientFundsError / the node's words). Distinct
+// from the USER's ERC20 balance ("transfer amount exceeds balance"), which is a revert ⇒ order.
+const KEEPER_GAS_TEXT = /insufficient funds for (?:gas|transfer)|exceeds transaction sender account balance|exceeds the balance of the account/
+// [A73b S-7] The KEEPER's tx nonce rejected by the node (viem NonceTooLow / TooHigh / MaxValueError or
+// its words — a stale nonce after a restart, a concurrent send, a resend of a known tx): ours; the
+// next cycle reads a fresh nonce. Distinct from the ORDER's nonce (InvalidNonce / NonceAlreadyUsed),
+// which is a revert ⇒ order (PERMANENT_SIGNATURES).
+const KEEPER_NONCE_NAME = /^Nonce(?:TooLow|TooHigh|MaxValue)Error$/
+const KEEPER_NONCE_TEXT = /nonce too low|nonce too high|transaction already imported|already known/
+const TRANSPORT_NAME = /^(?:HttpRequestError|TimeoutError|WebSocketRequestError|SocketClosedError|RpcRequestError|InternalRpcError|LimitExceededRpcError|ResourceUnavailableRpcError|UnknownRpcError|TransactionReceiptNotFoundError|WaitForTransactionReceiptTimeoutError)$/
+const TRANSPORT_TEXT = /fetch failed|econnrefused|econnreset|etimedout|enotfound|eai_again|ehostunreach|epipe|socket hang up|network error|timed out|timeout|und_err_/
+const TRANSPORT_CODE = /^(?:ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|EPIPE|UND_ERR_|ERR_NETWORK)/
+
+/** Transport / HTTP / timeout / socket evidence anywhere in the `cause` chain (collectErrorMeta walks every link). */
+function isTransportMeta(meta) {
+  return meta.statuses.length > 0 || meta.names.some((n) => TRANSPORT_NAME.test(n)) || meta.codes.some((c) => TRANSPORT_CODE.test(c)) || TRANSPORT_TEXT.test(meta.text)
+}
+
+// [A73 S-1] /api/swap's error bodies carry a machine-readable `code` (src/app/api/swap/route.ts). The
+// keeper classifies by CODE first — an HTTP status alone says nothing about whose fault a miss is —
+// and only falls back to the status when the body has none (an older API deploy, a platform page).
+const SWAP_API_CODE_RULES = Object.freeze({
+  // the ORDER: our API answered and this pair / this order cannot be routed as it stands
+  no_route: { cause: MISS_CAUSE.ORDER, reason: "no-route" },
+  unpriced_ack_required: { cause: MISS_CAUSE.ORDER, reason: "no-route:unpriced-ack" },
+  price_guard: { cause: MISS_CAUSE.ORDER, reason: "no-route:price-guard" },
+  // OURS: the oracle behind the price guard is down; the keeper's payload / config; our own 0x throttle
+  oracle_unavailable: { cause: MISS_CAUSE.INFRA, reason: "swap-api:oracle-unavailable" },
+  invalid_source: { cause: MISS_CAUSE.INFRA, reason: "keeper-config" },
+  chain_unsupported: { cause: MISS_CAUSE.INFRA, reason: "keeper-config" },
+  chain_coming_soon: { cause: MISS_CAUSE.INFRA, reason: "keeper-config" },
+  zerox_quote_cap_exceeded: { cause: MISS_CAUSE.INFRA, reason: "swap-api:429" },
+})
+
+/**
+ * Why /api/swap gave the keeper no route this cycle — by the body's CODE first, the status second.
+ * @param {{ configMissing?: boolean, networkError?: boolean, status?: number|null, code?: string|null, misroute?: boolean, missingData?: boolean }} [p]
+ * @returns {{ cause: 'infra'|'order', reason: string }}
+ *   order: NO_ROUTE (the adapter said no route / no pool / insufficient liquidity), unpriced_ack_required,
+ *          PRICE_GUARD — our API answered and named the order;
+ *   infra: everything else — unreachable / 5xx / 429 (swap-api:<status|network>), ORACLE_UNAVAILABLE,
+ *          a payload/config 400 or config code (keeper-config), calldata for the WRONG router
+ *          (swap-api:misroute), a 2xx without tx data (swap-api:no-tx-data), an unknown code or an
+ *          un-coded 4xx (contract drift: ours, never the order without positive evidence).
+ */
+export function classifySwapApiMiss({ configMissing = false, networkError = false, status = null, code = null, misroute = false, missingData = false } = {}) {
+  if (configMissing) return { cause: MISS_CAUSE.INFRA, reason: "keeper-config" }
+  if (networkError) return { cause: MISS_CAUSE.INFRA, reason: "swap-api:network" }
+  if (misroute) return { cause: MISS_CAUSE.INFRA, reason: "swap-api:misroute" }
+  if (missingData) return { cause: MISS_CAUSE.INFRA, reason: "swap-api:no-tx-data" }
+  const st = Number(status)
+  const hasStatus = Number.isFinite(st) && st > 0
+  if (typeof code === "string" && code.trim() !== "") {
+    const rule = SWAP_API_CODE_RULES[code.trim().toLowerCase()]
+    if (rule) return { ...rule }
+    return { cause: MISS_CAUSE.INFRA, reason: `swap-api:${hasStatus ? st : "unknown-code"}` }
+  }
+  if (hasStatus) {
+    if (st === 400) return { cause: MISS_CAUSE.INFRA, reason: "keeper-config" }
+    return { cause: MISS_CAUSE.INFRA, reason: `swap-api:${st}` }
+  }
+  return { cause: MISS_CAUSE.ORDER, reason: "no-route" }
+}
+
+// ─── [A73 S-1] The floor backoff for infra misses ────────────────────────────────────────────
+// An infra miss counts nothing, but an order must not be re-attempted every tick for the whole
+// outage either (a lock + a few failing RPC calls per order per 30 s). The keeper keeps a per-order
+// IN-MEMORY streak of consecutive infra misses; the cycle gate backs off at the ladder's own cadence
+// — backoffMs(streak): 30 s, 60 s, … capped at RETRY_BACKOFF_MAX_MS — on top of the ladder's window.
+// Reset by any order miss or a fill (consecutive infra misses only); gone on restart (the row then
+// carries last_attempt_at + the ladder count, as before).
+
+// [A73 C(3) / C(1)] Three infra reasons are not an outage that heals by itself — they are most likely
+// OUR bug or config: `unclassified` (a throw no rule recognised), `swap-api:misroute` (our API returned
+// calldata for another router) and `keeper-config`. The order is still never burned, but ops must
+// hear about a persistent run of them: per order, at INFRA_ALERT_STREAK consecutive such misses or
+// — under the floor backoff, which spaces attempts out — once INFRA_ALERT_AFTER_MS have passed since
+// the run began (and at least two misses), ONE high-urgency alert, then at most one per
+// INFRA_ALERT_COOLDOWN_MS while it persists. Any other infra reason, an order miss or a fill resets it.
+export const INFRA_ALERT_STREAK = 20
+export const INFRA_ALERT_AFTER_MS = 10 * 60_000
+export const INFRA_ALERT_COOLDOWN_MS = 60 * 60_000
+export const UNRECOGNISED_INFRA_REASONS = Object.freeze(["unclassified", "swap-api:misroute", "keeper-config"])
+
+/**
+ * Record one infra miss for `orderId` in `map` (executor.js orderInfraMisses). Never throws.
+ * @param {Map<string, object>} map
+ * @param {string} orderId
+ * @param {{ reason: string, nowMs: number, alertStreak?: number, alertAfterMs?: number, cooldownMs?: number }} p
+ * @returns {{ streak: number, lastAttempt: number, reason: string, backoffMs: number,
+ *   unrecognisedStreak: number, unrecognisedSince: number|null, lastAlertAt: number|null, alert: boolean }}
+ *   alert = send the one high-urgency ops alert NOW (C(3)); the entry remembers when, for the cooldown.
+ */
+export function recordInfraMiss(
+  map,
+  orderId,
+  { reason, nowMs, alertStreak = INFRA_ALERT_STREAK, alertAfterMs = INFRA_ALERT_AFTER_MS, cooldownMs = INFRA_ALERT_COOLDOWN_MS },
+) {
+  const prev = map.get(orderId)
+  const streak = (prev ? prev.streak : 0) + 1
+  const r = String(reason)
+  const unrecognised = UNRECOGNISED_INFRA_REASONS.includes(r)
+  const unrecognisedStreak = unrecognised ? (prev ? prev.unrecognisedStreak || 0 : 0) + 1 : 0
+  const unrecognisedSince = !unrecognised ? null : prev && prev.unrecognisedStreak > 0 && prev.unrecognisedSince != null ? prev.unrecognisedSince : nowMs
+  const lastAlertAt = prev && prev.lastAlertAt != null ? prev.lastAlertAt : null
+  const due = unrecognised && (unrecognisedStreak >= alertStreak || (unrecognisedStreak >= 2 && nowMs - unrecognisedSince >= alertAfterMs))
+  const alert = due && (lastAlertAt == null || nowMs - lastAlertAt >= cooldownMs)
+  const entry = {
+    streak,
+    lastAttempt: nowMs,
+    reason: r,
+    backoffMs: backoffMs(streak),
+    unrecognisedStreak,
+    unrecognisedSince,
+    lastAlertAt: alert ? nowMs : lastAlertAt,
+    alert,
+  }
+  map.set(orderId, entry)
+  return { ...entry }
+}
+
+/** Drop the streak: an order miss or a fill ended the run of infra misses. Tolerant of unknown ids. */
+export function clearInfraMisses(map, orderId) {
+  map.delete(orderId)
+}
+
+/**
+ * [A73b S-9] Drop the streaks of orders that are no longer in the active set the cycle just fetched
+ * (cancelled / filled / failed elsewhere — the keeper has no cancel path of its own, so absence from
+ * fetchActiveOrders is the only signal). An EMPTY active set leaves the map untouched: fetchActiveOrders
+ * also returns [] on a Supabase error, and a stale entry is bounded by the last active set and dropped
+ * on the next non-empty fetch. Never throws.
+ * @param {Map<string, object>} map
+ * @param {Iterable<string>|null|undefined} activeIds
+ * @returns {number} entries dropped
+ */
+export function pruneInfraMisses(map, activeIds) {
+  if (!map || activeIds == null || typeof activeIds[Symbol.iterator] !== "function") return 0
+  const keep = new Set()
+  for (const id of activeIds) keep.add(String(id))
+  if (keep.size === 0) return 0
+  let dropped = 0
+  for (const id of [...map.keys()]) {
+    if (!keep.has(String(id))) {
+      map.delete(id)
+      dropped++
+    }
+  }
+  return dropped
+}
+
+/**
+ * The cause table (ADR-026 §2), as ONE pure function. Rules are applied top-down; the first that
+ * has positive evidence wins.
+ * @param {{
+ *   err?: unknown,                 // the thrown viem/RPC/fetch error, if any
+ *   swapReason?: string|null,      // decoded SwapFailed inner reason (revert-decode.js)
+ *   executorErrorName?: string|null, // decoded executor custom error (InsufficientOutput, …)
+ *   noRoute?: boolean,             // fetchSwapRoute gave nothing this cycle
+ *   noRouteCause?: { cause: string, reason: string }|null, // from classifySwapApiMiss
+ *   minedRevert?: boolean,         // the tx was SENT and its receipt says reverted
+ *   txSent?: boolean,              // a tx hash exists for this attempt (writeContract returned)
+ *   paused?: string|null,          // the keeper's paused state (rpc-auth.js), if any
+ * }} [p]
+ * @returns {{ cause: 'infra'|'order', reason: string }}
+ */
+export function classifyMissCause({
+  err = null,
+  swapReason = null,
+  executorErrorName = null,
+  noRoute = false,
+  noRouteCause = null,
+  minedRevert = false,
+  txSent = false,
+  paused = null,
+} = {}) {
+  const infra = (reason) => ({ cause: MISS_CAUSE.INFRA, reason })
+  const order = (reason) => ({ cause: MISS_CAUSE.ORDER, reason })
+  // 1. Sent and reverted: the chain judged the order. Positive, final evidence — it beats the
+  //    keeper's own pause [A73 S-3]: a tx that reverted on-chain is the order's even if the monitor
+  //    flipped to paused while the receipt was in flight.
+  if (minedRevert) return order("reverted")
+  // 2. The keeper is paused: it must not be attempting at all (executor.js skips the loop); any
+  //    other miss that still reaches here is ours.
+  if (paused) return infra(`paused:${paused}`)
+  // 3. No route this cycle: the swap-API miss carries its own verdict.
+  if (noRoute) {
+    if (noRouteCause && (noRouteCause.cause === MISS_CAUSE.INFRA || noRouteCause.cause === MISS_CAUSE.ORDER)) {
+      return { cause: noRouteCause.cause, reason: String(noRouteCause.reason || "no-route") }
+    }
+    return order("no-route")
+  }
+  // 4. RPC auth / allowlist — the same classification rpc-auth.js pauses the keeper on. A contract
+  //    revert whose text says "not on whitelist" is transient there (never auth) and falls through.
+  if (err != null && classifyRpcError(err).kind === RPC_AUTH) return infra("rpc-auth")
+  // 5. A tx was sent but its outcome could not be read (receipt timeout / RPC error after send).
+  //    The chain decides; the next cycle re-reads it through canExecute. Never counted.
+  if (txSent) return infra("receipt-unavailable")
+  const meta = err == null ? null : collectErrorMeta(err)
+  // [A73 S-2] A revert anywhere in the chain is the CONTRACT talking (the same guard rpc-auth.js
+  // applies before its auth words): its text can say "insufficient funds" too, so the keeper-gas
+  // rule below applies only when nothing reverted. [A73b S-7] POSITIVE evidence only: a decoded
+  // executor error or SwapFailed reason, a /Revert/-named error in the chain, or revert text — never
+  // a viem wrapper's name.
+  // [A73c S-12] …and never viem's GUESS: getContractError wraps ANY JSON-RPC -32603 (InternalRpcError)
+  // as ContractFunctionRevertedError ("…reverted with the following reason: Internal error") although
+  // no contract code ran — a provider's own internal error, also on a 5xx with a JSON-RPC body (viem
+  // returns that body into the RPC pipeline, so no HTTP status survives). Such a chain is a revert
+  // only with independent proof: an ExecutionRevertedError (the node's code 3 / its "execution
+  // reverted" words) or hex revert data on some link. Otherwise it falls to the keeper-side rules
+  // below (keeper-gas / keeper-nonce if the node said so, else rpc-transport).
+  const guessedRevert = !!meta && meta.names.includes("InternalRpcError") && !meta.names.includes("ExecutionRevertedError") && !meta.revertData
+  // [A73c S-13] An HTTP status in the chain means the provider answered with an error PAGE: viem's
+  // getNodeError turns page text that says "execution reverted" into an ExecutionRevertedError, and
+  // the text rules would read the page's words. Next to a status only DECODED revert data is a
+  // revert (the executor's own decode: executorErrorName / swapReason) — never a name or a word;
+  // the miss falls to rpc-transport below, and classifyFailure never reads a page for a permanent cause.
+  const page = !!meta && meta.statuses.length > 0
+  const isRevert =
+    !!executorErrorName ||
+    !!swapReason ||
+    (!!meta && !page && !guessedRevert && (meta.names.some((n) => REVERT_NAME.test(n)) || REVERT_TEXT.test(meta.text)))
+  // 6. The KEEPER wallet is out of gas — ours, not the user's balance. Never on a revert.
+  if (meta && !isRevert && (meta.names.includes("InsufficientFundsError") || KEEPER_GAS_TEXT.test(meta.text))) return infra("keeper-gas")
+  // 6b. [A73b S-7] The KEEPER's tx nonce was rejected by the node — ours. Never on a revert.
+  if (meta && !isRevert && (meta.names.some((n) => KEEPER_NONCE_NAME.test(n)) || KEEPER_NONCE_TEXT.test(meta.text))) return infra("keeper-nonce")
+  // 6c. [A73b S-8] The provider / network could not be reached, timed out, or answered with an HTTP
+  //     error — anywhere in the chain: viem wraps a 503 / timeout at BOTH executor sites as
+  //     ContractFunctionExecutionError → … → HttpRequestError | TimeoutError. Decided BEFORE the
+  //     permanent text rules: a provider's error page can say "insufficient balance" or "exceeds
+  //     allowance", and a terminal `failed` for it would burn the order outright. Never on a revert.
+  if (meta && !isRevert && isTransportMeta(meta)) return infra("rpc-transport")
+  // 7. A permanent cause decoded from the revert (allowance / balance / nonce) — order, by code.
+  const permanent = classifyFailure({ err, swapReason })
+  if (permanent.terminal) return order(permanent.reason)
+  // 8. A decoded executor / router revert — order, named.
+  if (executorErrorName) return order(`revert:${executorErrorName}`)
+  if (swapReason) return order("revert:swap-failed")
+  if (isRevert) return order("revert")
+  // 9. No evidence at all: keep today's counting (an untouched call site must not stop counting).
+  if (meta == null) return order("unknown")
+  // 10. Something threw before any tx was sent and nothing above recognised it: the keeper did not
+  //     complete the attempt — ours by the ambiguity rule.
+  return infra("unclassified")
 }
 
 // ─── Persisted retry state (orders.consecutive_failures / orders.last_attempt_at) ──────────
@@ -221,7 +575,10 @@ const PERMANENT_SIGNATURES = [
   {
     reason: FAILURE_REASON.INSUFFICIENT_ALLOWANCE,
     patterns: [
-      /exceeds allowance/,
+      // [A73c S-11] NOT geth's own "gas required exceeds allowance (N)" (eth_estimateGas: the gas was
+      // capped at what the sender's balance affords, or the call ran out of gas at that cap) — that is
+      // no ERC20 allowance: it stays an ordinary counted revert (order:revert, the 8-miss ladder).
+      /(?<!gas required )exceeds allowance/,
       /insufficient allowance/,
       /allowanceexpired/,
       /insufficientallowance/,
@@ -246,8 +603,8 @@ const PERMANENT_SIGNATURES = [
 
 /**
  * Flatten a viem-style error (or string) into ONE lowercase string for matching.
- * Walks message / shortMessage / details / metaMessages and the .cause chain.
- * Never throws; tolerant of cycles, null, and plain strings.
+ * Walks message / shortMessage / details / metaMessages and the .cause chain, MAX_CAUSE_DEPTH links
+ * deep (the same bound as collectErrorMeta). Never throws; tolerant of cycles, null, and plain strings.
  * @param {unknown} err
  * @returns {string}
  */
@@ -257,15 +614,22 @@ export function collectErrorText(err) {
   const parts = []
   const seen = new Set()
   let e = err
-  while (e && typeof e === "object" && !seen.has(e)) {
-    seen.add(e)
-    for (const k of ["shortMessage", "message", "details", "reason"]) {
-      if (typeof e[k] === "string") parts.push(e[k])
+  // [A73c S-14] Same guard as collectErrorMeta: a throwing accessor / revoked Proxy ends the walk and
+  // the text read so far is returned — "never throws" must hold for a hostile object too.
+  try {
+    // [A73d L-1] Bounded at collectErrorMeta's depth: the same MAX_CAUSE_DEPTH links, not the whole chain.
+    for (let depth = 0; depth < MAX_CAUSE_DEPTH && e && typeof e === "object" && !seen.has(e); depth++) {
+      seen.add(e)
+      for (const k of ["shortMessage", "message", "details", "reason"]) {
+        if (typeof e[k] === "string") parts.push(e[k])
+      }
+      if (Array.isArray(e.metaMessages)) {
+        for (const m of e.metaMessages) if (typeof m === "string") parts.push(m)
+      }
+      e = e.cause
     }
-    if (Array.isArray(e.metaMessages)) {
-      for (const m of e.metaMessages) if (typeof m === "string") parts.push(m)
-    }
-    e = e.cause
+  } catch {
+    /* a hostile link ends the walk */
   }
   return parts.join(" ").toLowerCase()
 }
@@ -280,7 +644,10 @@ export function collectErrorText(err) {
  *   terminal=false → transient; retry a later cycle (reason is null)
  */
 export function classifyFailure({ err, swapReason } = {}) {
-  const text = `${swapReason ? String(swapReason) : ""} ${collectErrorText(err)}`.toLowerCase()
+  // [A73c S-13] With an HTTP status in the chain the error text is a provider PAGE, not a revert
+  // reason: it is never read for a permanent cause — only the decoded swapReason is.
+  const pageText = err != null && collectErrorMeta(err).statuses.length > 0
+  const text = `${swapReason ? String(swapReason) : ""} ${pageText ? "" : collectErrorText(err)}`.toLowerCase()
   for (const sig of PERMANENT_SIGNATURES) {
     if (sig.patterns.some((re) => re.test(text))) {
       return { terminal: true, reason: sig.reason }
@@ -380,19 +747,25 @@ export function buildOrderActivePatch(nowIso, retryState) {
  *   swapReason?: string|null,   // decoded SwapFailed inner reason (if any)
  *   executorErrorName?: string|null, // decoded executor custom error (revert-decode.js), e.g. "InsufficientOutput"
  *   noRoute?: boolean,          // true ⇒ "no route this cycle" (always transient)
+ *   noRouteCause?: object|null, // [ADR-026] classifySwapApiMiss verdict for that no-route
+ *   minedRevert?: boolean,      // [ADR-026] the tx was SENT and its receipt says reverted
+ *   txSent?: boolean,           // [ADR-026] a tx hash exists for this attempt
+ *   paused?: string|null,       // [ADR-026] the keeper's paused state (rpc-auth.js)
  *   prevFailures?: number,      // OPTIONAL same-process count; max()'d with the row's persisted count
  *   nowSec: number,             // current unix seconds (for expiry compare)
  *   nowIso: string,             // current ISO timestamp (for the patch)
  *   maxFailures?: number,
  * }} p
  * @returns {{
- *   kind: 'expired'|'fail'|'retry',
+ *   kind: 'expired'|'fail'|'retry'|'infra', // [ADR-026] infra = ours: counted nowhere, order stays active
  *   patch: object,              // the Supabase orders patch to PATCH
  *   reason: string|null,        // terminal reason code (null on retry)
  *   alert: boolean,             // fire the one-shot #201 alert before failing
  *   failures: number,           // new consecutive-miss count
  *   clearRetries: boolean,      // true ⇒ drop this order from the retry Map
  *   backoffMs?: number,         // wait before the next retry (retry kind only)
+ *   cause: 'infra'|'order',     // [ADR-026] why the keeper did not fill (classifyMissCause)
+ *   causeReason: string,        // [ADR-026] short, secret-free label for that cause
  * }}
  */
 export function planFailureHandling({
@@ -401,6 +774,10 @@ export function planFailureHandling({
   swapReason = null,
   executorErrorName = null,
   noRoute = false,
+  noRouteCause = null,
+  minedRevert = false,
+  txSent = false,
+  paused = null,
   prevFailures = 0,
   nowSec,
   nowIso,
@@ -417,6 +794,33 @@ export function planFailureHandling({
       alert: false,
       failures: 0,
       clearRetries: true,
+      cause: MISS_CAUSE.ORDER,
+      causeReason: FAILURE_REASON.EXPIRED,
+    }
+  }
+
+  // 1b. [ADR-026] Tag the miss with its cause (infra vs order). Every plan below carries it.
+  const miss = classifyMissCause({ err, swapReason, executorErrorName, noRoute, noRouteCause, minedRevert, txSent, paused })
+
+  // 1c. [ADR-026 §2] An `infra` miss is OURS: the ladder does not move. The order stays active, the
+  //     attempt is recorded (last_attempt_at + last_infra_miss_at/_reason) and the next healthy
+  //     cycle simply attempts again — the contract's dcaLastExecution + dcaInterval gate is what
+  //     decides whether a DCA chunk is due, so nothing here can double-fill or back-fill.
+  //     `failures` is the count the row ALREADY had (so the same-process cache mirrors the row);
+  //     with a count of 0 there is no backoff and the next healthy cycle retries at once.
+  if (miss.cause === MISS_CAUSE.INFRA) {
+    const persistedCount = readPersistedRetryState(dbOrder).count
+    const unchanged = Math.max(persistedCount, Math.max(0, Number(prevFailures) || 0))
+    return {
+      kind: "infra",
+      patch: buildInfraMissPatch(nowIso, miss.reason),
+      reason: null,
+      alert: false,
+      failures: unchanged,
+      clearRetries: false,
+      backoffMs: unchanged > 0 ? backoffMs(unchanged) : 0,
+      cause: miss.cause,
+      causeReason: miss.reason,
     }
   }
 
@@ -442,6 +846,8 @@ export function planFailureHandling({
       alert: decision.alert,
       failures,
       clearRetries: true,
+      cause: miss.cause,
+      causeReason: miss.reason,
     }
   }
 
@@ -453,5 +859,7 @@ export function planFailureHandling({
     failures,
     clearRetries: false,
     backoffMs: backoffMs(failures),
+    cause: miss.cause,
+    causeReason: miss.reason,
   }
 }

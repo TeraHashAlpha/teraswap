@@ -9,7 +9,7 @@ import { cleanup, fireEvent, render, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PortfolioData, PortfolioToken } from '@/hooks/usePortfolio'
 import type { ApprovalRecord } from '@/hooks/useActiveApprovals'
-import { DEFAULT_TOKENS } from '@/lib/tokens'
+import { getChainTokenList } from '@/lib/chains/tokens'
 import { fmtToken } from '@/lib/format'
 
 vi.mock('wagmi', () => ({
@@ -23,8 +23,11 @@ vi.mock('@/hooks/useChainId', () => ({ useActiveChainId: () => 8453 }))
 import { PortfolioView, type PortfolioViewProps } from './PortfolioTab'
 
 const CSS = readFileSync(join(__dirname, 'portfolio.css'), 'utf8')
-const eth = DEFAULT_TOKENS.find((t) => t.symbol === 'ETH')!
-const usdc = DEFAULT_TOKENS.find((t) => t.symbol === 'USDC')!
+// [fix/v1-maintenance C2] The view runs on Base (useActiveChainId → 8453), and curated vs Discovered now follows the ACTIVE chain's list —
+// so the curated fixtures are Base's own ETH / USDC, not mainnet's addresses.
+const BASE_TOKENS = getChainTokenList(8453)
+const eth = BASE_TOKENS.find((t) => t.symbol === 'ETH')!
+const usdc = BASE_TOKENS.find((t) => t.symbol === 'USDC')!
 const odd = { address: '0x6c240dda6b5c336df09a4d011139beaaa1ea2aa2' as `0x${string}`, symbol: 'ETHFI', name: 'ether.fi governance token', decimals: 18, logoURI: '', category: 'Other' as const }
 const row = (token: PortfolioToken['token'], balance: bigint, valueUsd: number | null): PortfolioToken => ({ token, balance, balanceFormatted: fmtToken(balance, token.decimals), priceUsd: 1, valueUsd })
 const approval = (symbol: string): ApprovalRecord => ({

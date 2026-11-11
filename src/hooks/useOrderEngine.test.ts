@@ -58,7 +58,7 @@ vi.mock('@/lib/order-engine', async () => {
 })
 
 import { renderHook, act, waitFor } from '@testing-library/react'
-import { useOrderEngine } from './useOrderEngine'
+import { useOrderEngine, flushOrderWrites } from './useOrderEngine'
 import {
   OrderType,
   PriceCondition,
@@ -155,8 +155,13 @@ beforeEach(() => {
   mockSubscribeToOrders.mockReturnValue(vi.fn())
 })
 
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers()
+  // [fix/v1-maintenance C4] saveOrders writes are queued module-wide. A case that returns right after its first
+  // write lands (e.g. "writes an encrypted payload") leaves later writes queued; with the SAME deterministic
+  // order in every case, one landing after the next case's localStorage.clear() looks like that case's own
+  // write. Settle the queue so no write outlives its case.
+  await flushOrderWrites()
 })
 
 describe('useOrderEngine — initial state', () => {
@@ -176,13 +181,27 @@ describe('useOrderEngine — initial state', () => {
     expect(result.current.orders).toHaveLength(2)
   })
 
-  it('subscribes to real-time updates on mount and unsubscribes on unmount', async () => {
-    const unsubscribe = vi.fn()
-    mockSubscribeToOrders.mockReturnValue(unsubscribe)
+  // [fix/user-ip-privacy] The hook used to open a Supabase Realtime socket from the browser (IP + wallet address
+  // straight to the database provider). It must not: order updates come from the poll through /api/orders.
+  it('opens NO real-time subscription — mounted, polling, or unmounted', async () => {
+    mockFetchUserOrders.mockResolvedValue([makeRow({ status: 'active' })])
     const { unmount } = renderHook(() => useOrderEngine())
-    expect(mockSubscribeToOrders).toHaveBeenCalledWith(ADDRESS, expect.any(Function))
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(350) })
     unmount()
-    expect(unsubscribe).toHaveBeenCalled()
+    expect(mockSubscribeToOrders).not.toHaveBeenCalled()
+  })
+
+  it('the browser order module has no Supabase client, socket or public Supabase env read', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const strip = (t: string) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
+    const supabase = strip(readFileSync(join(__dirname, '../lib/order-engine/supabase.ts'), 'utf8'))
+    expect(supabase).not.toMatch(/@supabase\/supabase-js|createClient|\.channel\(|postgres_changes|NEXT_PUBLIC_SUPABASE/)
+    const hook = strip(readFileSync(join(__dirname, 'useOrderEngine.ts'), 'utf8'))
+    expect(hook).not.toMatch(/subscribeToOrders|supabase-js|\.channel\(/)
+    const index = strip(readFileSync(join(__dirname, '../lib/order-engine/index.ts'), 'utf8'))
+    expect(index).not.toMatch(/subscribeToOrders/)
   })
 })
 
@@ -898,6 +917,76 @@ describe('useOrderEngine — polling', () => {
     expect(order.status).toBe('error')
     expect(result.current.historyOrders.map(o => o.id)).toContain('r1')
     expect(result.current.activeOrders.map(o => o.id)).not.toContain('r1')
+  })
+})
+
+// [fix/user-ip-privacy] With the realtime socket gone, the poll carries everything that socket used to push.
+describe('useOrderEngine — polling replaces the realtime socket', () => {
+  const HASH = '0x' + 'cd'.repeat(32)
+  const dcaRow = (over: Partial<OrderRow>) =>
+    makeRow({ id: 'd1', order_hash: HASH, order_type: 'dca', status: 'partially_filled' as unknown as 'active', dca_total: 5, dca_executed: 1, ...over })
+
+  async function mountWith(row: OrderRow) {
+    mockFetchUserOrders.mockResolvedValue([row])
+    const hook = renderHook(() => useOrderEngine())
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+    return hook
+  }
+  const tick = () => act(async () => { await vi.advanceTimersByTimeAsync(150); await Promise.resolve() })
+
+  it('refreshes a DCA’s fill count and tx hash while its status stays partially_filled', async () => {
+    const { result } = await mountWith(dcaRow({ dca_executed: 1, tx_hash: '0x01' }))
+    const initial = result.current.orders.find((o) => o.id === 'd1')!
+    expect(initial.dcaExecuted).toBe(1)
+    expect(initial.status).toBe('partially_filled')
+
+    mockFetchActiveOrders.mockResolvedValue([dcaRow({ dca_executed: 2, tx_hash: '0x02', amount_out: '777', executed_at: '2026-11-06T12:00:00.000Z' })])
+    await tick()
+    const after2 = result.current.orders.find((o) => o.id === 'd1')!
+    expect(after2.status).toBe('partially_filled') // NO status change: the old poll skipped this row entirely
+    expect(after2.dcaExecuted).toBe(2)
+    expect(after2.txHash).toBe('0x02')
+    expect(after2.amountOut).toBe('777')
+    expect(after2.executedAt).toBe(Date.parse('2026-11-06T12:00:00.000Z'))
+
+    mockFetchActiveOrders.mockResolvedValue([dcaRow({ dca_executed: 3, tx_hash: '0x03' })])
+    await tick()
+    const after3 = result.current.orders.find((o) => o.id === 'd1')!
+    expect(after3.dcaExecuted).toBe(3)
+    expect(after3.txHash).toBe('0x03')
+    expect(after3.executedAt).toBe(Date.parse('2026-11-06T12:00:00.000Z')) // a row without executed_at keeps the last known time
+  })
+
+  it('surfaces a keeper error message that arrives without a status change', async () => {
+    const { result } = await mountWith(dcaRow({ error: null }))
+    mockFetchActiveOrders.mockResolvedValue([dcaRow({ error: 'slippage exceeded, will retry' })])
+    await tick()
+    expect(result.current.orders.find((o) => o.id === 'd1')!.error).toBe('slippage exceeded, will retry')
+  })
+
+  it('fires order_filled exactly once — on the transition, not on every later poll of the filled row', async () => {
+    const { result } = await mountWith(dcaRow({ dca_executed: 4 }))
+    expect(result.current.latestEvent).toBeNull()
+
+    mockFetchActiveOrders.mockResolvedValue([dcaRow({ status: 'executed' as unknown as 'active', dca_executed: 5, tx_hash: '0x05' })])
+    await tick()
+    const filled = result.current.latestEvent
+    expect(filled).toMatchObject({ type: 'order_filled', orderId: 'd1', txHash: '0x05' })
+    expect(result.current.orders.find((o) => o.id === 'd1')!.status).toBe('filled')
+
+    // No active order is left, so the poll stops; and an identical row would not re-fire the event anyway.
+    await tick()
+    expect(result.current.latestEvent).toBe(filled)
+  })
+
+  it('an identical row changes nothing (same order object identity)', async () => {
+    const row = dcaRow({ dca_executed: 2, tx_hash: '0x02' })
+    const { result } = await mountWith(row)
+    const before = result.current.orders.find((o) => o.id === 'd1')!
+    mockFetchActiveOrders.mockResolvedValue([row])
+    await tick()
+    expect(result.current.orders.find((o) => o.id === 'd1')!).toBe(before)
   })
 })
 

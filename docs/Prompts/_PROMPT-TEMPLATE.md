@@ -21,7 +21,7 @@ Decide this **before** writing the `/goal`. Match the tier to the work; never de
 costs **funds or security**. Tier the **Auditor and recon** too (recon → Haiku; Auditor on docs → Sonnet; Auditor on
 fund-flow/contract → Opus).
 
-**Cost checklist on every `/goal`:** model+effort matched · `read ONLY <files>` (no repo scan) · `NO CI-poll` ·
+**Cost checklist on every `/goal`:** model+effort matched · `read ONLY <files>` (no repo scan) · `NO CI polling` ·
 `FEEDBACK ≤ 1 screen` · batched with siblings, parallel only on disjoint files · parallel → own git worktree · fan-out
 only for broad tasks.
 
@@ -30,7 +30,7 @@ only for broad tasks.
 ## 1. The CONTROL header — first line of EVERY `/goal`
 
 ```
-CONTROL: model <Haiku|Sonnet|Opus> · effort <low|medium|high> · NO CI-poll (push + report, don't watch) · read ONLY <the listed files> · FEEDBACK <= 1 screen.
+CONTROL: model <Haiku|Sonnet|Opus> · effort <low|medium|high> · NO CI polling (push + report, don't watch) · read ONLY <the listed files> · FEEDBACK <= 1 screen.
 STOP only if blocked or before anything irreversible (force-push, delete, prod DB write, secrets); otherwise keep going and put status in the same message as your next action.
 ```
 

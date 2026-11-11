@@ -178,6 +178,11 @@ interface SwapFallbackNotice {
 interface UseSwapResult {
   status: SwapStatus
   txHash: `0x${string}` | undefined
+  /** [fix/tx-links-remaining] The chain `txHash` was SENT on — captured once, at the send/sign
+   *  moment (confirmSwap's sendTransaction / confirmCowOrder's frozen `p.chainId`), never the live
+   *  `useActiveChainId()`. A wallet chain switch after sending must not repaint the explorer link to
+   *  the new chain for a tx that was never broadcast there. `undefined` until a tx is actually sent. */
+  txChainId: number | undefined
   errorMessage: string | null
   cowOrderUid: string | null
   /** True when DefiLlama server-side oracle blocked the swap (output too far below fair value) */
@@ -250,6 +255,10 @@ export function useSwap(
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [cowOrderUid, setCowOrderUid] = useState<string | null>(null)
   const [txHashState, setTxHashState] = useState<`0x${string}` | undefined>()
+  // [fix/tx-links-remaining] Chain txHashState/swapHash was actually sent/signed on. Reset in lockstep
+  // with txHashState (same three sites below); set once, at the send/sign moment, never recomputed
+  // from the live chainId.
+  const [sentChainId, setSentChainId] = useState<number | undefined>()
   const [priceGuardBlocked, setPriceGuardBlocked] = useState(false)
   const [priceGuardDeviation, setPriceGuardDeviation] = useState<number | null>(null)
   // [feat/swap-price-tiers D3] /api/swap wants the user's consent for an unpriced pair (409). The
@@ -289,6 +298,7 @@ export function useSwap(
       setErrorMessage(null)
       setCowOrderUid(null)
       setTxHashState(undefined)
+      setSentChainId(undefined)
     }
     prevAddressRef.current = address
   }, [address])
@@ -306,6 +316,7 @@ export function useSwap(
       setErrorMessage(null)
       setCowOrderUid(null)
       setTxHashState(undefined)
+      setSentChainId(undefined)
       setSimulationPassed(null)
       setSimulationSkipped(false)
     }
@@ -1041,7 +1052,7 @@ export function useSwap(
     if (p.message.validTo <= Math.floor(Date.now() / 1000)) {
       setPendingCowOrder(null)
       setStatus('error')
-      setErrorMessage('This MEV-protected order expired before you signed — please re-quote.')
+      setErrorMessage('This CoW Protocol order expired before you signed — please re-quote.')
       return
     }
 
@@ -1092,6 +1103,7 @@ export function useSwap(
       const result = await pollCowOrderStatus(orderUid, 120_000, p.chainId)
       if (result.status === 'fulfilled' && result.txHash) {
         setTxHashState(result.txHash as `0x${string}`)
+        setSentChainId(p.chainId) // [fix/tx-links-remaining] the chain this CoW order was signed/submitted on
         setStatus('success')
         let cowSurplusForPatch: string | undefined
         if (result.executedBuyAmount) {
@@ -1202,6 +1214,7 @@ export function useSwap(
       metadata: { routing: data.routeType },
     })
 
+    setSentChainId(chainId) // [fix/tx-links-remaining] the chain this tx is broadcast to, captured now — never the live chainId at render time
     try {
       sendTransaction({
         to: data.txTo,
@@ -1361,12 +1374,14 @@ export function useSwap(
 
   // Merge txHash from both flows
   const txHash = swapHash || txHashState
+  const txChainId = sentChainId
 
   const reset = useCallback(() => {
     setStatus('idle')
     setErrorMessage(null)
     setCowOrderUid(null)
     setTxHashState(undefined)
+    setSentChainId(undefined)
     setPriceGuardBlocked(false)
     setPriceGuardDeviation(null)
     setUnpricedAckRequired(false) // [feat/swap-price-tiers]
@@ -1380,7 +1395,7 @@ export function useSwap(
     resetSend()
   }, [resetSend])
 
-  return { status, txHash, errorMessage, cowOrderUid, priceGuardBlocked, priceGuardDeviation, unpricedAckRequired, simulationPassed, simulationSkipped, fallbackNotice, pendingSwap, pendingCowOrder, mevSurplusActualWei, execute, confirmSwap, confirmCowOrder, reset }
+  return { status, txHash, txChainId, errorMessage, cowOrderUid, priceGuardBlocked, priceGuardDeviation, unpricedAckRequired, simulationPassed, simulationSkipped, fallbackNotice, pendingSwap, pendingCowOrder, mevSurplusActualWei, execute, confirmSwap, confirmCowOrder, reset }
 }
 
 function parseWagmiError(error: Error): string {

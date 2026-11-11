@@ -27,10 +27,11 @@
  */
 
 import { kv } from '@/lib/kv'
+import { forLog } from './log-sanitize'
 import { WETH_ADDRESS } from './constants'
 import type { MetaQuoteResult } from './adapters'
 import { fetchMetaQuote } from './api'
-import { getAllStatuses, getStatus, getThresholds, forceDisable } from './source-state-machine'
+import { getAllStatuses, getStatus, getThresholds, forceDisable, recordRateLimited, clearRateLimited } from './source-state-machine'
 import { getCircuitBreaker, circuitKey, getOpenBreakerSources } from './adapters/circuit-breaker'
 
 // ── Token addresses (Ethereum mainnet) ──────────────────
@@ -254,6 +255,8 @@ async function analyzePair(
   pair: ReferencePair,
   activeSourceIds: Set<string>,
   excludeSources: string[],
+  /** [feat/retire-force-mev C3] Filled with every source that returned a quote (any state) — clean 429 evidence. */
+  responded?: Set<string>,
 ): Promise<PairResult> {
   const result: PairResult = {
     label: pair.label,
@@ -282,6 +285,8 @@ async function analyzePair(
     result.skipReason = `fetchMetaQuote failed: ${err instanceof Error ? err.message : String(err)}`
     return result
   }
+
+  for (const q of metaResult.all) responded?.add(q.source)
 
   // Filter to only active sources
   const activeQuotes = metaResult.all.filter(q => activeSourceIds.has(q.source))
@@ -354,6 +359,25 @@ async function analyzePair(
 
 // ── Main entry point ────────────────────────────────────
 
+/**
+ * [feat/retire-force-mev C3] The real quote path's 429 evidence. H1 only GETs CoW's quote URL (a 405 when healthy), which
+ * may not be rate-limited the way the POST /quote is; this run's own fan-out IS the real path. A source whose breaker
+ * failed with HTTP 429 during this run → rate-limited via 'quote' (degraded, never healthy); one that returned a quote →
+ * clean for 'quote'. Never throws — the quorum result does not depend on it.
+ */
+export async function recordQuotePathRateLimits(sourceIds: readonly string[], since: number, responded: ReadonlySet<string>): Promise<void> {
+  for (const id of sourceIds) {
+    if (id.startsWith('server-rpc:') || id === 'teraswap-self') continue
+    try {
+      const info = getCircuitBreaker(circuitKey(id)).getInfo()
+      if (info.lastFailureStatus === 429 && info.lastFailureAt >= since) await recordRateLimited(id, 'quote')
+      else if (responded.has(id)) await clearRateLimited(id, 'quote')
+    } catch (err) {
+      console.warn('[QUORUM] rate-limit evidence failed for %s:', forLog(id), forLog(err instanceof Error ? err.message : err))
+    }
+  }
+}
+
 export async function runQuorumCheck(): Promise<QuorumCheckResult> {
   const timestamp = new Date().toISOString()
 
@@ -389,11 +413,14 @@ export async function runQuorumCheck(): Promise<QuorumCheckResult> {
   }
 
   // Analyze each reference pair
+  const quorumStart = Date.now()
+  const responded = new Set<string>()
   const pairResults: PairResult[] = []
   for (const pair of QUORUM_REFERENCE_PAIRS) {
-    const result = await analyzePair(pair, activeSourceIds, excludeSources)
+    const result = await analyzePair(pair, activeSourceIds, excludeSources, responded)
     pairResults.push(result)
   }
+  await recordQuotePathRateLimits(allStatuses.map(s => s.id), quorumStart, responded)
 
   // Aggregate outlier flags across pairs
   const outliersBySource = new Map<string, OutlierInfo[]>()

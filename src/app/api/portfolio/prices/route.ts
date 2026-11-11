@@ -4,6 +4,7 @@ import { isValidAddress } from '@/lib/validation'
 import { checkRateLimit } from '@/lib/kv-rate-limiter'
 import { DEFAULT_CHAIN_ID, getChainConfig } from '@/lib/chains/registry'
 import { isPortfolioSupportedChain } from '@/lib/portfolio-chains'
+import { clientIpKey } from '@/lib/client-ip-key'
 
 /**
  * GET /api/portfolio/prices?tokens=<addr1,addr2,...>
@@ -28,7 +29,10 @@ const PORTFOLIO_PRICES_RATE_LIMIT = { limit: 10, windowMs: 60_000 } as const
 const MAX_TOKENS_PER_REQUEST = 100
 
 export async function GET(req: NextRequest) {
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+  // [fix/user-ip-privacy] Was the raw LEFT-MOST x-forwarded-for token: client-writable (anyone could dodge the
+  // limit or burn someone else's bucket — trusted-ip.ts) and stored / logged as a raw IP. Now the keyed hash of the
+  // TRUSTED client IP.
+  const ip = clientIpKey(req)
   const rateCheck = await checkRateLimit(
     `portfolio-prices:${ip}`,
     PORTFOLIO_PRICES_RATE_LIMIT.limit,

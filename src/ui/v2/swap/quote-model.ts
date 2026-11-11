@@ -16,6 +16,7 @@ import type { MetaQuoteResult, NormalizedQuote } from '@/lib/adapters/types'
 import type { Token } from '@/lib/tokens'
 import type { PriceCheck } from '@/lib/chainlink'
 import { AGGREGATOR_META, FEE_PERCENT, PRICE_DEVIATION_BLOCK, PRICE_DEVIATION_WARN, type AggregatorName } from '@/lib/constants'
+import { INTEGRATED_DEX_SOURCE_COUNT } from '@/config/product-claims'
 import { deriveMinimumOutput } from '@/lib/minimum-output'
 import { feeMode, isFeeCollected, type FeeMode } from '@/lib/fee-mode'
 import { feeUsd, swapNotionalUsd } from '@/lib/fee-usd'
@@ -252,6 +253,39 @@ export function priceImpact(check: PriceCheck): { text: string; tone: 'danger' |
  * echoed `amountRaw` is the amount in the field; until the re-quote lands the card is "quoting" (skeleton, CTA disabled),
  * so the receive amount, rate, fee and Min. output can never describe a different sell amount than the one on screen.
  */
+export interface ShareText {
+  /** The tweet-intent body (URL-encoded by the caller). */
+  text: string
+  /** v1's button label: "Share — saved X%" when the claim applies, else "Share swap". */
+  label: string
+}
+
+/**
+ * [L-1, owner decision: BUILD Share in v2] v1's Share-button tweet text (SwapBox.tsx), verbatim, as pure data instead
+ * of inline JSX: a comparison across > 1 source gets the "saved %" claim (worst → best of `meta.all`, [11-L-01]'s
+ * `safeBigInt` guard against a malformed `toAmount` hiding the claim rather than crashing); one source (or a tie) gets
+ * the plain line. Null whenever v1 would render nothing — no meta/tokenIn/tokenOut, or exactly one source.
+ */
+export function buildShareText(meta: MetaQuoteResult | null, tokenIn: Token | null, tokenOut: Token | null): ShareText | null {
+  if (!meta || !tokenIn || !tokenOut || meta.all.length <= 1) return null
+  const bestBig = safeBigInt(meta.best.toAmount)
+  const worstBig = safeBigInt(meta.all[meta.all.length - 1].toAmount)
+  if (bestBig === null || worstBig === null) return null
+  const bestOut = Number(formatUnits(bestBig, tokenOut.decimals))
+  const worstOut = Number(formatUnits(worstBig, tokenOut.decimals))
+  const savedPercent = worstOut > 0 ? ((bestOut - worstOut) / worstOut) * 100 : 0
+  const savedDisplay = savedPercent > 0.01 ? fmtPct(savedPercent) : null
+  return savedDisplay
+    ? {
+        text: `I just saved ${savedDisplay} on my ${tokenIn.symbol} → ${tokenOut.symbol} swap by comparing ${meta.all.length} DEX sources with @TeraSwapDEX 🔥\n\nTeraSwap meta-aggregates ${INTEGRATED_DEX_SOURCE_COUNT} DEX sources for the best price.\nhttps://www.teraswap.app`,
+        label: `Share — saved ${savedDisplay}`,
+      }
+    : {
+        text: `Just swapped ${tokenIn.symbol} → ${tokenOut.symbol} via @TeraSwapDEX — compared ${meta.all.length} sources for the best price 🔥\n\nhttps://www.teraswap.app`,
+        label: 'Share swap',
+      }
+}
+
 export function quoteIsForAmount(identityAmountRaw: string | undefined, amountIn: string, decimalsIn: number): boolean {
   if (identityAmountRaw === undefined || !amountIn) return false
   try {

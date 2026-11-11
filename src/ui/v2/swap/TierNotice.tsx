@@ -14,7 +14,7 @@ export function TierNotice({ tier }: { tier: SwapPriceTierResponse | null | unde
   if (tier?.tier === 'single-source') {
     return (
       <Notice tone="amber" testId="price-tier-single-source">
-        <span className="font-semibold">&#9888; Price from one source only ({singleSourceLabel(tier)}).</span> {SINGLE_SOURCE_TAIL}
+        <span className="font-semibold">Price from one source only ({singleSourceLabel(tier)}).</span> {SINGLE_SOURCE_TAIL}
       </Notice>
     )
   }
