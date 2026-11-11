@@ -23,9 +23,10 @@
 - Tests: every `main > section` has `data-ts-narrative`, none opaque; contrast re-run for all 9 sections.
 
 ## 3. Em dash (C3)
-- Visitor-facing string nodes (AST, comments skipped): 484 in 107 files -> 0. Per file:
-  `fix-ui-v2-walkthrough-polish.em-dash-counts.md`. Empty value `n/a` (your call if another word), spaced
-  range "to", asides commas, never a hyphen.
+- Visitor-facing string nodes (AST, comments skipped): 484 in 107 files -> 0 (5 left: 4 `console.*`, 1
+  exempt privacy note). Biggest before/after: DocsPage 39/0, DocsTabV2 39/0, SwapBox 24/0, DcaCard 22/0,
+  DCAPanel 21/1 (console). All 107 rows: `fix-ui-v2-walkthrough-polish.em-dash-counts.md` (too long for
+  one screen). Empty value `n/a` (your call), spaced range "to", asides commas, never a hyphen.
 - 10 samples: "Swap blocked — oracle data unsafe." -> "Swap blocked: oracle data unsafe." | "paused — your
   existing ones keep running" -> "paused. Your existing ones keep running" | "routing — you get whichever" ->
   "routing. You get whichever" | "Every other route — APIs (Curve) — is a public-mempool tx" -> "route, APIs
@@ -39,6 +40,10 @@
   `fix/privacy-no-usage-tracking` as the branch that removes it.
 - Left on purpose: 4 `console.*` logs; API routes, monitors, alerts (no API change); calldata-recipient/decoder
   and post-execution-validator reasons (gates, error-toast text only). Other routes: AST net only, not rendered.
+
+## Further reads (beyond the goal's list)
+NarrativeStack/narrative tests, photos/PhotoCredit + Footer, DocsPage, lib/constants.ts, agent-verify.sh,
+check-product-claims, gen-claude-state: needed to move the 4 stills into the stack, keep credits, and verify.
 
 ## 4. Verify (agent-verify.sh --codeql, base 0062400)
 suite 10368 pass/0 fail | lint +0/+0 (60/60) | tsc 0 | build ok | parity 111 | rpc-budget 33 | CodeQL 13 vs
