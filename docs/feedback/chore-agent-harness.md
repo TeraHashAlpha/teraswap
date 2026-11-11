@@ -4,8 +4,8 @@ Owner's standing agent rules become repo config. Touches only `.claude/**`, `scr
 `.github/pull_request_template.md`, `docs/Runbooks/agent-harness.md`, this file.
 
 ## Task checklist
-- [ ] C1 `.claude/settings.json` + `scripts/agent-settings.test.mjs`
-- [ ] C2 `.claude/agents/{implementer,recon,auditor}.md` (+ auditor hook)
+- [x] C1 `.claude/settings.json` + `scripts/agent-settings.test.mjs`
+- [x] C2 `.claude/agents/{implementer,recon,auditor}.md` (+ auditor hook)
 - [ ] C3 `scripts/agent-verify.sh` (+ formatter test)
 - [ ] C4 skills moved to `<name>/SKILL.md` (git mv) + `run-goal`, `audit-pr`
 - [ ] C5 PR template, `scripts/goal-lint.mjs` (+ test), runbook
