@@ -3,8 +3,13 @@
 // FIRST, on the whole command string, with quotes and backslashes removed and whitespace collapsed. There is no
 // tokenising: it looks for forbidden NAMES anywhere in the text, so it does not matter how the shell would have split,
 // quoted, nested or redirected them. It over-refuses on purpose (a `grep` pattern that names `.env` is refused).
-// ONE exemption: a lone `git commit` whose message holds no `$`, backtick or `<` (outside a `<<'EOF'` body) may mention
-// these words: the message literals are removed and the rest of the command is still scanned.
+// ONE exemption: a lone `git commit` (optionally after `git add … &&`) whose message holds no `$`, backtick or `<`
+// (outside a `<<'EOF'` body) may mention these words: the message literals are removed and the rest of the command is
+// still scanned.
+// A77d: three rules look at ONE region of the text instead of all of it, because a flag of another tool is not a flag of
+// `gh` or `git push` (`gh pr diff 5 | grep -F x`, `git stash push -m "a + b"`, `git fetch --prune && git push origin x`);
+// each falls back to the whole text when the region holds an expansion or the command uses xargs/parallel, since then
+// text from elsewhere can reach that argv.
 // Layer 1 (shell-parse.mjs + command-guard.mjs) decides on parsed argv; layer 2 is the permissions.deny patterns.
 // Not a sandbox: see "What this cannot stop" in docs/Runbooks/agent-harness.md.
 
@@ -15,6 +20,31 @@ export function normalise(command) {
   while (t.includes('/./')) t = t.replaceAll('/./', '/')
   return t.trim()
 }
+
+/**
+ * Splits `src` at unquoted separator characters (`seps`, a string of characters from `| & ; \n`); quote-aware but nothing
+ * more, so an unbalanced quote just makes the rest one region (the conservative direction). An `&` inside `>&`, `<&`
+ * or `&>` is a redirection, not a separator. Each piece is returned normalised.
+ */
+export function splitRegions(src, seps) {
+  const s = String(src)
+  const out = []
+  let cur = ''
+  let q = ''
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]
+    if (c === '\\' && q !== "'") { cur += c + (s[i + 1] ?? ''); i++; continue }
+    if (q) { if (c === q) q = ''; cur += c; continue }
+    if (c === "'" || c === '"') { q = c; cur += c; continue }
+    if (seps.includes(c) && !(c === '&' && (s[i - 1] === '>' || s[i - 1] === '<' || s[i + 1] === '>'))) { out.push(cur); cur = ''; continue }
+    cur += c
+  }
+  out.push(cur)
+  return out.map(normalise).filter((x) => x !== '')
+}
+const FEEDS_ARGV = /(?<![a-z0-9_-])g?(?:xargs|parallel)(?![a-z0-9_-])/
+/** True when text from OUTSIDE a region can end up in its argv (an expansion in it, or xargs/parallel anywhere): scan the whole command. */
+const reachesFromOutside = (region, whole) => /[$`]/.test(region) || FEEDS_ARGV.test(whole)
 
 const wordRe = (w) => new RegExp(`(?<![a-z0-9_-])${w}(?![a-z0-9_-])`)
 const has = (t, w) => wordRe(w).test(t)
@@ -50,10 +80,15 @@ function heredocSubstitutionEnd(s, j) {
  * `$(cat <<'EOF' ... EOF)` wrapper, and on any shell operator, comment or substitution outside the quotes.
  */
 export function loneCommitRemainder(command) {
-  const s = String(command)
+  const whole = String(command)
+  // A77d: `git add -A && git commit …` is the everyday pair. The add part is plain words only (no quote, `$`, backtick,
+  // operator) and stays in the returned remainder, so `git add .env` and `git add .claude/hooks/x` are still scanned.
+  const add = /^\s*git\s+add(?:\s+[^\s;&|<>()$`'"\\{}#]+)*\s*&&\s*(?=git\s+commit(?:\s|$))/.exec(whole)
+  const prefix = add ? add[0] : ''
+  const s = whole.slice(prefix.length)
   if (!/^\s*git\s+commit(?:\s|$)/.test(s)) return null
   const n = s.length
-  let out = ''
+  let out = prefix
   let i = 0
   while (i < n) {
     const c = s[i]
@@ -93,13 +128,19 @@ export function loneCommitRemainder(command) {
 
 // ---------------------------------------------------------------------------------------------------------------
 // "Pure reader" (for the harness-path rule only): readers joined by pipes, nothing that writes, redirects or substitutes.
-const READERS = /^(?:cat|head|tail|grep|rg|wc|ls|stat|diff|git(?: +(?:--no-pager|-p))* +(?:diff|log|show))(?= |$)/
+// A77d: `git -C DIR`, `git blame`, `git ls-files`, `jq`, and a leading `cd DIR &&` are reads too.
+const CD_WORD = String.raw`[^\s;&|<>()$` + '`' + String.raw`\\'"]+`
+const GIT_C = String.raw`-C +` + CD_WORD
+const READERS = new RegExp(String.raw`^(?:cat|head|tail|grep|rg|wc|ls|stat|diff|jq|git(?: +(?:--no-pager|-p|${GIT_C}))* +(?:diff|log|show|blame|ls-files))(?= |$)`)
+const LEADING_CD = new RegExp(String.raw`^\s*(?:cd +${CD_WORD} *&& *)+`)
 export function isPureReader(command) {
   const s = String(command)
   if (/[$`\n\r\\]/.test(s)) return false
-  const outside = s.replace(/'[^']*'|"[^"]*"/g, '""')
+  if (/(?:^|[\s;&|])(?:cd|-C) +[^\s;&|]*\.claude/i.test(s)) return false // a cd / -C INTO the harness stays a layer-0 refusal
+  const body = s.replace(LEADING_CD, '')
+  const outside = body.replace(/'[^']*'|"[^"]*"/g, '""')
   if (/[<>;&(){}]/.test(outside)) return false
-  if (/--output|--pre(?:=|\s|$)|--open-files-in-pager/.test(s)) return false
+  if (/--output|--pre(?:=|\s|$)|--open-files-in-pager/.test(body)) return false
   return outside.split('|').every((p) => READERS.test(p.trim()))
 }
 
@@ -154,11 +195,12 @@ function claudeChildGlob(t) {
 const ENV_RE = /(?<=^|[^a-z0-9_-]|(?:^|\s)-[a-z0-9]+)\.env(?![a-z0-9_-])/g
 function envRule(t) {
   // `.env` as a name: after a separator, or glued to a short flag (`base64 -i.env`, `grep -f.env`). `process.env.HOME`,
-  // `os.environ`, `import.meta.env` and `src/env.ts` are not file names and pass; `.env.example` passes.
+  // `os.environ`, `import.meta.env` and `src/env.ts` are not file names and pass; `.env.example` and `.env*.example` pass.
   for (const m of t.matchAll(ENV_RE)) {
     const rest = t.slice(m.index + 4)
-    if (/^\.example(?![a-z0-9_-])/.test(rest)) continue
-    return t.slice(m.index, m.index + 4 + (/^\.[a-z0-9_.-]*/.exec(rest)?.[0].length ?? 0))
+    const suffix = /^\.[a-z0-9_.-]*/.exec(rest)?.[0] ?? ''
+    if (/\.example$/.test(suffix)) continue // `.env.example`, `.env.executor.example`: tracked templates (A77d)
+    return t.slice(m.index, m.index + 4 + suffix.length)
   }
   return null
 }
@@ -173,8 +215,8 @@ function harnessRule(t, { pure }) {
 }
 
 const PUSH_LONG = ['force', 'mirror', 'delete', 'prune']
-function pushRule(t) {
-  if (!has(t, 'push')) return null
+const PUSH_WORD = new RegExp(wordRe('push').source, 'g')
+function pushArgsReason(t) {
   const short = /(?<= )-[a-z]*[fd][a-z]*(?![a-z0-9_-])/.exec(t) // `-f`, `-uf`, `-f)` (inside `$( )`), not `--follow-tags`
   if (short) return `push ${short[0]}`
   for (const m of t.matchAll(/(?<= )--([a-z-]+)/g)) {
@@ -184,28 +226,56 @@ function pushRule(t) {
   const refspec = /(?: \+| :|:\+)/.exec(t)
   return refspec ? `push ${refspec[0].trim() || refspec[0]}` : null
 }
+function pushRule(t, { cmds = [t] } = {}) {
+  if (!has(t, 'push')) return null
+  // A77d: the flags are those AFTER a `push` word up to the next separator; `git stash push …` is not `git push`
+  // (`git stash push -m "a + b"`, `git fetch --prune origin && git push origin x`). Whole command when an expansion or
+  // xargs/parallel can bring flags in from elsewhere.
+  for (const seg of cmds) {
+    for (const m of seg.matchAll(PUSH_WORD)) {
+      if (/(?<![a-z0-9_-])stash +$/.test(seg.slice(0, m.index))) continue
+      const tail = seg.slice(m.index + 4)
+      const why = pushArgsReason(reachesFromOutside(tail, t) ? t : tail)
+      if (why) return why
+    }
+  }
+  return null
+}
 
 const GH_VERBS = ['merge', 'create', 'new', 'ready', 'close', 'edit', 'review', 'comment']
-function ghRule(t) {
+function ghRule(t, { pipes = [t] } = {}) {
   if (!has(t, 'gh') || !(has(t, 'pr') || has(t, 'api'))) return null
   const verb = firstWord(t, GH_VERBS)
   if (verb) return `gh pr|api … ${verb}`
   const lit = ['--method', '--field', '--raw-field', '--input', 'method-override'].find((x) => t.includes(x))
   if (lit) return `gh pr|api … ${lit}`
-  const flag = /(?<= )-[a-z]*[fx]/.exec(t)
-  return flag ? `gh pr|api … ${flag[0]}` : null
+  // A77d: the short write flags (-f -F -X) are scanned in the pipeline segment that holds `gh` (`gh pr diff 5 | grep -F x`,
+  // `… | cut -d/ -f1-2`), or in the whole command when text from outside can reach that segment's argv.
+  for (const seg of pipes.filter((x) => has(x, 'gh'))) {
+    const flag = /(?<= )-[a-z]*[fx]/.exec(reachesFromOutside(seg, t) ? t : seg)
+    if (flag) return `gh pr|api … ${flag[0]}`
+  }
+  return null
+}
+
+// A variable NAME is not the subcommand: `cast call 0x0 "f()" "$WALLET"` passes (layer 1 refuses `cast $X …` itself, since the
+// subcommand must be a listed word).
+const CAST_WORDS = ['send', 'publish', 'mktx', 'wallet', 'erc20']
+function castRule(t) {
+  if (!has(t, 'cast')) return null
+  return CAST_WORDS.find((w) => new RegExp(`(?<![a-z0-9_$-])(?<!\\$\\{)${w}(?![a-z0-9_-])`).test(t)) ?? null
 }
 
 const KEYCHAIN_VERB = '(?:find|add|delete|dump|list|import|export|unlock|lock|set|show|create|default|login|remove|authorize|cms|verify|smartcard|translocate|error|help|install|uninstall|leave|execute|authorizationdb)'
 // `security` as a command: bare, with flags only (`security -i` reads commands from stdin), or followed by a keychain verb.
-// `docs/security/…`, `grep security docs` and `ls docs/security` are not commands and pass.
-const KEYCHAIN_RE = new RegExp(`(?:(?<![a-z0-9_./-])|(?<=/s?bin/))security(?=(?: +-[a-z]+)*\\s*(?:$|[;&|)])|(?: +-[a-z]+)* +${KEYCHAIN_VERB}[a-z-]*(?![a-z0-9_]))`)
+// `docs/security/…`, `grep security docs`, `ls docs/security` and a flag VALUE (`git log --grep=security`, A77d) are not commands and pass.
+const KEYCHAIN_RE = new RegExp(`(?:(?<![a-z0-9_./=-])|(?<=/s?bin/))security(?=(?: +-[a-z]+)*\\s*(?:$|[;&|)])|(?: +-[a-z]+)* +${KEYCHAIN_VERB}[a-z-]*(?![a-z0-9_]))`)
 
 export const LAYER0_RULES = [
-  { id: 'env', why: 'environment-secrets file (only .env.example is readable)', test: envRule },
+  { id: 'env', why: 'environment-secrets file (only the tracked .env*.example templates are readable)', test: envRule },
   { id: 'harness', why: 'the harness (.claude/settings*, .claude/hooks) is changed by the owner; only pure readers may name it', test: harnessRule },
   { id: 'credentials', why: 'credential access is the owner\'s (CLAUDE.md "Do NOT" #13)', test: (t) => (has(t, 'gh') && has(t, 'auth') ? 'gh auth' : null) ?? (t.includes('--show-token') ? '--show-token' : null) ?? (/git[- ]credential/.exec(t)?.[0] ?? null) },
-  { id: 'cast', why: 'cast send / publish / mktx / wallet / erc20 move funds or keys', test: (t) => (has(t, 'cast') ? firstWord(t, ['send', 'publish', 'mktx', 'wallet', 'erc20']) : null) },
+  { id: 'cast', why: 'cast send / publish / mktx / wallet / erc20 move funds or keys', test: castRule },
   { id: 'broadcast', why: 'forge/cast --broadcast sends transactions', test: (t) => (t.includes('--broadcast') ? '--broadcast' : null) },
   { id: 'push', why: 'force / mirror / delete / +refspec / :refspec pushes', test: pushRule },
   { id: 'gh-write', why: 'gh pr|api writes (merge create new ready close edit review comment, -X --method -f -F --field --raw-field --input, method override)', test: ghRule },
@@ -224,10 +294,12 @@ export const LAYER0_RULES = [
 export function rawScan(command) {
   const raw = String(command)
   const rest = loneCommitRemainder(raw)
-  const t = normalise(rest ?? raw)
+  const src = rest ?? raw
+  const t = normalise(src)
   const pure = rest === null && isPureReader(raw)
+  const ctx = { pure, pipes: splitRegions(src, '|'), cmds: splitRegions(src, '|&;\n') }
   for (const rule of LAYER0_RULES) {
-    const hit = rule.test(t, { pure })
+    const hit = rule.test(t, ctx)
     if (hit) return `layer 0 raw-text scan (${rule.id}): "${hit}" appears in the command text — ${rule.why}`
   }
   return null

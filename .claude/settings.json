@@ -70,6 +70,7 @@
       "Bash(history *)",
       "Read(.env*)",
       "Read(!.env.example)",
+      "Read(!.env*.example)",
       "Edit(.env*)",
       "Edit(!.env.example)",
       "Read(~/.zsh_history)",

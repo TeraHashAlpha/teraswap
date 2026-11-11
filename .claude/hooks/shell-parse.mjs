@@ -533,6 +533,8 @@ export function inspect(command) {
           }
           break
         }
+        // `bash --version`, `bash --help`: print and exit, nothing is read from stdin (A77d)
+        if (a.length === 2 && (a[1] === '--version' || a[1] === '--help')) { cmds.push({ argv: a, words, base }); return }
         if (hasC) {
           const script = a[k]
           if (script === undefined || isAllExp(script)) problems.push(`${base} -c with a script that is built from an expansion`)

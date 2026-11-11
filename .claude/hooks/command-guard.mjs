@@ -81,7 +81,7 @@ const INTERPRETERS = /^(node|nodejs|deno|bun|python[0-9.]*|perl|ruby|php|lua|osa
 const ENV_IN_TEXT = /(?:^|[^A-Za-z0-9_-])(\.env(?:\.[A-Za-z0-9_.-]*)?)(?![A-Za-z0-9_-])/g
 const HISTORY_IN_TEXT = /(?:^|[^A-Za-z0-9_-])(\.(?:zsh_history|zhistory|bash_history|sh_history|histfile|python_history|node_repl_history))(?![A-Za-z0-9_-])/g
 function embeddedSecretReason(word) {
-  for (const m of word.matchAll(ENV_IN_TEXT)) if (m[1].toLowerCase() !== '.env.example') return `${m[1]} named inside an interpreter program`
+  for (const m of word.matchAll(ENV_IN_TEXT)) if (!m[1].toLowerCase().endsWith('.example')) return `${m[1]} named inside an interpreter program`
   for (const m of word.matchAll(HISTORY_IN_TEXT)) return `${m[1]} named inside an interpreter program`
   return null
 }
@@ -109,12 +109,13 @@ function envPathReason(word, { nameOnly = false } = {}) {
   }
   for (const c of cands) {
     const b = baseName(c)
-    if (!nameOnly && /^\.env(\..+)?$/.test(b) && b !== '.env.example') return `${b} is an environment-secrets file`
+    if (!nameOnly && /^\.env(\..+)?$/.test(b) && !b.endsWith('.example')) return `${b} is an environment-secrets file` // `.env.example`, `.env.executor.example`: tracked templates (A77d)
     if (c.split('/').some((seg) => HISTORY_DIRS.has(seg.toLowerCase()))) return `${c} is inside the shell-history directory`
     if (/[*?[]/.test(b)) { // a glob only matches dotfiles when its first character is a literal dot
       let re = null
       try { re = new RegExp(`^${b.replace(/[.+^${}()|\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`) } catch { /* `[`, `[[`, `]]`: the test command's own words, not a glob */ }
       const names = [...(nameOnly ? [] : ENV_NAMES), ...HISTORY_NAMES]
+      if (nameOnly && /^\.[*?]+$/.test(b)) continue // `ls -d .*` lists names; a glob with no literal character matches every dotfile (A77d)
       const hit = re && names.find((n) => (n.startsWith('.') ? b.startsWith('.') : /fish/i.test(c)) && re.test(n))
       if (hit) return `${b} would match ${hit}`
     }

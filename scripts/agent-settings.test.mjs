@@ -101,6 +101,7 @@ export const REQUIRED_ASK = [
 export const REQUIRED_PATH_RULES = [
   'Read(.env*)',
   'Read(!.env.example)',
+  'Read(!.env*.example)', // A77d: tracked templates such as .env.executor.example (Edit stays: only .env.example)
   'Edit(.env*)',
   'Edit(!.env.example)',
   'Read(~/.zsh_history)',
@@ -174,10 +175,12 @@ export function validateSettings(settings) {
 
   for (const rule of REQUIRED_PATH_RULES) if (!deny.includes(rule)) problems.push(`missing deny rule: ${rule}`)
   // gitignore negation only carves out of rules listed BEFORE it.
-  for (const tool of ['Read', 'Edit']) {
+  for (const [tool, negs] of [['Read', ['!.env.example', '!.env*.example']], ['Edit', ['!.env.example']]]) {
     const base = deny.indexOf(`${tool}(.env*)`)
-    const neg = deny.indexOf(`${tool}(!.env.example)`)
-    if (base !== -1 && neg !== -1 && neg < base) problems.push(`${tool}(!.env.example) must come after ${tool}(.env*)`)
+    for (const n of negs) {
+      const neg = deny.indexOf(`${tool}(${n})`)
+      if (base !== -1 && neg !== -1 && neg < base) problems.push(`${tool}(${n}) must come after ${tool}(.env*)`)
+    }
   }
   return problems
 }
@@ -266,6 +269,25 @@ describe('.claude/settings.json', () => {
     d.splice(d.indexOf('Read(!.env.example)'), 1)
     d.splice(d.indexOf('Read(.env*)'), 0, 'Read(!.env.example)')
     expect(validateSettings(s).join('\n')).toMatch(/must come after/)
+  })
+
+  it('A77d: Read allows .env*.example templates and nothing else; Edit still allows only .env.example', () => {
+    const deny = settings.permissions.deny
+    expect(deny.indexOf('Read(!.env*.example)')).toBeGreaterThan(deny.indexOf('Read(.env*)'))
+    expect(deny).not.toContain('Edit(!.env*.example)')
+    const s = clone()
+    s.permissions.deny.splice(s.permissions.deny.indexOf('Read(!.env*.example)'), 1)
+    expect(validateSettings(s).join('\n')).toMatch(/missing deny rule: Read\(!\.env\*\.example\)/)
+    const t = clone()
+    const d = t.permissions.deny
+    d.splice(d.indexOf('Read(!.env*.example)'), 1)
+    d.splice(d.indexOf('Read(.env*)'), 0, 'Read(!.env*.example)')
+    expect(validateSettings(t).join('\n')).toMatch(/Read\(!\.env\*\.example\) must come after/)
+  })
+
+  it('A77d: layer 2 is NOT loosened for `git stash push -m "a + b"` — the pattern `git * push * +*` cannot tell stash from push, so it still matches (layers 0 and 1 allow it)', () => {
+    expect(isDenied(settings, 'git stash push -m "a + b"')).toBe(true)
+    expect(isDenied(settings, 'git stash push -m "a plus b"')).toBe(false)
   })
 })
 

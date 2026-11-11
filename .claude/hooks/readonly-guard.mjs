@@ -146,6 +146,19 @@ function gitReason(c, dir) {
     return null
   }
   switch (sub) {
+    // A77d: history readers that were missing from the list. Every form that writes (stash push|pop|drop|clear, reflog expire|delete,
+    // symbolic-ref with a value or -d/-m, --output) stays refused.
+    case 'stash': return args[0] === 'list' && !args.some((t) => /^--output(=|$)/.test(t)) ? null : no('anything but `stash list`')
+    case 'reflog': {
+      if (args.some((t) => /^--output(=|$)/.test(t))) return no('--output (writes a file)')
+      return args[0] === 'expire' || args[0] === 'delete' ? no(`\`reflog ${args[0]}\``) : null
+    }
+    case 'symbolic-ref': {
+      const flags = args.filter((t) => t.startsWith('-'))
+      const pos = args.filter((t) => !t.startsWith('-'))
+      return flags.every((t) => ['-q', '--quiet', '--short', '--no-recurse'].includes(t)) && pos.length === 1 ? null : no('anything but `symbolic-ref [-q] [--short] <name>` (a second argument, -d and -m write)')
+    }
+    case 'verify-commit': return args.every((t) => ['-v', '--verbose', '--raw'].includes(t) || !t.startsWith('-')) ? null : no('that flag')
     case 'remote': return args.length === 0 || (args.length === 1 && (args[0] === '-v' || args[0] === '--verbose')) ? null : no('anything but `remote` / `remote -v`')
     case 'branch': {
       const bad = onlyFlags(args, BRANCH_FLAGS, BRANCH_VALUED, { positionals: 'any' })
