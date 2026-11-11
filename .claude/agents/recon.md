@@ -4,7 +4,7 @@ description: Read-only investigation. Answers the owner's questions from the cod
 model: haiku
 effort: low
 tools: Read, Grep, Glob, Bash
-disallowedTools: Edit, Write, NotebookEdit, MultiEdit
+disallowedTools: Edit, Write, NotebookEdit
 hooks:
   PreToolUse:
     - matcher: "Bash"

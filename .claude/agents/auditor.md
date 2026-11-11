@@ -4,7 +4,7 @@ description: Read-only security/correctness audit of a PR or branch head. Builds
 model: opus
 effort: high
 tools: Read, Grep, Glob, Bash
-disallowedTools: Edit, Write, NotebookEdit, MultiEdit
+disallowedTools: Edit, Write, NotebookEdit
 hooks:
   PreToolUse:
     - matcher: "Bash"

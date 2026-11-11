@@ -34,20 +34,30 @@
       "Bash(gh * pr merge*)",
       "Bash(gh * pr ready*)",
       "Bash(gh * pr close*)",
-      "Bash(gh api *-X*)",
-      "Bash(gh api *--method*)",
+      "Bash(gh api -X*)",
+      "Bash(gh api * -X*)",
+      "Bash(gh api --method*)",
+      "Bash(gh api * --method*)",
       "Bash(gh api * -f*)",
       "Bash(gh api * -F*)",
-      "Bash(gh api *--field*)",
-      "Bash(gh api *--raw-field*)",
-      "Bash(gh api *--input*)",
-      "Bash(gh * api *-X*)",
-      "Bash(gh * api *--method*)",
+      "Bash(gh api --field*)",
+      "Bash(gh api * --field*)",
+      "Bash(gh api --raw-field*)",
+      "Bash(gh api * --raw-field*)",
+      "Bash(gh api --input*)",
+      "Bash(gh api * --input*)",
+      "Bash(gh * api -X*)",
+      "Bash(gh * api * -X*)",
+      "Bash(gh * api --method*)",
+      "Bash(gh * api * --method*)",
       "Bash(gh * api * -f*)",
       "Bash(gh * api * -F*)",
-      "Bash(gh * api *--field*)",
-      "Bash(gh * api *--raw-field*)",
-      "Bash(gh * api *--input*)",
+      "Bash(gh * api --field*)",
+      "Bash(gh * api * --field*)",
+      "Bash(gh * api --raw-field*)",
+      "Bash(gh * api * --raw-field*)",
+      "Bash(gh * api --input*)",
+      "Bash(gh * api * --input*)",
       "Bash(npm audit fix*)",
       "Bash(npm audit *--fix*)",
       "Bash(history)",
@@ -68,6 +78,21 @@
       "Read(~/.node_repl_history)",
       "Edit(~/.zsh_history)",
       "Edit(~/.bash_history)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/command-guard.mjs\" || exit 2",
+            "timeout": 10,
+            "onFailure": "block"
+          }
+        ]
+      }
     ]
   }
 }

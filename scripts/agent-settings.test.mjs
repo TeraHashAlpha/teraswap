@@ -79,6 +79,9 @@ export const MUST_NOT_DENY = [
   'gh pr list',
   'gh api repos/a/b/pulls/5',
   'gh api repos/a/b/pulls',
+  'gh api repos/a/b/contents/foo-Xbar', // a path that merely contains -X must not trip the write rule (A77)
+  'gh api repos/a/b/contents/x--method',
+  'gh api repos/a/b/contents/x--field',
   'forge test',
   'forge build',
   'cast call 0x0 "f()"',
@@ -241,6 +244,13 @@ describe('.claude/settings.json', () => {
     d.splice(d.indexOf('Read(!.env.example)'), 1)
     d.splice(d.indexOf('Read(.env*)'), 0, 'Read(!.env.example)')
     expect(validateSettings(s).join('\n')).toMatch(/must come after/)
+  })
+})
+
+describe('hooks block', () => {
+  it('wires command-guard on Bash for every agent, wrapped so a crash blocks', () => {
+    const entries = settings.hooks.PreToolUse.filter((e) => e.matcher === 'Bash').flatMap((e) => e.hooks)
+    expect(entries.some((h) => h.command.includes('command-guard.mjs') && h.command.endsWith('|| exit 2') && h.onFailure === 'block')).toBe(true)
   })
 })
 

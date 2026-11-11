@@ -39,3 +39,6 @@ Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...chore/agent-ha
 - [x] D3 `--keeper`: Node majors = ci.yml `keeper-suite` job (22) ∪ keeper-tests.yml (20); looked up via PATH, brew, nvm, fnm, volta; missing = FAIL, never substituted, one line `install: brew install node@20 node@22` (only missing majors). Fake-install tests (pass, fnm layouts, missing, failing) added. This Mac: both missing → FAIL by design; nothing installed without asking. Corrects "Node 20 only" in §1.
 - Verified: agent-verify/goal-lint/settings/hooks tests 106 pass; check:bash3-compat, check:product-claims OK. Full `agent-verify.sh` NOT re-run (keeper cannot pass here); §4 results stand for 5ee35f0.
 - diff --stat origin/main...HEAD: 22 files, +1642 / −2 (the 2 deletions = the template's two edited lines)
+
+## Round 3 — A77 fixes (blocked 0C/4H), new commits on top of 60bf973
+- [ ] C1 command-guard H-1..H-3 · [ ] C2 read-only guard in settings H-4/M-1/M-2 · [ ] C3 scripts M-3..M-5 · [ ] C4 runbook + this section
