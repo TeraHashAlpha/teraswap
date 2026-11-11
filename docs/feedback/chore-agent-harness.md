@@ -1,14 +1,34 @@
 # Feedback — chore/agent-harness (2026-11-11, off origin/main 26623b3)
 
-Owner's standing agent rules become repo config. Touches only `.claude/**`, `scripts/agent-*`, `scripts/goal-lint*`,
-`.github/pull_request_template.md`, `docs/Runbooks/agent-harness.md`, this file.
+Standing agent rules become repo config. Touched only the allowed paths (+ test files under scripts/). 5 feature commits, all SSH-signed.
+- [x] C1 settings.json afa6937 · [x] C2 agents+hook d31db41 · [x] C3 agent-verify 12397b8 · [x] C4 skills 7034fc7 · [x] C5 template/lint/runbook 5ee35f0
 
-## Task checklist
-- [x] C1 `.claude/settings.json` + `scripts/agent-settings.test.mjs`
-- [x] C2 `.claude/agents/{implementer,recon,auditor}.md` (+ auditor hook)
-- [x] C3 `scripts/agent-verify.sh` (+ formatter test)
-- [x] C4 skills moved to `<name>/SKILL.md` (git mv) + `run-goal`, `audit-pr`
-- [x] C5 PR template, `scripts/goal-lint.mjs` (+ test), runbook
+## 1. Docs checked (read via subagent; code.claude.com/docs/en/…)
+permissions.md · settings.md · settings-reference.md (truncated) · sub-agents.md · hooks.md · skills.md · cli-reference.md · goal.md. Deviations from the goal text:
+- Skills: docs require `<name>/SKILL.md`; flat `.md` is undocumented. Done via git mv; a real session lists all 6 skills.
+- Bypass: project `defaultMode` bypass is ignored by the harness anyway → set `disableBypassPermissionsMode: "disable"`; test forbids allow/ask/widening modes.
+- Bash deny is positional (`git push *` misses `git -C . push`), so every rule has a `git * push` / `gh * pr` twin; `.env` exception uses the documented `!` negation (must follow its base rule).
+- Per-agent frontmatter `hooks:` IS supported → used for recon + auditor (skipped if workspace trust is not accepted).
+- Tests are vitest (`scripts/*.test.mjs` run in `npm test`), not node:test. Keeper CI runs **Node 20 only** (workflow), not several versions.
+- Docs-agent could not confirm `claude --agent X "/goal …"` as one interactive line; `-p --agent` + prompt verified.
 
-## Evidence
-(filled in as each commit lands; final edit = last commit)
+## 2. settings.json (66 deny rules, 0 allow) + tests (agent-settings: 9)
+Real nested session in the worktree, `--allowedTools "Bash(ssh *)"` given on purpose: `ssh -V` → **DENIED** (deny beats allow); `git status --short` → **OK**; Read `.env.example` → OK; Read `.env.canary-harness` (fake, removed) → **DENIED**.
+Known evasion: `sh -c`, `git push -uf` (combined short flags), aliases — intent signal, not a sandbox.
+
+## 3. Agents — enforced vs prose
+Enforced: model/effort/tools in frontmatter; recon+auditor have no Edit/Write/NotebookEdit and a PreToolUse hook (exit 2, fail-closed). Self-test of `--agent auditor`: `git commit` and `gh pr merge` refused by the hook, file create → no tool, `git status` OK.
+Prose only: worktree/`npm ci`/feedback-first/signed commits/no CI polling/ask on false premise/report format/exit clause, no writes via Bash redirects.
+
+## 4. agent-verify at 5ee35f0 — default run PASS (suite 8350/0, lint +0/+0, tsc 0, build ok, parity 111, rpc-budget 33)
+`--codeql --keeper` run: codeql PASS (head 13 / base 13 / new 0); keeper **FAIL node20:MISSING** (only Node 25 installed; script refuses to substitute — `brew install node@20`); parity FAIL once (src/ui/v2/shell/sounds-parity.test.tsx, 5 s timeout + state leak; pre-existing, untouched) → 3/3 reruns pass, default rerun PASS. Possible overlap with a stray duplicate verify run; unconfirmed.
+goal-lint: good sample (CONTROL:, Exit =, ssh/pm2 only on Do-NOT) → OK 408 chars rc 0; bad sample → 5 violations rc 1 (control-line, exit-clause, "CI-poll", pm2, ssh).
+
+## 5. diff --stat origin/main...HEAD: 20 files, +1512 / −0 (4 skill renames at 93–95%)
+Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...chore/agent-harness — no PR opened.
+
+## Owner decisions / concerns
+- `scripts/*.sh` is gitignored (.gitignore:49) → `agent-verify.sh` force-added; add `!scripts/agent-verify.sh` (out of scope here).
+- goal-lint rejects "CI-poll" literally, but `_PROMPT-TEMPLATE.md` §1 CONTROL says "NO CI-poll"; this goal's line 1 also lacks `CONTROL:`. Template edit needed (out of scope).
+- Read beyond the allow-list: `keeper-tests.yml` (grep/sed of run/node-version lines), `.gitignore` 44–56, import lines of 2 scripts tests, `git ls-files` name greps.
+- Slip: one stray `git stash` of staged work; popped immediately, nothing lost.
