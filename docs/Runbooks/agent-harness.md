@@ -28,7 +28,7 @@ Two rounds of deny-lists each left new spellings, so the riskiest tools run only
 
 | Command | Permitted |
 |---|---|
-| `gh pr` | `view` `diff` `checks` `list` `status` `checkout` (a write verb anywhere after the action is refused) |
+| `gh pr` | `view` `diff` `checks` `list` `status`; `checkout` for the implementer and the main session only (it creates or moves a local branch: `recon` and `auditor` fetch and detach instead). A write verb anywhere after the action is refused |
 | `gh run` | `view` `list` |
 | `gh repo` | `view` |
 | `gh issue` | `view` `list` |
@@ -48,17 +48,17 @@ Two rounds of deny-lists each left new spellings, so the riskiest tools run only
 
 | Command | Permitted |
 |---|---|
-| `status` `log` `diff` `show` `rev-parse` `ls-files` `ls-tree` `cat-file` `blame` `describe` | any arguments except `--output` (writes a file) |
+| `status` `log` `diff` `show` `rev-parse` `rev-list` `merge-base` `name-rev` `shortlog` `for-each-ref` `show-ref` `diff-tree` `ls-files` `ls-tree` `cat-file` `blame` `describe` | any arguments except `--output` (writes a file) |
 | `grep` | as above, and not `-O`, `--open-files-in-pager`, `--no-index`, `--untracked` |
 | `remote` | `remote`, `remote -v` |
 | `branch` | no arguments, or list flags (`--list -l -a -r --show-current -v --contains --merged --points-at …`); a bare name creates a branch: refused |
 | `tag` | no arguments, `-l`/`--list [pattern]`, `--contains`, `--points-at` |
 | `config` | `--get`, `--get-all`, `--get-regexp <key>` (optionally with a scope flag) |
-| `fetch` | without a refspec (`origin`, `origin main`, `--depth N`, `--all`, `--tags`); `a:b`, `+x`, `--prune`, `--refmap` refused |
-| `worktree` | `add` (no `-b`/`-B`), `remove`, `list` |
+| `fetch` | without a refspec (`origin`, `origin main`, `origin pull/5/head`, `--all`, `--tags`). Refused: `a:b`, `+x`, `--depth`, `--deepen`, `--shallow-*`, `--unshallow`, `--prune`, `--refmap` (shallow and prune rewrite `.git`) |
+| `worktree` | `add --detach <path> [<commit>]` (`--detach` is REQUIRED: `git worktree add ../x` creates a branch named `x`; no `-b`/`-B`), `remove`, `list` |
 | `checkout` | `--detach [<commit>]` only |
-| `merge` | `--no-commit …`, `--abort`, `--quit` |
-| everything else | refused: `commit push pull add rm mv reset clean stash restore apply rebase cherry-pick revert switch rev-list merge-base reflog …` |
+| `merge` | `--no-commit --no-ff <commit>` (both REQUIRED: a fast-forward moves the checked-out branch; `--ff` and `--ff-only` refused), `--abort`, `--quit` |
+| everything else | refused: `commit push pull add rm mv reset clean stash restore apply rebase cherry-pick revert switch reflog update-ref symbolic-ref gc init clone submodule notes archive bundle` and every other subcommand |
 
 ## When a refused command is legitimate
 

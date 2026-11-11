@@ -24,14 +24,19 @@ const RO_REFUSED = [
   'gh pr create --title x', 'gh pr merge 5', 'gh pr comment 5 -b x', 'gh pr edit 5', 'gh pr close 5', 'gh -R a/b pr close 5', 'gh issue create', 'gh issue comment 5', 'gh release create v1', 'gh workflow run x', 'gh run download 5', 'gh run rerun 5', 'gh repo delete a/b', 'gh repo clone a/b', 'gh auth login', 'gh alias set x y', 'gh gist create f',
   'gh api -X POST repos/a/b/issues', 'gh api -XPOST x', 'gh api repos/a/b --method=DELETE', 'gh api repos/a/b/issues -f title=x', 'gh api repos/a/b/issues -ftitle=x', 'gh api x -Fn=1', 'gh api x --field=a=b', 'gh api x --input=f', 'gh api -iX PATCH x',
   'bash', 'echo x | sh', 'eval "$CMD"',
+  // A77c H-11 / M-11: read-only git cannot move refs or change the repository's shape
+  'git merge --no-commit origin/main', 'git merge --no-commit --ff-only origin/main', 'git merge --no-commit --ff origin/main', 'git merge --ff-only origin/main', 'git worktree add ../zz', 'git worktree add /tmp/w origin/main', 'git worktree add -f /tmp/w',
+  'git fetch --depth 1', 'git fetch --depth=1 origin main', 'git fetch --deepen 5', 'git fetch --deepen=5', 'git fetch --shallow-since=2020-01-01', 'git fetch --shallow-exclude=x', 'git fetch --unshallow', 'git fetch --prune', 'git fetch -p', 'git fetch --prune-tags',
+  'git fetch origin main:main', 'git fetch origin +main', 'gh pr checkout 5', 'gh -R a/b pr checkout 5', 'gh pr checkout 5 --detach',
 ]
 const RO_ALLOWED = [
-  'git status', 'git log --oneline -5', 'git diff origin/main...HEAD --stat', 'git fetch origin main', 'git fetch origin', 'git fetch --depth 1 origin main', 'git fetch origin pull/5/head', 'git worktree add --detach /tmp/wt origin/main',
+  'git status', 'git log --oneline -5', 'git diff origin/main...HEAD --stat', 'git fetch origin main', 'git fetch origin', 'git fetch --all --tags', 'git fetch origin pull/5/head', 'git worktree add --detach /tmp/wt origin/main', 'git worktree add --detach /tmp/wt',
   'git worktree remove /tmp/wt', 'git worktree remove --force /tmp/wt', 'git worktree list', 'git -C /tmp/wt rev-parse HEAD', 'git show HEAD:package.json', 'git branch --show-current', 'git branch -a', 'git branch -r --contains abc', 'git branch --list "chore/*"',
-  'git remote -v', 'git log -1 --format=%H', 'git merge --no-commit origin/main', 'git merge --no-commit --no-ff x', 'git merge --abort', 'git merge --quit', 'git checkout --detach origin/main',
+  'git remote -v', 'git log -1 --format=%H', 'git merge --no-commit --no-ff origin/main', 'git merge --no-commit --no-ff x', 'git merge --abort', 'git merge --quit', 'git checkout --detach origin/main',
+  'git merge-base HEAD origin/main', 'git merge-base --is-ancestor a b', 'git rev-list --count HEAD', 'git rev-list origin/main..HEAD', 'git name-rev HEAD', 'git shortlog -sn HEAD', 'git for-each-ref --format=%(refname) refs/heads', 'git show-ref', 'git show-ref --heads', 'git diff-tree --no-commit-id --name-only -r HEAD', 'git status -sb',
   'git ls-files', 'git blame -L1,5 file', 'git grep -n "git push" docs', 'git config --get remote.origin.url', 'git tag -l "v*"', 'git describe --tags',
   'npm ci', 'npm test', 'npx tsc --noEmit', 'npx --no-install vitest run',
-  'gh pr view 5 --json state', 'gh pr diff 5', 'gh pr list', 'gh pr status', 'gh pr checks 5', 'gh pr checkout 5', 'gh -R a/b pr checks 5', 'gh --repo a/b pr view 5', 'gh api repos/a/b/pulls/5', 'gh api repos/a/b/pulls?per_page=5', 'gh api -X GET repos/a/b', 'gh api repos/a/b -H "Accept: x" --jq .name',
+  'gh pr view 5 --json state', 'gh pr diff 5', 'gh pr list', 'gh pr status', 'gh pr checks 5', 'gh -R a/b pr checks 5', 'gh --repo a/b pr view 5', 'gh api repos/a/b/pulls/5', 'gh api repos/a/b/pulls?per_page=5', 'gh api -X GET repos/a/b', 'gh api repos/a/b -H "Accept: x" --jq .name',
   'gh issue view 5', 'gh issue list', 'gh repo view', 'gh run view 5', 'gh run list', 'gh --version', 'gh',
   'grep -rn "git push" docs', "grep -rn 'git push --force' docs", 'rg "gh pr merge" docs', 'git log --grep="git commit"', 'echo "git push"', 'echo "do not git commit here" | cat', 'git log --oneline | grep "git push"', 'ls -la', 'cat package.json',
 ]
@@ -293,7 +298,8 @@ const A77_TABLE_B_ALL = [
   'gh pr view 5', 'gh pr diff 5', 'scripts/codeql-local.sh', 'cat .env.example', 'git commit -m "fix: push --force handling, ssh and .env docs"',
   'node -e "console.log(process.env.HOME)"', 'node -e "console.log(require(\'fs\').readFileSync(\'.env.example\',\'utf8\'))"', 'python3 -c "import os; print(os.environ.get(\'HOME\'))"',
 ]
-const A77_TABLE_B_READONLY = ['gh pr checks 5', 'git merge --no-commit origin/main', 'grep -rn "git push" docs', ...A77_TABLE_B_ALL.filter((c) => !/^git (commit|push)/.test(c))]
+// New form for read-only agents (A77c): `worktree add` carries --detach, `merge --no-commit` carries --no-ff.
+const A77_TABLE_B_READONLY = ['gh pr checks 5', 'git merge --no-commit --no-ff origin/main', 'grep -rn "git push" docs', ...A77_TABLE_B_ALL.filter((c) => !/^git (commit|push)/.test(c)).map((c) => c.replace('git worktree add /tmp/w', 'git worktree add --detach /tmp/w'))]
 
 describe('A77 Table A (owner) — every "Not denied" spelling is now refused', () => {
   for (const [family, cmds] of Object.entries(A77_TABLE_A)) {
@@ -356,15 +362,21 @@ const FORGE_UNLISTED = [
 const RO_GIT_PERMITTED = [
   'git status', 'git status --short', 'git log --oneline -5', 'git diff origin/main...HEAD --stat', 'git show HEAD:package.json', 'git rev-parse HEAD', 'git ls-files', 'git ls-tree HEAD', 'git cat-file -p HEAD', 'git blame -L1,5 f', 'git grep -n x -- docs',
   'git describe --tags', 'git remote', 'git remote -v', 'git branch', 'git branch --list "chore/*"', 'git branch -a', 'git branch -r --contains abc', 'git branch --show-current', 'git tag', 'git tag -l "v*"', 'git config --get user.name',
-  'git config --global --get core.editor', 'git fetch', 'git fetch origin', 'git fetch origin main', 'git fetch --depth 1 origin main', 'git fetch origin pull/5/head', 'git worktree add /tmp/w origin/main', 'git worktree add --detach /tmp/w origin/main',
-  'git worktree remove /tmp/w', 'git worktree remove --force /tmp/w', 'git worktree list', 'git checkout --detach origin/main', 'git merge --no-commit origin/main', 'git merge --no-commit --no-ff x', 'git merge --abort', 'git merge --quit', 'git -C /tmp/w status', 'git --no-pager log -1',
+  'git config --global --get core.editor', 'git fetch', 'git fetch origin', 'git fetch origin main', 'git fetch --all', 'git fetch --tags origin', 'git fetch origin pull/5/head', 'git worktree add --detach /tmp/w origin/main', 'git worktree add --detach /tmp/w',
+  'git worktree remove /tmp/w', 'git worktree remove --force /tmp/w', 'git worktree list', 'git checkout --detach origin/main', 'git merge --no-commit --no-ff origin/main', 'git merge --no-commit --no-ff x', 'git merge --abort', 'git merge --quit', 'git -C /tmp/w status', 'git --no-pager log -1',
+  'git merge-base HEAD origin/main', 'git merge-base --is-ancestor a b', 'git rev-list --count HEAD', 'git rev-list origin/main..HEAD', 'git name-rev HEAD', 'git name-rev --name-only HEAD', 'git shortlog -sn HEAD', 'git for-each-ref refs/heads', 'git for-each-ref --format=%(refname:short) refs/remotes',
+  'git show-ref', 'git show-ref --verify refs/heads/main', 'git diff-tree --no-commit-id --name-only -r HEAD', 'git status', 'git status -sb',
 ]
 const RO_GIT_UNLISTED = [
   'git commit -m x', 'git push', 'git pull', 'git add .', 'git rm f', 'git mv a b', 'git reset --hard', 'git clean -fd', 'git stash', 'git stash list', 'git restore f', 'git apply p', 'git am p', 'git rebase main', 'git cherry-pick abc', 'git revert HEAD',
   'git merge origin/main', 'git merge --continue', 'git checkout .', 'git checkout -- .', 'git checkout main', 'git checkout origin/main', 'git checkout -b x', 'git checkout abc123', 'git switch main', 'git switch --detach x', 'git switch -c x',
   'git worktree add -b x /tmp/w origin/main', 'git worktree add -B x /tmp/w', 'git worktree prune', 'git worktree move a b', 'git worktree lock a', 'git branch x', 'git branch -D x', 'git branch -m a b', 'git tag v1', 'git tag -d v1', 'git tag -a v1 -m x',
   'git config user.name x', 'git config --list', 'git config --unset user.name', 'git config --get', 'git fetch origin a:b', 'git fetch +refs/heads/*:refs/x/*', 'git fetch --prune', 'git fetch --refmap=x:y origin main', 'git remote add x y', 'git remote get-url origin', 'git remote show origin',
-  'git rev-list HEAD', 'git merge-base a b', 'git reflog', 'git update-ref -d x', 'git symbolic-ref HEAD x', 'git gc', 'git fsck', 'git init', 'git clone a b', 'git submodule update', 'git bisect start', 'git notes add', 'git archive HEAD -o x.tar', 'git bundle create x',
+  'git reflog', 'git update-ref -d x', 'git symbolic-ref HEAD x', 'git gc', 'git fsck', 'git init', 'git clone a b', 'git submodule update', 'git bisect start', 'git notes add', 'git archive HEAD -o x.tar', 'git bundle create x',
+  // A77c H-11 / M-11 (owner decisions)
+  'git worktree add /tmp/w origin/main', 'git worktree add ../zz', 'git worktree add -f /tmp/w origin/main', 'git merge --no-commit origin/main', 'git merge --no-commit --ff-only origin/main', 'git merge --no-commit --ff origin/main', 'git merge --ff-only origin/main',
+  'git fetch --depth 1', 'git fetch --depth 1 origin main', 'git fetch --depth=1', 'git fetch --deepen 3', 'git fetch --shallow-since=2020-01-01', 'git fetch --shallow-exclude=main', 'git fetch --unshallow', 'git fetch --prune', 'git fetch -p', 'git fetch origin main:main', 'git fetch origin +main',
+  'git rev-list --output=f HEAD', 'git show-ref --output=f', 'git for-each-ref --output=f',
   'git log --output=f', 'git diff --output=f', 'git grep -O sh x', 'git grep --no-index x', 'git -c core.pager=sh log', 'git -c alias.x=y x', 'git --exec-path=/x log', 'git credential fill', 'git hash-object -w f', 'git fast-import',
 ]
 
@@ -372,9 +384,14 @@ describe('allow-list: gh', () => {
   it('lists are big enough to mean something', () => { expect(GH_UNLISTED.length).toBeGreaterThanOrEqual(20) })
   for (const c of GH_PERMITTED) it(`permits: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toBeNull())
   for (const c of GH_UNLISTED) it(`refuses: ${JSON.stringify(c)}`, () => expect(guardDecide(c), c).toEqual(expect.any(String)))
-  it('read-only agents get the same gh list (the A77b report lists `pr checkout` as allowed for all)', () => {
-    for (const c of GH_PERMITTED) expect(roDecide(c), c).toBeNull()
+  it('read-only agents get the same gh list, minus `pr checkout` (A77c H-11: it creates or moves a local branch)', () => {
+    for (const c of GH_PERMITTED.filter((x) => !x.includes('pr checkout'))) expect(roDecide(c), c).toBeNull()
     for (const c of GH_UNLISTED) expect(roDecide(c), c).toEqual(expect.any(String))
+    for (const c of ['gh pr checkout 5', 'gh -R a/b pr checkout 5', 'gh --repo=a/b pr checkout 5 --detach']) expect(roDecide(c), c).toMatch(/pr checkout/)
+  })
+  it('the implementer and the main session keep `gh pr checkout`', () => {
+    for (const agent of [undefined, 'implementer']) expect(hookExit('gh pr checkout 5', agent), String(agent)).toBe(0)
+    for (const agent of ['recon', 'auditor']) expect(hookExit('gh pr checkout 5', agent), agent).toBe(2)
   })
 })
 describe('allow-list: cast', () => {
@@ -501,7 +518,7 @@ describe('runbook (A77b M-7, M-8): allow-lists as tables, owner path, completed 
   const rb = readFileSync(path.join(ROOT, 'docs', 'Runbooks', 'agent-harness.md'), 'utf8')
   it('has the allow-list section with a table for gh, cast, forge and git', () => {
     expect(rb).toContain('## Allow-lists')
-    for (const needle of ['**`gh`**', '**`cast`**', '**`forge`**', '**`git` for `recon` and `auditor`**', '`erc20 transfer\\|approve`', '`merge` | `--no-commit …`, `--abort`, `--quit`']) expect(rb, needle).toContain(needle)
+    for (const needle of ['**`gh`**', '**`cast`**', '**`forge`**', '**`git` for `recon` and `auditor`**', '`erc20 transfer\\|approve`', '`merge` | `--no-commit --no-ff <commit>`', '`worktree` | `add --detach <path> [<commit>]`']) expect(rb, needle).toContain(needle)
     expect((rb.match(/^\| ---|^\|---/gm) ?? []).length).toBeGreaterThanOrEqual(4)
   })
   it('tells the owner how to run a refused legitimate command (one line, own terminal)', () => {
@@ -516,7 +533,13 @@ describe('runbook (A77b M-7, M-8): allow-lists as tables, owner path, completed 
     for (const f of ['recon.md', 'auditor.md']) {
       const t = readFileSync(path.join(AGENTS, f), 'utf8')
       expect(t, f).toContain('`checkout --detach`')
+      expect(t, f).toContain('`worktree add --detach|remove|list`')
+      expect(t, f).toContain('`merge --no-commit --no-ff|--abort|--quit`')
+      for (const verb of ['merge-base', 'rev-list', 'name-rev', 'shortlog', 'for-each-ref', 'show-ref', 'diff-tree']) expect(t, `${f} lists ${verb}`).toContain(verb)
       expect(t, f).not.toContain('gh codeql')
+      expect(t, f).not.toMatch(/gh pr (view\|diff\|checks\|list\|status)[^`]*checkout/) // read-only agents do not get `pr checkout`
+      expect(t, f).toContain('git fetch origin pull/<N>/head')
+      expect(t, f).not.toMatch(/git worktree add "\$\{TS_WORKTREE_BASE[^`]*" \.\.\./) // their worktree command carries --detach
     }
   })
 })
@@ -536,10 +559,10 @@ const A77B_REFUSED = {
     'git push origin "$BRANCH"', // by design (runbook "Known gaps")
   ],
 }
-const A77B_M9_READONLY_REFUSED = ['git checkout .', 'git checkout -f main', 'git switch --discard-changes', 'git worktree add -b x']
-const A77B_ALLOWED_ALL = ['test -f .env.example', 'ls .env.example', 'gh pr checkout 5', 'cast --help'] // A77c: `test -f .env.local`, `ls .env*`, `cast send --help` are now layer-0 refusals
+const A77B_M9_READONLY_REFUSED = ['git checkout .', 'git checkout -f main', 'git switch --discard-changes', 'git worktree add -b x', 'git worktree add ../zz', 'git merge --no-commit --ff-only origin/main', 'git fetch --depth 1', 'gh pr checkout 5']
+const A77B_ALLOWED_ALL = ['test -f .env.example', 'ls .env.example', 'cast --help'] // A77c: `test -f .env.local`, `ls .env*`, `cast send --help` are now layer-0 refusals
 const A77B_HEREDOC_COMMIT = 'git commit -m "$(cat <<\'EOF\'\nfeat: x\n\nit\'s fine\nEOF\n)"' // commit stays refused for recon/auditor by design
-const A77B_ALLOWED_READONLY = ['git merge --abort', 'git merge --quit', 'git tag -l', 'git config --get user.name']
+const A77B_ALLOWED_READONLY = ['git merge --abort', 'git merge --quit', 'git tag -l', 'git config --get user.name', 'git merge-base HEAD origin/main', 'git rev-list --count HEAD', 'git merge --no-commit --no-ff origin/main', 'git worktree add --detach /tmp/w origin/main']
 
 /** The exit code the harness sees: both PreToolUse hooks of settings.json, each as `node … || exit 2`; any 2 blocks. */
 function hookExit(command, agentType, cwd) {
@@ -607,8 +630,8 @@ describe('A77c layer 0 — the owner\'s probes through both hooks', () => {
   for (const c of A77C_L0_ALLOWED) {
     it(`allowed: ${JSON.stringify(c)}`, () => {
       expect(guardDecide(c), c).toBeNull()
-      // a commit is refused for recon/auditor by readonly-guard on purpose; merge-base / rev-list join their git list in commit 3
-      const agents = /^git (commit|merge-base|rev-list)/.test(c) ? [undefined, 'implementer'] : [undefined, 'implementer', 'recon', 'auditor']
+      // a commit is refused for recon/auditor by readonly-guard on purpose; every other row runs for all four
+      const agents = /^git commit/.test(c) ? [undefined, 'implementer'] : [undefined, 'implementer', 'recon', 'auditor']
       for (const agent of agents) expect(hookExit(c, agent), `${agent}: ${c}`).toBe(0)
     })
   }

@@ -19,16 +19,19 @@ import { ghAllowReason } from './command-guard.mjs'
 export const READONLY_AGENT_TYPES = new Set(['recon', 'auditor'])
 
 // ALLOW-LIST (audit A77b M-8, M-9): a read-only agent may run only these git forms; everything else is refused.
-const GIT_FREE = new Set(['status', 'log', 'diff', 'show', 'rev-parse', 'ls-files', 'ls-tree', 'cat-file', 'blame', 'grep', 'describe'])
+const GIT_FREE = new Set(['status', 'log', 'diff', 'show', 'rev-parse', 'rev-list', 'merge-base', 'name-rev', 'shortlog', 'for-each-ref', 'show-ref', 'diff-tree', 'ls-files', 'ls-tree', 'cat-file', 'blame', 'grep', 'describe'])
 const GIT_GLOBAL_OK = new Set(['--no-pager', '-P', '--no-optional-locks', '--version', '--help', '-h'])
 const GIT_GLOBAL_VALUED = new Set(['-C', '--git-dir', '--work-tree'])
 const BRANCH_FLAGS = new Set(['-l', '--list', '-a', '--all', '-r', '--remotes', '--show-current', '-v', '-vv', '--verbose'])
 const BRANCH_VALUED = new Set(['--contains', '--no-contains', '--merged', '--no-merged', '--points-at', '--sort', '--format'])
 const TAG_FLAGS = new Set(['-l', '--list', '-n'])
 const TAG_VALUED = new Set(['--contains', '--no-contains', '--merged', '--no-merged', '--points-at', '--sort', '--format'])
-const FETCH_FLAGS = new Set(['--all', '-t', '--tags', '--no-tags', '-q', '--quiet', '-v', '--verbose', '-n', '--dry-run', '--unshallow', '--no-recurse-submodules'])
-const FETCH_VALUED = new Set(['--depth', '--deepen', '--shallow-since', '--shallow-exclude', '-j', '--jobs'])
-const MERGE_FLAGS = new Set(['--no-commit', '--no-ff', '--ff', '--ff-only', '--no-edit', '--no-verify', '-q', '--quiet', '-v', '--verbose', '--no-stat', '--stat'])
+const FETCH_FLAGS = new Set(['--all', '-t', '--tags', '--no-tags', '-q', '--quiet', '-v', '--verbose', '-n', '--dry-run', '--no-recurse-submodules'])
+const FETCH_VALUED = new Set(['-j', '--jobs'])
+// A77c H-11: a fetch that changes the repository's shape (.git/shallow) or deletes refs is not a read.
+const FETCH_REFUSED = /^(--depth|--deepen|--shallow-[a-z-]+|--unshallow|--update-shallow|--prune|--prune-tags|-p|-P|--refmap|--update-head-ok|-u|--force|-f|--set-upstream)(=|$)/
+// `--ff` / `--ff-only` are not here: a fast-forward moves the checked-out branch (A77c M-11).
+const MERGE_FLAGS = new Set(['--no-commit', '--no-ff', '--no-edit', '--no-verify', '-q', '--quiet', '-v', '--verbose', '--no-stat', '--stat'])
 const WORKTREE_ADD_FLAGS = new Set(['--detach', '--no-checkout', '-f', '--force', '-q', '--quiet'])
 const CONFIG_GET = new Set(['--get', '--get-all', '--get-regexp'])
 const CONFIG_SCOPE = new Set(['--local', '--global', '--system', '--worktree', '--show-origin', '--show-scope'])
@@ -42,7 +45,7 @@ function onlyFlags(args, flags, valued, { positionals = 'none' } = {}) {
     const name = t.split('=')[0]
     if (flags.has(t)) continue
     if (valued.has(name)) { if (!t.includes('=')) k++; continue }
-    if (/^--(depth|deepen|jobs)=/.test(t) || /^-j\d+$/.test(t)) continue
+    if (/^--jobs=/.test(t) || /^-j\d+$/.test(t)) continue
     return `git flag ${t}`
   }
   if (positionals === 'none' && positional > 0) return 'a positional argument'
@@ -88,6 +91,8 @@ function gitReason(c) {
       return CONFIG_GET.has(rest[0]) && rest.length >= 2 && rest.slice(1).every((t) => !t.startsWith('-')) ? null : no('anything but `config --get[-all|-regexp] <key>`')
     }
     case 'fetch': {
+      const refused = args.find((t) => FETCH_REFUSED.test(t))
+      if (refused) return no(`${refused} (shallow / prune / forced fetches rewrite .git; use a plain \`git fetch origin <branch>\`)`)
       const bad = onlyFlags(args, FETCH_FLAGS, FETCH_VALUED, { positionals: 'any' })
       if (bad) return no(bad)
       const pos = args.filter((t, k) => !t.startsWith('-') && !FETCH_VALUED.has(args[k - 1]))
@@ -100,7 +105,9 @@ function gitReason(c) {
       if (action === 'remove') return args.slice(1).every((t) => t === '-f' || t === '--force' || !t.startsWith('-')) && args.length >= 2 ? null : no('worktree remove with that flag')
       if (action === 'add') {
         const bad = onlyFlags(args.slice(1), WORKTREE_ADD_FLAGS, new Set(), { positionals: 'any' })
-        return bad ? no(`worktree add (${bad}; -b/-B would create a branch)`) : null
+        if (bad) return no(`worktree add (${bad}; -b/-B would create a branch)`)
+        // without --detach, `git worktree add <path>` creates a branch named after the path (A77c H-11)
+        return args.includes('--detach') ? null : no('`worktree add` without --detach (it creates a branch)')
       }
       return no('worktree other than add|remove|list')
     }
@@ -113,7 +120,8 @@ function gitReason(c) {
       if (args.length === 1 && (args[0] === '--abort' || args[0] === '--quit')) return null
       const bad = onlyFlags(args, MERGE_FLAGS, new Set(), { positionals: 'any' })
       if (bad) return no(bad)
-      return args.includes('--no-commit') ? null : no('`merge` without --no-commit (creates a commit)')
+      if (!args.includes('--no-commit')) return no('`merge` without --no-commit (creates a commit)')
+      return args.includes('--no-ff') ? null : no('`merge --no-commit` without --no-ff (a fast-forward moves the checked-out branch)')
     }
     default: return no(`\`${sub}\``)
   }
