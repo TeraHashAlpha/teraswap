@@ -3,9 +3,11 @@
 #
 #   scripts/agent-verify.sh [--codeql] [--keeper] [--base REF]
 #   scripts/agent-verify.sh --format RESULTS.tsv        (formatter only; used by the tests)
+#   scripts/agent-verify.sh --codeql-diff HEAD.sarif BASE.sarif   (alert comparison only; used by the tests)
 #
 # Checks (always): suite, lint-delta, tsc, build, v1v2-parity, rpc-budget.
-#   --codeql  FULL javascript-security-extended via scripts/codeql-local.sh, HEAD vs base, count must not grow.
+#   --codeql  FULL javascript-security-extended via scripts/codeql-local.sh, HEAD vs base. Alerts are compared by
+#             rule + file + message (not by line, not by total), so one alert swapped for another is a FAIL.
 #   --keeper  keeper `node --test` on every Node major CI uses: the keeper-suite job of ci.yml and keeper-tests.yml.
 # A failing check, a missing tool, or an unparsable result is FAIL and the exit code is non-zero.
 # Never polls CI, never prints environment values (logs stay in $AGENT_VERIFY_OUT; only their path is printed).
@@ -17,6 +19,8 @@ BASE_REF="origin/main"
 DO_CODEQL=0
 DO_KEEPER=0
 FORMAT_ONLY=""
+CQ_DIFF_HEAD=""
+CQ_DIFF_BASE=""
 CODEQL_QLS="codeql/javascript-queries:codeql-suites/javascript-security-extended.qls"
 KEEPER_DIR="contracts/order-engine/executor"
 KEEPER_WORKFLOW=".github/workflows/keeper-tests.yml"
@@ -30,7 +34,8 @@ while [ $# -gt 0 ]; do
     --keeper) DO_KEEPER=1 ;;
     --base) shift; BASE_REF="${1:-origin/main}" ;;
     --format) shift; FORMAT_ONLY="${1:-}" ;;
-    -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+    --codeql-diff) CQ_DIFF_HEAD="${2:-}"; CQ_DIFF_BASE="${3:-}"; shift 2 2>/dev/null || shift $# ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
     *) echo "agent-verify: unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
@@ -73,7 +78,9 @@ run_vitest_check() { # name log args...
   local name="$1" log="$2"; shift 2
   local m
   if m="$(need npx)"; then :; else fail_missing "$name" "$m"; return; fi
-  (cd "$ROOT" && CI=1 npx vitest run "$@") > "$log" 2>&1
+  # --no-install alone still resolves a copy from npx's own cache (measured), so the project-local binary must exist.
+  if [ ! -x "$ROOT/node_modules/.bin/vitest" ]; then fail_missing "$name" "vitest (node_modules/.bin/vitest; run npm ci)"; return; fi
+  (cd "$ROOT" && CI=1 npx --no-install vitest run "$@") > "$log" 2>&1
   local rc=$?
   local counts p f n
   counts="$(vitest_counts "$log")"
@@ -93,7 +100,8 @@ check_rpc_budget() { run_vitest_check rpc-budget "$OUT/rpc-budget.log" rpc-budge
 check_tsc() {
   local m
   if m="$(need npx)"; then :; else fail_missing tsc "$m"; return; fi
-  (cd "$ROOT" && npx tsc --noEmit) > "$OUT/tsc.log" 2>&1
+  if [ ! -x "$ROOT/node_modules/.bin/tsc" ]; then fail_missing tsc "tsc (node_modules/.bin/tsc; run npm ci)"; return; fi
+  (cd "$ROOT" && npx --no-install tsc --noEmit) > "$OUT/tsc.log" 2>&1
   local rc=$? errs
   errs="$(grep -c 'error TS' "$OUT/tsc.log")"
   if [ "$rc" -eq 0 ] && [ "$errs" -eq 0 ]; then record tsc PASS "0 errors"
@@ -147,6 +155,30 @@ check_lint_delta() {
   if [ "$de" -le 0 ] && [ "$dw" -le 0 ]; then record lint-delta PASS "$detail"; else record lint-delta FAIL "$detail"; fi
 }
 
+# "head base new": alerts keyed by ruleId + file + message (line numbers move; totals hide swaps). `new` counts alerts
+# whose key occurs more often in HEAD than in base.
+CODEQL_DIFF_JS='
+import { readFileSync } from "node:fs"
+const load = (p) => {
+  const m = new Map()
+  for (const run of JSON.parse(readFileSync(p, "utf8")).runs ?? []) {
+    for (const r of run.results ?? []) {
+      const uri = r.locations?.[0]?.physicalLocation?.artifactLocation?.uri ?? "?"
+      const key = [r.ruleId ?? "?", uri, (r.message?.text ?? "").replace(/\s+/g, " ").trim()].join("|")
+      m.set(key, (m.get(key) ?? 0) + 1)
+    }
+  }
+  return m
+}
+const [headPath, basePath] = process.argv.slice(1)
+const head = load(headPath)
+const base = load(basePath)
+const sum = (m) => [...m.values()].reduce((a, b) => a + b, 0)
+let added = 0
+for (const [k, v] of head) added += Math.max(0, v - (base.get(k) ?? 0))
+console.log(sum(head) + " " + sum(base) + " " + added)
+'
+
 codeql_total() { # dir -> prints total or empty
   CODEQL_OUT="$1" "$2/scripts/codeql-local.sh" "$CODEQL_QLS" 2>"$1.err" | tee "$1.log" | sed -n 's/^total: //p'
 }
@@ -166,10 +198,12 @@ check_codeql() {
   if [ -z "$head_total" ] || [ -z "$base_total" ]; then
     record codeql FAIL "no result total (head='${head_total}' base='${base_total}'; logs: $OUT/cq-*.log/.err)"; return
   fi
-  local newn
-  newn="$(comm -23 <(grep -E '^[^ ]+:[0-9]+$' "$OUT/cq-head.log" | sort -u) <(grep -E '^[^ ]+:[0-9]+$' "$OUT/cq-base.log" | sort -u) | wc -l | tr -d ' ')"
-  local detail="security-extended: head $head_total, base $base_total, new file:line $newn"
-  if [ "$head_total" -le "$base_total" ]; then record codeql PASS "$detail"; else record codeql FAIL "$detail"; fi
+  local cmp
+  cmp="$(node --input-type=module -e "$CODEQL_DIFF_JS" "$OUT/cq-head/result.sarif" "$OUT/cq-base/result.sarif" 2>"$OUT/cq-diff.err")"
+  if [ -z "$cmp" ]; then record codeql FAIL "cannot compare SARIF results (log: $OUT/cq-diff.err)"; return; fi
+  set -- $cmp
+  local detail="security-extended: head $1, base $2, new by rule+file+message $3"
+  if [ "$3" -eq 0 ]; then record codeql PASS "$detail"; else record codeql FAIL "$detail"; fi
 }
 
 find_node_major() { # major -> prints a node binary path of that major, or nothing
@@ -236,8 +270,13 @@ check_keeper() {
 }
 
 # ---------- formatter ----------
-github_slug() { # origin url -> owner/repo (never echoes credentials)
-  git -C "$ROOT" remote get-url origin 2>/dev/null | sed -E 's#^.*github\.com[:/]+##; s#\.git$##; s#/+$##'
+github_slug() { # origin url -> owner/repo ONLY for a github.com origin; prints nothing otherwise (never echoes credentials)
+  local url
+  url="$(git -C "$ROOT" remote get-url origin 2>/dev/null)"
+  printf '%s\n' "$url" | sed -nE \
+    -e 's#^(https?|ssh|git)://([^/@]+@)?github\.com(:[0-9]+)?/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)/?$#\4/\5#p' \
+    -e 's#^([A-Za-z0-9._-]+@)?github\.com:([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)/?$#\2/\3#p' \
+    | sed -E 's#\.git$##' | head -1
 }
 
 format_block() { # results-file
@@ -280,10 +319,11 @@ format_block() { # results-file
       echo "$stat"
     fi
   fi
-  if [ -n "$slug" ] && [ "$branch" != "HEAD" ] && [ "$branch" != "unknown" ]; then
+  case "$branch" in *[!A-Za-z0-9._/-]*|HEAD|unknown|"") branch="" ;; esac
+  if [ -n "$slug" ] && [ -n "$branch" ]; then
     echo "compare: https://github.com/$slug/compare/main...$branch"
   else
-    echo "compare: unavailable (detached HEAD or no github origin)"
+    echo "compare: unavailable"
   fi
   if [ "$fails" -eq 0 ]; then echo "RESULT: PASS"; else echo "RESULT: FAIL ($fails failed)"; fi
   echo "=== END EVIDENCE ==="
@@ -291,6 +331,11 @@ format_block() { # results-file
 }
 
 # ---------- main ----------
+if [ -n "$CQ_DIFF_HEAD" ] || [ -n "$CQ_DIFF_BASE" ]; then
+  if [ ! -f "$CQ_DIFF_HEAD" ] || [ ! -f "$CQ_DIFF_BASE" ]; then echo "agent-verify: --codeql-diff needs two SARIF files" >&2; exit 2; fi
+  node --input-type=module -e "$CODEQL_DIFF_JS" "$CQ_DIFF_HEAD" "$CQ_DIFF_BASE"
+  exit $?
+fi
 if [ -n "$FORMAT_ONLY" ]; then
   if [ ! -f "$FORMAT_ONLY" ]; then echo "agent-verify: no such results file: $FORMAT_ONLY" >&2; exit 2; fi
   format_block "$FORMAT_ONLY"

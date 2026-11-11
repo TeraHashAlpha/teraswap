@@ -4,7 +4,7 @@
 //   node scripts/goal-lint.mjs FILE      exit 0 = clean, 1 = violations (listed), 2 = usage/IO error
 //
 // Rules (each violation prints `FAIL <rule>: <detail>`):
-//   length          more than 4000 characters
+//   length          more than 4000 BYTES (UTF-8, counted exactly as `wc -c` does: "·", "→", "—" are 2-3 bytes)
 //   control-line    the first non-empty line does not start with `CONTROL:`
 //   exit-clause     no `Exit =` anywhere
 //   banned-phrase   contains "no Monitor" or "CI-poll" (case-insensitive)
@@ -12,15 +12,21 @@
 //                   (case-sensitive lowercase tokens, so the prose "SSH-signed" is fine)
 //   audit-verdict   an audit goal (`READ-ONLY` on the CONTROL line) lacks "ANY verdict"
 //
-// A "Do-NOT line" is a line that starts (after optional bullet / quote / bold / heading marks) with
-// "Do NOT", "Do-NOT" or "Do not" — or any line inside a section whose heading starts that way.
+// A "Do-NOT line" is a line that starts (after optional bullet / number / checkbox / quote / bold / heading marks) with
+// "Do NOT", "Do-NOT" or "Do not" ("- Do NOT …", "1. Do NOT …", "- [ ] Do NOT …") — or any line inside a section whose
+// heading starts that way, or inside the list that follows a bare "Do NOT:" label line.
 
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
-export const MAX_CHARS = 4000
+export const MAX_BYTES = 4000
+export const MAX_CHARS = MAX_BYTES // old name
 
-const DO_NOT_START = /^\s*(?:[-*>]\s*)*(?:\*\*)?(?:#+\s*)?do[ -]not\b/i
+const MARKS = String.raw`(?:(?:[-*+>]|\d+[.)])\s*(?:\[[ xX]\]\s*)?)*`
+const DO_NOT_START = new RegExp(String.raw`^\s*${MARKS}(?:\*\*)?(?:#+\s*)?do[ -]not\b`, 'i')
+const DO_NOT_LABEL = new RegExp(String.raw`^\s*${MARKS}(?:\*\*)?(?:#+\s*)?do[ -]not\s*(?:\*\*)?\s*:?\s*(?:\*\*)?\s*$`, 'i')
+const LIST_ITEM = /^\s*(?:[-*+>]|\d+[.)])\s+/
+const INDENTED = /^\s{2,}\S/
 const HEADING = /^\s*#{1,6}\s/
 const RISKY = [
   { name: 'pm2', re: /\bpm2\b/ },
@@ -29,14 +35,16 @@ const RISKY = [
 ]
 const BANNED = [/no monitor/i, /ci-poll/i]
 
-/** @param {string} text @returns {{rule: string, detail: string}[]} */
-export function lintGoal(text) {
+/** @param {string|Buffer} input @returns {{rule: string, detail: string}[]} */
+export function lintGoal(input) {
   const out = []
+  const bytes = Buffer.isBuffer(input) ? input.length : Buffer.byteLength(input, 'utf8')
+  const text = Buffer.isBuffer(input) ? input.toString('utf8') : input
   const lines = text.split('\n')
   const first = lines.find((l) => l.trim() !== '') ?? ''
 
-  if (text.length > MAX_CHARS) {
-    out.push({ rule: 'length', detail: `${text.length} chars > ${MAX_CHARS}` })
+  if (bytes > MAX_BYTES) {
+    out.push({ rule: 'length', detail: `${bytes} bytes > ${MAX_BYTES}` })
   }
   if (!first.startsWith('CONTROL:')) {
     out.push({ rule: 'control-line', detail: 'first non-empty line must start with "CONTROL:"' })
@@ -50,9 +58,12 @@ export function lintGoal(text) {
   }
 
   let inDoNotSection = false
+  let inDoNotList = false // after a bare "Do NOT:" label: its bullets, numbered items and indented continuations
   lines.forEach((line, i) => {
-    if (HEADING.test(line)) inDoNotSection = DO_NOT_START.test(line)
-    const exempt = inDoNotSection || DO_NOT_START.test(line)
+    if (HEADING.test(line)) { inDoNotSection = DO_NOT_START.test(line); inDoNotList = false }
+    else if (DO_NOT_LABEL.test(line)) inDoNotList = true
+    else if (inDoNotList && line.trim() !== '' && !LIST_ITEM.test(line) && !INDENTED.test(line)) inDoNotList = false
+    const exempt = inDoNotSection || inDoNotList || DO_NOT_START.test(line)
     if (exempt) return
     for (const { name, re } of RISKY) {
       if (re.test(line)) {
@@ -73,16 +84,16 @@ function main(argv) {
     console.error('usage: node scripts/goal-lint.mjs FILE')
     return 2
   }
-  let text
+  let text // a Buffer: the length rule counts the file's bytes exactly as `wc -c` does
   try {
-    text = readFileSync(file, 'utf8')
+    text = readFileSync(file)
   } catch (e) {
     console.error(`goal-lint: cannot read ${file}: ${e.code ?? e.message}`)
     return 2
   }
   const violations = lintGoal(text)
   for (const v of violations) console.log(`FAIL ${v.rule}: ${v.detail}`)
-  console.log(violations.length === 0 ? `OK ${text.length} chars` : `${violations.length} violation(s)`)
+  console.log(violations.length === 0 ? `OK ${text.length} bytes` : `${violations.length} violation(s)`)
   return violations.length === 0 ? 0 : 1
 }
 

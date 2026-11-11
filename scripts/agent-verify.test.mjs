@@ -47,7 +47,7 @@ describe('agent-verify EVIDENCE formatter', () => {
     expect(r.stdout).toMatch(/^codeql:\s+SKIP\s+not requested/m)
     expect(r.stdout).toMatch(/^keeper:\s+SKIP\s+not requested/m)
     expect(r.stdout).toContain('diff --stat origin/main...HEAD:')
-    expect(r.stdout).toMatch(/^compare: (https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/compare\/main\.\.\.\S+|unavailable.*)$/m)
+    expect(r.stdout).toMatch(/^compare: (https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/compare\/main\.\.\.\S+|unavailable)$/m)
     expect(r.stdout).toContain('RESULT: PASS')
     expect(lines.filter(Boolean).at(-1)).toBe('=== END EVIDENCE ===')
   })
@@ -198,4 +198,101 @@ describe('agent-verify --keeper (CI Node majors, fake installs)', () => {
     fakeNode(path.join(h, '.nvm/versions/node/v20.1.0/bin/node'), 20)
     expect(keeper(h).stdout).toMatch(/^keeper\tFAIL\t.*node22:5-pass\/1-fail/m)
   })
+})
+
+// ---- A77 M-3 / M-4 / M-5 ----------------------------------------------------------------------------------------
+function sarif(file, results) {
+  const f = path.join(dir, file)
+  writeFileSync(f, JSON.stringify({ runs: [{ results: results.map(([ruleId, uri, text, line]) => ({ ruleId, message: { text }, locations: [{ physicalLocation: { artifactLocation: { uri }, region: { startLine: line ?? 1 } } }] })) }] }))
+  return f
+}
+const cqDiff = (head, base) => spawnSync('bash', [SCRIPT, '--codeql-diff', head, base], { encoding: 'utf8' })
+
+describe('agent-verify codeql compares alerts by rule + file + message (M-5)', () => {
+  const a = ['js/x', 'src/a.ts', 'Alert A']
+  const b = ['js/y', 'src/b.ts', 'Alert B']
+  it('same alerts, moved lines -> 0 new', () => {
+    const r = cqDiff(sarif('h1.sarif', [[...a, 10], [...b, 7]]), sarif('b1.sarif', [[...a, 99], [...b, 3]]))
+    expect(r.stdout.trim()).toBe('2 2 0')
+  })
+  it('one alert swapped for another keeps the total equal but is 1 new', () => {
+    const r = cqDiff(sarif('h2.sarif', [a, ['js/z', 'src/c.ts', 'New alert']]), sarif('b2.sarif', [a, b]))
+    expect(r.stdout.trim()).toBe('2 2 1')
+  })
+  it('same rule and file but a different message is new; an extra duplicate is new; fewer alerts is 0 new', () => {
+    expect(cqDiff(sarif('h3.sarif', [['js/x', 'src/a.ts', 'Other message']]), sarif('b3.sarif', [a])).stdout.trim()).toBe('1 1 1')
+    expect(cqDiff(sarif('h4.sarif', [a, a]), sarif('b4.sarif', [a])).stdout.trim()).toBe('2 1 1')
+    expect(cqDiff(sarif('h5.sarif', [a]), sarif('b5.sarif', [a, b])).stdout.trim()).toBe('1 2 0')
+  })
+  it('unreadable SARIF is a usage error, not a pass', () => {
+    expect(cqDiff(path.join(dir, 'nope1'), path.join(dir, 'nope2')).status).toBe(2)
+    const bad = path.join(dir, 'bad.sarif')
+    writeFileSync(bad, 'not json')
+    expect(cqDiff(bad, bad).status).not.toBe(0)
+  })
+})
+
+describe('agent-verify compare line (M-4)', () => {
+  // Run the formatter from a throw-away repo so `git remote get-url origin` is ours.
+  function compareFor(origin, branch = 'chore/agent-harness') {
+    const repo = mkdtempSync(path.join(dir, 'repo-'))
+    mkdirSync(path.join(repo, 'scripts'))
+    writeFileSync(path.join(repo, 'scripts', 'agent-verify.sh'), readFileSync(SCRIPT))
+    const git = (...args) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    git('init', '-q', '-b', branch)
+    git('-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'x')
+    if (origin) git('remote', 'add', 'origin', origin)
+    const f = path.join(dir, `c-${Math.random().toString(36).slice(2)}.tsv`)
+    writeFileSync(f, tsv(PASS))
+    const r = spawnSync('bash', [path.join(repo, 'scripts', 'agent-verify.sh'), '--format', f], { encoding: 'utf8', env: { ...process.env, AGENT_VERIFY_OUT: dir } })
+    return { line: lineOf(r.stdout, 'compare'), all: r.stdout + r.stderr }
+  }
+  it.each([
+    ['https://github.com/TeraHashAlpha/teraswap.git'],
+    ['https://github.com/TeraHashAlpha/teraswap'],
+    ['git@github.com:TeraHashAlpha/teraswap.git'],
+    ['ssh://git@github.com/TeraHashAlpha/teraswap.git'],
+    ['https://x-access-token:ghs_SECRET123@github.com/TeraHashAlpha/teraswap.git'],
+    ['https://user:p%40ss@github.com/TeraHashAlpha/teraswap.git'],
+  ])('github.com origin %s -> a plain link, never the credentials', (origin) => {
+    const { line, all } = compareFor(origin)
+    expect(line).toBe('compare: https://github.com/TeraHashAlpha/teraswap/compare/main...chore/agent-harness')
+    expect(all).not.toMatch(/SECRET123|p%40ss|x-access-token|user:/)
+  })
+  it.each([
+    [null],
+    ['https://gitlab.com/o/r.git'],
+    ['https://evil.example/github.com/o/r.git'],
+    ['https://github.com.evil.example/o/r.git'],
+    ['https://token@bitbucket.org/o/r.git'],
+    ['/some/local/path/repo.git'],
+    ['https://github.com/only-owner'],
+    ['https://u:a@b@github.com/o/r.git'],
+  ])('non-github or malformed origin %s -> "unavailable", no URL', (origin) => {
+    const { line, all } = compareFor(origin)
+    expect(line).toBe('compare: unavailable')
+    expect(all).not.toMatch(/token|a@b|https:\/\/github\.com\/o/)
+  })
+  it('a detached HEAD or an odd branch name is "unavailable"', () => {
+    expect(compareFor('https://github.com/o/r.git', 'weird$name').line).toBe('compare: unavailable')
+  })
+})
+
+describe('agent-verify uses npx --no-install and treats a missing tool as FAIL (M-3)', () => {
+  const text = readFileSync(SCRIPT, 'utf8')
+  it('never calls a bare `npx <tool>`', () => {
+    const calls = text.split('\n').filter((l) => /\bnpx\s/.test(l) && !l.trimStart().startsWith('#') && !/need npx/.test(l))
+    expect(calls.length).toBeGreaterThan(0)
+    for (const l of calls) expect(l, l).toMatch(/npx --no-install /)
+  })
+  it('a project without node_modules: suite and tsc are FAIL "missing tool: vitest/tsc", not a download', () => {
+    const repo = mkdtempSync(path.join(dir, 'nomod-'))
+    mkdirSync(path.join(repo, 'scripts'))
+    writeFileSync(path.join(repo, 'scripts', 'agent-verify.sh'), readFileSync(SCRIPT))
+    writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ name: 'x', scripts: { build: 'true' } }))
+    const r = spawnSync('bash', [path.join(repo, 'scripts', 'agent-verify.sh')], { encoding: 'utf8', env: { ...process.env, AGENT_VERIFY_OUT: path.join(dir, 'out-nomod'), npm_config_offline: 'true' }, timeout: 120000 })
+    expect(r.status).toBe(1)
+    expect(lineOf(r.stdout, 'suite')).toMatch(/FAIL\s+missing tool: vitest/)
+    expect(lineOf(r.stdout, 'tsc')).toMatch(/FAIL\s+missing tool: tsc/)
+  }, 150000)
 })

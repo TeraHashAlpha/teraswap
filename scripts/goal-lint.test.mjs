@@ -29,10 +29,11 @@ describe('lintGoal', () => {
     expect(lintGoal(AUDIT)).toEqual([])
   })
 
-  it('fails above 4000 chars and passes at exactly 4000', () => {
+  it('fails above 4000 bytes and passes at exactly 4000 (the header holds a 2-byte "·")', () => {
     const head = 'CONTROL: x · Exit = y\n'
-    expect(rules(head + 'a'.repeat(MAX_CHARS - head.length))).toEqual([])
-    expect(rules(head + 'a'.repeat(MAX_CHARS - head.length + 1))).toContain('length')
+    const room = MAX_CHARS - Buffer.byteLength(head)
+    expect(rules(head + 'a'.repeat(room))).toEqual([])
+    expect(rules(head + 'a'.repeat(room + 1))).toContain('length')
   })
 
   it('fails when the first non-empty line is not CONTROL:', () => {
@@ -125,5 +126,44 @@ describe('goal-lint CLI', () => {
   it('exits 2 on a missing file or missing argument', () => {
     expect(spawnSync('node', [SCRIPT, path.join(dir, 'nope.md')], { encoding: 'utf8' }).status).toBe(2)
     expect(spawnSync('node', [SCRIPT], { encoding: 'utf8' }).status).toBe(2)
+  })
+})
+
+describe('goal-lint A77 lows: bytes and Do-NOT shapes', () => {
+  const HEAD = 'CONTROL: x · Exit = y\n'
+  it('counts UTF-8 bytes exactly as `wc -c` does: 2000 two-byte characters is 4000 bytes + header -> over', () => {
+    const body = 'é'.repeat(1900) // 3800 bytes
+    const pad = (n) => 'a'.repeat(n)
+    const fits = HEAD + body
+    const bytes = Buffer.byteLength(fits)
+    expect(rules(fits + pad(MAX_CHARS - bytes))).toEqual([])
+    expect(rules(fits + pad(MAX_CHARS - bytes + 1))).toContain('length')
+    // 1500 three-byte arrows: 1500 chars (< 4000) but 4500 bytes
+    expect(rules(HEAD + '→'.repeat(1500))).toContain('length')
+    expect(lintGoal(HEAD + '→'.repeat(1500))[0].detail).toMatch(/\d+ bytes > 4000/)
+  })
+  it('the CLI reports bytes equal to wc -c, including for invalid UTF-8', () => {
+    const f = path.join(mkdtempSync(path.join(tmpdir(), 'goal-lint-wc-')), 'wc.md')
+    writeFileSync(f, Buffer.concat([Buffer.from(HEAD + '· — é\n'), Buffer.from([0xff, 0xfe, 0x0a])]))
+    const wc = Number(execFileSync('wc', ['-c', f], { encoding: 'utf8' }).trim().split(/\s+/)[0])
+    expect(execFileSync('node', [SCRIPT, f], { encoding: 'utf8' }).trim()).toBe(`OK ${wc} bytes`)
+  })
+  it.each([
+    ['numbered', '1. Do NOT run ssh.\n2. Do NOT use pm2.'],
+    ['numbered paren', '1) Do NOT cast send.'],
+    ['checkbox', '- [ ] Do NOT run ssh.\n- [x] Do NOT use pm2.'],
+    ['checkbox star', '* [ ] Do not cast send.'],
+    ['bold numbered', '1. **Do NOT** ssh anywhere.'],
+    ['label then bullets', 'Do NOT:\n- ssh\n- pm2\n- cast send'],
+    ['bold label then bullets', '**Do NOT:**\n\n- ssh\n- pm2 with a long\n  continuation: cast send'],
+    ['label then numbers', 'Do NOT:\n1. ssh\n2. pm2'],
+    ['heading label', '### Do NOT:\n- ssh'],
+  ])('allows risky words on Do-NOT lines: %s', (_n, block) => {
+    expect(rules(`${HEAD}${block}`), block).toEqual([])
+  })
+  it('a Do NOT: list ends at the first non-list paragraph', () => {
+    expect(rules(`${HEAD}Do NOT:\n- ssh\n\nNow run ssh host.`)).toEqual(['risky-command'])
+    expect(rules(`${HEAD}1. ssh first`)).toEqual(['risky-command'])
+    expect(rules(`${HEAD}- [ ] run pm2`)).toEqual(['risky-command'])
   })
 })
