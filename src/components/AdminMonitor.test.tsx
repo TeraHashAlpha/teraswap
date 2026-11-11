@@ -65,7 +65,7 @@ function openActivityTab() {
 
 const EXPLORER_HOST: Record<number, string> = { 1: 'etherscan.io', 8453: 'basescan.org', 42161: 'arbiscan.io' }
 
-describe('AdminMonitor — [fix/tx-links-remaining] trade-feed tx link is chain-aware, not etherscan-only', () => {
+describe('AdminMonitor: [fix/tx-links-remaining] trade-feed tx link is chain-aware, not etherscan-only', () => {
   it.each([1, 8453, 42161])("a trade on chain %i links to that chain's own explorer", (chainId) => {
     useAnalyticsMock.mockReturnValue({ dashboard: dashboard([trade(chainId, '0xabc')]), loading: false, exportSnapshot: vi.fn(), refresh: vi.fn() })
     renderWithProviders(<AdminMonitor />)

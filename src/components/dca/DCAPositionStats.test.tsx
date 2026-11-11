@@ -50,7 +50,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('DCAPositionStats — portfolio chain eligibility', () => {
+describe('DCAPositionStats: portfolio chain eligibility', () => {
   it('fetches spot prices for chainId=42161 (Arbitrum One is now portfolio-supported)', () => {
     renderStats(42161)
     expect(fetch).toHaveBeenCalledTimes(1)

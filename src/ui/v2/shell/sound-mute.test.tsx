@@ -10,8 +10,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 // ── Fakes ────────────────────────────────────────────────────────────────────────────────────────────────────────
 type AudioEvent = { op: 'play' | 'pause'; src: string; loop: boolean }
 let audioLog: AudioEvent[] = []
-let audioConstructed = 0
-let audioCloned = 0
 let ctxConstructed = 0
 let ctxNodes = 0
 
@@ -24,13 +22,9 @@ class FakeAudio {
   paused = true
   constructor(src = '') {
     this.src = src
-    audioConstructed++
   }
   cloneNode() {
-    audioCloned++
-    const c = new FakeAudio(this.src)
-    audioConstructed-- // a clone is counted as a clone, not as a second constructor call
-    return c
+    return new FakeAudio(this.src)
   }
   play() {
     this.paused = false
@@ -74,8 +68,6 @@ type Sounds = typeof import('@/lib/sounds')
 async function freshEngine(): Promise<Sounds> {
   vi.resetModules()
   audioLog = []
-  audioConstructed = 0
-  audioCloned = 0
   ctxConstructed = 0
   ctxNodes = 0
   vi.stubGlobal('Audio', FakeAudio)

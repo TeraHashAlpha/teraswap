@@ -26,7 +26,7 @@ const source = readFileSync(
   'utf-8',
 )
 
-describe('DCAPanel — no signing-path price-feed resolver', () => {
+describe('DCAPanel: no signing-path price-feed resolver', () => {
   it.each([
     '_findPriceFeed',
     'getChainlinkFeeds',

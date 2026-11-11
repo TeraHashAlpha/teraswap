@@ -300,8 +300,8 @@ describe('sweep · Swap · Share (v1 SwapBox.tsx button + tweet text)', () => {
   it('a comparison across sources with a saving: label and tweet text are v1\'s, bar the doubled %', () => {
     const v1 = share('v1', taggedFixture(fixtureMeta(), '1'))
     const v2 = share('v2', taggedFixture(fixtureMeta(), '1'))
-    expect(v1.label).toMatch(/^Share — saved \d[\d.,]*%%$/) // the v1 typo is real today; if v1 fixes it, the allow-list entry goes stale and fails
-    expect(v2.label).toMatch(/^Share — saved \d[\d.,]*%$/)
+    expect(v1.label).toMatch(/^Share: saved \d[\d.,]*%%$/) // the v1 typo is real today; if v1 fixes it, the allow-list entry goes stale and fails
+    expect(v2.label).toMatch(/^Share: saved \d[\d.,]*%$/)
     const page = (x: { label: string | null; text: string | null }) => {
       const d = document.createElement('div')
       for (const t of [x.label, x.text]) d.appendChild(document.createElement('p')).textContent = t

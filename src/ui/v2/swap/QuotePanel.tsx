@@ -85,9 +85,9 @@ export function QuotePanel(p: QuotePanelProps) {
 
   const impact = priceImpact(priceCheck)
   const rateTitle = priceCheck.oracleReadFailed
-    ? `⚠ Chainlink feed could not be read — price NOT independently verified. This is a temporary feed/network problem, not a property of ${p.symbolIn}.`
+    ? `⚠ Chainlink feed could not be read: price NOT independently verified. This is a temporary feed/network problem, not a property of ${p.symbolIn}.`
     : priceCheck.oracleUnavailable
-      ? `⚠ No Chainlink oracle for ${p.symbolIn} — price NOT independently verified. Risk of mispricing on wrapped/exotic tokens.`
+      ? `⚠ No Chainlink oracle for ${p.symbolIn}: price NOT independently verified. Risk of mispricing on wrapped/exotic tokens.`
       : priceCheck.chainlinkPrice != null
         ? `✓ Verified by Chainlink (${fmtUsd(priceCheck.chainlinkPrice)})`
         : undefined
@@ -98,16 +98,15 @@ export function QuotePanel(p: QuotePanelProps) {
       {priceCheck.level === 'warn' && !priceCheck.oracleUnavailable && priceCheck.message && <Notice tone="amber">{priceCheck.message}</Notice>}
       {priceCheck.oracleUnavailable && priceCheck.oracleReadFailed && (
         <Notice tone="amber" testId="oracle-read-failed-notice">
-          <span className="font-semibold">Price not verified</span> — the Chainlink feed could not be read right now. This is not a problem with the
+          <span className="font-semibold">Price not verified</span>: the Chainlink feed could not be read right now. This is not a problem with the
           token: we simply could not reach the oracle, so this price has not been independently verified. It clears as soon as the feed responds.
         </Notice>
       )}
       {p.tierNotice}
       {p.lowConfidence && (
         <Notice tone="cream">
-          <span className="font-semibold">Low confidence</span> — only {p.sourceCount} {p.sourceCount === 1 ? 'source' : 'sources'} responded with a usable
-          quote, so this price couldn&apos;t be cross-checked. Your swap is still protected by the on-chain <strong>minimum-output</strong> guarantee —
-          double-check the rate looks right before swapping.
+          <span className="font-semibold">Low confidence</span>: only {p.sourceCount} {p.sourceCount === 1 ? 'source' : 'sources'} responded with a usable
+          quote, so this price couldn&apos;t be cross-checked. Your swap is still protected by the on-chain <strong>minimum-output</strong> guarantee: double-check the rate looks right before swapping.
         </Notice>
       )}
       {p.gasless?.recommended && !v.intentBased && (
@@ -122,7 +121,7 @@ export function QuotePanel(p: QuotePanelProps) {
         <Notice tone="teal" testId="gasless-confirm">
           <span role="status">
             <span className="font-semibold">&#10003; You&apos;re using the gasless route</span>
-            {p.gasless.gasSavingsUsd >= 0.5 && <span> — saving ~{fmtUsd(p.gasless.gasSavingsUsd)} in gas.</span>}
+            {p.gasless.gasSavingsUsd >= 0.5 && <span>, saving ~{fmtUsd(p.gasless.gasSavingsUsd)} in gas.</span>}
           </span>
         </Notice>
       )}
@@ -163,7 +162,7 @@ export function QuotePanel(p: QuotePanelProps) {
       {v.intentBased && v.executionSeconds ? (
         <p className="text-[13px] text-v2-text/90">
           <span className="font-medium">Execution time: ~{v.executionSeconds}s</span>
-          <span className="text-v2-muted"> — Solvers compete in batch auctions for the best fill.</span>
+          <span className="text-v2-muted">. Solvers compete in batch auctions for the best fill.</span>
         </p>
       ) : null}
 
@@ -267,7 +266,7 @@ export function QuotePanel(p: QuotePanelProps) {
         )}
         {approvalPlan?.method === 'permit2' && (
           <p className="py-1 text-[12px] leading-relaxed text-v2-muted">
-            <span className="font-semibold text-v2-text/90">Permit2 Signature</span> — Deadline capped at 30 min. Never sign Permit2 requests from unknown dApps.
+            <span className="font-semibold text-v2-text/90">Permit2 Signature</span>: Deadline capped at 30 min. Never sign Permit2 requests from unknown dApps.
           </p>
         )}
         {impact && (
@@ -313,14 +312,14 @@ export function QuotePanel(p: QuotePanelProps) {
                   {q.isBest && <span>&#10003;</span>}
                   {q.label}
                   {q.direct && (
-                    <span className="font-v2-mono text-[10px] uppercase tracking-[1.5px] text-v2-amber" title="Direct on-chain swap — no API middleman">
+                    <span className="font-v2-mono text-[10px] uppercase tracking-[1.5px] text-v2-amber" title="Direct on-chain swap: no API middleman">
                       Direct
                     </span>
                   )}
                   {q.quoteOnly && (
                     <span
                       className="font-v2-mono text-[10px] uppercase tracking-[1.5px] text-v2-muted"
-                      title="Price shown for comparison — this source can't settle swaps on this network yet, so it is never used for execution."
+                      title="Price shown for comparison: this source can't settle swaps on this network yet, so it is never used for execution."
                     >
                       Quote only
                     </span>

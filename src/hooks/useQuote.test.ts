@@ -161,7 +161,7 @@ function mockFetchStatus(status: number, body: unknown = { error: 'failed' }) {
 // ─────────────────────────────────────────────────────────────
 // M-01 Phase 1 behaviour
 // ─────────────────────────────────────────────────────────────
-describe('useQuote — Phase 1 behaviour', () => {
+describe('useQuote: Phase 1 behaviour', () => {
   it('fetches once on mount when enabled with valid inputs', async () => {
     const fetchSpy = mockFetchSuccess()
     const { result } = renderHook(() =>
@@ -230,7 +230,7 @@ describe('useQuote — Phase 1 behaviour', () => {
 // ─────────────────────────────────────────────────────────────
 // HF-L-01 — doFetch stability + in-flight guard
 // ─────────────────────────────────────────────────────────────
-describe('useQuote — HF-L-01 stability', () => {
+describe('useQuote: HF-L-01 stability', () => {
   it('does NOT re-fetch on every parent rerender (doFetch identity is stable)', async () => {
     const fetchSpy = mockFetchSuccess()
     const { rerender, result } = renderHook(() =>
@@ -287,7 +287,7 @@ describe('useQuote — HF-L-01 stability', () => {
 // ─────────────────────────────────────────────────────────────
 // HF-L-01 — exponential backoff on 429
 // ─────────────────────────────────────────────────────────────
-describe('useQuote — HF-L-01 exponential backoff on 429', () => {
+describe('useQuote: HF-L-01 exponential backoff on 429', () => {
   it('keeps the error visible across a manual refetch while in backoff', async () => {
     // First call: 429. Subsequent calls: also 429 — the refetch should
     // NOT clear the message at the top (setError(null) is gated by
@@ -330,7 +330,7 @@ describe('useQuote — HF-L-01 exponential backoff on 429', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2)
   })
 
-  it('non-429 errors do NOT enter backoff — they fall through the normal error path', async () => {
+  it('non-429 errors do NOT enter backoff. They fall through the normal error path', async () => {
     mockFetchStatus(500, { error: 'oops' })
     const { result } = renderHook(() =>
       useQuote(TOKEN_IN, TOKEN_OUT, '1', true, undefined),
@@ -353,7 +353,7 @@ describe('useQuote — HF-L-01 exponential backoff on 429', () => {
 // ─────────────────────────────────────────────────────────────
 // P208 / FULL-L-01 — AbortController supersede semantics
 // ─────────────────────────────────────────────────────────────
-describe('useQuote — [P208] AbortController', () => {
+describe('useQuote: [P208] AbortController', () => {
   it('aborts the in-flight request when the token pair changes', async () => {
     const pending = new Promise<Response>(() => {}) // first request never resolves
     const fetchSpy = vi
@@ -381,7 +381,7 @@ describe('useQuote — [P208] AbortController', () => {
     expect(fetchSpy.mock.calls.length).toBeGreaterThan(1)
   })
 
-  it('ignores AbortError silently — no error state, no meta clear (same pair)', async () => {
+  it('ignores AbortError silently: no error state, no meta clear (same pair)', async () => {
     const fetchSpy = vi
       .spyOn(global, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify(VALID_RESPONSE), { status: 200 }))
@@ -446,7 +446,7 @@ describe('useQuote — [P208] AbortController', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 
-  it('cleans up on unmount — aborts the pending request', async () => {
+  it('cleans up on unmount: aborts the pending request', async () => {
     const pending = new Promise<Response>(() => {}) // never resolves
     const fetchSpy = vi.spyOn(global, 'fetch').mockReturnValue(pending)
 
@@ -466,7 +466,7 @@ describe('useQuote — [P208] AbortController', () => {
 // ─────────────────────────────────────────────────────────────
 // [fix/quote-poll-visibility] Page Visibility API — suspend/resume poll
 // ─────────────────────────────────────────────────────────────
-describe('useQuote — visibility-aware polling', () => {
+describe('useQuote: visibility-aware polling', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -638,7 +638,7 @@ describe('useQuote — visibility-aware polling', () => {
 // ─────────────────────────────────────────────────────────────
 // [fix/stale-quote-pair-flip] A quote carries its identity
 // ─────────────────────────────────────────────────────────────
-describe('useQuote — [fix/stale-quote-pair-flip] quote identity', () => {
+describe('useQuote: [fix/stale-quote-pair-flip] quote identity', () => {
   const flipProps = { tin: TOKEN_OUT, tout: TOKEN_IN }
   const baseProps = { tin: TOKEN_IN, tout: TOKEN_OUT }
   const render = (initial = baseProps, amount = '1') =>

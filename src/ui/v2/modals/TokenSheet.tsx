@@ -92,8 +92,8 @@ function TokenRow({
       <div className="flex items-center justify-between pl-[40px]">
         <div className="min-w-0">
           <AddressLine token={token} chainId={chainId} full={symbolCollision} />
-          {symbolCollision && <div className="text-[12px] leading-snug text-v2-amber">Same symbol as a listed token — verify the contract address</div>}
-          {unavailable && <div className="text-[12px] leading-snug text-v2-red">Unavailable — this chain no longer returns a valid ERC-20 at this address</div>}
+          {symbolCollision && <div className="text-[12px] leading-snug text-v2-amber">Same symbol as a listed token: verify the contract address</div>}
+          {unavailable && <div className="text-[12px] leading-snug text-v2-red">Unavailable: this chain no longer returns a valid ERC-20 at this address</div>}
         </div>
         {onRemove && (
           <Button variant="text" tone="danger" aria-label={`Remove ${token.symbol}`} onClick={() => onRemove(token.address)} className="shrink-0">
@@ -216,7 +216,7 @@ export function TokenSheet({ onSelect, onClose, disabledAddress, hideNativeInput
             <>
               {list.filtered.length > 0 && (
                 <p className="mt-2 font-v2-mono text-[11px] uppercase tracking-[1.5px] text-v2-muted">
-                  {list.filtered.length === list.resultLimit ? `first ${list.resultLimit} results — refine to narrow` : `${list.filtered.length} result${list.filtered.length !== 1 ? 's' : ''}`}
+                  {list.filtered.length === list.resultLimit ? `first ${list.resultLimit} results: refine to narrow` : `${list.filtered.length} result${list.filtered.length !== 1 ? 's' : ''}`}
                 </p>
               )}
               <ul>{list.normalMatches.map(renderRow)}</ul>

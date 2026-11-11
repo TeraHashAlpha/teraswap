@@ -63,7 +63,7 @@ describe('diagnoseQuoteSources [diag]', () => {
   it('reports ok / HTTP-error / missing-key / zero-output per source', async () => {
     fakeRegistry = [
       okAdapter('uniswapv3', '1000'),
-      throwingAdapter('1inch', '1inch 401: Unauthorized — invalid API key'),
+      throwingAdapter('1inch', '1inch 401: Unauthorized: invalid API key'),
       throwingAdapter('0x', '0x API key not configured'),
       okAdapter('curve', '0'), // zero output → treated as error (no usable quote)
     ]
@@ -107,7 +107,7 @@ describe('diagnoseQuoteSources [diag]', () => {
     expect(res.env.rpcPrimaryConfigured).toBe(false) // empty Base registry primary
   })
 
-  it('NEVER logs a secret value — only boolean presence', async () => {
+  it('NEVER logs a secret value, only boolean presence', async () => {
     const SECRET = 'sk_live_SUPER_SECRET_ABCDEF'
     process.env.ONEINCH_API_KEY = SECRET
     const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
@@ -126,7 +126,7 @@ describe('diagnoseQuoteSources [diag]', () => {
     expect(allLogged).toMatch(/true|false/)
   })
 
-  it('skips a source whose breaker is OPEN — reports it WITHOUT calling the adapter (reflects production skip)', async () => {
+  it('skips a source whose breaker is OPEN: reports it WITHOUT calling the adapter (reflects production skip)', async () => {
     const spy = vi.fn(async () => ({ source: '1inch' as DEXAdapter['name'], toAmount: '9', estimatedGas: 0, gasUsd: 0, routes: [] }))
     fakeRegistry = [{ name: '1inch' as DEXAdapter['name'], fetchQuote: spy, fetchSwapData: async () => null }]
     const diagnose = await loadHelper()

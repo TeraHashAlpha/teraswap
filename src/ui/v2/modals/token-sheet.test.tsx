@@ -75,7 +75,7 @@ afterEach(async () => {
 })
 
 describe('browse (23)', () => {
-  it('title, ✕, an underline search with v1 placeholder, category chips, popular quick-selects — no "All" chip', async () => {
+  it('title, ✕, an underline search with v1 placeholder, category chips, popular quick-selects: no "All" chip', async () => {
     const app = await freshSheet()
     expect(app.screen.getByRole('dialog', { name: 'Select token' })).toBeTruthy()
     expect(app.screen.getByRole('button', { name: 'Close' })).toBeTruthy()
@@ -88,7 +88,7 @@ describe('browse (23)', () => {
     expect(document.querySelector('[data-popular]')?.textContent).toContain('USDC')
   })
 
-  it('rows are hairline-separated list items — no row boxes, no radius', async () => {
+  it('rows are hairline-separated list items: no row boxes, no radius', async () => {
     await freshSheet()
     const rows = document.querySelectorAll('[data-token-list] li')
     expect(rows.length).toBeGreaterThan(5)
@@ -160,7 +160,7 @@ describe('search (symbol, name, address)', () => {
     const app = await freshSheet()
     search(app, 'usdc')
     expect(rowSymbols()[0]).toBe('USDC')
-    expect(app.screen.getByText(/^\d+ results?$|^first \d+ results — refine to narrow$/)).toBeTruthy()
+    expect(app.screen.getByText(/^\d+ results?$|^first \d+ results: refine to narrow$/)).toBeTruthy()
   })
 
   it('by name', async () => {
@@ -184,7 +184,7 @@ describe('search (symbol, name, address)', () => {
     expect(app.screen.getByText('Paste a contract address to import any ERC-20 token')).toBeTruthy()
   })
 
-  it('parity: the same lists as v1 TokenSelector — browse and three searches', async () => {
+  it('parity: the same lists as v1 TokenSelector. Browse and three searches', async () => {
     const { findToken } = await import('@/lib/tokens')
     const eth = findToken('ETH')!
     h.balances = new Map([[eth.address.toLowerCase(), { raw: 10n, formatted: '0.0014' }]])
@@ -266,7 +266,7 @@ describe('import (v1 useTokenImport) · persist per chain (#607) · Imported bad
     const app = await freshSheet()
     await app.waitFor(() => expect(document.querySelector(`[data-token="${TOKEN}"]`)).not.toBeNull())
     const row = document.querySelector(`[data-token="${TOKEN}"]`) as HTMLElement
-    expect(row.textContent).toContain('Same symbol as a listed token — verify the contract address')
+    expect(row.textContent).toContain('Same symbol as a listed token: verify the contract address')
     expect(row.querySelector('[data-address]')?.textContent?.toLowerCase()).toBe(TOKEN) // full, not shortened
     expect(row.querySelector('a[href*="/token/"]')).not.toBeNull()
     // a clean (non-colliding) listed row stays short
@@ -286,7 +286,7 @@ describe('import (v1 useTokenImport) · persist per chain (#607) · Imported bad
     const b = await freshSheet()
     search(b, TOKEN)
     b.fireEvent.click(b.screen.getByRole('button', { name: 'Import token' }))
-    expect(await b.screen.findByText('Network error — could not read this contract. Please try again.')).toBeTruthy()
+    expect(await b.screen.findByText('Network error: could not read this contract. Please try again.')).toBeTruthy()
     expect(b.screen.queryByText('Not a valid ERC-20 token')).toBeNull()
   })
 

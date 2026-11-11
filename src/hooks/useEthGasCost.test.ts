@@ -79,7 +79,7 @@ describe('useEthGasCost', () => {
   })
 
   // ── [SPRINT-9E] chain-aware feed ──
-  it('mainnet (chainId 1) reads CHAINLINK_ETH_USD on chain 1 — byte-identical', () => {
+  it('mainnet (chainId 1) reads CHAINLINK_ETH_USD on chain 1: byte-identical', () => {
     mockChainId = 1
     renderHook(() => useEthGasCost())
     expect(feedRead()?.address?.toLowerCase()).toBe(CHAINLINK_ETH_USD.toLowerCase())

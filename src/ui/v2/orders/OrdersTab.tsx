@@ -202,7 +202,7 @@ export function OrderRow({ order, expanded, onToggle, onCancel, onRemove, connec
             {isActive ? (
               <Button variant="text" tone="danger" data-testid="order-cancel"
                 onClick={(e) => { e.stopPropagation(); playTouchMP3(); onCancel() }}
-                title={chainMismatch ? `This order is on ${chainName} — switching your wallet is required to cancel it` : undefined}>
+                title={chainMismatch ? `This order is on ${chainName}: switching your wallet is required to cancel it` : undefined}>
                 {chainMismatch ? `Switch to ${chainName}` : 'Cancel Order'}
               </Button>
             ) : (
@@ -279,7 +279,7 @@ export function OrdersView({ address, connectedChainId, engine }: { address: str
       {/* [W6-M-01] v1: the read-signature prompt was rejected — active orders stay hidden until signed. */}
       {readAuthDenied && (
         <div className="ts-orders-notice" data-testid="orders-read-auth">
-          <p className="text-[13px] text-v2-text/90">Your active orders are private — sign a free message (no transaction) to view them.</p>
+          <p className="text-[13px] text-v2-text/90">Your active orders are private: sign a free message (no transaction) to view them.</p>
           <Button variant="text" onClick={() => void requestOrdersReadAuth?.()} data-testid="orders-sign-to-view">Sign to view</Button>
         </div>
       )}

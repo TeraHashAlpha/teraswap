@@ -113,7 +113,7 @@ describe('buildTimeline (the steps are SwapButton\'s labels, in the order the ho
   })
 })
 
-describe('28a — pending', () => {
+describe('28a: pending', () => {
   it('replaces the quote panel with the Execution column: the timeline on "Executing swap...", the tx link on the ORDER chain\'s explorer', () => {
     mount({ status: 'swapping', txHash: TX, simulationPassed: true })
     expect(document.querySelector('[data-quote-panel]')).toBeNull()
@@ -123,9 +123,9 @@ describe('28a — pending', () => {
     // [fix/tx-links-remaining] v1 switched to a generic "track on explorer ↗" (no longer names a
     // specific host, now that ETHERSCAN_TX — mainnet-only — is deprecated with 0 callers); v2
     // keeps its own chain-named copy, so this pins v2's text for chain 1, not byte parity with v1.
-    expect(a.textContent).toBe('Transaction sent — track on Etherscan ↗')
+    expect(a.textContent).toBe('Transaction sent: track on Etherscan ↗')
     expect(a.rel).toContain('noopener')
-    expect(execCol().textContent).toContain('Pre-swap simulation passed — transaction verified safe')
+    expect(execCol().textContent).toContain('Pre-swap simulation passed: transaction verified safe')
     expect(document.querySelector('[data-cta]')!.textContent).toBe('Executing swap...') // v1's button label, disabled
     expect((document.querySelector('[data-cta]') as HTMLButtonElement).disabled).toBe(true)
   })
@@ -158,8 +158,8 @@ describe('28a — pending', () => {
   })
   it('a fallback and an inconclusive simulation are told in v1\'s words', () => {
     mount({ status: 'swapping', simulationSkipped: true, fallbackNotice: { from: 'velora', to: 'kyberswap' } })
-    expect(execCol().textContent).toContain('Simulation unavailable — proceed with caution')
-    expect(execCol().textContent).toContain('velora couldn\'t execute this route — switched to kyberswap')
+    expect(execCol().textContent).toContain('Simulation unavailable: proceed with caution')
+    expect(execCol().textContent).toContain('velora couldn\'t execute this route: switched to kyberswap')
   })
   it('split: v1\'s per-leg progress, with v1\'s leg words', () => {
     h.route = { splitResult: { bestSplit: { isSplit: true, legs: [] }, bestSingle: {} }, analyzing: false, useSplit: true, toggleSplit: noop }
@@ -172,7 +172,7 @@ describe('28a — pending', () => {
   })
 })
 
-describe('28b — success', () => {
+describe('28b: success', () => {
   it('the timeline completes; the received amount is v1\'s arrow line; View on explorer; New swap', () => {
     mount({ status: 'success', txHash: TX })
     expect(steps().every(([, s]) => s === 'done')).toBe(true)
@@ -188,7 +188,7 @@ describe('28b — success', () => {
     mount({ status: 'success', txHash: TX, mevSurplusActualWei: 5_000_000n }) // 5 USDC at $2490 (the mocked feed prices every token) — over a cent
     expect(screen.getByTestId('exec-saved').textContent).toMatch(/^You saved ~.* vs public-mempool execution$/)
   })
-  it('New swap: starts over — both hooks reset, the amount clears, the quote panel returns', () => {
+  it('New swap: starts over: both hooks reset, the amount clears, the quote panel returns', () => {
     mount({ status: 'success', txHash: TX })
     fireEvent.click(screen.getByTestId('exec-new-swap'))
     expect(h.swap.reset).toHaveBeenCalled()
@@ -196,11 +196,11 @@ describe('28b — success', () => {
   })
 
   describe('[L-1] Share (v1 SwapBox.tsx\'s Share button, owner decision: BUILD in v2)', () => {
-    it('more than one source compared: "Share — saved X%", opens v1\'s tweet intent for the live meta/tokenIn/tokenOut', () => {
+    it('more than one source compared: "Share. Saved X%", opens v1\'s tweet intent for the live meta/tokenIn/tokenOut', () => {
       const open = vi.spyOn(window, 'open').mockReturnValue(null)
       mount({ status: 'success', txHash: TX })
       const btn = screen.getByTestId('exec-share')
-      expect(btn.textContent).toBe('Share — saved 0.27%')
+      expect(btn.textContent).toBe('Share: saved 0.27%')
       fireEvent.click(btn)
       expect(open).toHaveBeenCalledTimes(1)
       const [url, target, features] = open.mock.calls[0]
@@ -211,7 +211,7 @@ describe('28b — success', () => {
       open.mockRestore()
     })
 
-    it('only one source: no Share button — v1 never shows it without a comparison', () => {
+    it('only one source: no Share button. V1 never shows it without a comparison', () => {
       const m = fixtureMeta()
       h.quote = { ...h.quote, meta: taggedFixture({ ...m, all: [m.best] }, '1') }
       mount({ status: 'success', txHash: TX })
@@ -225,15 +225,15 @@ describe('28b — success', () => {
   })
 })
 
-describe('28c — failure', () => {
-  it('v1\'s error text verbatim under v1\'s toast title; the step that failed; the retry is the CTA "Error — retry"', () => {
+describe('28c: failure', () => {
+  it('v1\'s error text verbatim under v1\'s toast title; the step that failed; the retry is the CTA "Error: retry"', () => {
     mount({ status: 'error', errorMessage: 'Transaction reverted on-chain. Try increasing slippage.', txHash: TX })
     // the card saw idle → error in one hop, so the last running step is unknown → the first; a real run passes through swapping
     expect(screen.getByTestId('exec-error').textContent).toContain('Swap failed')
     expect(screen.getByTestId('exec-error').textContent).toContain('Transaction reverted on-chain. Try increasing slippage.')
     expect(steps().some(([, s]) => s === 'failed')).toBe(true)
     const cta = document.querySelector('[data-cta]') as HTMLButtonElement
-    expect(cta.textContent).toBe('Error — retry')
+    expect(cta.textContent).toBe('Error: retry')
     expect(cta.disabled).toBe(false)
   })
   it('a real run: swapping → error draws the failure on "Executing swap..."; a simulated revert says no gas was spent', () => {
@@ -244,7 +244,7 @@ describe('28c — failure', () => {
     expect(execCol().textContent).toContain('Transaction rejected in wallet.')
     h.swap = swapHook({ status: 'error', errorMessage: 'x', simulationPassed: false })
     view.rerender(<SwapCard />)
-    expect(execCol().textContent).toContain('Pre-swap simulation caught a revert — no gas was spent')
+    expect(execCol().textContent).toContain('Pre-swap simulation caught a revert: no gas was spent')
   })
   it('no message → v1\'s fallback copy; split titles follow v1 (failed / partially complete)', () => {
     mount({ status: 'error' })
@@ -255,14 +255,14 @@ describe('28c — failure', () => {
     expect(screen.getByTestId('exec-error').textContent).toContain('Split swap partially complete')
     expect(screen.getByTestId('exec-error').textContent).toContain('1/2 legs completed. 1 failed.')
   })
-  it('Error — retry opens the review again with the hook reset (v1 re-runs execute from the error state)', () => {
+  it('Error: retry opens the review again with the hook reset (v1 re-runs execute from the error state)', () => {
     mount({ status: 'error', errorMessage: 'x' })
     fireEvent.click(document.querySelector('[data-cta]') as HTMLElement)
     expect(h.swap.reset).toHaveBeenCalled()
   })
 })
 
-describe('29 — wrong network & connect: v1\'s SwapButton actions', () => {
+describe('29: wrong network & connect: v1\'s SwapButton actions', () => {
   it('a wallet on an unsupported chain: the amber text button "Switch to Ethereum" (v1\'s label); the click is v1\'s switchChain({ chainId: CHAIN_ID })', () => {
     h.account = { ...h.account, chain: { id: 137 } }
     const v1 = render(<SwapButton swapStatus="idle" approvalStatus="ready" approvalReady hasAmount hasSufficientBalance hasQuote quoteLoading={false} priceBlocked={false} onApprove={() => {}} onSwap={() => {}} />)

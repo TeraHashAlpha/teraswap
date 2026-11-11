@@ -121,7 +121,7 @@ export function analyzeGasless(
 
   if (cowIsBest && referenceGasUsd >= GASLESS_MIN_SAVINGS_USD) {
     recommended = true
-    reason = `Best price AND zero gas — save ~${fmtUsd(referenceGasUsd)}`
+    reason = `Best price AND zero gas: save ~${fmtUsd(referenceGasUsd)}`
   } else if (cowIsBest) {
     recommended = true
     reason = 'Best price AND zero gas'

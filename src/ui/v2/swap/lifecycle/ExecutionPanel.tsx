@@ -114,7 +114,7 @@ export function ExecutionPanel(p: ExecutionPanelProps) {
       <div className="mt-4 ts-v2-rule-t pt-4 text-[13px]">
         {p.phase === 'pending' && (
           <>
-            {p.txHash && <p data-testid="exec-sent">{link(<>Transaction sent — track on {explorerName(p.explorerUrl)} ↗</>)}</p>}
+            {p.txHash && <p data-testid="exec-sent">{link(<>Transaction sent: track on {explorerName(p.explorerUrl)} ↗</>)}</p>}
             {p.cowPending && <p className="text-v2-muted">Your order is in CoW Protocol&apos;s batch auction. Solvers are competing to fill it at the best price.</p>}
           </>
         )}
@@ -164,22 +164,22 @@ export function ExecutionPanel(p: ExecutionPanelProps) {
         )}
         {p.simulation.passed === true && (p.simulation.swapStatus === 'swapping' || p.simulation.swapStatus === 'success') && (
           <p className="mt-2 text-[12px] text-v2-green">
-            <span aria-hidden="true">✓</span> Pre-swap simulation passed — transaction verified safe
+            <span aria-hidden="true">✓</span> Pre-swap simulation passed: transaction verified safe
           </p>
         )}
         {p.simulation.passed === false && p.simulation.swapStatus === 'error' && (
           <p className="mt-2 text-[12px] text-v2-red">
-            <span aria-hidden="true">✗</span> Pre-swap simulation caught a revert — no gas was spent
+            <span aria-hidden="true">✗</span> Pre-swap simulation caught a revert: no gas was spent
           </p>
         )}
         {p.simulation.skipped && (
           <p className="mt-2 text-[12px] text-v2-amber">
-            Simulation unavailable — proceed with caution
+            Simulation unavailable: proceed with caution
           </p>
         )}
         {p.fallback && (
           <p className="mt-2 text-[12px] text-v2-amber">
-            <span aria-hidden="true">↻</span> {p.fallback.from} couldn&apos;t execute this route — switched to {p.fallback.to}
+            <span aria-hidden="true">↻</span> {p.fallback.from} couldn&apos;t execute this route: switched to {p.fallback.to}
           </p>
         )}
       </div>

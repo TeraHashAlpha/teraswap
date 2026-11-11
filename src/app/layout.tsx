@@ -34,7 +34,7 @@ const jetbrainsMono = localFont({
 })
 
 const SITE_URL = 'https://www.teraswap.app'
-const SITE_TITLE = 'TeraSwap — The Gold Standard of DeFi Trading'
+const SITE_TITLE = 'TeraSwap: The Gold Standard of DeFi Trading'
 const SITE_DESCRIPTION = SITE_META_DESCRIPTION
 
 export const metadata: Metadata = {
@@ -61,7 +61,7 @@ export const metadata: Metadata = {
         url: '/og-image.png',
         width: 1200,
         height: 630,
-        alt: 'TeraSwap — Ethereum Meta-Aggregator',
+        alt: 'TeraSwap: Ethereum Meta-Aggregator',
       },
     ],
   },

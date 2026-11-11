@@ -169,7 +169,7 @@ export function buildCanonicalRoute(p: BuildCanonicalRouteParams): CanonicalRout
   }
   if (!CANONICAL_FEE_TIERS.includes(p.feeTier)) {
     throw new Error(
-      `canonical-route: unsupported fee tier ${p.feeTier} — must be one of ${CANONICAL_FEE_TIERS.join(', ')}`,
+      `canonical-route: unsupported fee tier ${p.feeTier}: must be one of ${CANONICAL_FEE_TIERS.join(', ')}`,
     )
   }
   if (p.amountIn <= 0n) {
@@ -183,7 +183,7 @@ export function buildCanonicalRoute(p: BuildCanonicalRouteParams): CanonicalRout
 
   const netAmountIn = computeNetAmountIn(p.amountIn)
   if (netAmountIn <= 0n) {
-    throw new Error('canonical-route: netAmountIn resolved to 0 — amountIn is too small to route')
+    throw new Error('canonical-route: netAmountIn resolved to 0: amountIn is too small to route')
   }
 
   const encoded = encodeAbiParameters(EXACT_INPUT_SINGLE_PARAMS, [

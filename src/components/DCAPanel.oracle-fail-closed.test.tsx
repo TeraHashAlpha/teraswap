@@ -370,7 +370,7 @@ beforeEach(() => {
   mockFetchDefiLlamaPrice.mockResolvedValue({ price: 2000, symbol: 'X', timestamp: 0, confidence: 1 })
 })
 
-describe('DCAPanel — oracle fail-closed: creation is blocked on an unverified feed', () => {
+describe('DCAPanel: oracle fail-closed: creation is blocked on an unverified feed', () => {
   it('a healthy verified feed is the control: creation still reaches signing', async () => {
     renderWithProviders(<DCAPanel />)
     enterAmount('100')
@@ -383,7 +383,7 @@ describe('DCAPanel — oracle fail-closed: creation is blocked on an unverified 
     await waitFor(() => expect(mockSignTypedDataAsync).toHaveBeenCalledTimes(1))
   })
 
-  it('oracleIntegrityFailed (feed identity mismatch) blocks creation — no review, no signature', async () => {
+  it('oracleIntegrityFailed (feed identity mismatch) blocks creation: no review, no signature', async () => {
     mockIdentityMismatch()
     renderWithProviders(<DCAPanel />)
     enterAmount('100')
@@ -401,7 +401,7 @@ describe('DCAPanel — oracle fail-closed: creation is blocked on an unverified 
       .toMatch(/Chainlink feed identity does not match the configured pair/i)
   })
 
-  it('oracleReadFailed (feed configured but unreadable) blocks creation — no review, no signature', async () => {
+  it('oracleReadFailed (feed configured but unreadable) blocks creation: no review, no signature', async () => {
     mockReadFailure()
     renderWithProviders(<DCAPanel />)
     enterAmount('100')
@@ -422,7 +422,7 @@ describe('DCAPanel — oracle fail-closed: creation is blocked on an unverified 
   // asserting it here would short-circuit this test before the forced click ever ran (it did: the
   // first draft passed under a `canCreate` mutation for that exact reason). What this pins is that
   // the production handler itself refuses over a blocked render.
-  it('a forced click cannot sign — the handler refuses over a blocked render, not just the button', async () => {
+  it('a forced click cannot sign. The handler refuses over a blocked render, not just the button', async () => {
     mockIdentityMismatch()
     renderWithProviders(<DCAPanel />)
     enterAmount('100')
@@ -438,8 +438,8 @@ describe('DCAPanel — oracle fail-closed: creation is blocked on an unverified 
   })
 })
 
-describe('DCAPanel — oracle fail-closed: no non-oracle source may rescue an integrity failure', () => {
-  it('THE TRAP — DefiLlama is never consulted after a Chainlink integrity failure', async () => {
+describe('DCAPanel: oracle fail-closed: no non-oracle source may rescue an integrity failure', () => {
+  it('THE TRAP: DefiLlama is never consulted after a Chainlink integrity failure', async () => {
     // The identity-mismatch verdict returns chainlinkPrice: null, so the fallback's own trigger
     // condition (`chainlinkPriceIn == null`) IS satisfied. Before the fix this fetched DefiLlama and
     // derived a signed floor from it — a fail-closed oracle verdict laundered into a fail-open one.
@@ -466,7 +466,7 @@ describe('DCAPanel — oracle fail-closed: no non-oracle source may rescue an in
     expect(screen.queryByText(/Signed floor per order/i)).toBeNull()
   })
 
-  it('CONTRAST — a token with NO feed at all is not blocked, and DOES still price via DefiLlama', async () => {
+  it('CONTRAST: a token with NO feed at all is not blocked, and DOES still price via DefiLlama', async () => {
     // oracleUnavailable without oracleIntegrityFailed ⇒ evaluatePriceGate 'ok'. This is the ordinary
     // DCA case for imported/thin assets and must keep working; a gate that blocked it would be a
     // serious availability regression dressed up as a safety fix.
@@ -489,7 +489,7 @@ describe('DCAPanel — oracle fail-closed: no non-oracle source may rescue an in
 
 // ── [L-2] A composed feed IS a feed ──
 
-describe('DCAPanel — L-2: a COMPOSED-feed output token is not treated as feedless', () => {
+describe('DCAPanel: L-2: a COMPOSED-feed output token is not treated as feedless', () => {
   it('outputHasNoResolvableFeed is false for Base cbETH, whose only source is composed', () => {
     // The regression this pins, stated as the predicate: `getChainlinkFeed(cbETH, 8453)` is null
     // (there is no direct cbETH/USD entry, by design), so the old direct-only check answered "no
@@ -498,7 +498,7 @@ describe('DCAPanel — L-2: a COMPOSED-feed output token is not treated as feedl
     expect(outputHasNoResolvableFeed(CBETH_BASE as never, 8453)).toBe(false)
   })
 
-  it('stays TRUE for a token with no source of any shape — the safe direction is not inverted', () => {
+  it('stays TRUE for a token with no source of any shape. The safe direction is not inverted', () => {
     expect(outputHasNoResolvableFeed(FEEDLESS_TOKEN as never, 8453)).toBe(true)
   })
 
@@ -507,7 +507,7 @@ describe('DCAPanel — L-2: a COMPOSED-feed output token is not treated as feedl
     expect(outputHasNoResolvableFeed(null, 8453)).toBe(false)
   })
 
-  it('so buying cbETH goes straight to review — no "no price feed" consent modal', async () => {
+  it('so buying cbETH goes straight to review: no "no price feed" consent modal', async () => {
     // End-to-end counterpart to the predicate test: with both composed legs verifying against their
     // own genuine ADR-018 identities, creation must reach the review modal directly. Before the fix
     // `noFeedOutput` was true here, so the click was intercepted by the consent modal and
@@ -528,7 +528,7 @@ describe('DCAPanel — L-2: a COMPOSED-feed output token is not treated as feedl
 
 // ── [L-1] The in-handler guard, reached by forcing the handler over a blocked render ──
 
-describe('DCAPanel — L-1: a forced create cannot sign over a blocked oracle, feedless output included', () => {
+describe('DCAPanel: L-1: a forced create cannot sign over a blocked oracle, feedless output included', () => {
   /**
    * [FIX-DCA-NOFEED-FAIL-CLOSED] This block used to drive `handleNoFeedAccept` — the consent modal's
    * Accept handler, which called `handleCreate()` directly and was therefore the only caller that
@@ -564,7 +564,7 @@ describe('DCAPanel — L-1: a forced create cannot sign over a blocked oracle, f
     expect(screen.queryByTestId('confirm-review')).toBeNull()
   })
 
-  it('NON-VACUITY — the same forced path DOES sign while the oracle stays verified', async () => {
+  it('NON-VACUITY: the same forced path DOES sign while the oracle stays verified', async () => {
     // Without this, the test above would pass just as well if the forced click never reached the
     // handler at all.
     renderWithProviders(<DCAPanel />)
@@ -579,7 +579,7 @@ describe('DCAPanel — L-1: a forced create cannot sign over a blocked oracle, f
   })
 })
 
-describe('DCAPanel — oracle fail-closed: the surfaced reason is the oracle one', () => {
+describe('DCAPanel: oracle fail-closed: the surfaced reason is the oracle one', () => {
   it('says the price could not be VERIFIED, and never blames price movement or manipulation', async () => {
     mockIdentityMismatch()
     renderWithProviders(<DCAPanel />)
@@ -626,11 +626,11 @@ const READ_FAILED: PriceCheck = {
 }
 const NO_FEED: PriceCheck = {
   ...LEG_BASE, chainlinkPrice: null, level: 'warn',
-  message: 'No Chainlink oracle available — price cannot be independently verified. Proceed with caution.',
+  message: 'No Chainlink oracle available: price cannot be independently verified. Proceed with caution.',
   oracleUnavailable: true,
 }
 
-describe('evaluateDcaOracleGate — delegates every decision to evaluatePriceGate', () => {
+describe('evaluateDcaOracleGate: delegates every decision to evaluatePriceGate', () => {
   it('passes two healthy legs', () => {
     expect(evaluateDcaOracleGate(HEALTHY, HEALTHY)).toEqual({ blocked: false, reason: 'none', detail: null })
   })
@@ -647,12 +647,12 @@ describe('evaluateDcaOracleGate — delegates every decision to evaluatePriceGat
     })
   })
 
-  it('checks BOTH legs — a reference price is the ratio, so either leg poisons it', () => {
+  it('checks BOTH legs: a reference price is the ratio, so either leg poisons it', () => {
     expect(evaluateDcaOracleGate(HEALTHY, INTEGRITY_FAILED).blocked).toBe(true)
     expect(evaluateDcaOracleGate(INTEGRITY_FAILED, HEALTHY).blocked).toBe(true)
   })
 
-  it('does NOT block a no-feed leg — that is oracleUnavailable, which evaluatePriceGate calls ok', () => {
+  it('does NOT block a no-feed leg. That is oracleUnavailable, which evaluatePriceGate calls ok', () => {
     expect(evaluateDcaOracleGate(NO_FEED, NO_FEED).blocked).toBe(false)
   })
 

@@ -52,7 +52,7 @@ export function DcaCancelSheet({ review, onConfirm, onCancel }: { review: Pendin
             {/* The orderHash binds the off-chain removal signature to exactly this order's row. */}
             <ReviewRow label="Order hash" testId="dca-cancel-orderhash">{truncAddr(review.order.orderHash)}</ReviewRow>
             <p className="mt-4 border-l-2 ts-v2-accent-stroke pl-4 text-[13px] leading-relaxed text-v2-text/90">
-              After the on-chain cancel confirms, this order can never execute — the contract marks
+              After the on-chain cancel confirms, this order can never execute. The contract marks
               its hash cancelled. No funds move.
             </p>
           </>
@@ -62,14 +62,14 @@ export function DcaCancelSheet({ review, onConfirm, onCancel }: { review: Pendin
             <ReviewRow label="On-chain transactions" testId="dca-invalidate-tx-summary" wrap>
               {totalTxCount} total
               {nonceTxCount > 0 ? ` (${nonceTxCount} nonce invalidation${nonceTxCount > 1 ? 's' : ''})` : ''}
-              {cancelTxCount > 0 ? ` (${cancelTxCount} cancelOrder call${cancelTxCount > 1 ? 's' : ''} — DCA orders)` : ''}
+              {cancelTxCount > 0 ? ` (${cancelTxCount} cancelOrder call${cancelTxCount > 1 ? 's' : ''} for DCA orders)` : ''}
             </ReviewRow>
             {review.newNonce !== null && <ReviewRow label="New invalidation nonce" testId="dca-invalidate-nonce">{review.newNonce.toString()}</ReviewRow>}
             <ul className="mt-2 flex flex-col" data-testid="dca-invalidate-rows">
               {review.affectedOrders.map((o) => (
                 <li key={o.id} data-testid="dca-invalidate-row" className="ts-sheet-row flex items-center justify-between gap-4 py-2 text-[13px]">
                   <span className="font-medium text-v2-text">{o.tokenInSymbol || '?'} → {o.tokenOutSymbol || '?'}</span>
-                  <span className="text-v2-muted">{orderTypeLabel(o)} · nonce {String(o.order?.nonce ?? '—')}</span>
+                  <span className="text-v2-muted">{orderTypeLabel(o)} · nonce {String(o.order?.nonce ?? 'n/a')}</span>
                 </li>
               ))}
             </ul>
@@ -77,16 +77,16 @@ export function DcaCancelSheet({ review, onConfirm, onCancel }: { review: Pendin
               <p data-testid="dca-invalidate-skipped" className="mt-3 border-l-2 ts-v2-accent-stroke pl-4 text-[13px] leading-relaxed text-v2-amber">
                 {review.skippedOrders.length} order{review.skippedOrders.length > 1 ? 's' : ''} on other
                 chains ({[...new Set(review.skippedOrders.map((o) => getChainName(o.chainId ?? DEFAULT_CHAIN_ID)))].join(', ')}) were
-                NOT included — switch your wallet to that chain and run Cancel All again to cancel them.
+                NOT included: switch your wallet to that chain and run Cancel All again to cancel them.
               </p>
             )}
             <p className="mt-4 border-l-2 ts-v2-accent-stroke pl-4 text-[13px] leading-relaxed text-v2-text/90">
               {cancelTxCount > 0 ? (
                 <>Non-DCA orders above are cancelled by the nonce invalidation; each DCA order needs its
-                own on-chain cancelOrder call (the contract never checks the nonce for DCA) — expect{' '}
+                own on-chain cancelOrder call (the contract never checks the nonce for DCA): expect{' '}
                 {totalTxCount} wallet prompts. No funds move.</>
               ) : (
-                <>Invalidating the nonce on-chain cancels every order above at once — orders signed with a
+                <>Invalidating the nonce on-chain cancels every order above at once: orders signed with a
                 lower nonce can never execute afterwards. No funds move.</>
               )}
             </p>
@@ -96,7 +96,7 @@ export function DcaCancelSheet({ review, onConfirm, onCancel }: { review: Pendin
 
       <div className="mt-6 flex flex-col gap-1">
         <Button variant="text" tone="danger" className="w-full" onClick={onConfirm} data-testid="dca-cancel-confirm">
-          {isInvalidate ? 'Confirm — Cancel All' : 'Confirm — Cancel Order'}
+          {isInvalidate ? 'Confirm: Cancel All' : 'Confirm: Cancel Order'}
         </Button>
         <Button ref={keepRef} variant="text" className="w-full" onClick={onCancel} data-testid="dca-cancel-keep">
           {isInvalidate ? 'Keep my orders' : 'Keep this order'}

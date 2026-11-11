@@ -128,7 +128,7 @@ describe('retired in BOTH UIs: the toggle, its notice, the Enable strip and the 
       expect(within(c).queryByRole('button', { name: 'Dismiss MEV protection hint' }), `${ui}: dismiss ×`).toBeNull()
       expect(within(c).queryByRole('button', { name: /Switch to the gasless CoW Protocol route/ }), `${ui}: gasless CTA`).toBeNull()
       expect(text, `${ui}: gasless card`).toContain('Zero Gas Available')
-      expect(text, `${ui}: best stays the top output — no forced filter`).toContain('Best via Velora')
+      expect(text, `${ui}: best stays the top output. No forced filter`).toContain('Best via Velora')
     }
   })
 

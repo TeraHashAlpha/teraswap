@@ -18,7 +18,7 @@ const CSS = readFileSync(join(__dirname, 'primitives.css'), 'utf8')
 const BOX = /\b(bg-v2-surface2?(\/\d+)?|border(-[trblxy])?(-\d+)?|rounded(-v2-\w+|-\w+)?)\b/
 
 describe('Surface', () => {
-  it('plain: no fill, no border, no radius — content on the photo', () => {
+  it('plain: no fill, no border, no radius. Content on the photo', () => {
     render(<Surface data-testid="s">hello</Surface>)
     const el = screen.getByTestId('s')
     expect(el.textContent).toBe('hello')
@@ -52,7 +52,7 @@ describe('Surface', () => {
     expect(screen.getByTestId('m').className).not.toMatch(/rounded|\bborder\b|shadow/)
   })
 
-  it('strip: solid --bg with a bottom hairline; an accent swaps it for a 2 px left bar — always the platform green, whatever the status (design review 1)', () => {
+  it('strip: solid --bg with a bottom hairline; an accent swaps it for a 2 px left bar, always the platform green, whatever the status (design review 1)', () => {
     render(<><Surface variant="strip" data-testid="s" /><Surface variant="strip" accent="red" data-testid="a" /></>)
     expect(screen.getByTestId('s').className).toMatch(/bg-v2-bg.*ts-v2-rule-b/)
     const a = screen.getByTestId('a').className
@@ -214,7 +214,7 @@ describe('Tabs', () => {
     expect(onSelect).toHaveBeenLastCalledWith('a')
   })
 
-  it('Segmented is the same underline row, small — no pill', () => {
+  it('Segmented is the same underline row, small: no pill', () => {
     render(<Segmented tabs={tabs.slice(0, 2)} active="a" onSelect={() => {}} label="seg" />)
     const [a] = screen.getAllByRole('tab')
     expect(a.className).toMatch(/text-\[12px\]/)
@@ -344,7 +344,7 @@ describe('HandUnderline', () => {
 })
 
 describe('Skeleton', () => {
-  it('is a decorative sized bar carrying the shimmer class — square, no border', () => {
+  it('is a decorative sized bar carrying the shimmer class: square, no border', () => {
     render(<Skeleton data-testid="s" width={120} height="1rem" />)
     const el = screen.getByTestId('s')
     expect(el.getAttribute('aria-hidden')).toBe('true')

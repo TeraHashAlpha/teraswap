@@ -39,7 +39,7 @@ beforeEach(() => {
   mockExplorerBase = 'https://etherscan.io'
 })
 
-describe('TokenAddressBadge — explorer anchor (CodeQL js/xss-through-dom)', () => {
+describe('TokenAddressBadge: explorer anchor (CodeQL js/xss-through-dom)', () => {
   const anchor = (c: HTMLElement) => c.querySelector('a[aria-label="View on block explorer"]')
 
   it('renders the explorer link for a valid address, href unchanged', () => {
@@ -78,7 +78,7 @@ describe('TokenAddressBadge — explorer anchor (CodeQL js/xss-through-dom)', ()
   })
 })
 
-describe('TokenAddressBadge — Etherscan href guard (CQL-10)', () => {
+describe('TokenAddressBadge: Etherscan href guard (CQL-10)', () => {
   it('accepts a valid checksummed address', () => {
     expect(isAddress('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48')).toBe(true)
   })
@@ -108,7 +108,7 @@ describe('TokenAddressBadge — Etherscan href guard (CQL-10)', () => {
   })
 })
 
-describe('TokenAddressBadge — verified indicator (green shield ✓)', () => {
+describe('TokenAddressBadge: verified indicator (green shield ✓)', () => {
   it('renders a green-shield check for a verified/curated token', () => {
     mockVerified = true
     const { container } = render(<TokenAddressBadge address={USDC} />)

@@ -15,14 +15,14 @@ const base = (over: Partial<Omit<ApprovalRecord, 'id' | 'active'>> = {}): Omit<A
 
 beforeEach(() => useActiveApprovals.setState({ approvals: [] }))
 
-describe('addApproval — the record stores the chain it was written with', () => {
+describe('addApproval: the record stores the chain it was written with', () => {
   it('keeps chainId verbatim (8453 stays 8453, 1 stays 1)', () => {
     useActiveApprovals.getState().addApproval(base({ chainId: 8453 }))
     expect(useActiveApprovals.getState().approvals[0].chainId).toBe(8453)
     useActiveApprovals.getState().addApproval(base({ tokenAddress: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', chainId: 1 }))
     expect(useActiveApprovals.getState().approvals[0].chainId).toBe(1)
   })
-  it('an unknown chain stays unknown — never defaulted to mainnet or to the previous record', () => {
+  it('an unknown chain stays unknown, never defaulted to mainnet or to the previous record', () => {
     useActiveApprovals.getState().addApproval(base({ chainId: undefined }))
     expect(useActiveApprovals.getState().approvals[0]).toHaveProperty('chainId', undefined)
     expect(useActiveApprovals.getState().approvals[0].chainId).not.toBe(1)
@@ -45,7 +45,7 @@ describe('addApproval — the record stores the chain it was written with', () =
   })
 })
 
-describe('readApprovalRecord — versioned reader (schema 1 → 2)', () => {
+describe('readApprovalRecord: versioned reader (schema 1 → 2)', () => {
   it('schema version is 2', () => expect(APPROVAL_RECORD_SCHEMA_VERSION).toBe(2))
   it('a schema-1 record (no chainId key) reads as chain-unknown, everything else intact', () => {
     const v1 = { id: `${USDC.toLowerCase()}:${RELAYER.toLowerCase()}`, tokenAddress: USDC, tokenSymbol: 'USDC', spenderAddress: RELAYER, spenderLabel: 'CoW VaultRelayer', source: 'cowswap', method: 'exact', timestamp: 1_700_000_000_000, active: true, needsRevoke: true }

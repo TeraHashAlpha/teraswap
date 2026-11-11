@@ -87,7 +87,7 @@ async function fetchSwapViaApi(
     }
     // [feat/swap-price-tiers D3] Consent required — the DCA floorAck shape (409 + code).
     if (res.status === 409 && data.code === 'unpriced_ack_required') {
-      throw new UnpricedAckRequiredError(data.error || 'No reference price for this pair — confirmation required.')
+      throw new UnpricedAckRequiredError(data.error || 'No reference price for this pair: confirmation required.')
     }
     throw new Error(data.error || `Swap API error ${res.status}`)
   }
@@ -366,7 +366,7 @@ export function useSwap(
       // make this unreachable; throwing here lets the 9O walk continue to the
       // ranked executable fallbacks if a caller slipped one through.
       if (!isExecutableSource(source, chainId)) {
-        throw new Error(`${source} is quote-only on this network — it can't settle swaps yet.`)
+        throw new Error(`${source} is quote-only on this network. It can't settle swaps yet.`)
       }
       const rawAmountBn = parseUnits(amountIn, tokenIn.decimals)
       const routeViaFeeCollector = usesFeeCollector(source, chainId)
@@ -515,7 +515,7 @@ export function useSwap(
         if (!feeCheck.valid) {
           console.error('[TeraSwap] Fee integrity BLOCKED:', feeCheck.reason)
           throw new Error(
-            'Fee verification failed — swap output is unexpectedly high. ' +
+            'Fee verification failed: swap output is unexpectedly high. ' +
             'This may indicate the partner fee was not applied. Swap blocked for safety.'
           )
         }
@@ -638,7 +638,7 @@ export function useSwap(
             success: false, error_msg: sim.error?.slice(0, 200),
             duration_ms: Date.now() - swapStartTime,
           })
-          throw new Error(sim.error || 'Transaction simulation failed — swap would revert on-chain.')
+          throw new Error(sim.error || 'Transaction simulation failed: swap would revert on-chain.')
         }
       }
 
@@ -1052,7 +1052,7 @@ export function useSwap(
     if (p.message.validTo <= Math.floor(Date.now() / 1000)) {
       setPendingCowOrder(null)
       setStatus('error')
-      setErrorMessage('This CoW Protocol order expired before you signed — please re-quote.')
+      setErrorMessage('This CoW Protocol order expired before you signed: please re-quote.')
       return
     }
 
@@ -1405,11 +1405,11 @@ function parseWagmiError(error: Error): string {
   if (msg.includes('insufficient funds'))
     return 'Insufficient ETH for gas fees.'
   if (msg.includes('execution reverted'))
-    return 'Swap reverted on-chain — price may have moved. Try increasing slippage.'
+    return 'Swap reverted on-chain: price may have moved. Try increasing slippage.'
   if (msg.includes('nonce'))
     return 'Nonce conflict. Reset your wallet nonce or wait a moment.'
   if (msg.includes('intrinsic gas too low') || msg.includes('gas too low'))
-    return 'Gas estimate too low. Try again — the network may be congested.'
+    return 'Gas estimate too low. Try again: the network may be congested.'
   if (msg.includes('replacement transaction underpriced'))
     return 'A pending transaction is blocking this swap. Speed it up or wait.'
   if (msg.includes('already known'))

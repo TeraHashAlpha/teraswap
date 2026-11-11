@@ -103,7 +103,7 @@ export function DcaReviewSheet({
         <ReviewRow label="Total duration" testId="dca-review-duration">{view.duration}</ReviewRow>
         <ReviewRow label="Expires" testId="dca-review-expires">{view.expires}</ReviewRow>
         {view.floorTotal != null && (
-          <ReviewRow label="Signed floor per order (total)" testId="dca-review-floor">≥ {view.floorTotal} {view.symbolOut}{view.floorPerBuy != null ? ` — ≥ ${view.floorPerBuy} ${view.symbolOut} enforced per buy` : ''}</ReviewRow>
+          <ReviewRow label="Signed floor per order (total)" testId="dca-review-floor">≥ {view.floorTotal} {view.symbolOut}{view.floorPerBuy != null ? `, ≥ ${view.floorPerBuy} ${view.symbolOut} enforced per buy` : ''}</ReviewRow>
         )}
         {protection && (
           <ReviewRow label="Protection" testId="dca-review-protection" tone="amber">

@@ -41,12 +41,12 @@ describe('fmtToken (§3)', () => {
     ['bigint 6 decimals', [1_718_300n, 6], '1.7183'],
     ['bigint negative', [-1_500_000_000_000_000_000n, 18], `${M}1.5000`],
     ['bigint zero', [0n, 18], '0'],
-    ['NaN', [NaN], '—'],
-    ['Infinity', [Infinity], '—'],
-    ['undefined', [undefined], '—'],
-    ['null', [null], '—'],
-    ['empty string', [''], '—'],
-    ['garbage string', ['abc'], '—'],
+    ['NaN', [NaN], 'n/a'],
+    ['Infinity', [Infinity], 'n/a'],
+    ['undefined', [undefined], 'n/a'],
+    ['null', [null], 'n/a'],
+    ['empty string', [''], 'n/a'],
+    ['garbage string', ['abc'], 'n/a'],
     ['sign opt (+)', [3, 18, { sign: true }], '+3.0000'],
     ['sign opt leaves negatives alone', [-3, 18, { sign: true }], `${M}3.0000`],
     ['exact: bigint keeps all 18 dp', [1_713_181_234_567_890_123n, 18, { exact: true }], `1.713181234567890123`],
@@ -74,8 +74,8 @@ describe('fmtUsd (§3)', () => {
     ['compact K', [12_345, { compact: true }], '$12.3K'],
     ['compact M', [1_234_567, { compact: true }], '$1.23M'],
     ['compact below 1k stays full', [999.5, { compact: true }], '$999.50'],
-    ['NaN', [NaN], '—'],
-    ['undefined', [undefined], '—'],
+    ['NaN', [NaN], 'n/a'],
+    ['undefined', [undefined], 'n/a'],
   ]
   it.each(rows)('%s', (_n, args, out) => {
     expect(fmtUsd(...args)).toBe(out)
@@ -92,8 +92,8 @@ describe('fmtPct (§3)', () => {
     ['negative U+2212', [-0.5], `${M}0.5%`],
     ['sign (+)', [0.25, 2, { sign: true }], '+0.25%'],
     ['rounds to zero → no sign', [-0.001], '0%'],
-    ['NaN', [NaN], '—'],
-    ['undefined', [undefined], '—'],
+    ['NaN', [NaN], 'n/a'],
+    ['undefined', [undefined], 'n/a'],
   ]
   it.each(rows)('%s', (_n, args, out) => {
     expect(fmtPct(...args)).toBe(out)
@@ -106,8 +106,8 @@ describe('fmtInt / fmtFixed', () => {
     [0, '0'],
     [-12345, `${M}12${T}345`],
     [12.6, '13'],
-    [NaN, '—'],
-    [undefined, '—'],
+    [NaN, 'n/a'],
+    [undefined, 'n/a'],
   ] as const)('fmtInt(%s) → %s', (v, out) => {
     expect(fmtInt(v)).toBe(out)
   })
@@ -116,7 +116,7 @@ describe('fmtInt / fmtFixed', () => {
     [0.36, 1, '0.4'],
     [-0.001, 2, '0.00'],
     [-2, 1, `${M}2.0`],
-    [NaN, 2, '—'],
+    [NaN, 2, 'n/a'],
   ] as const)('fmtFixed(%s, %s) → %s', (v, dp, out) => {
     expect(fmtFixed(v, dp)).toBe(out)
   })
@@ -156,8 +156,8 @@ describe('fmtGas (§3)', () => {
     [123.4, '123'],
     [0.0000000012, '0.0000000012'],
     [0, '0'],
-    [NaN, '—'],
-    [undefined, '—'],
+    [NaN, 'n/a'],
+    [undefined, 'n/a'],
   ]
   it.each(rows)('fmtGas(%s) → %s', (v, out) => {
     expect(fmtGas(v as number)).toBe(out)
@@ -185,10 +185,10 @@ describe('fmtAddress (§3)', () => {
   it('non-address strings pass through (ENS)', () => {
     expect(fmtAddress('vitalik.eth')).toBe('vitalik.eth')
   })
-  it('empty / undefined → —', () => {
-    expect(fmtAddress('')).toBe('—')
-    expect(fmtAddress(undefined)).toBe('—')
-    expect(fmtAddress(null)).toBe('—')
+  it('empty / undefined →:', () => {
+    expect(fmtAddress('')).toBe('n/a')
+    expect(fmtAddress(undefined)).toBe('n/a')
+    expect(fmtAddress(null)).toBe('n/a')
   })
 })
 
@@ -197,9 +197,9 @@ describe('fmtDate / fmtRelTime (§3)', () => {
     expect(fmtDate(Date.UTC(2026, 9, 12, 14, 5), { utc: true })).toBe('12 Oct 2026, 14:05')
     expect(fmtDate('2026-01-05T03:07:00Z', { utc: true })).toBe('5 Jan 2026, 03:07')
   })
-  it('fmtDate: invalid → —', () => {
-    expect(fmtDate('nope')).toBe('—')
-    expect(fmtDate(undefined)).toBe('—')
+  it('fmtDate: invalid →:', () => {
+    expect(fmtDate('nope')).toBe('n/a')
+    expect(fmtDate(undefined)).toBe('n/a')
   })
   const now = Date.UTC(2026, 9, 12, 14, 5)
   it.each([
@@ -211,8 +211,8 @@ describe('fmtDate / fmtRelTime (§3)', () => {
   ])('fmtRelTime(%s)', (t, out) => {
     expect(fmtRelTime(t, now)).toBe(out)
   })
-  it('fmtRelTime: invalid → —', () => {
-    expect(fmtRelTime('nope', now)).toBe('—')
+  it('fmtRelTime: invalid →:', () => {
+    expect(fmtRelTime('nope', now)).toBe('n/a')
   })
 })
 

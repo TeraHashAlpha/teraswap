@@ -125,7 +125,7 @@ beforeEach(() => {
   useChainIdMock.mockReturnValue(BASE)
 })
 
-describe('DCAPanel [fix/dca-chain-switch] — selections never outlive the chain', () => {
+describe('DCAPanel [fix/dca-chain-switch]: selections never outlive the chain', () => {
   it('fixtures are real: both chains have the alt token and distinct WETH', () => {
     expect(altOf(BASE)).toBeTruthy()
     expect(altOf(ARB)).toBeTruthy()
@@ -135,7 +135,7 @@ describe('DCAPanel [fix/dca-chain-switch] — selections never outlive the chain
   it.each([
     ['panel rerendered in place (inner reset)', false],
     ['panel keyed by chainId (page.tsx)', true],
-  ])('8453→42161→8453: every address sent to /api/dca-floor-cap belongs to the current chain — %s', async (_n, keyed) => {
+  ])('8453→42161→8453: every address sent to /api/dca-floor-cap belongs to the current chain. %S', async (_n, keyed) => {
     const { calls } = stubFloorEndpoint()
     const ui = () => <DCAPanel key={keyed ? currentChain() : 'static'} />
     const { rerender } = renderWithProviders(ui())

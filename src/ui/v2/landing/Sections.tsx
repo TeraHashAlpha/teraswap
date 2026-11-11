@@ -61,7 +61,7 @@ export function PerformanceSection() {
           </h2>
           <p className={`mt-6 ${BODY}`}>
             Stop searching for the best price. TeraSwap&apos;s meta-aggregation engine simultaneously scans {INTEGRATED_DEX_SOURCE_COUNT_WORDS}{' '}
-            liquidity sources across {SWAP_CHAIN_LIST_LABEL} — identifying and executing the optimal route to deliver the highest net output
+            liquidity sources across {SWAP_CHAIN_LIST_LABEL}, identifying and executing the optimal route to deliver the highest net output
             on every single swap. Gas costs are folded into the ranking, so the quote you see is the one your wallet actually feels.
           </p>
         </div>
@@ -79,11 +79,11 @@ export function DifferentSection() {
   const BLOCKS: { title: string; desc: string }[] = [
     {
       title: 'Meta-Aggregator',
-      desc: "We don't pick one routing model. TeraSwap compares intent-based solvers against traditional DEX routing — you get whichever gives the better price.",
+      desc: "We don't pick one routing model. TeraSwap compares intent-based solvers against traditional DEX routing. You get whichever gives the better price.",
     },
     {
       title: 'Oracle-Verified Execution',
-      desc: `Every quote is checked against Chainlink price feeds before execution. Deviations above ${PRICE_DEVIATION_BLOCK_PCT} are blocked automatically — before your trade happens, not after.`,
+      desc: `Every quote is checked against Chainlink price feeds before execution. Deviations above ${PRICE_DEVIATION_BLOCK_PCT} are blocked automatically, before your trade happens, not after.`,
     },
     // [feat/retire-force-mev, owner 2026-11-06] Replaces "MEV Protection on CoW Routes" (retired claim) — same slot as v1.
     { title: UNVERIFIED_SWAP_GATE_TITLE, desc: UNVERIFIED_SWAP_GATE_CLAIM },
@@ -121,7 +121,7 @@ export function SecuritySection() {
     {
       tag: 'PRE-SWAP',
       title: 'Chainlink Oracle Check',
-      body: `${feedCount} token price feeds on ${chainName} — warns at ${PRICE_DEVIATION_WARN_PCT}+ deviation, blocks at ${PRICE_DEVIATION_BLOCK_PCT}. ${CHAINLINK_STALENESS_CLAIM}`,
+      body: `${feedCount} token price feeds on ${chainName}: warns at ${PRICE_DEVIATION_WARN_PCT}+ deviation, blocks at ${PRICE_DEVIATION_BLOCK_PCT}. ${CHAINLINK_STALENESS_CLAIM}`,
     },
     {
       tag: 'POST-SWAP',
@@ -222,11 +222,11 @@ interface Feature {
 const FEATURES: Feature[] = [
   {
     title: `${INTEGRATED_DEX_SOURCE_COUNT} Liquidity Sources`,
-    desc: `Simultaneous queries across aggregator APIs and direct DEX protocols — ${formatChainList(INTEGRATED_DEX_SOURCE_LABELS)}.`,
+    desc: `Simultaneous queries across aggregator APIs and direct DEX protocols: ${formatChainList(INTEGRATED_DEX_SOURCE_LABELS)}.`,
   },
   {
     title: 'Gas-Aware Routing',
-    desc: 'Quotes ranked by net output minus estimated gas cost. The ranking metric that actually matters to your wallet — not just raw amounts.',
+    desc: 'Quotes ranked by net output minus estimated gas cost. The ranking metric that actually matters to your wallet, not just raw amounts.',
   },
   {
     title: 'Statistical Outlier Detection',
@@ -235,17 +235,17 @@ const FEATURES: Feature[] = [
   { title: 'Privacy-First Architecture', desc: `${PRIVACY_PROXY_CLAIM} ${PRIVACY_DIRECT_NOTE}` },
   {
     title: 'DCA',
-    desc: 'Automated dollar-cost averaging on a fixed schedule. Keeper-executed on-chain — no browser required.',
+    desc: 'Automated dollar-cost averaging on a fixed schedule. Keeper-executed on-chain: no browser required.',
     orderType: 'dca',
   },
   {
     title: 'Limit Orders',
-    desc: `Set your target price and walk away. Your signed order is filled on-chain by the OrderExecutor contract when a keeper sees your price reached — you pay no gas at fill time, and changes to the executor's configuration sit behind a ${ADMIN_TIMELOCK_HOURS}-hour timelock.`,
+    desc: `Set your target price and walk away. Your signed order is filled on-chain by the OrderExecutor contract when a keeper sees your price reached. You pay no gas at fill time, and changes to the executor's configuration sit behind a ${ADMIN_TIMELOCK_HOURS}-hour timelock.`,
     orderType: 'limit',
   },
   {
     title: 'Stop Loss / Take Profit',
-    desc: `Automated position protection gated by Chainlink oracles. Prices are monitored in real-time — when your trigger is reached, a keeper fills the order on-chain through the OrderExecutor, behind the same ${ADMIN_TIMELOCK_HOURS}-hour configuration timelock.`,
+    desc: `Automated position protection gated by Chainlink oracles. Prices are monitored in real-time: when your trigger is reached, a keeper fills the order on-chain through the OrderExecutor, behind the same ${ADMIN_TIMELOCK_HOURS}-hour configuration timelock.`,
     orderType: 'stopLoss',
   },
   {
@@ -254,15 +254,15 @@ const FEATURES: Feature[] = [
   },
   {
     title: 'Analytics Dashboard',
-    desc: 'Real-time protocol performance: volume trends, aggregator win-rates, popular pairs, and activity feed — built-in transparency for every user.',
+    desc: 'Real-time protocol performance: volume trends, aggregator win-rates, popular pairs, and activity feed. Built-in transparency for every user.',
   },
   {
     title: 'Exact-Amount Approvals',
-    desc: 'A one-time on-chain approval for exactly what each swap needs — never an infinite allowance. Revoke it later from the approvals manager.',
+    desc: 'A one-time on-chain approval for exactly what each swap needs, never an infinite allowance. Revoke it later from the approvals manager.',
   },
   {
     title: 'Active Approvals Manager',
-    desc: 'Full visibility into token approvals made through TeraSwap. Revoke any residual allowance in one click — security you control.',
+    desc: 'Full visibility into token approvals made through TeraSwap. Revoke any residual allowance in one click: security you control.',
   },
 ]
 

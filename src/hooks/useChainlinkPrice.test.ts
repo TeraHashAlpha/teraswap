@@ -300,7 +300,7 @@ describe('useChainlinkPrice', () => {
   })
 })
 
-describe('useChainlinkPrice — chain-aware feed resolution [SPRINT-9E]', () => {
+describe('useChainlinkPrice: chain-aware feed resolution [SPRINT-9E]', () => {
   // The platform-fee USD in QuoteBreakdown reads priceCheck.chainlinkPrice.
   // On Base it was null (mainnet feed resolved + read on the wrong chain) so
   // no ($) showed next to the fee. The hook must resolve AND read the feed on
@@ -363,7 +363,7 @@ describe('useChainlinkPrice — chain-aware feed resolution [SPRINT-9E]', () => 
 // verdict indistinguishable from a healthy first render, which silently disabled BOTH the deviation
 // gate and the >$10k unpriceable gate. Every branch of the new decision tree is pinned here.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-describe('useChainlinkPrice — [FIX-PRICE-ORACLE-FAIL-CLOSED] fail closed on an unreadable feed', () => {
+describe('useChainlinkPrice: [FIX-PRICE-ORACLE-FAIL-CLOSED] fail closed on an unreadable feed', () => {
   /** An errored read AS THE REAL LIBRARY REPORTS IT — last-good value retained alongside isError. */
   const errored = (lastGood: unknown = undefined) =>
     ({ data: lastGood, isError: true, failureCount: 4, errorUpdateCount: 1 })
@@ -403,7 +403,7 @@ describe('useChainlinkPrice — [FIX-PRICE-ORACLE-FAIL-CLOSED] fail closed on an
   // an isError-first check would hard-block the whole app on any transient RPC blip while holding a
   // round the oracle timestamps as fresh. The gate keys on "do we have a usable round?", not "did
   // the last fetch error?" — and the staleness ladder still judges whatever we retained.
-  it('[OB-1] a REFETCH error that still holds a FRESH cached round does NOT block — data is verifiable', () => {
+  it('[OB-1] a REFETCH error that still holds a FRESH cached round does NOT block: data is verifiable', () => {
     mockReadOverride = {
       latestRoundData: { data: roundData({ answer: 2_000_00000000n }), isError: true, failureCount: 4, errorUpdateCount: 1 },
       decimals: { data: 8, isError: true, failureCount: 4, errorUpdateCount: 1 },
@@ -488,14 +488,14 @@ describe('useChainlinkPrice — [FIX-PRICE-ORACLE-FAIL-CLOSED] fail closed on an
     expect(result.current.oracleIntegrityFailed).toBe(true)
   })
 
-  it('unreadable copy says the feed could not be READ — never that the token has no feed', () => {
+  it('unreadable copy says the feed could not be READ, never that the token has no feed', () => {
     mockReadOverride = { latestRoundData: errored(), decimals: { data: 8 } }
     const { result } = renderHook(() => useChainlinkPrice(TOKEN, 2000))
     expect(result.current.message).toMatch(/could not be read/i)
     expect(result.current.message).not.toMatch(/no chainlink oracle/i)
   })
 
-  it('a HEALTHY read is completely unaffected — no new friction', () => {
+  it('a HEALTHY read is completely unaffected: no new friction', () => {
     mockRoundData = roundData({ answer: 2_000_00000000n })
     mockDecimals = 8
     const { result } = renderHook(() => useChainlinkPrice(TOKEN, 2000))
@@ -560,7 +560,7 @@ describe('useChainlinkPrice — [FIX-PRICE-ORACLE-FAIL-CLOSED] fail closed on an
     }
   })
 
-  it('[M-01] the exact regressed frame — failureCount reset to 0 mid-poll — blocks on errorUpdateCount alone', () => {
+  it('[M-01] the exact regressed frame, failureCount reset to 0 mid-poll, blocks on errorUpdateCount alone', () => {
     mockReadOverride = {
       latestRoundData: { isLoading: true, failureCount: 0, errorUpdateCount: 1 },
       decimals: { isLoading: true, failureCount: 0, errorUpdateCount: 1 },
@@ -577,7 +577,7 @@ describe('useChainlinkPrice — [FIX-PRICE-ORACLE-FAIL-CLOSED] fail closed on an
 // as the mismatch while the round itself is genuinely fresh and valid, mirroring the WBTC/USD
 // scenario ADR-018 exists to catch: a reachable, well-formed answer for the WRONG feed.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-describe('useChainlinkPrice — [ADR-018] feed self-identification', () => {
+describe('useChainlinkPrice: [ADR-018] feed self-identification', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockRoundData = undefined
@@ -650,7 +650,7 @@ describe('useChainlinkPrice — [ADR-018] feed self-identification', () => {
 // oracleIntegrityFailed — the one combination evaluatePriceGate WAIVES. Four mainnet tokens became
 // swappable with zero Chainlink validation.
 // ═════════════════════════════════════════════════════════════════════════════════════════════
-describe('useChainlinkPrice — [FIX-HOOK-COMPOSED-FEEDS] composed feeds', () => {
+describe('useChainlinkPrice: [FIX-HOOK-COMPOSED-FEEDS] composed feeds', () => {
   // Mainnet composed pairs, by token → [base leg, quote leg].
   const ETH_USD_MAINNET = '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419'
   const BTC_USD_MAINNET = '0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c'
@@ -827,7 +827,7 @@ describe('useChainlinkPrice — [FIX-HOOK-COMPOSED-FEEDS] composed feeds', () =>
 // timestamp 1787695639, two independent RPCs agreeing) — not an invented magnitude. That is what
 // makes the magnitude guard meaningful rather than self-fulfilling.
 // ═════════════════════════════════════════════════════════════════════════════════════════════
-describe('useChainlinkPrice — [FIX-CBETH-DIRECT-FEED] direct primary, composed fallback', () => {
+describe('useChainlinkPrice: [FIX-CBETH-DIRECT-FEED] direct primary, composed fallback', () => {
   // Addresses come from the REAL registry, never hand-typed here (rule #9 / ADR-018).
   const CBETH_TOKEN = '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22'
   const CBETH_USD = actualGetPreferredDirectUsdFeed(CBETH_TOKEN, 8453)!
@@ -864,7 +864,7 @@ describe('useChainlinkPrice — [FIX-CBETH-DIRECT-FEED] direct primary, composed
   })
 
   // ── ACCEPTANCE 1a: the DIRECT feed is what prices the leg ──
-  it('prices cbETH from the DIRECT feed — provably, not by coincidence', () => {
+  it('prices cbETH from the DIRECT feed: provably, not by coincidence', () => {
     // The composition is fed a deliberately absurd base so the two sources cannot be confused: if
     // the hook composed instead of reading the direct feed, the price would be ~$24455, not ~$2783.
     mockByAddress = {
@@ -893,7 +893,7 @@ describe('useChainlinkPrice — [FIX-CBETH-DIRECT-FEED] direct primary, composed
     expect(result.current.oracleIntegrityFailed).toBeFalsy()
   })
 
-  it('the direct feed is still trusted at 1799s — the fall-through is the ceiling, not a hair trigger', () => {
+  it('the direct feed is still trusted at 1799s. The fall-through is the ceiling, not a hair trigger', () => {
     mockByAddress = {
       ...healthyLegs(),
       [CBETH_USD.toLowerCase()]: { round: roundData({ answer: CBETH_USD_ANSWER, updatedAt: NOW_SECONDS - 1799 }), decimals: 8, description: 'CBETH / USD' },
@@ -929,7 +929,7 @@ describe('useChainlinkPrice — [FIX-CBETH-DIRECT-FEED] direct primary, composed
   })
 
   // ── The deliberate asymmetry: IDENTITY is never masked ──
-  it('an IDENTITY MISMATCH on the direct feed HARD BLOCKS — the healthy composition does NOT rescue it', () => {
+  it('an IDENTITY MISMATCH on the direct feed HARD BLOCKS. The healthy composition does NOT rescue it', () => {
     // This is the line the whole design turns on. A stale feed is an outage and must fall through;
     // a feed that self-reports something other than what the config claims means the CONFIG is
     // wrong (ADR-018), and letting the composition quietly succeed would bury that forever — while
@@ -953,7 +953,7 @@ describe('useChainlinkPrice — [FIX-CBETH-DIRECT-FEED] direct primary, composed
     expect(result.current.chainlinkPrice).toBeCloseTo(COMPOSED_PRICE, 6)
   })
 
-  it('direct in flight + composition unreadable stays NEUTRAL — not a false UNREADABLE block', () => {
+  it('direct in flight + composition unreadable stays NEUTRAL, not a false UNREADABLE block', () => {
     // The primary may still answer. Declaring the token unreadable here would hard-block a swap on
     // a first render, which is the fail-CLOSED-too-eagerly mirror of the bug this file guards.
     mockByAddress = {
@@ -979,7 +979,7 @@ describe('useChainlinkPrice — [FIX-CBETH-DIRECT-FEED] direct primary, composed
     expect(result.current.oracleReadFailed).toBe(true)
   })
 
-  it('a preferred token issues 9 enabled reads — 3 legs x 3, all polled so the fallback is warm', () => {
+  it('a preferred token issues 9 enabled reads: 3 legs x 3, all polled so the fallback is warm', () => {
     mockByAddress = healthyLegs()
     renderHook(() => useChainlinkPrice(CBETH_TOKEN, null))
     const calls = vi.mocked(useReadContract).mock.calls.map((c) => c[0] as { query?: { enabled?: boolean } })
@@ -1002,7 +1002,7 @@ describe('useChainlinkPrice — [FIX-CBETH-DIRECT-FEED] direct primary, composed
 // below have nothing to compare. The registry-level twin — a preferred feed MUST declare a
 // "… / USD" 8dp identity, asserted at import — is in chainlink-feeds.test.ts.
 // ═════════════════════════════════════════════════════════════════════════════════════════════
-describe('useChainlinkPrice — [FIX-CBETH-DIRECT-FEED] MAGNITUDE: cbETH/USD is USD-denominated', () => {
+describe('useChainlinkPrice: [FIX-CBETH-DIRECT-FEED] MAGNITUDE: cbETH/USD is USD-denominated', () => {
   const CBETH_TOKEN = '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22'
   const WETH_BASE = '0x4200000000000000000000000000000000000006'
   const CBETH_USD = actualGetPreferredDirectUsdFeed(CBETH_TOKEN, 8453)!
@@ -1071,7 +1071,7 @@ describe('useChainlinkPrice — [FIX-CBETH-DIRECT-FEED] MAGNITUDE: cbETH/USD is 
     expect(ratio).toBeCloseTo(1.1379, 3) // the measured market ratio, not a placeholder
   })
 
-  it('DEMONSTRATION — an ETH-denominated feed in the USD slot is rejected, so the guard cannot pass vacuously', () => {
+  it('DEMONSTRATION: an ETH-denominated feed in the USD slot is rejected, so the guard cannot pass vacuously', () => {
     // Force the exact defect: the direct slot serves what the cbETH/ETH feed actually publishes
     // (description "CBETH / ETH", 18 dp, ~1.1377). The identity check refuses it, and because the
     // composition must NOT mask an identity failure, the price is null — the guard above would fail.
@@ -1095,7 +1095,7 @@ describe('useChainlinkPrice — [FIX-CBETH-DIRECT-FEED] MAGNITUDE: cbETH/USD is 
 // It is derived from listConfiguredFeedTokens(), so a feed added later is covered with no test edit.
 // Revert the hook to a direct-map lookup and the four composed mainnet tokens fail this immediately.
 // ═════════════════════════════════════════════════════════════════════════════════════════════
-describe('useChainlinkPrice — STRUCTURAL: every configured feed resolves', () => {
+describe('useChainlinkPrice: STRUCTURAL: every configured feed resolves', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockRoundData = undefined
@@ -1132,7 +1132,7 @@ describe('useChainlinkPrice — STRUCTURAL: every configured feed resolves', () 
     expect(mainnetComposed).toHaveLength(4)
   })
 
-  it('NO configured token — on any chain, any shape — reaches the price gate as oracleUnavailable', () => {
+  it('NO configured token, on any chain, any shape, reaches the price gate as oracleUnavailable', () => {
     const offenders: string[] = []
 
     for (const entry of ALL) {

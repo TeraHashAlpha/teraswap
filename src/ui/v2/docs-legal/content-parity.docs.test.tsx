@@ -65,7 +65,7 @@ describe('Docs: v1 DocsPage ⊆ v2 DocsTabV2', () => {
     expect(r.missingHrefs).toEqual([])
   })
 
-  it('holds on another chain (chain-aware strings — feed count, chain name — move together)', () => {
+  it('holds on another chain (chain-aware strings, feed count, chain name, move together)', () => {
     h.chainId = 8453
     const { v1, v2 } = renderBoth()
     const r = compareContent(v1, v2)

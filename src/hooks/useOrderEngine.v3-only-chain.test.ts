@@ -260,7 +260,7 @@ afterAll(() => {
   restore('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS', ENV_BEFORE.mainnet)
 })
 
-describe('[third gate] the ONE rule, at the config level — real config, env = DEPLOYMENTS.md', () => {
+describe('[third gate] the ONE rule, at the config level: real config, env = DEPLOYMENTS.md', () => {
   it('sanity: the fixture is what the header says (v2 map, v3 resolution per chain, distinct addresses)', () => {
     expect(getOrderExecutor(ARBITRUM)).toBeNull()
     expect(getOrderExecutorV3(ARBITRUM)).toBe(ARBITRUM_V3)
@@ -280,7 +280,7 @@ describe('[third gate] the ONE rule, at the config level — real config, env = 
     expect(resolveSigningExecutor(MAINNET, false)).toBe(MAINNET_V2)
   })
 
-  it('getCancelOrderDomain: v2\'s domain where v2 exists (1, 8453 — the exact getOrderExecutorDomain object), else v3\'s (42161), else throws (10)', () => {
+  it('getCancelOrderDomain: v2\'s domain where v2 exists (1, 8453. The exact getOrderExecutorDomain object), else v3\'s (42161), else throws (10)', () => {
     expect(getCancelOrderDomain(MAINNET)).toEqual(getOrderExecutorDomain(MAINNET))
     expect(getCancelOrderDomain(MAINNET)).toEqual({ name: 'TeraSwapOrderExecutor', version: '2', chainId: MAINNET, verifyingContract: MAINNET_V2 })
     expect(getCancelOrderDomain(BASE)).toEqual(getOrderExecutorDomain(BASE))
@@ -291,8 +291,8 @@ describe('[third gate] the ONE rule, at the config level — real config, env = 
   })
 })
 
-describe('[third gate] Arbitrum One (42161) — v3-only: create, confirm, cancel all resolve to the DEPLOYMENTS.md V3', () => {
-  it('the v2 nonce reads are fail-closed (disabled, no address) — the only place v2 is still consulted, and it is not a precondition', async () => {
+describe('[third gate] Arbitrum One (42161): v3-only: create, confirm, cancel all resolve to the DEPLOYMENTS.md V3', () => {
+  it('the v2 nonce reads are fail-closed (disabled, no address). The only place v2 is still consulted, and it is not a precondition', async () => {
     renderHook(() => useOrderEngine())
     const nonceReads = readContractCalls.filter(c => c.functionName === 'nonces' || c.functionName === 'invalidatedNonces')
     expect(nonceReads.length).toBeGreaterThan(0)
@@ -313,7 +313,7 @@ describe('[third gate] Arbitrum One (42161) — v3-only: create, confirm, cancel
   // unordered-nonce model is not honoured here, by contract design, not by omission. The nonce's
   // only remaining job is disambiguating getOrderHash, which `expiry` (per-second) already does
   // across sessions.
-  it('nonce source on 42161 (v3-only): v2 nonces() is disabled so currentNonce reads 0n, and sequential orders take 0n then 1n from the session-local counter — never from V3\'s unordered-nonce bitmap', async () => {
+  it('nonce source on 42161 (v3-only): v2 nonces() is disabled so currentNonce reads 0n, and sequential orders take 0n then 1n from the session-local counter, never from V3\'s unordered-nonce bitmap', async () => {
     const { result } = renderHook(() => useOrderEngine())
     expect(result.current.currentNonce).toBe(0n)
 
@@ -329,7 +329,7 @@ describe('[third gate] Arbitrum One (42161) — v3-only: create, confirm, cancel
     expect(mockWriteContractAsync).not.toHaveBeenCalled()
   })
 
-  it('create → confirm: signs under {TeraSwapOrderExecutor, "3", 42161, <Arbitrum V3>} with the v3 schema and POSTs chainId 42161 — no "not yet available" refusal', async () => {
+  it('create → confirm: signs under {TeraSwapOrderExecutor, "3", 42161, <Arbitrum V3>} with the v3 schema and POSTs chainId 42161. No "not yet available" refusal', async () => {
     const { result } = renderHook(() => useOrderEngine())
     await createAndConfirm(result, makeConfig(ARBITRUM, { maxSlippageBps: 300 }))
 
@@ -463,7 +463,7 @@ describe('[fix/cross-chain-order-cancel] cancel follows the ORDER chain, never t
     expect((result.current.latestEvent as { error: string }).error).toMatch(/Base/)
   })
 
-  it('Base order + wallet on Arbitrum → a SUCCESSFUL switch still does not freeze/cancel on this click (stale-closure guard) — no tx, click Cancel again after the switch', async () => {
+  it('Base order + wallet on Arbitrum → a SUCCESSFUL switch still does not freeze/cancel on this click (stale-closure guard): no tx, click Cancel again after the switch', async () => {
     useChainIdMock.mockReturnValue(ARBITRUM)
     mockFetchUserOrders.mockResolvedValue([makeV3Row(BASE, 'row-base')])
     mockSwitchChainAsync.mockResolvedValue(undefined)
@@ -498,7 +498,7 @@ describe('[fix/cross-chain-order-cancel] cancel follows the ORDER chain, never t
     expect(result.current.orders[0].status).toBe('cancelled')
   })
 
-  it('cancelAllOrders with a mixed-chain portfolio (Base + Arbitrum, wallet on Arbitrum) cancels ONLY the active chain\'s group and lists the rest as skipped — never silent partial success', async () => {
+  it('cancelAllOrders with a mixed-chain portfolio (Base + Arbitrum, wallet on Arbitrum) cancels ONLY the active chain\'s group and lists the rest as skipped, never silent partial success', async () => {
     useChainIdMock.mockReturnValue(ARBITRUM)
     mockFetchUserOrders.mockResolvedValue([
       makeV3Row(BASE, 'row-base'),
@@ -527,10 +527,10 @@ describe('[fix/cross-chain-order-cancel] cancel follows the ORDER chain, never t
   })
 })
 
-describe('[third gate] Base (8453) — unchanged, pinned by literal address before and after', () => {
+describe('[third gate] Base (8453): unchanged, pinned by literal address before and after', () => {
   beforeEach(() => { useChainIdMock.mockReturnValue(BASE) })
 
-  it('v3 DCA: signs under {"3", 8453, <Base V3>}, cancels on <Base V3> with the V3 ABI, proves under the v2 domain of 0x135B…2598 — exactly as before this commit', async () => {
+  it('v3 DCA: signs under {"3", 8453, <Base V3>}, cancels on <Base V3> with the V3 ABI, proves under the v2 domain of 0x135B…2598. Exactly as before this commit', async () => {
     const { result } = renderHook(() => useOrderEngine())
     await createAndConfirm(result, makeConfig(BASE, { maxSlippageBps: 300 }))
     const signed = orderSign()
@@ -580,10 +580,10 @@ describe('[third gate] Base (8453) — unchanged, pinned by literal address befo
   })
 })
 
-describe('[third gate] Ethereum Mainnet (1) — v3 still refused, whatever the env slot says', () => {
+describe('[third gate] Ethereum Mainnet (1): v3 still refused, whatever the env slot says', () => {
   beforeEach(() => { useChainIdMock.mockReturnValue(MAINNET) })
 
-  it('a config asking for v3 is signed as v2 against 0xeFC3…f130 (no maxSlippageBps in the message) — a v3 order cannot be minted on mainnet', async () => {
+  it('a config asking for v3 is signed as v2 against 0xeFC3…f130 (no maxSlippageBps in the message). A v3 order cannot be minted on mainnet', async () => {
     const { result } = renderHook(() => useOrderEngine())
     await createAndConfirm(result, makeConfig(MAINNET, { maxSlippageBps: 300 }))
     const signed = orderSign()
@@ -594,7 +594,7 @@ describe('[third gate] Ethereum Mainnet (1) — v3 still refused, whatever the e
     expect(posted.maxSlippageBps).toBeUndefined()
   })
 
-  it('a stored v3-tagged order on chain 1 cannot even be frozen for cancel — refused, no tx, no proof', async () => {
+  it('a stored v3-tagged order on chain 1 cannot even be frozen for cancel: refused, no tx, no proof', async () => {
     mockFetchUserOrders.mockResolvedValue([makeV3Row(MAINNET)])
     const { result } = renderHook(() => useOrderEngine())
     await settleLoad()
@@ -604,14 +604,14 @@ describe('[third gate] Ethereum Mainnet (1) — v3 still refused, whatever the e
     expect(result.current.pendingCancel).toBeNull()
     expect(result.current.latestEvent).toEqual({
       type: 'order_error', orderId: order.id,
-      error: 'v3 conditional orders are not yet available on chain 1 — this order cannot be cancelled here.',
+      error: 'v3 conditional orders are not yet available on chain 1. This order cannot be cancelled here.',
     })
     await act(async () => { await result.current.confirmCancel() }) // nothing frozen ⇒ no-op
     expect(mockWriteContractAsync).not.toHaveBeenCalled()
     expect(proofSigns()).toHaveLength(0)
   })
 
-  it('a v2 order on mainnet: create/confirm/cancel are byte-identical — v2 domain, v2 executor, v2 ABI', async () => {
+  it('a v2 order on mainnet: create/confirm/cancel are byte-identical. V2 domain, v2 executor, v2 ABI', async () => {
     const { result } = renderHook(() => useOrderEngine())
     await createAndConfirm(result, makeConfig(MAINNET, { orderType: OrderType.LIMIT, targetPrice: '3000', priceFeed: '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419', dcaInterval: 0, dcaTotal: 1 }))
     expect(orderSign().domain).toEqual(getOrderExecutorDomain(MAINNET))

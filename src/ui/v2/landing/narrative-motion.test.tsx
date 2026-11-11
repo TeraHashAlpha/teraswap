@@ -55,7 +55,7 @@ describe('entrance: plays once when the section crosses the 40 % line', () => {
     expect(ENTER_ROOT_MARGIN).toBe('-40% 0px -60% 0px')
   })
 
-  it('crossing the line shows the section and unobserves it — once, never replayed', () => {
+  it('crossing the line shows the section and unobserves it: once, never replayed', () => {
     mountPage()
     expect(enterIO().observed.has(section('security'))).toBe(true)
     act(() => enterIO().fire([{ target: section('security'), isIntersecting: true }]))
@@ -100,7 +100,7 @@ describe('entrance: plays once when the section crosses the 40 % line', () => {
     expect(section('cta').hasAttribute('data-nar-in')).toBe(false)
   })
 
-  it('stagger: 40 ms per element, capped at index 4 — the last starts at 160 ms, the sequence ends by 320 ms', () => {
+  it('stagger: 40 ms per element, capped at index 4. The last starts at 160 ms, the sequence ends by 320 ms', () => {
     expect(STAGGER_MS).toBe(40)
     expect(STAGGER_MAX_INDEX).toBe(4)
     expect([0, 1, 2, 3, 4, 5, 8, 20].map(staggerDelayMs)).toEqual([0, 40, 80, 120, 160, 160, 160, 160])

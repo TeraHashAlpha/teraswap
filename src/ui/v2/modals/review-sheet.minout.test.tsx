@@ -101,7 +101,7 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('direct route (not via the FeeCollector): the decoded router floor', () => {
-  it('v1 == v2 on the same frozen preview — the SAME bigint reaches the formatter (not the UI\'s quote × (1 − slippage))', () => {
+  it('v1 == v2 on the same frozen preview. The SAME bigint reaches the formatter (not the UI\'s quote × (1 − slippage))', () => {
     const { v1, v2 } = formatted(pendingFor())
     expect(v1).toEqual([{ v: ROUTER_FLOOR, d: 6 }])
     expect(v2).toEqual(v1)
@@ -199,7 +199,7 @@ describe.each([1, 8453, 42161])('direct route on chain %i: v1 == v2, the decoded
   })
 })
 
-describe('FeeCollector route: unchanged — the enforced minimum wins, badged', () => {
+describe('FeeCollector route: unchanged: the enforced minimum wins, badged', () => {
   it('v1 == v2: the enforced bigint is formatted, the decoded floor is not', () => {
     const { v1, v2 } = formatted(pendingFor({ routeViaFeeCollector: true, minimumOutput: FEE_COLLECTOR_FLOOR }))
     // v1 also formats the decoded floor eagerly on every render (it just does not display it here); v2 formats only what it displays.
@@ -226,7 +226,7 @@ describe('before the transaction is frozen', () => {
     expect(screen.queryByTestId('review-min')).toBeNull()
   })
 
-  it('nothing frozen and nothing in flight: NO row — never a UI-computed fallback', () => {
+  it('nothing frozen and nothing in flight: NO row, never a UI-computed fallback', () => {
     render(<ReviewSheet model={model()} onConfirm={() => {}} onCancel={() => {}} />)
     expect(screen.queryByTestId('review-min')).toBeNull()
     expect(screen.queryByTestId('review-min-pending')).toBeNull()

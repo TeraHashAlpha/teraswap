@@ -89,7 +89,7 @@ export function friendlyError(source: string, err: unknown): string {
 
   // Network-level
   if (isNetworkErrorText(lower))
-    return `${source}: Network error — check your connection.`
+    return `${source}: Network error. Check your connection.`
   if (isTimeoutText(lower))
     return `${source}: Request timed out. Try again.`
 
@@ -97,7 +97,7 @@ export function friendlyError(source: string, err: unknown): string {
   if (isRateLimitText(lower))
     return `${source}: Rate limited. Wait a moment and retry.`
   if (isForbiddenText(lower))
-    return `${source}: Access denied — API key may be invalid.`
+    return `${source}: Access denied. API key may be invalid.`
   if (isInsufficientLiquidityText(lower))
     return `${source}: Insufficient liquidity for this pair/amount.`
   if (isNoRouteText(lower))

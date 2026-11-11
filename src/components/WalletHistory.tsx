@@ -211,7 +211,7 @@ export default function WalletHistory() {
       {/* Empty state */}
       {!loading && swaps.length === 0 && !error && (
         <div className="rounded-xl border border-cream-08 bg-surface-tertiary p-6 text-center">
-          <p className="text-sm text-cream-35">No activity yet — your swaps and DCA fills will appear here</p>
+          <p className="text-sm text-cream-35">No activity yet: your swaps and DCA fills will appear here</p>
         </div>
       )}
 

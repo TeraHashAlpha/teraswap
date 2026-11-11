@@ -58,7 +58,7 @@ async function mount() {
   return { v1: v1.container as HTMLElement, v2: v2.container as HTMLElement }
 }
 
-describe.each([1, 8453, 42161])('Portfolio holdings — chain %i', (chainId) => {
+describe.each([1, 8453, 42161])('Portfolio holdings: chain %i', (chainId) => {
   beforeEach(() => { h.chainId = chainId })
 
   it('content parity v1 ⊆ v2: 0 missing, and the same text nodes in the same order', async () => {
@@ -92,8 +92,8 @@ describe.each([1, 8453, 42161])('Portfolio holdings — chain %i', (chainId) => 
     expect(symbols.length).toBe(1 + ERC20_BY_CHAIN[chainId].length) // native ETH + every discovered token
     expect(NATIVE_WEI > 0n).toBe(true)
     // the unpriced token shows v1's "—" and sorts last
-    if (ERC20_BY_CHAIN[chainId].some((t) => t.priceCents === null)) expect(rows[rows.length - 1].textContent).toContain('—')
-    else expect(rows.some((r) => r.textContent?.includes('—'))).toBe(false)
+    if (ERC20_BY_CHAIN[chainId].some((t) => t.priceCents === null)) expect(rows[rows.length - 1].textContent).toContain('n/a')
+    else expect(rows.some((r) => r.textContent?.includes('n/a'))).toBe(false)
   })
 
   it('grouping as v1: curated category buckets in CATEGORY_DISPLAY_ORDER, then "Discovered in Wallet"', async () => {
@@ -117,7 +117,7 @@ describe.each([1, 8453, 42161])('Portfolio holdings — chain %i', (chainId) => 
     expect(v2.querySelector(`[data-token="${usdc.address.toLowerCase()}"]`)?.getAttribute('data-discovered')).toBeNull()
   })
 
-  it('Add imports the token and the row rejoins the curated look (Swap, no address) — as v1', async () => {
+  it('Add imports the token and the row rejoins the curated look (Swap, no address), as v1', async () => {
     const { v1, v2 } = await mount()
     const token = ERC20_BY_CHAIN[chainId].find((t) => t.symbol === 'ETHFI')
     if (!token) return // Arbitrum's fixture holds no unknown token

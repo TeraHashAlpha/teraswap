@@ -34,7 +34,7 @@ const PARAMS = {
   chainId: 8453,
 }
 
-describe('checkRoute — routable', () => {
+describe('checkRoute: routable', () => {
   it('returns routable when /api/quote yields at least one quote', async () => {
     fetchMock.mockResolvedValue(jsonRes(200, { best: { toAmount: '990000' }, all: [{ source: 'velora', toAmount: '990000' }] }))
     const res = await checkRoute(PARAMS)
@@ -55,7 +55,7 @@ describe('checkRoute — routable', () => {
   })
 })
 
-describe('checkRoute — no route (BLOCK)', () => {
+describe('checkRoute: no route (BLOCK)', () => {
   it('blocks on a 502 "No valid quotes" (every aggregator source failed)', async () => {
     fetchMock.mockResolvedValue(jsonRes(502, { error: 'No valid quotes. all sources failed' }))
     const res = await checkRoute(PARAMS)
@@ -73,7 +73,7 @@ describe('checkRoute — no route (BLOCK)', () => {
 // /api/quote returns HTTP 502 for BOTH a genuine no-route ("No valid quotes") AND transient
 // all-timeout / all-network blips. Only the former is a real no-route — the transient 502s must
 // fail OPEN so a brief upstream blip never blocks a legitimately routable imported token.
-describe('checkRoute — transient 502 fails OPEN (not a real no-route)', () => {
+describe('checkRoute: transient 502 fails OPEN (not a real no-route)', () => {
   it('does not block a 502 whose body is "All sources timed out"', async () => {
     fetchMock.mockResolvedValue(jsonRes(502, { error: 'All sources timed out. Check your connection and try again.' }))
     const res = await checkRoute(PARAMS)
@@ -93,7 +93,7 @@ describe('checkRoute — transient 502 fails OPEN (not a real no-route)', () => 
   })
 })
 
-describe('checkRoute — fail OPEN on transient/ambiguous errors', () => {
+describe('checkRoute: fail OPEN on transient/ambiguous errors', () => {
   it('does not block on a network error (fetch throws)', async () => {
     fetchMock.mockRejectedValue(new Error('network down'))
     const res = await checkRoute(PARAMS)

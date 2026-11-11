@@ -15,7 +15,7 @@ describe('v2 tabs', () => {
   // [L-5, A75] Swap and Analytics are real v1 pages (src/app/swap, src/app/analytics) — with v2 off, those two
   // URLs stay untouched and v1 renders its own page. The other 6 have no v1 page at all: proxy.ts redirects them
   // to `/` under v1 rather than falling through to Next's generic 404.
-  it('V2_ONLY_TAB_PATHS: the 6 tabs with no v1 page of their own — everything but Swap and Analytics', () => {
+  it('V2_ONLY_TAB_PATHS: the 6 tabs with no v1 page of their own, everything but Swap and Analytics', () => {
     expect(V2_ONLY_TAB_PATHS).toEqual(['/portfolio', '/dca', '/limit', '/sltp', '/orders', '/history'])
     expect(V2_TAB_PATHS.filter((p) => !V2_ONLY_TAB_PATHS.includes(p))).toEqual(['/swap', '/analytics'])
   })

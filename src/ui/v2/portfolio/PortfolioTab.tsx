@@ -17,7 +17,7 @@ import { approvalRows, formatLastUpdated, groupPortfolio, shortenAddress } from 
 import './portfolio.css'
 
 const CAPS = 'font-v2-mono text-[10px] font-semibold uppercase tracking-[1.5px]'
-const DASH = '—' // v1's literal for an unpriced total / row
+const DASH = 'n/a' // v1's literal for an unpriced total / row
 
 /** v1 `TokenAvatar`: the token logo, or its first letter on a disc when there is none / it fails to load. Decorative. */
 function TokenAvatar({ token }: { token: Token }) {

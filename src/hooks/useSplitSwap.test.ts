@@ -265,7 +265,7 @@ async function runSplit(
   }
 }
 
-describe('useSplitSwap — initial state', () => {
+describe('useSplitSwap: initial state', () => {
   it('starts in idle state with no legs or error', () => {
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     expect(result.current.status).toBe('idle')
@@ -276,7 +276,7 @@ describe('useSplitSwap — initial state', () => {
   })
 })
 
-describe('useSplitSwap — guards', () => {
+describe('useSplitSwap: guards', () => {
   it('does nothing when tokenIn is missing', async () => {
     const { result } = renderHook(() => useSplitSwap(null, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
@@ -309,7 +309,7 @@ describe('useSplitSwap — guards', () => {
   })
 })
 
-describe('useSplitSwap — happy path', () => {
+describe('useSplitSwap: happy path', () => {
   it('completes a 2-leg FeeCollector swap and runs each per-leg validator twice', async () => {
     mockSwapFetch(() => makeQuote())
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
@@ -364,7 +364,7 @@ describe('useSplitSwap — happy path', () => {
   })
 })
 
-describe('useSplitSwap — security validator failures', () => {
+describe('useSplitSwap: security validator failures', () => {
   it('rejects truncated calldata (<10 chars)', async () => {
     mockSwapFetch(() => makeQuote({ data: '0x' }))
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
@@ -429,7 +429,7 @@ describe('useSplitSwap — security validator failures', () => {
   })
 })
 
-describe('useSplitSwap — partial / mixed outcomes', () => {
+describe('useSplitSwap: partial / mixed outcomes', () => {
   it('marks status=partial when first leg succeeds but second fails', async () => {
     let call = 0
     mockSwapFetch(() => {
@@ -475,7 +475,7 @@ describe('useSplitSwap — partial / mixed outcomes', () => {
   })
 })
 
-describe('useSplitSwap — [P207] per-leg pre-swap simulation', () => {
+describe('useSplitSwap: [P207] per-leg pre-swap simulation', () => {
   it('simulates each leg before broadcast', async () => {
     mockSwapFetch(() => makeQuote())
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
@@ -494,7 +494,7 @@ describe('useSplitSwap — [P207] per-leg pre-swap simulation', () => {
     mockSwapFetch(() => makeQuote())
     // Leg 1 simulation reverts, leg 2 passes.
     mockSimulateSwapTx
-      .mockResolvedValueOnce({ success: false, error: 'Swap output below minimum — leg would revert' })
+      .mockResolvedValueOnce({ success: false, error: 'Swap output below minimum: leg would revert' })
       .mockResolvedValue({ success: true, simulated: true })
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
@@ -539,7 +539,7 @@ describe('useSplitSwap — [P207] per-leg pre-swap simulation', () => {
   })
 })
 
-describe('useSplitSwap — [P221] chainId threading', () => {
+describe('useSplitSwap: [P221] chainId threading', () => {
   it('forwards the active chainId to each per-leg swap API call', async () => {
     // [SPRINT-9G G6] The active chain is now useActiveChainId() (the wallet
     // chain), not wagmi useChainId() — so set it via useAccount().chain.
@@ -571,7 +571,7 @@ describe('useSplitSwap — [P221] chainId threading', () => {
   })
 })
 
-describe('useSplitSwap — reset()', () => {
+describe('useSplitSwap: reset()', () => {
   it('returns to idle and clears legs after an error', async () => {
     mockSwapFetch(() => makeQuote({ data: '0x' }))
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
@@ -588,8 +588,8 @@ describe('useSplitSwap — reset()', () => {
   })
 })
 
-describe('useSplitSwap — unusable quote refusal [W2-L-01]', () => {
-  it('REFUSES a fee-routed leg whose toAmount is malformed — never encodes minimumOutput 0', async () => {
+describe('useSplitSwap: unusable quote refusal [W2-L-01]', () => {
+  it('REFUSES a fee-routed leg whose toAmount is malformed, never encodes minimumOutput 0', async () => {
     // [W2-L-01] Previously (10-L-01) a toAmount that can't be parsed as bigint
     // fell back to legMinOutput = 0n and the leg still broadcast — silently
     // disabling the FeeCollector's on-chain InsufficientOutput check for that
@@ -619,7 +619,7 @@ describe('useSplitSwap — unusable quote refusal [W2-L-01]', () => {
 // [SPRINT-9G G6] One chain-id source of truth: useSplitSwap must build each leg
 // for useActiveChainId() (same as the quote pipeline), not a divergent wagmi
 // useChainId().
-describe('useSplitSwap — chain-id source of truth [SPRINT-9G G6]', () => {
+describe('useSplitSwap: chain-id source of truth [SPRINT-9G G6]', () => {
   it('builds each leg on the ACTIVE (wallet) chain, not a divergent wagmi useChainId', async () => {
     // Wallet on Base (8453) while wagmi useChainId() still reports mainnet (1).
     vi.mocked(useAccount).mockReturnValue({
@@ -638,8 +638,8 @@ describe('useSplitSwap — chain-id source of truth [SPRINT-9G G6]', () => {
   })
 })
 
-describe('useSplitSwap — [SPRINT-9R R1] review gate (no signature without review)', () => {
-  it('execute() freezes the plan and NEVER signs — confirmPlan is required to broadcast', async () => {
+describe('useSplitSwap: [SPRINT-9R R1] review gate (no signature without review)', () => {
+  it('execute() freezes the plan and NEVER signs: confirmPlan is required to broadcast', async () => {
     mockSwapFetch(() => makeQuote())
     const { result } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
@@ -698,8 +698,8 @@ describe('useSplitSwap — [SPRINT-9R R1] review gate (no signature without revi
 // [SPRINT-9R audit] The two-phase review-pause holds a frozen plan in 'awaiting-review' for an
 // indefinite, human-paced wait. These guard the conditions that must INVALIDATE that frozen plan —
 // the parity gaps the auditor flagged (the single-swap useSwap already does all three).
-describe('useSplitSwap — [SPRINT-9R audit] frozen-plan invalidation', () => {
-  it('discards the frozen plan on an account switch (FULL-M-04 parity) — confirmPlan cannot sign wallet-A calldata under wallet B', async () => {
+describe('useSplitSwap: [SPRINT-9R audit] frozen-plan invalidation', () => {
+  it('discards the frozen plan on an account switch (FULL-M-04 parity): confirmPlan cannot sign wallet-A calldata under wallet B', async () => {
     mockSwapFetch(() => makeQuote())
     const { result, rerender } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 100))
@@ -721,7 +721,7 @@ describe('useSplitSwap — [SPRINT-9R audit] frozen-plan invalidation', () => {
     expect(mockSendTransactionAsync).not.toHaveBeenCalled()
   })
 
-  it('discards the frozen plan on a chain switch (P219 parity) — never broadcasts a chain-A plan onto chain B', async () => {
+  it('discards the frozen plan on a chain switch (P219 parity), never broadcasts a chain-A plan onto chain B', async () => {
     mockSwapFetch(() => makeQuote())
     const { result, rerender } = renderHook(() => useSplitSwap(ETH, USDC, '1', 0.5))
     const route = makeSplitRoute(makeLeg('1inch', 100))
@@ -741,7 +741,7 @@ describe('useSplitSwap — [SPRINT-9R audit] frozen-plan invalidation', () => {
     expect(mockSendTransactionAsync).not.toHaveBeenCalled()
   })
 
-  it('refuses to rebuild while Phase B is broadcasting — a swap-button re-click cannot double-broadcast in-flight legs', async () => {
+  it('refuses to rebuild while Phase B is broadcasting. A swap-button re-click cannot double-broadcast in-flight legs', async () => {
     mockSwapFetch(() => makeQuote())
     // Hang the FIRST signature so the hook stays in 'executing' across the re-entry attempt.
     let release!: (v: `0x${string}`) => void
@@ -781,7 +781,7 @@ describe('useSplitSwap — [SPRINT-9R audit] frozen-plan invalidation', () => {
 // analysis quote), and (c) encode that minimum into the actual
 // FeeCollector calldata that gets signed.
 // ─────────────────────────────────────────────────────────────
-describe('useSplitSwap — Base split legMinOutput freshness [CHORE-SPLITROUTE-CHAINID]', () => {
+describe('useSplitSwap: Base split legMinOutput freshness [CHORE-SPLITROUTE-CHAINID]', () => {
   it('encodes deriveMinimumOutput(fresh toAmount) into the Base FeeCollector call', async () => {
     const { deriveMinimumOutput } = await vi.importActual<typeof import('@/lib/minimum-output')>('@/lib/minimum-output')
     const { FEE_COLLECTOR_ABI } = await vi.importActual<typeof import('@/lib/constants')>('@/lib/constants')
@@ -852,7 +852,7 @@ describe('useSplitSwap — Base split legMinOutput freshness [CHORE-SPLITROUTE-C
 // the only thing between a tampered leg response and a signed leg was the
 // ceiling-side, partner-fee-only validateFeeIntegrity.
 // ─────────────────────────────────────────────────────────────
-describe('useSplitSwap — [Auditor H-02] quote-vs-swap floor, per leg and on the total', () => {
+describe('useSplitSwap: [Auditor H-02] quote-vs-swap floor, per leg and on the total', () => {
   const QUOTED = '500000000' // each leg's quoted share
   const HALVED = '250000000'
 
@@ -879,7 +879,7 @@ describe('useSplitSwap — [Auditor H-02] quote-vs-swap floor, per leg and on th
     expect(mockSendTransactionAsync).not.toHaveBeenCalled()
   })
 
-  it('ONE leg below its floor blocks the WHOLE split — no partial execution', async () => {
+  it('ONE leg below its floor blocks the WHOLE split: no partial execution', async () => {
     // Leg 1 (1inch) is honest and is planned first; leg 2 (0x) comes back at
     // half its quoted share. The whole plan must be discarded, not just that
     // leg skipped: a partial fill would execute half the trade at a price the
@@ -969,7 +969,7 @@ describe('useSplitSwap — [Auditor H-02] quote-vs-swap floor, per leg and on th
 // legs' /swap responses are chosen so their SUM exactly matches the total quoted (the
 // source-agnostic aggregate sees zero shortfall and would freeze the plan on its own), while one
 // leg individually lands at 10% of its own quoted share — only reachable by the per-leg check.
-describe('useSplitSwap — [Auditor round 2, L-01] the per-leg floor is independently load-bearing', () => {
+describe('useSplitSwap: [Auditor round 2, L-01] the per-leg floor is independently load-bearing', () => {
   function legFor(source: SplitLeg['source'], percent: number, quoted: string): SplitLeg {
     return {
       source, percent,
@@ -980,7 +980,7 @@ describe('useSplitSwap — [Auditor round 2, L-01] the per-leg floor is independ
     }
   }
 
-  it('the 0x leg lands below its own floor while the total still clears the aggregate — only the per-leg check refuses it', async () => {
+  it('the 0x leg lands below its own floor while the total still clears the aggregate, only the per-leg check refuses it', async () => {
     const QUOTED = '500000000' // each leg's quoted share
     // [fix/stale-quote-pair-flip] Two-sided guard: 1inch can only overshoot to inside its own ceiling
     // (504M < 504.495M), 0x lands at 490M (< its 494.505M floor). Summed: 994M — inside the
@@ -1009,7 +1009,7 @@ describe('useSplitSwap — [Auditor round 2, L-01] the per-leg floor is independ
 // netting nor the final floor division divides exactly; the expected floors are computed from the
 // REAL exported helpers (feeAdjustedQuoteBasis, SWAP_QUOTE_TOLERANCE_BPS), not hand-derived
 // numbers, so they can't silently drift from the production formula.
-describe('useSplitSwap — [Auditor round 2, L-02] aggregate: single netting + floor rounds down', () => {
+describe('useSplitSwap: [Auditor round 2, L-02] aggregate: single netting + floor rounds down', () => {
   const SLIPPAGE_PERCENT = 0.5
   const COMBINED_BPS = BigInt(Math.round(SLIPPAGE_PERCENT * 100)) + BigInt(SWAP_QUOTE_TOLERANCE_BPS)
   const Q = 333333337n // per-leg quoted share — deliberately not a multiple of 10_000
@@ -1036,7 +1036,7 @@ describe('useSplitSwap — [Auditor round 2, L-02] aggregate: single netting + f
     expect((perLegBasis * 2n * (10000n - COMBINED_BPS)) % 10000n).not.toBe(0n)
   })
 
-  it('[round-down] a response landing EXACTLY on the aggregate floor still clears — proves the floor rounds DOWN, not up', async () => {
+  it('[round-down] a response landing EXACTLY on the aggregate floor still clears: proves the floor rounds DOWN, not up', async () => {
     // leg1 + leg2 === aggFloorSingleNet exactly, each individually >= its own per-leg floor (so
     // the per-leg check above never fires and this genuinely exercises the aggregate).
     const leg1 = (perLegFloor + 1n).toString()
@@ -1083,7 +1083,7 @@ describe('useSplitSwap — [Auditor round 2, L-02] aggregate: single netting + f
 // is consent — the plan is discarded and the dialog opens — never a per-leg error that ends in
 // "No split leg can execute".
 // ─────────────────────────────────────────────────────────────
-describe('useSplitSwap — [fix/unpriced-ack-paths L-3] the ack rides every leg; a 409 is consent, not an error', () => {
+describe('useSplitSwap: [fix/unpriced-ack-paths L-3] the ack rides every leg; a 409 is consent, not an error', () => {
   const ACK_409 = { error: 'No reference price for this pair', code: 'unpriced_ack_required', requiredTier: 'unpriced', unpriceable: true }
   const twoLegs = () => makeSplitRoute(makeLeg('1inch', 60), makeLeg('0x', 40))
   function captureBodies() {

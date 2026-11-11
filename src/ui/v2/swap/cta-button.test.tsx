@@ -15,9 +15,9 @@ describe('one filled shape per screen: only the actionable states are the cream 
     [{ kind: 'wrong-network', label: 'Switch to Ethereum', disabled: false }, 'text', /text-v2-amber/],
     [{ kind: 'in-flight', label: 'Executing swap...', disabled: true }, 'text', /text-v2-muted/],
     [{ kind: 'complete', label: 'Swap complete', disabled: true }, 'text', /text-v2-green/],
-    [{ kind: 'retry', label: 'Error — retry', disabled: false }, 'text', /text-v2-red/],
+    [{ kind: 'retry', label: 'Error: retry', disabled: false }, 'text', /text-v2-red/],
     [{ kind: 'blocked', label: 'Confirm price impact to swap', disabled: true, recoverable: true }, 'text', /text-v2-amber/],
-    [{ kind: 'blocked', label: 'Asset depegged — swap blocked', disabled: true, recoverable: false }, 'text', /text-v2-red/],
+    [{ kind: 'blocked', label: 'Asset depegged: swap blocked', disabled: true, recoverable: false }, 'text', /text-v2-red/],
   ]
   it.each(table)('%o → %s', (cta, variant, tone) => {
     const onClick = vi.fn()

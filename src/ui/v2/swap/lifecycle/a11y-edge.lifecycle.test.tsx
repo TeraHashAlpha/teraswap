@@ -131,7 +131,7 @@ describe('focus stays in the sheet while the hooks move', () => {
     expect(dialog().contains(document.activeElement)).toBe(true)
   })
 
-  it('Tab cycles inside the sheet (the trap is the shared Sheet\'s) — including the busy button, which stays in the tab order', () => {
+  it('Tab cycles inside the sheet (the trap is the shared Sheet\'s), including the busy button, which stays in the tab order', () => {
     openReview()
     setSwap({ status: 'fetching_swap' })
     const items = [...dialog().querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input')]

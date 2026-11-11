@@ -137,7 +137,7 @@ describe('banner, toasts, drawer (D3 items 14, 16)', () => {
     ['warning', 'ts-v2-accent-stroke'],
     ['info', 'ts-v2-accent-stroke'],
     ['loading', 'ts-v2-accent-stroke'],
-  ] as const)('a %s toast is a solid strip with a 2 px %s accent — same surface for all', (type: ToastType, accent) => {
+  ] as const)('a %s toast is a solid strip with a 2 px %s accent: same surface for all', (type: ToastType, accent) => {
     function Fire() {
       const { toast } = useV2Toast()
       return <button onClick={() => toast({ type, title: `t-${type}` })}>fire</button>

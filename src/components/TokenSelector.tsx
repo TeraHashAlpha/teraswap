@@ -318,7 +318,7 @@ export default function TokenSelector({ selected, onSelect, disabledAddress, hid
                   {filtered.length > 0 && (
                     <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-cream-35">
                       {filtered.length === SEARCH_RESULT_LIMIT
-                        ? `first ${SEARCH_RESULT_LIMIT} results — refine to narrow`
+                        ? `first ${SEARCH_RESULT_LIMIT} results: refine to narrow`
                         : `${filtered.length} result${filtered.length !== 1 ? 's' : ''}`}
                     </p>
                   )}
@@ -430,12 +430,12 @@ function TokenRow({
         <TokenAddressBadge address={token.address} size={symbolCollision ? 'md' : 'sm'} showExplorerLink={symbolCollision} />
         {symbolCollision && (
           <div className="mt-0.5 text-[10px] leading-snug text-amber-300/80">
-            Same symbol as a listed token — verify the contract address
+            Same symbol as a listed token: verify the contract address
           </div>
         )}
         {unavailable && (
           <div className="mt-0.5 text-[10px] leading-snug text-danger">
-            Unavailable — this chain no longer returns a valid ERC-20 at this address
+            Unavailable: this chain no longer returns a valid ERC-20 at this address
           </div>
         )}
       </div>

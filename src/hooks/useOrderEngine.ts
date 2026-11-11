@@ -710,7 +710,7 @@ export function useOrderEngine() {
             requestedBuys: config.dcaTotal ?? 1,
             priceUsd,
           }).text
-        : `Order amount must be at least ${formatMinBuyUnit(MIN_ORDER_AMOUNT, config.tokenIn.decimals, config.tokenIn.symbol, priceUsd)} — the on-chain minimum.`
+        : `Order amount must be at least ${formatMinBuyUnit(MIN_ORDER_AMOUNT, config.tokenIn.decimals, config.tokenIn.symbol, priceUsd)}. The on-chain minimum.`
       setLatestEvent({
         type: 'order_error',
         orderId: crypto.randomUUID(),
@@ -796,7 +796,7 @@ export function useOrderEngine() {
     // sat open (it could never trigger). Fail-safe → discard + surface an error so the user recreates.
     if (Number(p.order.expiry) <= Math.floor(Date.now() / 1000)) {
       setPendingOrder(null)
-      setLatestEvent({ type: 'order_error', orderId: crypto.randomUUID(), error: 'Order expired before signing — please recreate it.' })
+      setLatestEvent({ type: 'order_error', orderId: crypto.randomUUID(), error: 'Order expired before signing: please recreate it.' })
       return
     }
     // [SPRINT-V3-P2] order.maxSlippageBps defined ⇒ this order was built for v3 (createOrder
@@ -1052,7 +1052,7 @@ export function useOrderEngine() {
         setLatestEvent({
           type: 'order_error',
           orderId,
-          error: `This order is on ${chainName} — switch your wallet to ${chainName} to cancel it.`,
+          error: `This order is on ${chainName}: switch your wallet to ${chainName} to cancel it.`,
         })
         return
       }
@@ -1064,7 +1064,7 @@ export function useOrderEngine() {
       setLatestEvent({
         type: 'order_error',
         orderId,
-        error: `Switched to ${chainName} — click Cancel again to continue.`,
+        error: `Switched to ${chainName}: click Cancel again to continue.`,
       })
       return
     }
@@ -1080,7 +1080,7 @@ export function useOrderEngine() {
       setLatestEvent({
         type: 'order_error',
         orderId,
-        error: `v3 conditional orders are not yet available on chain ${chainId} — this order cannot be cancelled here.`,
+        error: `v3 conditional orders are not yet available on chain ${chainId}. This order cannot be cancelled here.`,
       })
       return
     }

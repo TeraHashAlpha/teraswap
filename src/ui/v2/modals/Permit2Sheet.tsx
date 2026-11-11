@@ -29,7 +29,7 @@ export function Permit2Sheet({ onConfirm, onCancel, amount, tokenSymbol }: { onC
   }
 
   return (
-    <Sheet name="permit2" size="md" title="About to sign a Permit2 approval" subtitle="One-time explainer — understand what you're signing" onClose={onCancel} initialFocusRef={cancelRef}>
+    <Sheet name="permit2" size="md" title="About to sign a Permit2 approval" subtitle="One-time explainer: understand what you're signing" onClose={onCancel} initialFocusRef={cancelRef}>
       <p className="mt-5 font-v2-mono text-[11px] font-semibold uppercase tracking-[1.5px] text-v2-cream">What you&apos;re signing</p>
       <div className="mt-1">
         <ReviewRow label="Spender">Permit2 (0x0000...30F1)</ReviewRow>
@@ -66,7 +66,7 @@ export function Permit2Sheet({ onConfirm, onCancel, amount, tokenSymbol }: { onC
             !
           </span>
           <span>
-            If a site asks you to sign a Permit2 message with unlimited amount and far-future expiry — <b className="font-semibold text-v2-red">reject it immediately</b>
+            If a site asks you to sign a Permit2 message with unlimited amount and far-future expiry: <b className="font-semibold text-v2-red">reject it immediately</b>
           </span>
         </li>
       </ul>

@@ -261,13 +261,13 @@ const glyphs = (list: readonly string[], why: string): AllowedRemoval[] => list.
 export const OPEN_DELTAS = [
   { item: 'Limit order panel (LimitOrderPanel)', tab: 'Limit', why: 'v2 has no pane; AppShell mounts the skeleton TabPane', decision: 'owner, feat/ui-v2-mobile-parity: keep "Soon" in v2 until a pane exists' },
   { item: 'Take-Profit / SL panel (ConditionalOrderPanel)', tab: 'SL/TP', why: 'v2 has no pane; AppShell mounts the skeleton TabPane', decision: 'owner, feat/ui-v2-mobile-parity: keep "Soon" in v2 until a pane exists' },
-  { item: '"Coming Soon on <chain>" banner (2 strings)', tab: 'Swap', why: 'only when a chain has no FeeCollector (P223); v2 disables the CTA but prints no banner. Unreachable on 1/8453/42161 where all three are deployed', decision: 'owner, feat/ui-v2-mobile-parity (asked in-session): record, do not add — pinned below to exactly its two strings' },
+  { item: '"Coming Soon on <chain>" banner (2 strings)', tab: 'Swap', why: 'only when a chain has no FeeCollector (P223); v2 disables the CTA but prints no banner. Unreachable on 1/8453/42161 where all three are deployed', decision: 'owner, feat/ui-v2-mobile-parity (asked in-session): record, do not add. Pinned below to exactly its two strings' },
 ] as const
 /** The tabs that have NO v2 pane at all (a subset of the deltas above). */
 const NO_PANE_TABS = ['limit', 'sltp'] as const
 
 /** v1 SwapBox's P223 banner on a chain with no FeeCollector; v2 has no counterpart (unreachable on 1/8453/42161 in prod, where all three are deployed). */
-const SWAP_INACTIVE_BANNER = ['🚀 Coming Soon on', "Swaps aren't live on this network yet — switch to Ethereum to trade. You can still browse tokens here."]
+const SWAP_INACTIVE_BANNER = ['🚀 Coming Soon on', "Swaps aren't live on this network yet: switch to Ethereum to trade. You can still browse tokens here."]
 
 function expectClean(label: string, r: ParityResult, minNodes = 1) {
   console.log(`[sweep] ${label}: v1 text nodes ${r.v1Nodes}, v1 links ${r.v1Hrefs}, missing text ${r.missingText.length}, missing hrefs ${r.missingHrefs.length}, stale allow ${r.staleAllow.length}`)
@@ -376,13 +376,13 @@ describe.each(DCA_CHAINS_LIVE)('sweep · DCA · chain %i (a DCA chain: the card)
     cleanup()
     const v2 = render(<DcaCard chainId={chainId} />)
     if (amount) typeAmount(v2.container, amount)
-    const allow = [...ALLOW, ...(amount ? [{ text: 'Start DCA — 10 buys over 10.0 days', reason: 'owner B6a: "Review DCA"; the v1 label also names buys and duration, which the summary rows state' }] : [])]
+    const allow = [...ALLOW, ...(amount ? [{ text: 'Start DCA: 10 buys over 10.0 days', reason: 'owner B6a: "Review DCA"; the v1 label also names buys and duration, which the summary rows state' }] : [])]
     expectClean(`DCA ${chainName(chainId)} amount ${amount || 'empty'}`, compareContent(v1Root, v2.container, allow), 20)
   })
 })
 
 describe('sweep · DCA · chain 1 (not a DCA chain: the network gate)', () => {
-  it("v1's ComingSoonPanel(dca) ⊆ v2's DcaNetworkGate — the sentence and both switches, never \"Soon\"", () => {
+  it("v1's ComingSoonPanel(dca) ⊆ v2's DcaNetworkGate. The sentence and both switches, never \"Soon\"", () => {
     h.mode = 'dca'
     setWallet(1, false)
     const v1 = render(<ComingSoonPanel mode="dca" chainId={1} onSwap={noop} />)
@@ -525,7 +525,7 @@ describe.each(CHAINS)('sweep · landing · selected chain %i', (chainId) => {
 
 // ══ the sweep covers every tab ═════════════════════════════════════════════════════════════════════════════════════════════════
 describe('sweep · coverage', () => {
-  it('every one of the 8 tabs is either compared above or a documented no-pane tab in OPEN_DELTAS — a new tab cannot slip past', async () => {
+  it('every one of the 8 tabs is either compared above or a documented no-pane tab in OPEN_DELTAS. A new tab cannot slip past', async () => {
     const { V2_TABS } = await import('../shell/tab-paths')
     const compared = ['swap', 'portfolio', 'dca', 'orders', 'history', 'analytics']
     expect([...compared, ...NO_PANE_TABS].sort()).toEqual(V2_TABS.map((t) => t.id).sort())

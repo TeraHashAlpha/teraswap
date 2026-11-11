@@ -105,7 +105,7 @@ describe('§4 radius, fonts, motion', () => {
     expect(VARS['--t-underline']).toBe('600ms')
   })
 
-  it('landing photo tokens: 900 ms cross-fade + 1600 ms scale (owner decision, 26 Oct review — supersedes MOTION-SPEC §3 "180 ms")', () => {
+  it('landing photo tokens: 900 ms cross-fade + 1600 ms scale (owner decision, 26 Oct review. Supersedes MOTION-SPEC §3 "180 ms")', () => {
     expect(VARS['--t-photo']).toBe('900ms')
     expect(VARS['--t-photo-scale']).toBe('1600ms')
     expect(VARS['--t-slow']).toBe('180ms') // untouched: still the pack value for everything that is not the photo stack
@@ -163,7 +163,7 @@ describe('Tailwind v2 scope (own pass: tailwind.v2.config.ts)', () => {
     expect(v2Config.content).toEqual(['./src/ui/v2/**/*.{ts,tsx}', './src/app/v2/**/*.{ts,tsx}'])
   })
 
-  it('main (v1) config has no v2 theme and does not scan the v2 tree — v1 CSS output is unchanged', () => {
+  it('main (v1) config has no v2 theme and does not scan the v2 tree: v1 CSS output is unchanged', () => {
     expect(main.colors).not.toHaveProperty('v2')
     expect(Object.keys(main.fontFamily).filter((k) => k.startsWith('v2-'))).toEqual([])
     expect(main.borderRadius).toBeUndefined()

@@ -427,7 +427,7 @@ describe('scroll narrative: markup (MOTION-SPEC §1, §4)', () => {
     expect(Math.max(...cards.map((c) => staggerDelayMs(idx(c))))).toBe(160)
   })
 
-  it('Round 7 D2: every narrative section has its own local scrim and no box — copy sits straight on the photo', () => {
+  it('Round 7 D2: every narrative section has its own local scrim and no box. Copy sits straight on the photo', () => {
     mount()
     const BOXED = /\b(bg-v2-surface2?(\/\d+)?|border-v2-border|rounded-v2-(card|control|chip))\b/
     for (const id of NARRATIVE_SECTIONS) {

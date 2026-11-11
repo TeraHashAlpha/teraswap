@@ -176,7 +176,7 @@ export default function WalletModal({ open, onClose }: Props) {
           {/* Balance */}
           <div className="mt-3 flex items-baseline gap-1.5">
             <span className="font-display text-2xl font-bold text-cream">
-              {balance ? fmtToken(balance.formatted) : '—'}
+              {balance ? fmtToken(balance.formatted) : 'n/a'}
             </span>
             <span className="text-sm font-medium text-cream-50">
               {balance?.symbol ?? 'ETH'}

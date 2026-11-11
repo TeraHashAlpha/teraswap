@@ -130,7 +130,7 @@ afterEach(() => {
 })
 
 describe('NarrativeStack: observers and lazy photos', () => {
-  it('uses IntersectionObserver only — no scroll or wheel listener anywhere', () => {
+  it('uses IntersectionObserver only: no scroll or wheel listener anywhere', () => {
     const add = vi.spyOn(window, 'addEventListener')
     const addDoc = vi.spyOn(document, 'addEventListener')
     mountPage()

@@ -87,7 +87,7 @@ beforeEach(() => {
   useChainIdMock.mockReturnValue(8453)
 })
 
-describe('DCAPanel Positions — failed order', () => {
+describe('DCAPanel Positions: failed order', () => {
   it('shows a failed DCA order as "Failed" with a default reason when the keeper left no error', () => {
     setOrders([failedDcaOrder({ error: null })])
     renderWithProviders(<DCAPanel />)

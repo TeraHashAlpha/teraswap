@@ -712,7 +712,7 @@ describe('usePortfolio', () => {
 
 // ── [E-3] portfolio Base activation ──────────────────────────────────────────
 
-describe('usePortfolio — chain-aware [E-3]', () => {
+describe('usePortfolio: chain-aware [E-3]', () => {
   const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'.toLowerCase()
 
   it('mainnet: discovery + prices requests carry chainId=1 (explicit, behavior-identical)', async () => {
@@ -788,7 +788,7 @@ describe('usePortfolio — chain-aware [E-3]', () => {
 
 // ─── [fix/v1-maintenance C3] hidden-tab polling ───────────
 
-describe('usePortfolio — hidden-tab polling [fix/v1-maintenance C3]', () => {
+describe('usePortfolio: hidden-tab polling [fix/v1-maintenance C3]', () => {
   const setVisibility = (state: 'visible' | 'hidden') => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
     document.dispatchEvent(new Event('visibilitychange'))

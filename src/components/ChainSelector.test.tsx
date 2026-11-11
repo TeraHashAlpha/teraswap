@@ -55,7 +55,7 @@ beforeEach(() => {
   useDisconnectedChainSelection.setState({ chainId: null })
 })
 
-describe('[9Y] ChainSelector — chain logos', () => {
+describe('[9Y] ChainSelector: chain logos', () => {
   it('shows the active chain logo in the trigger', () => {
     renderWithProviders(<ChainSelector />)
     expect(screen.getByTestId('chain-icon-1')).toBeInTheDocument()
@@ -71,14 +71,14 @@ describe('[9Y] ChainSelector — chain logos', () => {
   })
 })
 
-describe('[SPRINT-46-ARBITRUM-CONFIG] ChainSelector — Arbitrum registered dark (feeCollector null)', () => {
+describe('[SPRINT-46-ARBITRUM-CONFIG] ChainSelector: Arbitrum registered dark (feeCollector null)', () => {
   // [CORRECTION] The dark-launch premise is NOT "absent from the chain selector" — this
   // component lists every registry-driven chain unconditionally (getSupportedChainIds().map)
   // and shows a "Soon" badge for any feeCollector === null entry. That IS the existing Base
   // pre-activation pattern this sprint mirrors exactly; Arbitrum appearing with a "Soon" badge
   // here is expected, unchanged behavior — not a UI activation. Quotes/swaps stay blocked
   // downstream by isChainActive(42161) === false regardless of what this list renders.
-  it('Arbitrum appears with a "Soon" badge (generic icon, no crash) — same pattern as Base', () => {
+  it('Arbitrum appears with a "Soon" badge (generic icon, no crash): same pattern as Base', () => {
     renderWithProviders(<ChainSelector />)
     fireEvent.click(screen.getByLabelText(/network/i))
     expect(screen.getByTestId('chain-icon-42161')).toBeInTheDocument()
@@ -100,7 +100,7 @@ describe('[SPRINT-46-ARBITRUM-CONFIG] ChainSelector — Arbitrum registered dark
   })
 })
 
-describe('[CHORE-CHAIN-SELECTOR-UX] search popover — filter, ARIA, keyboard, Esc', () => {
+describe('[CHORE-CHAIN-SELECTOR-UX] search popover: filter, ARIA, keyboard, Esc', () => {
   it('renders a search input with the reference placeholder, autofocused on open', () => {
     renderWithProviders(<ChainSelector />)
     const input = openSelector()

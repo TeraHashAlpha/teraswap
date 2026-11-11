@@ -63,12 +63,12 @@ const ETH_USD_FEED = '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419'
 /** Base's canonical WETH — the token key CHAINLINK_FEEDS_BY_CHAIN[8453] maps to Base ETH/USD. */
 const BASE_WETH = '0x4200000000000000000000000000000000000006'
 
-describe('getOrderExecutor — wired chains', () => {
+describe('getOrderExecutor: wired chains', () => {
   it('chain 1 resolves to the exact checksummed mainnet OrderExecutor', () => {
     expect(getOrderExecutor(1)).toBe(MAINNET_EXECUTOR)
   })
 
-  it('chain 8453 resolves to Base OrderExecutor — its OWN deployment, NOT the mainnet string', () => {
+  it('chain 8453 resolves to Base OrderExecutor. Its OWN deployment, NOT the mainnet string', () => {
     expect(getOrderExecutor(8453)).toBe(BASE_EXECUTOR)
     // Guard the documented invariant: Base must not reuse the mainnet executor string
     // (on Base that address is a FeeCollector with different bytecode, no executeOrder).
@@ -76,7 +76,7 @@ describe('getOrderExecutor — wired chains', () => {
   })
 })
 
-describe('getOrderExecutor — fail-closed on unwired chains', () => {
+describe('getOrderExecutor: fail-closed on unwired chains', () => {
   // Arbitrum (42161) is the canonical "looks plausible but unwired" case.
   it('chain 42161 (Arbitrum) is unwired → null', () => {
     expect(getOrderExecutor(42161)).toBeNull()
@@ -87,7 +87,7 @@ describe('getOrderExecutor — fail-closed on unwired chains', () => {
   // REAL, resolvable ChainConfig. This pins that registering the chain-config layer did NOT
   // also (accidentally or otherwise) wire an OrderExecutor: ORDER_EXECUTOR_BY_CHAIN has no
   // 42161 key, so the config-only registry change carries zero order/DCA surface with it.
-  it('registering CHAIN_CONFIGS[42161] did not wire an OrderExecutor — no key in the map', () => {
+  it('registering CHAIN_CONFIGS[42161] did not wire an OrderExecutor: no key in the map', () => {
     expect(Object.prototype.hasOwnProperty.call(ORDER_EXECUTOR_BY_CHAIN, 42161)).toBe(false)
   })
 
@@ -106,7 +106,7 @@ describe('getOrderExecutor — fail-closed on unwired chains', () => {
   })
 })
 
-describe('getOrderExecutorDomain — EIP-712 domain', () => {
+describe('getOrderExecutorDomain: EIP-712 domain', () => {
   it('chain 1 deep-equals the byte-identical mainnet domain', () => {
     expect(getOrderExecutorDomain(1)).toEqual({
       name: 'TeraSwapOrderExecutor',
@@ -143,7 +143,7 @@ describe('getOrderExecutorDomain — EIP-712 domain', () => {
   })
 })
 
-describe('ORDER_EXECUTOR_ADDRESS — deprecated mainnet alias', () => {
+describe('ORDER_EXECUTOR_ADDRESS: deprecated mainnet alias', () => {
   it('equals getOrderExecutor(1) (the mainnet entry)', () => {
     expect(ORDER_EXECUTOR_ADDRESS).toBe(getOrderExecutor(1))
     expect(ORDER_EXECUTOR_ADDRESS).toBe(MAINNET_EXECUTOR)
@@ -159,7 +159,7 @@ describe('CANCEL_ORDER_TYPES [FULL-H-01]', () => {
   })
 })
 
-describe('MIN_ORDER_AMOUNT [CHORE-DCA-PRELAUNCH-FIXES] — single source pinned to the contract', () => {
+describe('MIN_ORDER_AMOUNT [CHORE-DCA-PRELAUNCH-FIXES]: single source pinned to the contract', () => {
   it('equals the on-chain constant TeraSwapOrderExecutor.sol MIN_ORDER_AMOUNT = 10_000 (bigint)', () => {
     // Contract: `uint256 public constant MIN_ORDER_AMOUNT = 10_000;` (TeraSwapOrderExecutor.sol:126),
     // pinned on-chain by contracts/order-engine/test-run.js ("MIN_ORDER_AMOUNT is 10000"). If the
@@ -169,8 +169,8 @@ describe('MIN_ORDER_AMOUNT [CHORE-DCA-PRELAUNCH-FIXES] — single source pinned 
   })
 })
 
-describe('getWhitelistedRouters / getDefaultRouter — chain-aware [chore/dca-router-chainaware]', () => {
-  it('mainnet (1) is UNCHANGED — 1inch v6 with its exact whitelisted address', () => {
+describe('getWhitelistedRouters / getDefaultRouter: chain-aware [chore/dca-router-chainaware]', () => {
+  it('mainnet (1) is UNCHANGED: 1inch v6 with its exact whitelisted address', () => {
     const routers = getWhitelistedRouters(1)
     expect(routers['1inch']).toEqual({ address: ONEINCH_V6, label: '1inch v6' })
   })
@@ -185,7 +185,7 @@ describe('getWhitelistedRouters / getDefaultRouter — chain-aware [chore/dca-ro
     expect(routers['uniswapV3']).toEqual({ address: BASE_SWAPROUTER02, label: 'Uniswap SwapRouter02' })
   })
 
-  it('Base (8453) does NOT offer 1inch — /api/swap cannot serve it on Base (was the SwapFailed cause)', () => {
+  it('Base (8453) does NOT offer 1inch: /api/swap cannot serve it on Base (was the SwapFailed cause)', () => {
     expect(getWhitelistedRouters(8453)['1inch']).toBeUndefined()
   })
 
@@ -201,7 +201,7 @@ describe('getWhitelistedRouters / getDefaultRouter — chain-aware [chore/dca-ro
   // OrderExecutorV3 does not whitelist. A chain map that does not know the chain must fail closed.
   // [feat/arbitrum-dca-gates] 42161 is no longer the unwired example — it carries its own derived
   // set now (below). Optimism (10) has no entry in ROUTERS_BY_CHAIN and stands in for "unknown".
-  it('an unwired chain gets NOTHING — no map, no default router (never mainnet\'s)', () => {
+  it('an unwired chain gets NOTHING: no map, no default router (never mainnet\'s)', () => {
     expect(getWhitelistedRouters(10)).toEqual({})
     expect(getWhitelistedRouters(10)).not.toBe(getWhitelistedRouters(1))
     expect(getDefaultRouter(10)).toBeNull()
@@ -214,7 +214,7 @@ describe('getWhitelistedRouters / getDefaultRouter — chain-aware [chore/dca-ro
   // the negative control) is recorded in config.ts beside ARBITRUM_ROUTERS and in ADR-020's table;
   // it cannot be re-read hermetically, so what this pins is that the ORDER map never carries a
   // router the swap path could not return as tx.to or the keeper could not build calldata for.
-  describe('Arbitrum One (42161) — the order map is a subset of the swap whitelist AND of the keeper route builder', () => {
+  describe('Arbitrum One (42161): the order map is a subset of the swap whitelist AND of the keeper route builder', () => {
     const ARBITRUM = 42161
     const swapWhitelist = ROUTER_WHITELIST_BY_CHAIN[ARBITRUM]
     const keeperRouteBuilder = readFileSync(
@@ -243,7 +243,7 @@ describe('getWhitelistedRouters / getDefaultRouter — chain-aware [chore/dca-ro
       expect(entry.address.toLowerCase()).not.toBe(getWhitelistedRouters(1).uniswapV3.address.toLowerCase())
     })
 
-    it('every Arbitrum order-map entry is in the swap whitelist AND has a keeper source — the intersection, never wider', () => {
+    it('every Arbitrum order-map entry is in the swap whitelist AND has a keeper source. The intersection, never wider', () => {
       const swapAddresses = new Set(Object.values(swapWhitelist).map(a => a.toLowerCase()))
       for (const entry of Object.values(getWhitelistedRouters(ARBITRUM))) {
         expect(swapAddresses.has(entry.address.toLowerCase())).toBe(true)
@@ -262,14 +262,14 @@ describe('getWhitelistedRouters / getDefaultRouter — chain-aware [chore/dca-ro
       expect(keeperSourceFor(swapWhitelist.kyberswap)).toBeNull()
     })
 
-    it('getDefaultRouter(42161) commits Augustus V6 — the same source path the Base keeper fills through', () => {
+    it('getDefaultRouter(42161) commits Augustus V6: the same source path the Base keeper fills through', () => {
       expect(getDefaultRouter(ARBITRUM)).toEqual(getWhitelistedRouters(ARBITRUM).augustusV6)
       expect(getDefaultRouter(ARBITRUM)?.address).not.toBe(ONEINCH_V6)
     })
   })
 })
 
-describe('getChainlinkFeeds — chain-aware, mainnet-only table, fail-closed elsewhere', () => {
+describe('getChainlinkFeeds: chain-aware, mainnet-only table, fail-closed elsewhere', () => {
   it('returns the mainnet ETH/USD feed with exact address + 8 decimals', () => {
     const feeds = getChainlinkFeeds(1)
     expect(feeds['ETH/USD']).toEqual({
@@ -283,7 +283,7 @@ describe('getChainlinkFeeds — chain-aware, mainnet-only table, fail-closed els
   // "IGNORES chainId" test. This table describes MAINNET; handing a Base order a mainnet
   // aggregator is what made every Base fill revert (TeraSwapOrderExecutorV3.sol:1117, reached
   // from :504). A chain this table does not describe now gets NOTHING, never a sibling's feeds.
-  it('a non-mainnet chain gets an EMPTY map — never the mainnet one', () => {
+  it('a non-mainnet chain gets an EMPTY map, never the mainnet one', () => {
     const mainnet = getChainlinkFeeds(1)
     expect(Object.keys(mainnet).length).toBeGreaterThan(0)
     for (const chainId of [8453, 42161, 10, -1]) {
@@ -292,7 +292,7 @@ describe('getChainlinkFeeds — chain-aware, mainnet-only table, fail-closed els
     }
   })
 
-  it('every non-mainnet chain shares ONE frozen empty map — it cannot be mutated into feeds', () => {
+  it('every non-mainnet chain shares ONE frozen empty map. It cannot be mutated into feeds', () => {
     const empty = getChainlinkFeeds(8453)
     expect(getChainlinkFeeds(42161)).toBe(empty)
     expect(Object.isFrozen(empty)).toBe(true)
@@ -304,7 +304,7 @@ describe('getChainlinkFeeds — chain-aware, mainnet-only table, fail-closed els
 
   // The per-chain, ADDRESS-keyed registry is the source of truth the order panels resolve
   // `order.priceFeed` through; this table is deliberately NOT grown per chain to match it.
-  it('is NOT the per-chain feed source — chains/chainlink-feeds.ts covers Base', () => {
+  it('is NOT the per-chain feed source: chains/chainlink-feeds.ts covers Base', () => {
     expect(getChainlinkFeeds(8453)).toEqual({})
     expect(getChainlinkFeed(BASE_WETH, 8453)).not.toBeNull()
   })
@@ -361,8 +361,8 @@ describe('DCA presets [chore/dca-ux-tweaks]', () => {
 })
 
 // ── [SPRINT-V3-P2] v3 config — fail-closed while unconfigured ──────────────────────────────
-describe('getOrderExecutorV3 — fail-closed while v3 is not deployed', () => {
-  it('mainnet (1) and Base (8453) are both null — v3 is not deployed anywhere yet', () => {
+describe('getOrderExecutorV3: fail-closed while v3 is not deployed', () => {
+  it('mainnet (1) and Base (8453) are both null: v3 is not deployed anywhere yet', () => {
     expect(getOrderExecutorV3(1)).toBeNull()
     expect(getOrderExecutorV3(8453)).toBeNull()
   })
@@ -375,12 +375,12 @@ describe('getOrderExecutorV3 — fail-closed while v3 is not deployed', () => {
     expect(getOrderExecutorV3(chainId)).toBeNull()
   })
 
-  it('getOrderExecutorV3Domain THROWS while unconfigured — callers must check getOrderExecutorV3 first', () => {
+  it('getOrderExecutorV3Domain THROWS while unconfigured: callers must check getOrderExecutorV3 first', () => {
     expect(() => getOrderExecutorV3Domain(1)).toThrow(/No OrderExecutorV3 deployed on chain 1/)
     expect(() => getOrderExecutorV3Domain(8453)).toThrow(/No OrderExecutorV3 deployed on chain 8453/)
   })
 
-  it('v3 does not inherit v2 configuration — a wired v2 chain does NOT imply a wired v3 chain', () => {
+  it('v3 does not inherit v2 configuration. A wired v2 chain does NOT imply a wired v3 chain', () => {
     // Mainnet + Base both have real v2 executors (asserted above), yet v3 stays null on both —
     // "v3 enabled" must be an explicit address, never derived from v2's presence.
     expect(getOrderExecutor(1)).not.toBeNull()
@@ -396,7 +396,7 @@ describe('getOrderExecutorV3 — fail-closed while v3 is not deployed', () => {
 // LIMIT_TP_CHAIN_ID both exclude it), so env can no longer light chain 1. The positive path now
 // runs on Base (8453), the one eligible chain; mainnet's slot is exercised below as the
 // "env set, not eligible ⇒ null" case.
-describe('getOrderExecutorV3Domain — once configured on an ELIGIBLE chain (env override on Base)', () => {
+describe('getOrderExecutorV3Domain: once configured on an ELIGIBLE chain (env override on Base)', () => {
   const V3_MAINNET = '0x3333333333333333333333333333333333333333'
   const V3_BASE = '0x4444444444444444444444444444444444444444'
 
@@ -432,14 +432,14 @@ describe('getOrderExecutorV3Domain — once configured on an ELIGIBLE chain (env
     expect(v2Domain.verifyingContract).not.toBe(v3Domain.verifyingContract)
   })
 
-  it('throws when the SAME v3 address is configured on two chains (config-typo guard) — checked on the RAW env map, eligibility notwithstanding', async () => {
+  it('throws when the SAME v3 address is configured on two chains (config-typo guard): checked on the RAW env map, eligibility notwithstanding', async () => {
     process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS = V3_MAINNET
     process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE = V3_MAINNET
     vi.resetModules()
     await expect(import('./config')).rejects.toThrow(/the same v3 address is configured on two chains/)
   })
 
-  it('accepts distinct addresses per chain without error — but only the eligible chain resolves', async () => {
+  it('accepts distinct addresses per chain without error, but only the eligible chain resolves', async () => {
     process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS = V3_MAINNET
     process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE = V3_BASE
     vi.resetModules()
@@ -456,7 +456,7 @@ describe('getOrderExecutorV3Domain — once configured on an ELIGIBLE chain (env
 // ── [SPRINT-48-ARBITRUM-DCA-PREP → feat/arbitrum-dca-gates] Arbitrum (42161) v3 plumbing ──────
 // Shipped DARK in Sprint 48; ELIGIBLE since feat/arbitrum-dca-gates. The env slot now decides
 // between "wired" and "dark" — env can disable, and the code list is what lets env enable.
-describe('getOrderExecutorV3 — Arbitrum (42161): eligible in code, wired only while env says so', () => {
+describe('getOrderExecutorV3: Arbitrum (42161): eligible in code, wired only while env says so', () => {
   afterEach(() => {
     delete process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM
     vi.resetModules()
@@ -483,7 +483,7 @@ describe('getOrderExecutorV3 — Arbitrum (42161): eligible in code, wired only 
   // now made in code (ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS cites the evidence), so env wiring 42161 is
   // once more the correct behaviour — with the difference that this time it holds ONLY because the
   // allowlist says so (the data-driven block below fails the day 42161 leaves it).
-  it('setting NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM wires 42161 (eligible in code) — the domain binds chainId 42161 to that address, the v3 signing executor resolves, and no other chain is touched', async () => {
+  it('setting NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM wires 42161 (eligible in code). The domain binds chainId 42161 to that address, the v3 signing executor resolves, and no other chain is touched', async () => {
     const V3_ARBITRUM = '0x5555555555555555555555555555555555555555'
     process.env.NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM = V3_ARBITRUM
     vi.resetModules()
@@ -518,7 +518,7 @@ describe('getOrderExecutorV3 — Arbitrum (42161): eligible in code, wired only 
 // consumer treated "address configured" as "chain enabled". This block is data-driven off the map itself:
 // a chain added to ORDER_EXECUTOR_V3_BY_CHAIN is covered the day it is added (the key-set pin fails
 // until its env var is registered here, and the it.each cases then exercise it automatically).
-describe('getOrderExecutorV3 — ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS gates EVERY env slot (data-driven off the map)', () => {
+describe('getOrderExecutorV3: ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS gates EVERY env slot (data-driven off the map)', () => {
   // chainId → the env var that feeds its ORDER_EXECUTOR_V3_BY_CHAIN slot. Not derivable by convention
   // (mainnet's var has no suffix) and process.env[...] cannot be dynamic in the client bundle (Next.js
   // only inlines static `process.env.NEXT_PUBLIC_*` member access), so the map keeps static reads and
@@ -545,7 +545,7 @@ describe('getOrderExecutorV3 — ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS gates EVERY e
     vi.resetModules()
   })
 
-  it('the allowlist is exactly the set intended today — Base (8453) + Arbitrum One (42161); changing it is a reviewed code change, never an env flip', () => {
+  it('the allowlist is exactly the set intended today. Base (8453) + Arbitrum One (42161); changing it is a reviewed code change, never an env flip', () => {
     // Base: OrderExecutor V3 deployed + verified + LIVE (docs/DEPLOYMENTS.md, README), keeper
     // CHAIN_ID=8453. Arbitrum [feat/arbitrum-dca-gates]: V3 byte-proven on-chain (DEPLOYMENTS.md row,
     // INC-2026-08-26-001 §11.3, re-read 2026-09-11 on two RPCs), a second keeper process shipped in
@@ -559,7 +559,7 @@ describe('getOrderExecutorV3 — ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS gates EVERY e
     for (const id of ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS) expect(MAP_CHAIN_IDS).toContain(id)
   })
 
-  it('every env slot in ORDER_EXECUTOR_V3_BY_CHAIN has its env var registered here — a new chain must be covered the day it is added', () => {
+  it('every env slot in ORDER_EXECUTOR_V3_BY_CHAIN has its env var registered here. A new chain must be covered the day it is added', () => {
     expect(Object.keys(V3_ENV_VAR_BY_CHAIN).map(Number).sort((a, b) => a - b))
       .toEqual([...MAP_CHAIN_IDS].sort((a, b) => a - b))
     expect(MAP_CHAIN_IDS.length).toBeLessThanOrEqual(DISTINCT_VALID_ADDRESSES.length)
@@ -601,7 +601,7 @@ describe('getOrderExecutorV3 — ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS gates EVERY e
     },
   )
 
-  it('EVERY slot set at once (distinct valid addresses — the strongest env can do) ⇒ only allowlisted chains resolve', async () => {
+  it('EVERY slot set at once (distinct valid addresses. The strongest env can do) ⇒ only allowlisted chains resolve', async () => {
     MAP_CHAIN_IDS.forEach((chainId, i) => vi.stubEnv(V3_ENV_VAR_BY_CHAIN[chainId], DISTINCT_VALID_ADDRESSES[i]))
     vi.resetModules()
     const fresh = await import('./config')

@@ -85,7 +85,7 @@ export function PositionSummary({ tokenInSymbol, tokenOutSymbol, tokenInDecimals
       <dl className="mt-2 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
         <Stat label="Invested">{fmtToken(BigInt(stats.totalInvestedRaw), tokenInDecimals)} {tokenInSymbol}</Stat>
         <Stat label="Received">{fmtToken(BigInt(stats.totalReceivedRaw), tokenOutDecimals)} {tokenOutSymbol}</Stat>
-        <Stat label="Avg price">{stats.avgBuyPrice != null ? `${fmtToken(stats.avgBuyPrice)} ${tokenInSymbol}/${tokenOutSymbol}` : '—'}</Stat>
+        <Stat label="Avg price">{stats.avgBuyPrice != null ? `${fmtToken(stats.avgBuyPrice)} ${tokenInSymbol}/${tokenOutSymbol}` : 'n/a'}</Stat>
         <Stat label="Fills">{stats.fillsExecuted}/{stats.fillsPlanned} ({stats.pctComplete}%)</Stat>
         {range && <Stat label="Range">{range}</Stat>}
         {pnl && (

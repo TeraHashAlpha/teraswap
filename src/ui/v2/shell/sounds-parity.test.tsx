@@ -96,7 +96,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('sound parity — shell vs v1 (real sounds.ts, mocked audio)', () => {
+describe('sound parity: shell vs v1 (real sounds.ts, mocked audio)', () => {
   it('tab click = playTouchMP3 (touch.mp3, 0.5)', async () => {
     const expected = await baseline((s) => s.playTouchMP3())
     expect(expected).toEqual([TOUCH])
@@ -124,7 +124,7 @@ describe('sound parity — shell vs v1 (real sounds.ts, mocked audio)', () => {
     ['click', (el: Document) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }))],
     ['keydown', (el: Document) => el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'a' }))],
     ['scroll', (el: Document) => el.dispatchEvent(new Event('scroll'))],
-  ])('first %s starts the music exactly like v1 (background.mp3, 0.08, loop) — and only once', async (_name, fire) => {
+  ])('first %s starts the music exactly like v1 (background.mp3, 0.08, loop), and only once', async (_name, fire) => {
     const expected = await baseline((s) => s.startBackgroundMusic())
     expect(expected).toEqual([MUSIC_ON])
     const { AppShell } = await freshPage()

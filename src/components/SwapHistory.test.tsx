@@ -29,7 +29,7 @@ function seedRecord(overrides: Partial<SwapRecord> = {}) {
   })
 }
 
-describe('SwapHistory — entity + amount-formatting fixes [CHORE-ARBITRUM-UI-POLISH]', () => {
+describe('SwapHistory: entity + amount-formatting fixes [CHORE-ARBITRUM-UI-POLISH]', () => {
   beforeEach(() => {
     useSwapHistory.setState({ records: [] })
   })

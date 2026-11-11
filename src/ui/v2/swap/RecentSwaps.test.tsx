@@ -45,7 +45,7 @@ describe('RecentSwaps', () => {
     expect(link.target).toBe('_blank')
   })
 
-  it('no box: no rounded/bordered container class on the root — a hairline Surface only', () => {
+  it('no box: no rounded/bordered container class on the root. A hairline Surface only', () => {
     useSwapHistory.setState({ records: [record()] })
     render(<RecentSwaps />)
     const root = screen.getByText('Recent swaps (1)').closest('[data-surface]') as HTMLElement

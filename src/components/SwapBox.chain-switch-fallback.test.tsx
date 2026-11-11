@@ -126,7 +126,7 @@ import { NATIVE_ETH } from '@/lib/constants'
 
 const ARB = 42161
 const BASE = 8453
-const IMPORTED_WARNING = 'Imported token — verify the address before trading'
+const IMPORTED_WARNING = 'Imported token: verify the address before trading'
 
 function setHookDefaults() {
   useQuoteMock.mockReturnValue({ meta: null, loading: false, error: null, countdown: 0, refetch: vi.fn(), refresh: vi.fn() })
@@ -164,7 +164,7 @@ const lastQuotePair = () => {
   return { tin: tin?.address.toLowerCase() ?? null, tout: tout?.address.toLowerCase() ?? null }
 }
 
-describe('SwapBox — chain switch with a token that has no home on the target chain [fix/chain-switch-token-fallback]', () => {
+describe('SwapBox: chain switch with a token that has no home on the target chain [fix/chain-switch-token-fallback]', () => {
   const SNX = findToken('SNX')!
   const SNX_MAINNET = SNX.address.toLowerCase()
 
@@ -215,7 +215,7 @@ describe('SwapBox — chain switch with a token that has no home on the target c
   })
 })
 
-describe('SwapBox — chain-switch GUARD: every walk × every pair of the 6-token fixture [fix/chain-switch-token-fallback]', () => {
+describe('SwapBox: chain-switch GUARD: every walk × every pair of the 6-token fixture [fix/chain-switch-token-fallback]', () => {
   beforeAll(importFixtureToken)
   afterAll(removeFixtureToken)
 

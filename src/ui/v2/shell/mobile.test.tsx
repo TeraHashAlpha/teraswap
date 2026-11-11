@@ -108,7 +108,7 @@ describe('tab strip scroll', () => {
 })
 
 describe('mobile photo treatment', () => {
-  it('Round 7 D2: no solid column on mobile — the photo (with its uniform scrim) sits behind the content at every width', () => {
+  it('Round 7 D2: no solid column on mobile. The photo (with its uniform scrim) sits behind the content at every width', () => {
     render(<AppShell />)
     const col = document.querySelector('[data-ts-column]') as HTMLElement
     expect(col.className).not.toMatch(/\bbg-v2-|\bmx-3\b|sm:bg-/)

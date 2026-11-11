@@ -247,7 +247,7 @@ beforeEach(() => {
   mockFetchCurrentPrice.mockResolvedValue(0.0005)
 })
 
-describe('LimitOrderPanel — order.priceFeed is the feed for THE CHAIN BEING SIGNED FOR', () => {
+describe('LimitOrderPanel: order.priceFeed is the feed for THE CHAIN BEING SIGNED FOR', () => {
   // Base (8453) = the v3 signing path; mainnet (1) = the v2 signing path. Same expectation.
   for (const chainId of [8453, 1]) {
     it(`chain ${chainId}: signs exactly getChainlinkFeed(wrappedNative, ${chainId})`, async () => {
@@ -267,7 +267,7 @@ describe('LimitOrderPanel — order.priceFeed is the feed for THE CHAIN BEING SI
     })
   }
 
-  it('H2 REGRESSION — a Base order never signs the MAINNET aggregator', async () => {
+  it('H2 REGRESSION: a Base order never signs the MAINNET aggregator', async () => {
     await renderOn(8453)
     fireEvent.click(sell('pick-usdc'))
     fireEvent.click(buy('pick-native'))
@@ -286,7 +286,7 @@ describe('LimitOrderPanel — order.priceFeed is the feed for THE CHAIN BEING SI
   })
 })
 
-describe('LimitOrderPanel — selling the wrapped native directly resolves a feed on every chain', () => {
+describe('LimitOrderPanel: selling the wrapped native directly resolves a feed on every chain', () => {
   // PR #490 added a second look-up inside findPriceFeed because the MAINNET symbol map has
   // 'ETH/USD' and no 'WETH/USD'. [NARROWED] On mainnet that fallback is kept verbatim and is the
   // mechanism here; on Base the address-keyed helper has no symbol to miss — it maps both the
@@ -320,8 +320,8 @@ describe('LimitOrderPanel — selling the wrapped native directly resolves a fee
   })
 })
 
-describe('LimitOrderPanel — a feed that does not exist fails CLOSED', () => {
-  it('an UNCOVERED CHAIN refuses before any wallet call — never a sibling chain’s aggregator', async () => {
+describe('LimitOrderPanel: a feed that does not exist fails CLOSED', () => {
+  it('an UNCOVERED CHAIN refuses before any wallet call, never a sibling chain’s aggregator', async () => {
     await renderOn(UNCOVERED_CHAIN_ID)
     fireEvent.click(sell('pick-link'))   // non-stable ⇒ LINK is the feed token
     fireEvent.click(buy('pick-usdc'))
@@ -359,7 +359,7 @@ describe('LimitOrderPanel — a feed that does not exist fails CLOSED', () => {
     await waitFor(() => expect(mockCreateOrderInSupabase).not.toHaveBeenCalled())
   })
 
-  it('the refusal is never the zero address — address(0) would DISABLE the price condition', async () => {
+  it('the refusal is never the zero address: address(0) would DISABLE the price condition', async () => {
     // TeraSwapOrderExecutorV3.sol:1105-1108 — `priceFeed == address(0)` returns (true, ""), the DCA
     // "execute unconditionally" branch. Signing it on a Limit order would strip the price condition
     // entirely and fill at any price, so "no feed" must refuse, never degrade to a zero address.

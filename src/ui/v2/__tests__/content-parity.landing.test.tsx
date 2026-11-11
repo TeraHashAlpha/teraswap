@@ -157,7 +157,7 @@ describe('the gate itself (so a green run means something)', () => {
     expect(r.missingHrefs).toEqual(['/gone'])
   })
 
-  it('an allow-listed substring may be absent from v2 — but only that substring', () => {
+  it('an allow-listed substring may be absent from v2, but only that substring', () => {
     const v1 = document.createElement('div')
     v1.innerHTML = '<p>All wrapped in an interface with particles that react. Because clarity.</p>'
     const v2 = document.createElement('div')

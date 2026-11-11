@@ -312,7 +312,7 @@ export function useChainlinkPrice(
       executionPrice: executionPriceUsd,
       deviation: 0,
       level: isReal ? 'warn' : 'none',
-      message: isReal ? 'No Chainlink oracle available — price cannot be independently verified. Proceed with caution.' : null,
+      message: isReal ? 'No Chainlink oracle available: price cannot be independently verified. Proceed with caution.' : null,
       oracleUnavailable: isReal,
     }
   }

@@ -112,7 +112,7 @@ export function formatMinBuyMessage(params: MinBuyMessageParams): MinBuyMessage 
         : `Raise your total to at least ${minTotalHuman} ${symbol}.`)
 
   const text = `Each buy is too small. With ${symbol}, each buy must be at least `
-    + `${formatMinBuyUnit(minBuyRaw, decimals, symbol, priceUsd)} — the on-chain minimum. ${fixText}`
+    + `${formatMinBuyUnit(minBuyRaw, decimals, symbol, priceUsd)}. The on-chain minimum. ${fixText}`
 
   return { text, maxBuys, minTotalRaw }
 }

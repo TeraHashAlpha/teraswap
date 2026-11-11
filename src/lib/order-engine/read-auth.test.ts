@@ -48,7 +48,7 @@ beforeEach(() => {
   _readAuthInternal.reset()
 })
 
-describe('verifyOrdersReadAccess — the server-side gate', () => {
+describe('verifyOrdersReadAccess: the server-side gate', () => {
   it('accepts a fresh signature from the wallet owner', async () => {
     const { issuedAt, signature } = await signReadAuth()
     const res = await verifyOrdersReadAccess({ wallet: WALLET, issuedAt, signature })
@@ -118,7 +118,7 @@ describe('session cache + headers (client side)', () => {
   })
 })
 
-describe('ensureOrdersReadAuth — sign once per session', () => {
+describe('ensureOrdersReadAuth: sign once per session', () => {
   it('signs once, caches, and does not prompt again', async () => {
     let signCount = 0
     const signFn = async (typed: unknown) => {
