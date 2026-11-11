@@ -20,7 +20,7 @@ const isSystemHaltedMock = vi.fn()
 const checkRateLimitMock = vi.fn()
 vi.mock('@/lib/circuit-breaker', () => ({ isSystemHalted: (...a: unknown[]) => isSystemHaltedMock(...a) }))
 vi.mock('@/lib/kv-rate-limiter', () => ({
-  checkRateLimit: (...a: unknown[]) => checkRateLimitMock(...a),
+  checkRateLimitWithin: (...a: unknown[]) => checkRateLimitMock(...a),
   QUOTE_RATE_LIMIT: { limit: 120, windowMs: 60_000 },
 }))
 vi.mock('@/lib/source-monitor', () => ({ recordSourcePing: vi.fn() }))

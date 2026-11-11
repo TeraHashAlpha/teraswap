@@ -39,38 +39,98 @@ function nextConfigCoop(): string | undefined {
   return src.match(/'Cross-Origin-Opener-Policy',\s*value:\s*'([^']+)'/)?.[1]
 }
 
-/** connect-src sources declared in next.config.js (the only CSP layer: vercel.json mirrors all but CSP). */
-function nextConfigConnectSrc(): string[] {
-  const src = readFileSync(join(ROOT, 'next.config.js'), 'utf-8')
-  return src.match(/"connect-src ([^"]+)"/)?.[1].split(/\s+/) ?? []
+// ── Content-Security-Policy ─────────────────────────────────────────────────────────────────────
+// [fix/user-ip-privacy] The policy is data now (csp-policy.js): next.config.js builds the header from it
+// and these tests read the same list, plus the header next.config.js actually returns.
+const policy = require(join(ROOT, 'csp-policy.js')) as {
+  WALLET_CONNECT_SOURCES: ReadonlyArray<{ source: string; wallet: string; reason: string }>
+  CONNECT_SRC: readonly string[]
+  IMG_SRC: readonly string[]
+  buildContentSecurityPolicy: (o?: { isDev?: boolean }) => string
 }
 
-/** img-src sources declared in next.config.js. */
-function nextConfigImgSrc(): string[] {
-  const src = readFileSync(join(ROOT, 'next.config.js'), 'utf-8')
-  return src.match(/"img-src ([^"]+)"/)?.[1].split(/\s+/) ?? []
+/** The CSP header next.config.js really serves (not a regex over its source). */
+async function servedCsp(): Promise<string> {
+  // next.config.js is CommonJS
+  const nextConfig = require(join(ROOT, 'next.config.js')) as { headers: () => Promise<Array<{ headers: Array<{ key: string; value: string }> }>>; images?: unknown }
+  const rules = await nextConfig.headers()
+  return rules.flatMap((r) => r.headers).find((h) => h.key === 'Content-Security-Policy')!.value
 }
+const directive = (csp: string, name: string): string[] =>
+  csp
+    .split(';')
+    .map((d) => d.trim().split(/\s+/))
+    .find(([n]) => n === name)
+    ?.slice(1) ?? []
 
-// [fix/functional-chain-ui C8] Supersedes the [fix/dca-consent-copy-and-tier-check] allowance: the
-// floor classifier moved server-side (/api/dca-floor-cap) and DCAPanel's own price fallback now goes
-// through /api/price/defillama, so no browser code may reach DefiLlama — or GitHub's raw host for
-// Trust Wallet logos (/api/proxy/logo) — directly.
-describe('[fix/functional-chain-ui C8] CSP — third parties stay behind /api', () => {
-  it('connect-src allows no DefiLlama origin', () => {
-    expect(nextConfigConnectSrc()).toEqual(expect.arrayContaining(["'self'"]))
-    expect(nextConfigConnectSrc().filter(s => s.includes('llama.fi'))).toEqual([])
+describe('[fix/user-ip-privacy] CSP — the browser may only reach our origin and the wallet hosts', () => {
+  it('next.config.js serves exactly the policy built by csp-policy.js', async () => {
+    expect(await servedCsp()).toBe(policy.buildContentSecurityPolicy({ isDev: false }))
   })
 
-  it('img-src allows no raw.githubusercontent.com', () => {
-    expect(nextConfigImgSrc()).toEqual(expect.arrayContaining(["'self'"]))
-    expect(nextConfigImgSrc().filter(s => s.includes('githubusercontent'))).toEqual([])
+  it("connect-src is 'self' + the listed wallet hosts, and nothing else", async () => {
+    const served = directive(await servedCsp(), 'connect-src')
+    expect(served).toEqual(["'self'", ...policy.WALLET_CONNECT_SOURCES.map((s) => s.source)])
+    expect(served).toEqual([
+      "'self'",
+      'wss://relay.walletconnect.org',
+      'https://api.web3modal.org',
+      'https://metamask-sdk.api.cx.metamask.io',
+      'wss://metamask-sdk.api.cx.metamask.io',
+    ])
   })
 
-  // [chore/copy-leftovers] /api/token-logo streams CoinGecko bytes server-side (#591), so no browser <img>
-  // loads assets.coingecko.com any more. tokens.1inch.io stays: usePortfolio + importedTokenLogo still load it.
-  it('img-src allows no CoinGecko origin, but keeps tokens.1inch.io', () => {
-    expect(nextConfigImgSrc().filter(s => s.includes('coingecko'))).toEqual([])
-    expect(nextConfigImgSrc()).toContain('https://tokens.1inch.io')
+  it('every wallet host is an exact host (no wildcard, no path, no bare scheme) and says which wallet needs it and why', () => {
+    expect(policy.WALLET_CONNECT_SOURCES.length).toBeGreaterThan(0)
+    for (const { source, wallet, reason } of policy.WALLET_CONNECT_SOURCES) {
+      expect(source).toMatch(/^(https|wss):\/\/[a-z0-9-]+(\.[a-z0-9-]+)+$/)
+      expect(source).not.toContain('*')
+      expect(['WalletConnect', 'MetaMask']).toContain(wallet)
+      expect(reason.length).toBeGreaterThan(60)
+    }
+    expect(new Set(policy.WALLET_CONNECT_SOURCES.map((s) => s.source)).size).toBe(policy.WALLET_CONNECT_SOURCES.length)
+  })
+
+  it.each([
+    ['an RPC provider', /alchemy|infura|llamarpc|ankr|publicnode|merkle|base\.org|arbitrum\.io/],
+    ['an aggregator or DEX API', /1inch|0x\.org|paraswap|kyberswap|cow\.fi|openocean|sushi|balancer/],
+    ['Etherscan', /etherscan/],
+    ['Supabase', /supabase/],
+    ['Sentry', /sentry/],
+    ['DefiLlama', /llama/],
+    ['WalletConnect / Reown telemetry', /pulse\.walletconnect/],
+    ["WalletConnect's own RPC, verify, echo or explorer API", /rpc\.walletconnect|verify\.walletconnect|echo\.walletconnect|explorer-api|web3modal\.com/],
+    ['MetaMask SDK analytics', /mm-sdk-analytics/],
+    ['a wildcard', /\*/],
+    ['a bare scheme (https: / wss: / http:)', /^(https?|wss?):$/],
+  ])('connect-src allows no %s', async (_what, pattern) => {
+    expect(directive(await servedCsp(), 'connect-src').filter((s) => pattern.test(s))).toEqual([])
+  })
+
+  it("img-src is exactly 'self' data: blob: — no remote image host at all", async () => {
+    expect(directive(await servedCsp(), 'img-src')).toEqual(["'self'", 'data:', 'blob:'])
+    expect(policy.IMG_SRC).toEqual(["'self'", 'data:', 'blob:'])
+  })
+
+  it('next.config.js declares no image remotePatterns (the optimizer cannot be pointed at a third-party host)', () => {
+    // next.config.js is CommonJS
+    const nextConfig = require(join(ROOT, 'next.config.js')) as { images?: { remotePatterns?: unknown; domains?: unknown } }
+    expect(nextConfig.images?.remotePatterns).toBeUndefined()
+    expect(nextConfig.images?.domains).toBeUndefined()
+    expect(readFileSync(join(ROOT, 'next.config.js'), 'utf-8')).not.toMatch(/^\s*remotePatterns\s*:/m)
+  })
+
+  it('no directive falls back to something wider than its own list', async () => {
+    const csp = await servedCsp()
+    expect(directive(csp, 'default-src')).toEqual(["'self'"])
+    expect(directive(csp, 'frame-src')).toEqual(["'none'"])
+    expect(directive(csp, 'object-src')).toEqual(["'none'"])
+    expect(directive(csp, 'worker-src')).toEqual(["'self'"])
+    expect(directive(csp, 'font-src')).toEqual(["'self'", 'data:'])
+    expect(directive(csp, 'media-src')).toEqual(["'self'", 'blob:'])
+    // script-src: no remote script host; 'unsafe-eval' only in development
+    expect(directive(csp, 'script-src')).toEqual(["'self'", "'unsafe-inline'"])
+    expect(directive(policy.buildContentSecurityPolicy({ isDev: true }), 'script-src')).toEqual(["'self'", "'unsafe-inline'", "'unsafe-eval'"])
   })
 })
 

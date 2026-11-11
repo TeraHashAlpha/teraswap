@@ -15,7 +15,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 // real KV call — the monitor's own alert logic is covered by cow-fee-monitor.test.ts.
 vi.mock('@/lib/cow-fee-monitor', () => ({ recordCowFeeZeroing: vi.fn(async () => {}) }))
 
-import cowAdapter, { pollCowOrderStatus, __resetCow429LogForTests } from './cow'
+import cowAdapter, { pollCowOrderStatus, submitCowOrder, __resetCow429LogForTests } from './cow'
 import { FEE_RECIPIENT, FEE_BPS, NATIVE_ETH } from '@/lib/constants'
 
 const VALID_QUOTE = {
@@ -249,6 +249,53 @@ describe('pollCowOrderStatus — poll fetches are time-bounded [RQ-2026-06-11]',
   })
 })
 
+
+// [fix/user-ip-privacy A76 S-1] submitCowOrder / pollCowOrderStatus run in the BROWSER (useSwap, v1 and v2, after the
+// wallet signed). They must talk to our own origin only: the site's CSP has no CoW host, and a direct call to
+// api.cow.fi hands CoW the visitor's IP. Before this fix both called `${getCowApiBase(chainId)}/…`.
+describe('CoW submit + poll go through /api/cow/*, never api.cow.fi [A76 S-1]', () => {
+  const UID = '0x' + 'cd'.repeat(56)
+  const ORDER = {
+    ...VALID_QUOTE,
+    sellToken: VALID_QUOTE.sellToken as `0x${string}`,
+    buyToken: VALID_QUOTE.buyToken as `0x${string}`,
+    appDataHash: VALID_QUOTE.appDataHash as `0x${string}`,
+    receiver: VALID_QUOTE.receiver as `0x${string}`,
+    kind: 'sell' as const,
+    sellTokenBalance: 'erc20' as const,
+    buyTokenBalance: 'erc20' as const,
+    from: '0x2222222222222222222222222222222222222222' as `0x${string}`,
+    quoteId: 7,
+    signingScheme: 'eip712' as const,
+  }
+  afterEach(() => vi.restoreAllMocks())
+
+  it.each([1, 8453, 42161])('chain %i: the signed order is POSTed to /api/cow/orders?chainId=<chain>', async (chainId) => {
+    const spy = vi.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify(UID), { status: 201 }))
+    await expect(submitCowOrder(ORDER, '0x' + '1'.repeat(130), chainId)).resolves.toBe(UID)
+    const [url, init] = spy.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`/api/cow/orders?chainId=${chainId}`)
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toMatchObject({ signature: '0x' + '1'.repeat(130), from: ORDER.from, quoteId: 7 })
+  })
+
+  it("a rejected submit keeps CoW's description in the error", async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify({ errorType: 'InsufficientBalance', description: 'order owner must have funds' }), { status: 400 }))
+    await expect(submitCowOrder(ORDER, '0x' + '1'.repeat(130), 8453)).rejects.toThrow('CoW order submit 400: order owner must have funds')
+  })
+
+  it('the poll reads /api/cow/order-status, then /api/cow/trades once filled', async () => {
+    const spy = vi.spyOn(global, 'fetch').mockImplementation(async (input) =>
+      String(input).startsWith('/api/cow/order-status')
+        ? new Response(JSON.stringify({ status: 'fulfilled' }), { status: 200 })
+        : new Response(JSON.stringify([{ txHash: '0xabc', executedBuyAmount: '42' }]), { status: 200 }),
+    )
+    await expect(pollCowOrderStatus(UID, 10_000, 42161)).resolves.toEqual({ status: 'fulfilled', txHash: '0xabc', executedBuyAmount: '42' })
+    const urls = spy.mock.calls.map((c) => String(c[0]))
+    expect(urls).toEqual([`/api/cow/order-status?chainId=42161&uid=${UID}`, `/api/cow/trades?chainId=42161&orderUid=${UID}`])
+    for (const u of urls) expect(u).not.toMatch(/cow\.fi|^https?:/)
+  })
+})
 
 describe('cow adapter — 429 Retry-After reaches the circuit breaker (fix/monitor-self-source-alerts)', () => {
   const SELL = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'

@@ -40,8 +40,16 @@ describe('help-content — "What is TeraSwap?"', () => {
       INTEGRATED_DEX_SOURCE_LABELS: ['Alpha', 'Beta', 'Gamma'],
       SWAP_CHAIN_LIST_LABEL: 'Chain A and Chain B',
       formatChainList: (names: readonly string[]) => names.join(' / '),
+      // [fix/user-ip-privacy] the privacy answers are product-claims sentences too
+      PRIVACY_PROXY_CLAIM: 'ZZ-RELAY.',
+      PRIVACY_DIRECT_NOTE: 'ZZ-WALLET.',
+      PRIVACY_WALLET_ADVICE: 'ZZ-ADVICE.',
+      PRIVACY_IP_STORAGE_NOTE: 'ZZ-IP.',
+      PRIVACY_WALLET_STORAGE_NOTE: 'ZZ-ADDRESSES.',
     }))
     const mocked = await import('./help-content')
+    expect(answer('How does TeraSwap protect my privacy?', mocked.helpSections)).toBe('ZZ-RELAY. ZZ-WALLET. ZZ-ADVICE.')
+    expect(answer('What data does TeraSwap collect?', mocked.helpSections)).toBe('We do not store private keys. ZZ-IP. ZZ-ADDRESSES. See our Privacy Policy for full details.')
     expect(whatIs(mocked.helpSections)).toContain('compares quotes across 3 liquidity sources simultaneously on Chain A and Chain B.')
     expect(answer('How does the meta-aggregator work?', mocked.helpSections)).toContain('queries 3 sources (Alpha / Beta / Gamma) in parallel')
     expect(answer('Which networks are supported?', mocked.helpSections)).toContain('supports Chain A and Chain B.')
@@ -68,3 +76,32 @@ describe('help-content — [chore/copy-leftovers] networks and sources are not t
     }
   })
 })
+
+// [fix/user-ip-privacy] Help said "Your IP address is never exposed" and "We do not track wallets" — neither was true.
+describe('help-content — privacy answers say what is relayed and what the wallet does on its own', () => {
+  const privacy = () => answer('How does TeraSwap protect my privacy?')
+  const collect = () => answer('What data does TeraSwap collect?')
+
+  it('"How does TeraSwap protect my privacy?" is the owner wording, sentence for sentence', () => {
+    expect(privacy()).toBe(
+      "TeraSwap's server relays all RPC reads on Ethereum, Base and Arbitrum, every aggregator quote and swap request, every CoW Protocol order you sign and its status checks, and token logos, so those providers see our server's IP address, not yours. " +
+        "Your wallet's own RPC connection and the transactions it broadcasts are outside our control; the WalletConnect relay sees your connection once you choose a WalletConnect wallet. " +
+        'Use a privacy RPC in your wallet settings if that matters to you.',
+    )
+  })
+
+  it('"What data does TeraSwap collect?" says IPs are not stored, only hashed for rate limiting, and that wallet addresses ARE stored', () => {
+    expect(collect()).toBe(
+      'We do not store private keys. ' +
+        'We do not store IP addresses in our database; our hosting and rate-limiting layers process them transiently, and our rate limiter only ever sees a one-way hash. ' +
+        'We do store wallet addresses for orders, swap history and activity. ' +
+        'See our Privacy Policy for full details.',
+    )
+  })
+
+  it('no help answer makes an absolute IP claim or denies storing wallet data', () => {
+    const all = helpSections.flatMap((s) => s.items.map((i) => `${i.q} ${i.a}`)).join('\n')
+    expect(all).not.toMatch(/never exposed|actively protected|IP address is (never|not) (exposed|visible|shared)|do not track wallets|collect personal information/i)
+  })
+})
+

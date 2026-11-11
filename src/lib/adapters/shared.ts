@@ -5,6 +5,7 @@ import {
 } from '@/lib/constants'
 import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
 import { serverRpcUrl, serverRpcEnvUrl } from '@/lib/rpc-env'
+import { proxyRpcUrl } from '@/lib/rpc-proxy-url'
 import type { Address } from 'viem'
 
 // ── Slippage safety clamp ────────────────────────────────
@@ -141,18 +142,21 @@ export function getRpcUrl(): string {
  * [SPRINT-9C] Chain-aware RPC resolver for the on-chain adapters (uniswapv3,
  * curve). `chainId === DEFAULT_CHAIN_ID` (1) → `getRpcUrl()` verbatim, preserving
  * the /api/rpc privacy proxy in the browser so the mainnet path stays
- * byte-identical. Any other chain resolves the chain's configured RPC (primary,
- * then the registry fallback) and NEVER returns the mainnet RPC — an off-mainnet
+ * byte-identical. Any other chain NEVER returns the mainnet RPC — an off-mainnet
  * adapter must never silently eth_call mainnet. Throws on an unsupported chain
  * (callers gate on per-chain contract availability before reaching this).
+ *
+ * [fix/user-ip-privacy] In the BROWSER a non-mainnet chain is our proxy too
+ * (`/api/rpc?chainId=<id>`), never the provider URL: the chainlink.ts raw feed reads call this
+ * from client code. On the SERVER it is the chain's configured RPC (RPC_URL_<id>, then the
+ * registry values).
  */
 export function getRpcUrlForChain(chainId: number = DEFAULT_CHAIN_ID): string {
   if (chainId === DEFAULT_CHAIN_ID) return getRpcUrl()
-  const { rpc } = getChainConfig(chainId)
-  // [FEAT-SERVER-RPC-ENV-SPLIT] Server: RPC_URL_<id> (else the NEXT_PUBLIC_* the registry holds)
-  // wins; the browser keeps the registry value untouched.
-  const configured = typeof window === 'undefined' ? serverRpcEnvUrl(chainId) : undefined
-  return configured || rpc.primary || rpc.fallbacks?.[0] || ''
+  const { rpc } = getChainConfig(chainId) // throws on an unsupported chain
+  if (typeof window !== 'undefined') return proxyRpcUrl(chainId)
+  // [FEAT-SERVER-RPC-ENV-SPLIT] Server: RPC_URL_<id> (else the deprecated NEXT_PUBLIC_* name) wins.
+  return serverRpcEnvUrl(chainId) || rpc.primary || rpc.fallbacks?.[0] || ''
 }
 
 /**

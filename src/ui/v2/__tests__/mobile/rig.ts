@@ -189,8 +189,12 @@ function rpc(body: unknown, chainId: number): unknown {
 /** Network isolation + fixtures for one page: nothing leaves the machine, `/api/**` and `/api/rpc` are answered locally. */
 export async function installNetwork(page: Page, origin: string, s: Scenario) {
   const host = new URL(origin).host
-  /** The chain an RPC endpoint answers for: `/api/rpc` is mainnet's proxy; the L2 clients dial their public endpoints directly. */
+  /** The chain an off-origin RPC endpoint would answer for. [fix/user-ip-privacy] The app no longer dials one (every chain reads
+   *  through `/api/rpc?chainId=`, answered below); kept so a stray direct JSON-RPC POST is still stubbed, never sent. */
   const chainOf = (url: URL) => (/base/i.test(url.host) ? 8453 : /arb/i.test(url.host) ? 42161 : 1)
+  /** `/api/rpc` is mainnet's proxy; `/api/rpc?chainId=<id>` is that chain's. The stub must answer for the chain it was asked for, or the
+   *  app's chain-identity guard refuses every read on Base / Arbitrum. */
+  const proxiedChain = (url: URL) => Number(url.searchParams.get('chainId') ?? 1) || 1
   const jsonRpc = (route: Route, chainId: number) => {
     let body: unknown = {}
     try {
@@ -202,11 +206,11 @@ export async function installNetwork(page: Page, origin: string, s: Scenario) {
   await page.route('**/*', (route: Route) => {
     const url = new URL(route.request().url())
     if (url.host !== host) {
-      // the L2 RPC endpoints are JSON-RPC POSTs: answered by the stub; everything else off-origin never leaves the machine
+      // an off-origin JSON-RPC POST is answered by the stub; everything else off-origin never leaves the machine
       return route.request().method() === 'POST' && /"jsonrpc"/.test(route.request().postData() ?? '') ? jsonRpc(route, chainOf(url)) : route.abort()
     }
     if (!url.pathname.startsWith('/api/')) return route.continue()
-    if (url.pathname === '/api/rpc') return jsonRpc(route, 1)
+    if (url.pathname === '/api/rpc') return jsonRpc(route, proxiedChain(url))
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(answer(url.pathname, url, s)) })
   })
 }

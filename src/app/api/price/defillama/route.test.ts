@@ -17,6 +17,7 @@ vi.mock('@/lib/kv-rate-limiter', () => ({
 }))
 
 import { GET } from './route'
+import { hashClientIp } from '@/lib/client-ip-key'
 
 const UNI_BASE = '0xc3De830EA07524a0761646a6a4e4be0e114a3C83'
 const PRICE = { price: 7.557, symbol: 'UNI', timestamp: 1, confidence: 0.99 }
@@ -80,7 +81,7 @@ describe('/api/price/defillama — lookup', () => {
     mockCheckRateLimit.mockResolvedValue({ allowed: false, remaining: 0, resetAt: 123 })
     const res = await GET(req({ chainId: '8453', address: UNI_BASE }))
     expect(res.status).toBe(429)
-    expect(mockCheckRateLimit.mock.calls[0][0]).toBe('defillama-price:203.0.113.7')
+    expect(mockCheckRateLimit.mock.calls[0][0]).toBe(`defillama-price:${hashClientIp('203.0.113.7')}`)
     expect(mockFetchDefiLlamaPrice).not.toHaveBeenCalled()
   })
 
@@ -90,7 +91,7 @@ describe('/api/price/defillama — lookup', () => {
     expect(res.headers.get('cache-control')).toBe('no-store')
     expect(res.headers.get('x-ratelimit-remaining')).toBe('0')
     expect(res.headers.get('x-ratelimit-reset')).toBe('123')
-    expect(mockCheckRateLimit).toHaveBeenCalledWith('defillama-price:203.0.113.7', 30, 60_000)
+    expect(mockCheckRateLimit).toHaveBeenCalledWith(`defillama-price:${hashClientIp('203.0.113.7')}`, 30, 60_000)
   })
 
   it('keys on the trusted IP, not a client-written x-forwarded-for token', async () => {
@@ -98,7 +99,7 @@ describe('/api/price/defillama — lookup', () => {
       headers: { 'x-forwarded-for': '6.6.6.6, 203.0.113.7', 'x-vercel-forwarded-for': '198.51.100.9' },
     })
     await GET(spoofed)
-    expect(mockCheckRateLimit.mock.calls[0][0]).toBe('defillama-price:198.51.100.9')
+    expect(mockCheckRateLimit.mock.calls[0][0]).toBe(`defillama-price:${hashClientIp('198.51.100.9')}`)
   })
 
   it('N+1 requests from one IP: the allowed path keeps its 30 s cache, the (N+1)th is 429', async () => {
