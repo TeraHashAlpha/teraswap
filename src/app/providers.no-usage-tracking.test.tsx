@@ -18,11 +18,15 @@ vi.mock('@/lib/sounds', async () => {
 let mockPathname = '/'
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), usePathname: () => mockPathname }))
 
-import { installHarnessGlobals } from '@/ui/v2/__tests__/rpc-budget/scenarios'
 
 const beacon = vi.fn(() => true)
 
-beforeAll(() => installHarnessGlobals())
+beforeAll(() => {
+  // jsdom has no IntersectionObserver; WalletConnect project id is required by the wagmi config; every fetch answers `{}`.
+  vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} takeRecords() { return [] } })
+  vi.stubEnv('NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID', 'test_projectid_0123456789abcdef')
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })))
+})
 
 beforeEach(() => {
   mockPathname = '/'
