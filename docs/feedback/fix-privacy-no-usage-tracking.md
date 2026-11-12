@@ -71,3 +71,44 @@ Auditor required: yes, Privacy copy and a retired telemetry route; no fund-flow 
 suite PASS 10394 tests, 0 failed, 476 files · lint-delta PASS +0 err +0 warn · tsc PASS 0 · build PASS · v1v2-parity PASS 111 · rpc-budget PASS 33 · CodeQL security-extended PASS head 13 / base 13 / new 0 · `check-product-claims.mjs` PASS · `gen-claude-state.mjs --check` and `check-agents-parity.mjs` PASS (regenerated, not hand-merged).
 Diff vs origin/main: 27 files, +485 -309. No database, orders, swap history, quote logging, Vercel Web Analytics, CSP, rate-limit, signing or dependency change. Hosts capture not re-run in round 2 (no network-path code changed since the 6 passed on 8476cc3).
 Owner decisions still open: retention of `usage_events` and `wallet_activity`; Auditor pass (Privacy copy plus a retired telemetry route).
+
+## Round 3: A78 (0C/1H) fixes, owner rulings 2026-11-12
+Commits on top of 381cf84, all SSH-signed, no rebase: 185d5b6 (S-1/S-4 quote logging), f31f129 (Vercel Web Analytics removed), 253dccd (copy S-1/S-2/S-3/S-5/S-6), d34ac41 (S-7 log-event), d140175 (isolation fix to my own guard).
+- [x] C1 quote logging  - [x] C2 analytics removal  - [x] C3 copy  - [x] C4 log-event  - [x] verify, hosts capture, claims, state check
+
+### Evidence 1: S-1/S-4 quote logging
+- `useQuote` logs only with `{ logQuote: true }` (default off). On: `SwapBox` (v1), `SwapCard` (v2). Off: v1 `LandingPage`, v2 `Hero`.
+- `useQuote.log-quote.test.ts` (real hook + real logger, valid echoing quote): landing, no wallet, three 15 s refreshes = 4 quotes stored, **0** `/api/log-quote`; landing with a wallet 0; swap screen no wallet = 1 request, 11 fields, no wallet/session/device/referrer; with wallet = carries it; each swap-screen refresh = 1. Mutation (default on) fails 2 tests. Caller guard pins the opt-in on all four files.
+- Capture `quote-logging.pw.ts` (real Chromium, production build, `/api/quote` answers a valid quote): v1 and v2 both landing 35 s = 3 `/api/quote`, **0** `/api/log-quote`; swap screen, amount typed = 1 `/api/quote`, **1** `/api/log-quote`, body fields `allQuotes amountIn bestAmountOut bestSource responseTimeMs sourcesQueried sourcesResponded tokenIn tokenInSymbol tokenOut tokenOutSymbol`. (Old head: the landing posted on every refresh, A78 measurement.)
+- Readers of `quotes` and what changes (rows stop growing per landing visitor; old rows stay):
+  | reader | use | change |
+  |---|---|---|
+  | `GET /api/stats` (`stats/route.ts:24,40`) | public Analytics tab "Total quotes" (count), "Top quote winners" (last 1000 rows) | total grows only with swap-screen quotes; winners now reflect real pairs, not the 0.5 ETH→USDC preview |
+  | `GET /api/monitor` (`monitor/route.ts:138`, Bearer) | per-source quotes/wins/failures/avg ms over the last 2000 rows | same sample basis shift: swap-screen quotes only |
+  | `GET /api/monitor?wallet=` (`:79`) | that wallet's last 100 quotes | unchanged; preview rows never carried a wallet unless connected |
+  | `GET /api/health` (`health/route.ts:67`) | table-exists probe, no numbers | none |
+  | view `quote_price_source_daily_stats` (migration 20260912120000) | per-day per-source response counts; no code reader | lower daily counts |
+  | `log-quote` side effects (`wallet_activity` `quote_requested`, `trackQuoteFailure`) | fire only from that route | same reduction |
+
+### Evidence 2: analytics removal
+- Diff: `src/app/layout.tsx` -2 (import + `<Analytics />`), `package.json` -1, `package-lock.json` -55 (npm 11.10.1 wrote it: the `@vercel/analytics` entry plus four `libc` fields npm dropped from optional platform packages; not hand-edited). No CSP or allow-list entry existed: it was same-origin `/_vercel/insights`, covered by `connect-src 'self'`.
+- Grep: `grep -rn "vercel/analytics\|_vercel/insights\|va.vercel-scripts" src package.json csp-policy.js next.config.js e2e` = only the new bundle test and the Privacy test that asserts absence. New bundle test (`bundle.pw.ts`): old build chunk `audit-privacy-a78/.next/static/chunks/2dbz28y4_u9e1.js` contains `_vercel/insights` (positive control); new build 0 files.
+
+### Evidence 3: content-map delta (v1 == v2; Help and Docs read the same constants)
+| where | before | after | proof |
+|---|---|---|---|
+| Privacy 3.1 | "…such as balances, orders, and swap history, to show them to you." | "…such as token balances and allowances, and we look up the orders and swap history our server holds for that address (see 3.2), to show them to you." | balances/allowances: wagmi reads via `/api/rpc`; orders/history: `/api/orders`, `/api/history` (`privacy-copy.test.tsx` §3.3 block) |
+| Privacy 3.2 first sentence | "Our own code does not collect your device type, operating system, browser, clicks, or usage patterns, and the Interface sets no tracking cookies. Page views are counted by Vercel Web Analytics…(see section 8)." | "Our own code does not record the pages you view or your clicks, and it does not collect your device type, operating system, or browser. The Interface sets no tracking cookies and uses no analytics service." | `providers.no-usage-tracking.test.tsx`, `log-event/route.test.ts`, capture asserts `/api/log-event` = 0; analytics removed (Evidence 2) |
+| wallet-storage note (3.2, Help "What data…", Docs v1/v2) | ends "…debugging and support." | + "Each quote you request on the swap screen, including its automatic refresh, is logged with its token pair, amount, and the sources' answers; the log carries your wallet address when a wallet is connected and no identifier when none is." | Evidence 1 (tests + capture); `product-claims.test.ts`, `help-content.test.ts` pin the string |
+| Privacy 8 | cookies/ads sentence + two sentences on Vercel Web Analytics + "(via localStorage)" | "The Interface sets no cookies for visitors, uses no analytics service, and runs no advertising scripts. No third-party error-reporting or session-replay service runs in your browser. Any data stored in your browser (local storage, session storage, and the wallet libraries' own storage) is used solely for your convenience and remains on your device." | only cookie writer in `src` is `api/admin/ui-version/route.ts` (owner-only), tested; Sentry not initialised (`sentry-not-initialised.test.ts`, `docs/security/SENTRY-STATUS.md`); no third-party host (capture); no ad script (CSP + capture) |
+| Privacy 10 | "We retain the records described in section 3.2 only for as long as necessary to fulfill the purposes outlined in this Privacy Policy." | "We keep the records described in section 3.2 until you ask us to delete them (see section 11) or we no longer need them; no fixed deletion period applies." (blockchain sentence kept) | no deletion job exists in `src`/`supabase`; the sentence promises none |
+| page metadata | privacy/terms `description` | unchanged: names no analytics, no cookie or retention claim | grep |
+IP sentence unchanged. In JSX the apostrophes render typographic (`&rsquo;`) as elsewhere; the constant keeps the owner's straight apostrophe. Premise note: the goal's "§3.1 … (see 3.2)" and "§8 claims nothing the code does not prove": the kept sentence "runs no advertising scripts" rests on CSP + capture, not on a named test.
+
+### Evidence 4: verify, S-7, diff
+- S-7: `log-event/route.ts` uses `checkRateLimitWithin`; `route.hung-kv.test.ts` (real limiter, every Redis call hangs) answers 204 in ~1.0 s (< 1.5 s asserted); same test against the old route times out at 10 s. `log-routes.hardening.test.ts` mock extended. Not changed (outside the ruling): `log-quote`, `log-swap`, `log-activity` still await `checkRateLimit` (same ~4.5 s when Redis is down); say if you want them moved.
+- `scripts/agent-verify.sh --codeql` head d140175 base origin/main 84cf362: suite PASS 10410/0 failed, 478 files · lint-delta PASS +0/+0 · tsc PASS 0 · build PASS · v1v2-parity PASS 111 · rpc-budget PASS 33 · CodeQL PASS head 13 / base 13 / new 0. First run failed 2 (my guard named the v2 path in a v1-side file; fixed in d140175).
+- Hosts capture (build with the CI env incl. Base/Arbitrum FeeCollector and marker values): 16 passed (bundle ×2, capture ×6, cow ×2, quote-logging ×2, wallet ×4). A first run on a build without the FeeCollector vars failed 6 (Base/Arbitrum options disabled): environment, not code.
+- `check-product-claims.mjs` PASS · `gen-claude-state.mjs --check` PASS · `check-agents-parity.mjs` PASS (regenerated in 253dccd and d34ac41). No change to orders, swap history, swap-screen quote logging, wallet activity log, rate-limit numbers, signing, database.
+- Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/privacy-no-usage-tracking. Auditor required: yes (privacy copy, telemetry removal).
+- Not run: `goal-lint` on the goal text (no `CONTROL:` first line, same as earlier rounds).
