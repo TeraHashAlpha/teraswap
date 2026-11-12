@@ -152,7 +152,7 @@ const openReview = () => fireEvent.click(screen.getByRole('button', { name: 'Rev
 const confirmBtn = (name: string | RegExp = 'Confirm & Sign') => within(screen.getByRole('dialog')).getByRole('button', { name })
 const flush = () => new Promise((r) => setTimeout(r, 0))
 
-describe('standard route (1inch/0x/Velora/Kyber/…): the same execute(source, fallbacks) — and no third argument', () => {
+describe('standard route (1inch/0x/Velora/Kyber/…): the same execute(source, fallbacks), and no third argument', () => {
   it('approval ready → v1 Swap = v2 Review swap → Confirm & Sign', async () => {
     const one = v1Run(() => v1Click('Swap'))
     expect(one.execute).toHaveLength(1)
@@ -178,9 +178,9 @@ describe('standard route (1inch/0x/Velora/Kyber/…): the same execute(source, f
     expect(v2Out()).toEqual(one)
   })
 
-  it('the approval states surface as v1 words: Approving... / Signing... / Approval error — retry; then the swap states', () => {
+  it('the approval states surface as v1 words: Approving... / Signing... / Approval error: retry; then the swap states', () => {
     // The review is open before the approval starts (the user pressed Confirm in it), so open it first and then let the hooks move.
-    for (const [status, label] of [['approving_permit2', 'Approving...'], ['signing', 'Signing...'], ['error', 'Approval error — retry']] as const) {
+    for (const [status, label] of [['approving_permit2', 'Approving...'], ['signing', 'Signing...'], ['error', 'Approval error: retry']] as const) {
       h.approval = { ...h.approval, isReady: false, status: 'idle' }
       const v2 = v2Render()
       openReview()
@@ -233,7 +233,7 @@ describe('unpriced pair (#608 / #613): consent gates execute; the ack rides exec
     expect(v2Out()).toEqual(one)
   })
 
-  it('with the ack → execute(source, fallbacks, { unpricedAck: true }) — v1 dialog Continue = v2 tick + Confirm', async () => {
+  it('with the ack → execute(source, fallbacks, { unpricedAck: true }). V1 dialog Continue = v2 tick + Confirm', async () => {
     h.tier = unpricedTier
     const one = v1Run(() => {
       v1Click('Swap')
@@ -285,7 +285,7 @@ describe('CoW route: execute("cowswap", …) then the frozen order is signed by 
     expect(calls(h.swap.confirmCowOrder)).toHaveLength(1)
   })
 
-  it('CoW + unpriced ack: execute("cowswap", fallbacks, { unpricedAck: true }) — the same consent as the standard path (M-1)', async () => {
+  it('CoW + unpriced ack: execute("cowswap", fallbacks, { unpricedAck: true }). The same consent as the standard path (M-1)', async () => {
     h.tier = unpricedTier
     h.quote = { ...h.quote, meta: taggedFixture(cowMeta(), '1') }
     const one = v1Run(() => {
@@ -304,7 +304,7 @@ describe('CoW route: execute("cowswap", …) then the frozen order is signed by 
   })
 })
 
-describe('split route: execute(bestSplit[, { unpricedAck: true }]) — both legs, one call (the hook walks the legs)', () => {
+describe('split route: execute(bestSplit[, { unpricedAck: true }]), both legs, one call (the hook walks the legs)', () => {
   beforeEach(() => {
     h.route = { splitResult: SPLIT, analyzing: false, useSplit: true, toggleSplit: vi.fn() }
   })
@@ -353,7 +353,7 @@ describe('split route: execute(bestSplit[, { unpricedAck: true }]) — both legs
   })
 })
 
-describe('409 unpriced_ack_required: the consent comes back, unticked, even after a Cancel — and Cancel resets the hook that raised it', () => {
+describe('409 unpriced_ack_required: the consent comes back, unticked, even after a Cancel, and Cancel resets the hook that raised it', () => {
   it('single: swap.unpricedAckRequired reopens the review (v1: the dialog); Continue re-runs execute with the ack; Cancel → reset()', async () => {
     h.swap = swapHook({ unpricedAckRequired: true })
     const one = v1Run(() => {

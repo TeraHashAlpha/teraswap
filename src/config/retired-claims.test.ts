@@ -81,9 +81,9 @@ describe('retired claim: TeraSwap makes no MEV-related promise (owner 2026-11-06
       const a = 'No MEV-protected quote available.'
       const b = <span>CoW Protocol available for MEV protection.</span>
       const c = <p>execution via CoW Protocol provides <strong>MEV protection</strong> out of the box.</p>
-      const d = <span> — Solvers compete in batch auctions for the best fill. Your trade is fully protected from MEV (frontrunning, sandwich attacks).</span>
-      const e = <p>✓ Settled — solvers compete in a batch auction; you&apos;re shielded from frontrunning/sandwich attacks.</p>
-      const f = <span title="MEV Protected — no frontrunning or sandwich attacks">MEV</span>
+      const d = <span>. Solvers compete in batch auctions for the best fill. Your trade is fully protected from MEV (frontrunning, sandwich attacks).</span>
+      const e = <p>✓ Settled, solvers compete in a batch auction; you&apos;re shielded from frontrunning/sandwich attacks.</p>
+      const f = <span title="MEV Protected, no frontrunning or sandwich attacks">MEV</span>
       const g = <p>swaps that route through CoW execute via batch auctions that remove the in-block ordering window front-running and sandwich attacks depend on.</p>
       const h = \`offers \${x} MEV-protected routes\`
     `
@@ -92,7 +92,7 @@ describe('retired claim: TeraSwap makes no MEV-related promise (owner 2026-11-06
       expect(hits.some((h) => h.includes(needle)), needle).toBe(true)
     }
     const neutral = `
-      const a = <p>Professional solvers compete in a <strong>batch auction</strong> to fill the order. How that auction treats MEV is part of CoW Protocol&apos;s own design — not a TeraSwap guarantee.</p>
+      const a = <p>Professional solvers compete in a <strong>batch auction</strong> to fill the order. How that auction treats MEV is part of CoW Protocol&apos;s own design, not a TeraSwap guarantee.</p>
       const b = <p>TeraSwap does not claim to prevent MEV.</p>
       const c = 'Each leg is independently visible to MEV searchers.'
       // a comment that says Force MEV Protection is not a surface
@@ -104,7 +104,7 @@ describe('retired claim: TeraSwap makes no MEV-related promise (owner 2026-11-06
   it('no user-facing string in src/ attributes MEV protection to TeraSwap', () => {
     const files = walk(SRC)
     expect(files.length).toBeGreaterThan(200) // the walk really covers src/
-    const offenders = files.flatMap((f) => findClaims(f, readFileSync(f, 'utf8')).map((h) => `${relative(process.cwd(), f)} — ${h}`))
+    const offenders = files.flatMap((f) => findClaims(f, readFileSync(f, 'utf8')).map((h) => `${relative(process.cwd(), f)}: ${h}`))
     expect(offenders).toEqual([])
   })
 })

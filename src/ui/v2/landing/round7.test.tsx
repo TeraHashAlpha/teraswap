@@ -135,7 +135,7 @@ describe('local scrims (landing.css)', () => {
     expect(mobile).toMatch(/\.ts-v2-scrim--features::after \{ background: var\(--scrim-down-features\); \}/)
   })
 
-  it('badges are text labels with a "· " lead — no chip', () => {
+  it('badges are text labels with a "· " lead: no chip', () => {
     expect(CSS).toMatch(/\.ts-v2-badge::before \{ content: "· "; \}/)
     const badge = /\.ts-v2-badge \{[^}]*\}/.exec(CSS)?.[0] ?? ''
     expect(badge).not.toMatch(/border|background|padding/)

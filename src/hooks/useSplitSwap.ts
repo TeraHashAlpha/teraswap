@@ -130,7 +130,7 @@ async function fetchSwapViaApi(
   if (!res.ok) {
     // [fix/unpriced-ack-paths L-3] Consent required — the same 409 + code shape the single path handles.
     if (res.status === 409 && data.code === 'unpriced_ack_required') {
-      throw new UnpricedAckRequiredError(data.error || 'No reference price for this pair — confirmation required.')
+      throw new UnpricedAckRequiredError(data.error || 'No reference price for this pair: confirmation required.')
     }
     throw new Error(data.error || `Swap API error ${res.status}`)
   }
@@ -333,7 +333,7 @@ export function useSplitSwap(
           throw new Error('Swap calldata is empty or too short.')
         }
         if (calldataHex.length > 200_000) {
-          throw new Error('Swap calldata abnormally large — possible injection.')
+          throw new Error('Swap calldata abnormally large: possible injection.')
         }
         const selector = calldataHex.slice(0, 10).toLowerCase()
         if (!KNOWN_SWAP_SELECTORS.has(selector)) {
@@ -351,7 +351,7 @@ export function useSplitSwap(
         if (leg.quote?.toAmount) {
           const feeCheck = validateFeeIntegrity(leg.quote.toAmount, swapData.toAmount, source)
           if (!feeCheck.valid) {
-            throw new Error('Fee integrity failed on split leg — output unexpectedly high.')
+            throw new Error('Fee integrity failed on split leg: output unexpectedly high.')
           }
         }
 
@@ -393,7 +393,7 @@ export function useSplitSwap(
         })
         const sim = await simulateSwapTx(simTx)
         if (!sim.success) {
-          updateLeg(i, { status: 'error', error: sim.error || 'Simulation failed — leg would revert' })
+          updateLeg(i, { status: 'error', error: sim.error || 'Simulation failed: leg would revert' })
           planned.push({
             source, percent: leg.percent, legAmount, routeViaFeeCollector, isNativeIn,
             routerAddress: swapData.tx.to, routerCalldata: calldataHex,
@@ -490,7 +490,7 @@ export function useSplitSwap(
           updateLeg(i, { status: 'error', error: msg.slice(0, 100) })
           setPlannedLegs([])
           setStatus('error')
-          setErrorMessage(`Split blocked — ${msg}`)
+          setErrorMessage(`Split blocked: ${msg}`)
           return
         }
         updateLeg(i, { status: 'error', error: msg.slice(0, 100) })
@@ -509,7 +509,7 @@ export function useSplitSwap(
     const signable = planned.filter(p => p.status === 'reviewed')
     if (signable.length === 0) {
       setStatus('error')
-      setErrorMessage('No split leg can execute — every leg failed pre-flight checks.')
+      setErrorMessage('No split leg can execute: every leg failed pre-flight checks.')
       return
     }
     // [Auditor H-02] Aggregate floor — the SAME helper applied once to the
@@ -550,7 +550,7 @@ export function useSplitSwap(
       const msg = err instanceof Error ? err.message : 'Unknown error'
       setPlannedLegs([])
       setStatus('error')
-      setErrorMessage(`Split blocked — ${msg}`)
+      setErrorMessage(`Split blocked: ${msg}`)
       return
     }
 

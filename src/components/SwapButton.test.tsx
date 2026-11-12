@@ -216,7 +216,7 @@ describe('SwapButton', () => {
     expect(onSwap).toHaveBeenCalledTimes(1)
   })
 
-  it('shows "Error — retry" enabled after a swap error', () => {
+  it('shows "Error: retry" enabled after a swap error', () => {
     render(<SwapButton {...baseProps} swapStatus="error" />)
     const btn = screen.getByRole('button')
     expect(btn).toHaveTextContent(/retry/i)

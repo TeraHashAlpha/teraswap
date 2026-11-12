@@ -103,7 +103,7 @@ describe('B7 · History: content parity v1 WalletHistory ⊆ v2, per state (0 mi
     expect(SWAPS.map((s) => timeAgo(s.created_at, NOW))).toEqual(['1m ago', '17d ago', '28d ago', '29d ago', '3h ago', '1mo ago'])
   })
 
-  it('the read signature, when the session holds one, rides the same request as v1 — on connect and on Refresh', async () => {
+  it('the read signature, when the session holds one, rides the same request as v1, on connect and on Refresh', async () => {
     h.headers = { 'x-orders-read-sig': '0xsig', 'x-orders-read-issued': '1' }
     const settle = async (root: HTMLElement) => {
       await waitFor(() => expect(root.textContent).toMatch(/Showing 6 of 62/))

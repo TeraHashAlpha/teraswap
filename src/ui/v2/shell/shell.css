@@ -8,8 +8,8 @@
 }
 
 /* Hide v1's own ♫ (the root layout mounts v1 BackgroundMusic around /v2 too; v2 renders its own). Matched by the
-   aria-label v1 sets — a test pins that label in v1's source and that the v2 button never matches. */
-body:has([data-ts-ui="v2"]) button[aria-label$="background music"] { display: none; }
+   data attribute v1 sets on it — a test pins that attribute in v1's source and that the v2 button never has it. */
+body:has([data-ts-ui="v2"]) button[data-v1-sound-toggle] { display: none; }
 
 /* Tab strip: horizontal scroll without a scrollbar; edge fades by data-edge-*; chevrons are decorative. */
 .ts-v2-tabscroll { scrollbar-width: none; -webkit-overflow-scrolling: touch; }

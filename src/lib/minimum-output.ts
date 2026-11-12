@@ -28,7 +28,7 @@ export class UnusableQuoteError extends Error {
 
   constructor(toAmount: unknown) {
     super(
-      'Unusable quote: no valid output amount — swap refused to keep the ' +
+      'Unusable quote: no valid output amount. Swap refused to keep the ' +
         'on-chain minimum-output protection active. Try another source.',
     )
     this.name = 'UnusableQuoteError'
@@ -138,16 +138,16 @@ export class StaleOrTamperedSwapError extends Error {
   constructor(deviationPercent: number | null, kind: StaleOrTamperedKind = 'below') {
     super(
       kind === 'pair-mismatch'
-        ? 'The quote you accepted was for a different pair or network — swap refused. ' +
+        ? 'The quote you accepted was for a different pair or network: swap refused. ' +
             'Please refresh the quote and try again.'
         : deviationPercent === null
-          ? 'No accepted quote to compare this swap against — swap refused. ' +
+          ? 'No accepted quote to compare this swap against: swap refused. ' +
             'Please refresh the quote and try again.'
           : kind === 'above'
             ? `Swap output is above the quote you accepted (+${fmtPct(deviationPercent, 1)}). ` +
-              'The route was refreshed — please review and try again.'
+              'The route was refreshed: please review and try again.'
             : `Swap output is below the quote you accepted (−${fmtPct(deviationPercent, 1)}). ` +
-              'The route was refreshed — please review and try again.',
+              'The route was refreshed: please review and try again.',
     )
     this.name = 'StaleOrTamperedSwapError'
     this.deviationPercent = deviationPercent

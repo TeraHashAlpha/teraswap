@@ -114,7 +114,7 @@ export default function LimitOrderPanel() {
     if (latestEvent.type === 'order_created') {
       stopWaitingSound()
       playSwapConfirmMP3()
-      toast({ type: 'success', title: 'Limit order placed', description: 'Your order is live — it will execute automatically when your target price is reached.' })
+      toast({ type: 'success', title: 'Limit order placed', description: 'Your order is live: it will execute automatically when your target price is reached.' })
     }
     if (latestEvent.type === 'order_filled') {
       playSwapConfirmMP3()
@@ -634,10 +634,10 @@ function CreateLimitForm({
           same event reads identically wherever a user encounters it. No click-through. */}
       {depegHardBlocked && (
         <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger" data-testid="limit-depeg-block">
-          <span className="font-semibold">&#9888; Order blocked — {depegCheck.symbol} depeg.</span>{' '}
+          <span className="font-semibold">&#9888; Order blocked: {depegCheck.symbol} depeg.</span>{' '}
           {depegCheck.message}
           <span className="mt-1 block text-xs text-danger/80">
-            The market price has diverged sharply from the protocol exchange rate — likely a depeg or oracle manipulation. This cannot be overridden. Try again once the prices reconverge.
+            The market price has diverged sharply from the protocol exchange rate, likely a depeg or oracle manipulation. This cannot be overridden. Try again once the prices reconverge.
           </span>
         </div>
       )}
@@ -646,10 +646,10 @@ function CreateLimitForm({
           not check. */}
       {depegUnverified && (
         <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger" data-testid="limit-depeg-unverified">
-          <span className="font-semibold">&#9888; Order paused — price not verified.</span>{' '}
+          <span className="font-semibold">&#9888; Order paused: price not verified.</span>{' '}
           {depegCheck.message}
           <span className="mt-1 block text-xs text-danger/80">
-            We could not get usable price-feed data to check this asset against its exchange rate, so we are not letting the order be created on a price we have not verified. This is not itself a depeg finding — we have not been able to make one either way. It clears once the feeds return good data.
+            We could not get usable price-feed data to check this asset against its exchange rate, so we are not letting the order be created on a price we have not verified. This is not itself a depeg finding. We have not been able to make one either way. It clears once the feeds return good data.
           </span>
         </div>
       )}
@@ -679,7 +679,7 @@ function CreateLimitForm({
             title="Flip price direction"
           >
             <span className="text-cream-gold">⇄</span>
-            1 {baseToken?.symbol ?? '—'} = ? {quoteToken?.symbol ?? '—'}
+            1 {baseToken?.symbol ?? 'n/a'} = ? {quoteToken?.symbol ?? 'n/a'}
           </button>
           {displayMarketPrice > 0 && (
             <button onClick={setMarketAsTarget} className="text-[10px] text-cream-gold hover:underline">
@@ -786,7 +786,7 @@ function CreateLimitForm({
         >
           This order executes when your price is met <strong className="text-cream-65">if the pinned
           route is viable</strong> at that moment; otherwise it stays open until it expires. The
-          route is fixed when you sign, so a changed quote cannot alter it — but it also cannot
+          route is fixed when you sign, so a changed quote cannot alter it, but it also cannot
           re-route around a pool that has dried up.
         </div>
       )}
@@ -794,7 +794,7 @@ function CreateLimitForm({
       {/* Info badge */}
       <div className="mt-3 flex items-center gap-2 rounded-lg border border-cream-gold/20 bg-cream-gold/5 px-3 py-2">
         <span className="text-[10px] text-cream-50">
-          <span className="font-semibold text-cream-gold">Autonomous execution</span> — Chainlink oracles monitor price. Your order executes via 1inch when target is hit. Approve once, then sign — no infinite approvals, no browser needed.
+          <span className="font-semibold text-cream-gold">Autonomous execution</span>: Chainlink oracles monitor price. Your order executes via 1inch when target is hit. Approve once, then sign: no infinite approvals, no browser needed.
         </span>
       </div>
     </div>
@@ -911,7 +911,7 @@ function OrderCard({
 
   const amountIn = order.order?.amountIn
     ? formatUnits(BigInt(order.order.amountIn.toString()), order.tokenInDecimals)
-    : '—'
+    : 'n/a'
 
   // Target price from Chainlink 8-decimal format
   const targetPriceUsd = useMemo(() => {
@@ -1056,7 +1056,7 @@ function OrderCard({
         {onCancel && isActive && (
           <button
             onClick={() => { onCancel(order.id); playClick() }}
-            title={chainMismatch ? `This order is on ${orderChainName} — switching your wallet is required to cancel it` : undefined}
+            title={chainMismatch ? `This order is on ${orderChainName}: switching your wallet is required to cancel it` : undefined}
             className="rounded-lg border border-danger/30 px-3 py-1.5 text-[11px] text-danger/70 hover:text-danger transition-colors"
           >
             {chainMismatch ? `Switch to ${orderChainName}` : 'Cancel'}

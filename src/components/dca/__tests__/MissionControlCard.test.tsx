@@ -76,7 +76,7 @@ function arcOffsetRatio() {
   return offset / dash
 }
 
-describe('MissionControlCard — countdown anchor', () => {
+describe('MissionControlCard: countdown anchor', () => {
   it('0 fills → anchors the countdown to createdAt + interval', () => {
     execMock.mockReturnValue({ executions: [], orderMeta: {}, lastFillAtMs: null, loading: false })
     render(<MissionControlCard order={makeOrder()} onCancel={vi.fn()} />)
@@ -90,7 +90,7 @@ describe('MissionControlCard — countdown anchor', () => {
   })
 })
 
-describe('MissionControlCard — states', () => {
+describe('MissionControlCard: states', () => {
   it('active → Cancel wired; ring at dcaExecuted/dcaTotal', () => {
     const onCancel = vi.fn()
     render(<MissionControlCard order={makeOrder({ dcaExecuted: 3, dcaTotal: 8 })} onCancel={onCancel} />)

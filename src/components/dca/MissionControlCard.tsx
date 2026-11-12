@@ -130,7 +130,7 @@ export default function MissionControlCard({
           {isLive && onCancel && (
             <button
               onClick={onCancel}
-              title={chainMismatch ? `This order is on ${chainName} — switching your wallet is required to cancel it` : undefined}
+              title={chainMismatch ? `This order is on ${chainName}: switching your wallet is required to cancel it` : undefined}
               className="inline-flex min-h-[44px] items-center rounded-lg border border-danger/30 px-3 text-xs text-danger/70 transition-colors hover:text-danger"
             >
               {chainMismatch ? `Switch to ${chainName}` : 'Cancel'}

@@ -46,7 +46,7 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-describe('TokenSelector — trigger button', () => {
+describe('TokenSelector: trigger button', () => {
   it('renders a "Select" placeholder when no token is chosen', () => {
     renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
     expect(screen.getByText('Select')).toBeInTheDocument()
@@ -66,7 +66,7 @@ describe('TokenSelector — trigger button', () => {
   })
 })
 
-describe('TokenSelector — modal interactions', () => {
+describe('TokenSelector: modal interactions', () => {
   it('opens the modal when the trigger button is clicked', () => {
     renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
     fireEvent.click(screen.getByText('Select'))
@@ -118,7 +118,7 @@ describe('TokenSelector — modal interactions', () => {
   })
 })
 
-describe('[9Y] TokenSelector — expanded catalog + chain-scoped long-tail search', () => {
+describe('[9Y] TokenSelector: expanded catalog + chain-scoped long-tail search', () => {
   async function setChain(id: number) {
     const wagmi = await import('wagmi')
     ;(wagmi.useAccount as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -289,7 +289,7 @@ describe('[token-selector-ux P4] category filter chips', () => {
   })
 })
 
-describe('[CHORE-DCA-WETH-INPUT] TokenSelector — hideNativeInput (DCA spend selector)', () => {
+describe('[CHORE-DCA-WETH-INPUT] TokenSelector: hideNativeInput (DCA spend selector)', () => {
   /** The popular-chip row is the first `flex-wrap` container in the modal. */
   function chipRow(): HTMLElement {
     const dialog = screen.getByText(/Select token/).closest('div')!.parentElement!
@@ -313,14 +313,14 @@ describe('[CHORE-DCA-WETH-INPUT] TokenSelector — hideNativeInput (DCA spend se
     expect(screen.getAllByText('WETH').length).toBeGreaterThan(0)
   })
 
-  it('default (no prop): native ETH still selectable — instant-swap path unchanged', () => {
+  it('default (no prop): native ETH still selectable. Instant-swap path unchanged', () => {
     renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
     fireEvent.click(screen.getByText('Select'))
     expect(screen.getAllByText('ETH').length).toBeGreaterThan(0)
   })
 })
 
-describe('TokenSelector — wallet disconnected', () => {
+describe('TokenSelector: wallet disconnected', () => {
   it('still renders the trigger when wallet is not connected', async () => {
     const wagmi = await import('wagmi')
     ;(wagmi.useAccount as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -339,7 +339,7 @@ describe('TokenSelector — wallet disconnected', () => {
   })
 })
 
-describe('[chore/category-scroll-fix] category chip row — DOM contract (structure only)', () => {
+describe('[chore/category-scroll-fix] category chip row: DOM contract (structure only)', () => {
   // NOTE: JSDOM does NO layout/overflow, so it can NOT prove the row actually
   // scrolls — the original `[chore/dca-ux-tweaks]` test "passed" while the row was
   // un-scrollable for desktop mouse users. These cases only assert the DOM contract
@@ -350,7 +350,7 @@ describe('[chore/category-scroll-fix] category chip row — DOM contract (struct
     return screen.getByText(/Select token/i).closest('div')!.parentElement! as HTMLElement
   }
 
-  it('the chip row has the single-row scroll contract — overflow-x-auto + flex-nowrap, never flex-wrap', () => {
+  it('the chip row has the single-row scroll contract: overflow-x-auto + flex-nowrap, never flex-wrap', () => {
     renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
     fireEvent.click(screen.getByText('Select'))
     const chipRow = modalRoot().querySelector('.overflow-x-auto') as HTMLElement
@@ -360,7 +360,7 @@ describe('[chore/category-scroll-fix] category chip row — DOM contract (struct
     expect(chipRow.classList.contains('flex-wrap')).toBe(false)      // would multi-row / not overflow
   })
 
-  it('chips do not shrink to fit — each chip is shrink-0 so the row genuinely overflows', () => {
+  it('chips do not shrink to fit. Each chip is shrink-0 so the row genuinely overflows', () => {
     renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
     fireEvent.click(screen.getByText('Select'))
     const chipRow = modalRoot().querySelector('.overflow-x-auto') as HTMLElement
@@ -401,7 +401,7 @@ describe('[fix/token-selector-chain-aware] catalog follows useQuoteChainId, not 
       throw new Error(
         `chainExclusiveSymbol(${presentChainId}, ${absentChainId}): every token in chain ` +
           `${presentChainId}'s catalog also exists (by address or symbol) in chain ` +
-          `${absentChainId}'s catalog — no valid negative control exists. Fix the test, ` +
+          `${absentChainId}'s catalog: no valid negative control exists. Fix the test, ` +
           `don't let it pass vacuously.`,
       )
     }
@@ -416,7 +416,7 @@ describe('[fix/token-selector-chain-aware] catalog follows useQuoteChainId, not 
   // Positive control: a symbol genuinely in Arbitrum's rendered default catalog.
   const arbitrumDefaultCatalog = getChainTokenList(42161)
   if (arbitrumDefaultCatalog.length === 0) {
-    throw new Error('getChainTokenList(42161) is empty — no positive control available')
+    throw new Error('getChainTokenList(42161) is empty: no positive control available')
   }
   const ARBITRUM_RENDERED_SYMBOL = arbitrumDefaultCatalog[0].symbol
 
@@ -501,7 +501,7 @@ describe('[fix/token-selector-chain-aware] catalog follows useQuoteChainId, not 
     expect(screen.getAllByText('ZRX').length).toBeGreaterThan(0)
   })
 
-  it('pin: connected on Base renders what DCAPanel/LimitOrderPanel/ConditionalOrderPanel embed unchanged (those panels require a wallet and pass no chain prop, so useQuoteChainId === useActiveChainId there — see useChainId.test.ts)', async () => {
+  it('pin: connected on Base renders what DCAPanel/LimitOrderPanel/ConditionalOrderPanel embed unchanged (those panels require a wallet and pass no chain prop, so useQuoteChainId === useActiveChainId there. See useChainId.test.ts)', async () => {
     await setWallet({ isConnected: true, chainId: 8453 })
     renderWithProviders(<TokenSelector selected={null} onSelect={vi.fn()} />)
     openModal()

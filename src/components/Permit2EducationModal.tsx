@@ -84,7 +84,7 @@ export default function Permit2EducationModal({
               About to sign a Permit2 approval
             </h2>
             <p className="mt-0.5 text-[11px] text-cream-40">
-              One-time explainer — understand what you&apos;re signing
+              One-time explainer: understand what you&apos;re signing
             </p>
           </div>
         </div>
@@ -128,7 +128,7 @@ export default function Permit2EducationModal({
             </div>
             <div className="flex gap-2">
               <span className="shrink-0 text-amber-400">!</span>
-              <span>If a site asks you to sign a Permit2 message with unlimited amount and far-future expiry — <b className="text-red-400">reject it immediately</b></span>
+              <span>If a site asks you to sign a Permit2 message with unlimited amount and far-future expiry: <b className="text-red-400">reject it immediately</b></span>
             </div>
           </div>
         </div>

@@ -12,7 +12,7 @@ import { fmtPct } from '@/lib/format'
  * focus; Escape cancels. Owner copy, verbatim.
  */
 export const UNPRICED_CONSENT_HEADING = 'No reference price for this pair'
-export const UNPRICED_CONSENT_CHECKBOX = 'I understand — continue'
+export const UNPRICED_CONSENT_CHECKBOX = 'I understand: continue'
 
 /** "{d}%" — the house percent formatter: at most 2 decimals, trailing zeros trimmed ("1.5%", "0.12%", "2%"). */
 function fmtSpread(pct: number): string {
@@ -39,7 +39,7 @@ export function unpricedConsentCopy({
   const protection = quoteSourceCount >= 2
     ? `${quoteSourceCount} sources quoted within ${fmtSpread(quoteSpreadPct)} of each other`
     : '1 source quoted (no second quote to compare against)'
-  return `We couldn't find a Chainlink, DefiLlama or CoinGecko price for ${symbolIn} or ${symbolOut}, so we can't estimate this trade's USD value or apply value-based limits. What still protects you: ${protection}, and the on-chain minimum output of ${minOut} ${symbolOut} — if a fill would return less, the transaction reverts.`
+  return `We couldn't find a Chainlink, DefiLlama or CoinGecko price for ${symbolIn} or ${symbolOut}, so we can't estimate this trade's USD value or apply value-based limits. What still protects you: ${protection}, and the on-chain minimum output of ${minOut} ${symbolOut}. If a fill would return less, the transaction reverts.`
 }
 
 export default function SwapUnpricedConsentDialog({

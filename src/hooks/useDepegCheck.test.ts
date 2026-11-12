@@ -109,7 +109,7 @@ afterEach(() => {
 const run = (tokenIn = CBETH, tokenOut: string | undefined = USDC) =>
   renderHook(() => useDepegCheck(tokenIn, tokenOut)).result.current
 
-describe('useDepegCheck — applicability (must not block the whole app)', () => {
+describe('useDepegCheck: applicability (must not block the whole app)', () => {
   it('a pair with NO exchange-rate feed → ok, frictionless (the overwhelmingly common swap)', () => {
     const r = run(USDC, USDC)
     expect(r.mode).toBe('ok')
@@ -131,7 +131,7 @@ describe('useDepegCheck — applicability (must not block the whole app)', () =>
   })
 })
 
-describe('useDepegCheck — in-flight is pending, not a block', () => {
+describe('useDepegCheck: in-flight is pending, not a block', () => {
   it('reads still loading → pending, frictionless (a normal first render is not an error)', () => {
     reads = {
       [readKey(MARKET, 'latestRoundData')]: { isLoading: true },
@@ -163,7 +163,7 @@ describe('useDepegCheck — in-flight is pending, not a block', () => {
 // first render, and re-opened the gate for ~0.3-1.3s on every poll during the outage it exists to
 // catch. These cases drive the REAL observer state sequence, one entry per emitted result.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-describe('useDepegCheck — M-01: the poll must never re-open the gate', () => {
+describe('useDepegCheck: M-01: the poll must never re-open the gate', () => {
   /** Apply one observer-result shape to ALL four reads (they share a query config, so they move together). */
   const allFour = (r: ReadResult) => ({
     [readKey(MARKET, 'latestRoundData')]: r,
@@ -195,7 +195,7 @@ describe('useDepegCheck — M-01: the poll must never re-open the gate', () => {
       state: { isLoading: true, isError: false, failureCount: 0, errorUpdateCount: 3 }, mustBlock: true },
   ]
 
-  it('stays blocked across EVERY step of a sustained outage — no pending window after the first failure', () => {
+  it('stays blocked across EVERY step of a sustained outage: no pending window after the first failure', () => {
     for (const step of OUTAGE_SEQUENCE) {
       reads = allFour(step.state)
       const mode = run().mode
@@ -207,14 +207,14 @@ describe('useDepegCheck — M-01: the poll must never re-open the gate', () => {
     }
   })
 
-  it('the exact regressed frame — failureCount reset to 0 mid-poll — blocks on errorUpdateCount alone', () => {
+  it('the exact regressed frame, failureCount reset to 0 mid-poll, blocks on errorUpdateCount alone', () => {
     // This single frame is the bug. Before the fix it returned 'pending' (gate open); the ONLY thing
     // distinguishing it from a genuine first render is errorUpdateCount, which query-core never resets.
     reads = allFour({ isLoading: true, isError: false, failureCount: 0, errorUpdateCount: 1 })
     expect(run().mode).toBe('unverified')
   })
 
-  it('one still-failing leg is enough — the gate does not need all four to have failed', () => {
+  it('one still-failing leg is enough. The gate does not need all four to have failed', () => {
     reads = {
       ...allFour({ isLoading: true, isError: false, failureCount: 0, errorUpdateCount: 0 }),
       [readKey(ER, 'latestRoundData')]: { isLoading: true, isError: false, failureCount: 0, errorUpdateCount: 1 },
@@ -234,7 +234,7 @@ describe('useDepegCheck — M-01: the poll must never re-open the gate', () => {
     expect(run().mode).toBe('ok')
   })
 
-  it('RECOVERY still yields a real verdict, not a rubber stamp — a depeg in the recovered data blocks', () => {
+  it('RECOVERY still yields a real verdict, not a rubber stamp. A depeg in the recovered data blocks', () => {
     reads = {
       [readKey(MARKET, 'latestRoundData')]: { data: round(112n * 10n ** 16n), errorUpdateCount: 2 },
       [readKey(MARKET, 'decimals')]: { data: 18, errorUpdateCount: 2 },
@@ -254,7 +254,7 @@ describe('useDepegCheck — M-01: the poll must never re-open the gate', () => {
   })
 })
 
-describe('useDepegCheck — FAIL CLOSED: cannot verify ⇒ blocked as unverified', () => {
+describe('useDepegCheck: FAIL CLOSED: cannot verify ⇒ blocked as unverified', () => {
   // These four use `errored()`, which keeps the last good value in `data` exactly as TanStack does.
   // That is what makes them bite: with otherwise-healthy, in-heartbeat data still in hand, ONLY the
   // isError guard can produce 'unverified'. Delete that guard and these fail — which is the property
@@ -323,7 +323,7 @@ describe('useDepegCheck — FAIL CLOSED: cannot verify ⇒ blocked as unverified
     expect(run().mode).toBe('unverified')
   })
 
-  it('unverified copy never claims a depeg — it says we could not check', () => {
+  it('unverified copy never claims a depeg. It says we could not check', () => {
     reads = { ...healthyReads(), [readKey(MARKET, 'latestRoundData')]: errored() }
     const r = run()
     expect(r.message).not.toMatch(/depeg/i)
@@ -331,7 +331,7 @@ describe('useDepegCheck — FAIL CLOSED: cannot verify ⇒ blocked as unverified
   })
 })
 
-describe('useDepegCheck — healthy reads still produce the real verdict', () => {
+describe('useDepegCheck: healthy reads still produce the real verdict', () => {
   it('peg holds (market == ER) → ok, passes', () => {
     reads = healthyReads()
     const r = run()
@@ -364,7 +364,7 @@ describe('useDepegCheck — healthy reads still produce the real verdict', () =>
   })
 })
 
-describe('useDepegCheck — unresolved chain (the fallback-to-mainnet hole)', () => {
+describe('useDepegCheck: unresolved chain (the fallback-to-mainnet hole)', () => {
   it('CONNECTED with an unresolved chain → unverified, never a confident "ok"', () => {
     // The old useActiveChainId fallback resolved this to mainnet, found no pair there (only Base
     // has one), and reported 'ok' — the guard vanished exactly when the chain was in flux.

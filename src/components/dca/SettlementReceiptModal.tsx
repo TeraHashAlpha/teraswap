@@ -33,12 +33,12 @@ function fmtEth(wei: string): string {
 }
 
 function fmtPrice(price: number | null, tokenInSymbol: string, tokenOutSymbol: string): string {
-  if (price == null) return '—'
+  if (price == null) return 'n/a'
   return `${fmtTokenValue(price)} ${tokenInSymbol} / ${tokenOutSymbol}`
 }
 
 function fmtBps(bps: number | null): string {
-  if (bps == null) return '—'
+  if (bps == null) return 'n/a'
   return fmtPct(bps / 100)
 }
 
@@ -54,16 +54,16 @@ function resolveBestRouteLabel(router: string | null | undefined, chainId: numbe
 }
 
 function fmtTimestamp(ms: number | null): string {
-  if (ms == null) return '—'
+  if (ms == null) return 'n/a'
   const d = new Date(ms)
-  if (Number.isNaN(d.getTime())) return '—'
+  if (Number.isNaN(d.getTime())) return 'n/a'
   return fmtDate(d)
 }
 
 /** Plain-text export — the only "share" affordance this slice ships (no PDF/export libs). */
 function receiptToText(receipt: SettlementReceipt, bestRouteLabel: string): string {
   const lines: string[] = []
-  lines.push(`TeraSwap DCA settlement receipt — ${receipt.tokenInSymbol} -> ${receipt.tokenOutSymbol}`)
+  lines.push(`TeraSwap DCA settlement receipt: ${receipt.tokenInSymbol} -> ${receipt.tokenOutSymbol}`)
   lines.push(`Status: ${receipt.status}`)
   lines.push(`Order: ${receipt.orderHash}`)
   lines.push('')
@@ -75,7 +75,7 @@ function receiptToText(receipt: SettlementReceipt, bestRouteLabel: string): stri
   lines.push(
     `Aggregation value: ${
       receipt.totals.totalAggregationValueRaw == null
-        ? '—'
+        ? 'n/a'
         : `+${fmtToken(receipt.totals.totalAggregationValueRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}`
     }`,
   )
@@ -87,10 +87,10 @@ function receiptToText(receipt: SettlementReceipt, bestRouteLabel: string): stri
   for (const f of receipt.fills) {
     const agg =
       f.nextBestOutRaw == null
-        ? 'Aggregation value: —'
+        ? 'Aggregation value: n/a'
         : `Best route: ${bestRouteLabel} -> ${fmtToken(f.amountOutRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}. Next-best: ${f.nextBestSource} -> ${fmtToken(f.nextBestOutRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}. Aggregation value: +${fmtToken(f.aggregationValueRaw ?? '0', receipt.tokenOutDecimals, receipt.tokenOutSymbol)}.`
     lines.push(
-      `  #${f.executionNumber} ${fmtTimestamp(f.timestamp)} — ${fmtToken(f.amountInRaw, receipt.tokenInDecimals, receipt.tokenInSymbol)} -> ${fmtToken(f.amountOutRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}, fee ${fmtToken(f.protocolFeeRaw, receipt.tokenInDecimals, receipt.tokenInSymbol)}, ${f.txUrl}`,
+      `  #${f.executionNumber} ${fmtTimestamp(f.timestamp)}: ${fmtToken(f.amountInRaw, receipt.tokenInDecimals, receipt.tokenInSymbol)} -> ${fmtToken(f.amountOutRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}, fee ${fmtToken(f.protocolFeeRaw, receipt.tokenInDecimals, receipt.tokenInSymbol)}, ${f.txUrl}`,
     )
     lines.push(`    ${agg}`)
   }
@@ -169,7 +169,7 @@ export default function SettlementReceiptModal({ order, onClose }: Props) {
         })
         if (!cancelled) setReceipt(built)
       } catch {
-        if (!cancelled) setError('Could not build the settlement receipt — try again shortly.')
+        if (!cancelled) setError('Could not build the settlement receipt: try again shortly.')
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -250,7 +250,7 @@ export default function SettlementReceiptModal({ order, onClose }: Props) {
                   <span className="text-cream-35">Aggregation value</span>
                   <span className="text-cream">
                     {receipt.totals.totalAggregationValueRaw == null
-                      ? '—'
+                      ? 'n/a'
                       : `+${fmtToken(receipt.totals.totalAggregationValueRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}`}
                   </span>
                 </div>
@@ -300,7 +300,7 @@ export default function SettlementReceiptModal({ order, onClose }: Props) {
                           runner-up recorded — never a fabricated number. */}
                       <div className="mt-1 text-cream-35" data-testid="fill-aggregation-value">
                         {f.nextBestOutRaw == null ? (
-                          <span>Aggregation value: —</span>
+                          <span>Aggregation value: n/a</span>
                         ) : (
                           <span>
                             Best route: {bestRouteLabel} → {fmtToken(f.amountOutRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}.{' '}

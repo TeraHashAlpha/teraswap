@@ -134,7 +134,7 @@ describe('useApproval', () => {
     expect(result.current.plan).toBeNull()
   })
 
-  it('treats invalid amount (NaN, bad decimals) as zero — no plan', () => {
+  it('treats invalid amount (NaN, bad decimals) as zero: no plan', () => {
     const { result } = renderHook(() => useApproval(USDC, '1.2.3', SPENDER))
     expect(result.current.plan).toBeNull()
   })
@@ -197,7 +197,7 @@ describe('useApproval', () => {
   })
 })
 
-describe('useApproval — [SPRINT-9Q] chain-pinned allowance reads', () => {
+describe('useApproval: [SPRINT-9Q] chain-pinned allowance reads', () => {
   const ADDR = '0x1111111111111111111111111111111111111111'
 
   beforeEach(() => {
@@ -219,7 +219,7 @@ describe('useApproval — [SPRINT-9Q] chain-pinned allowance reads', () => {
     for (const id of ids) expect(id).toBe(1)
   })
 
-  it('reads allowance on Base (8453) when the wallet is on Base — not mainnet (the 9Q bug)', () => {
+  it('reads allowance on Base (8453) when the wallet is on Base, not mainnet (the 9Q bug)', () => {
     ;(useAccount as unknown as Mock).mockReturnValue({ address: ADDR, chain: { id: 8453 } })
     directAllowance = 0n
     renderHook(() => useApproval(USDC, '1000', SPENDER))
@@ -238,7 +238,7 @@ describe('useApproval — [SPRINT-9Q] chain-pinned allowance reads', () => {
 // SwapBox.test.tsx). This pins the invariant on the approval side: a
 // confirmed exact-approve tx transitions this hook to 'ready', full stop.
 // ─────────────────────────────────────────────────────────────
-describe('useApproval — approve confirmation never yields a "success" state [BUG-SWAP-APPROVE-STALE-SUCCESS]', () => {
+describe('useApproval: approve confirmation never yields a "success" state [BUG-SWAP-APPROVE-STALE-SUCCESS]', () => {
   it("a confirmed exact-approve receipt lands the hook on 'ready', not any success-shaped status", () => {
     directAllowance = 0n
     const { result, rerender } = renderHook(() => useApproval(USDC, '1000', SPENDER))

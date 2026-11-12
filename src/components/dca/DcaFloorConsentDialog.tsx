@@ -14,7 +14,7 @@ import { DCA_NO_PRICE_FILL_CAP_MAX_USD, type DcaFloorTier } from '@/lib/order-en
  * guess, never "0 tokens". The cap comes from DCA_NO_PRICE_FILL_CAP_MAX_USD, never a literal.
  */
 export const FLOOR_CONSENT_HEADING = 'How DCA buys are protected'
-export const FLOOR_CONSENT_CHECKBOX = 'Got it — continue'
+export const FLOOR_CONSENT_CHECKBOX = 'Got it: continue'
 
 function registeredLead(count: number | null | undefined): string {
   if (typeof count !== 'number' || !Number.isInteger(count) || count <= 0) return 'A small set of tokens on this network have'
@@ -37,7 +37,7 @@ export function floorConsentCopy({
   const symbol = symbols.join(' and ')
   const doesnt = symbols.length > 1 ? "don't" : "doesn't"
   if (tier === 'offchain-price') {
-    return `${lead} a Chainlink price feed registered in our contract, which lets the contract reject a bad fill on its own. ${symbol} ${doesnt} have one yet, so protection comes from our executor instead — it checks each buy against live market prices and holds the buy if they disagree. This is how most tokens work today.`
+    return `${lead} a Chainlink price feed registered in our contract, which lets the contract reject a bad fill on its own. ${symbol} ${doesnt} have one yet, so protection comes from our executor instead. It checks each buy against live market prices and holds the buy if they disagree. This is how most tokens work today.`
   }
   // Never render a number above the ceiling, whatever the API returned.
   const cap = typeof effectiveCapUsd === 'number' && Number.isFinite(effectiveCapUsd) && effectiveCapUsd > 0

@@ -61,7 +61,7 @@ const COW_16_BPS = '9984'   // 1 bp over threshold
 
 // ── Path 2: smart preference (mevProtected=false) ────────
 
-describe('selectBestWithMevPreference — smart promotion gating', () => {
+describe('selectBestWithMevPreference: smart promotion gating', () => {
   it('promotes CoW when within 15 bps AND gasless.recommended=true', () => {
     const oneInch = quote('1inch', BEST_AMOUNT)
     const cow = quote('cowswap', COW_15_BPS)
@@ -135,7 +135,7 @@ describe('selectBestWithMevPreference — smart promotion gating', () => {
 
 // ── Boundary conditions ──────────────────────────────────
 
-describe('selectBestWithMevPreference — boundary conditions', () => {
+describe('selectBestWithMevPreference: boundary conditions', () => {
   it('promotes at exactly 15 bps shortfall (≤ threshold, not <)', () => {
     const oneInch = quote('1inch', BEST_AMOUNT)
     const cow = quote('cowswap', COW_15_BPS)
@@ -178,7 +178,7 @@ describe('selectBestWithMevPreference — boundary conditions', () => {
 
 // ── Already-best paths ───────────────────────────────────
 
-describe('selectBestWithMevPreference — already-best paths', () => {
+describe('selectBestWithMevPreference: already-best paths', () => {
   it('keeps CoW as best (no promotion needed) when it has 0 bps shortfall', () => {
     const cow = quote('cowswap', BEST_AMOUNT)
     const oneInch = quote('1inch', BEST_AMOUNT)
@@ -216,7 +216,7 @@ describe('selectBestWithMevPreference — already-best paths', () => {
 // The "Force MEV Protection" toggle is retired; its strict CoW-only filter is gone. The 2nd argument is
 // deprecated and IGNORED: `true` must select exactly like `false` (the old default).
 
-describe('selectBestWithMevPreference — the retired force flag is ignored', () => {
+describe('selectBestWithMevPreference: the retired force flag is ignored', () => {
   it('true with a non-competitive CoW quote: best stays the top output, every source kept', () => {
     const oneInch = quote('1inch', BEST_AMOUNT)
     const cow = quote('cowswap', COW_16_BPS)
@@ -250,7 +250,7 @@ describe('selectBestWithMevPreference — the retired force flag is ignored', ()
 
 // ── Null input ───────────────────────────────────────────
 
-describe('selectBestWithMevPreference — null input', () => {
+describe('selectBestWithMevPreference: null input', () => {
   it('returns null meta with both flags false when rawMeta is null', () => {
     const result = selectBestWithMevPreference(null, false, AGGREGATOR_META, MEV_PREFERENCE_THRESHOLD)
     expect(result.meta).toBeNull()

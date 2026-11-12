@@ -34,7 +34,7 @@ function makeOrder(overrides: Partial<AutonomousOrder> = {}): AutonomousOrder {
   }
 }
 
-describe('DCAOrderCard — View receipt gating', () => {
+describe('DCAOrderCard: View receipt gating', () => {
   it('shows "View receipt" for a completed (filled) position', () => {
     render(<DCAOrderCard order={makeOrder({ status: 'filled' })} />)
     expect(screen.getByText('View receipt')).toBeInTheDocument()

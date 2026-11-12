@@ -31,7 +31,7 @@ beforeEach(() => {
   useDisconnectedChainSelection.setState({ chainId: null })
 })
 
-describe('useActiveChainId — unchanged wallet-derived fallback', () => {
+describe('useActiveChainId: unchanged wallet-derived fallback', () => {
   it('returns the wallet chain when connected', () => {
     mockChainId = 8453
     const { result } = renderHook(() => useActiveChainId())
@@ -46,7 +46,7 @@ describe('useActiveChainId — unchanged wallet-derived fallback', () => {
   })
 })
 
-describe('useQuoteChainId — quote/browse path only', () => {
+describe('useQuoteChainId: quote/browse path only', () => {
   it('matches the wallet chain when connected (same as useActiveChainId)', () => {
     mockChainId = 8453
     const { result } = renderHook(() => useQuoteChainId())

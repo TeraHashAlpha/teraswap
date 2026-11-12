@@ -68,7 +68,8 @@ function clickInProduction(el: Element) {
   act(() => void document.dispatchEvent(new MouseEvent('click', { bubbles: true })))
 }
 
-const v2Toggle = () => screen.getByRole('button', { name: /Turn music (on|off)/ })
+// v1's own button carries the same label now, so pick v2's by its marker (v1's is hidden by shell.css under v2).
+const v2Toggle = () => document.querySelector('[data-v2-music-toggle]') as HTMLElement
 
 afterEach(() => {
   cleanup()
@@ -80,7 +81,7 @@ describe('v2 ♫ toggle as the very first interaction', () => {
     await freshPage('v2')
     clickInProduction(v2Toggle())
     expect(bg('play')).toEqual([])
-    expect(v2Toggle().getAttribute('aria-label')).toBe('Turn music on')
+    expect(v2Toggle().getAttribute('aria-label')).toBe('Unmute sound')
     expect(v2Toggle().getAttribute('aria-pressed')).toBe('false')
     expect(v2Toggle().querySelector('svg[data-music-icon]')?.getAttribute('data-music-icon')).toBe('off')
   })
@@ -90,7 +91,7 @@ describe('v2 ♫ toggle as the very first interaction', () => {
     clickInProduction(v2Toggle())
     clickInProduction(v2Toggle())
     expect(bg('play')).toHaveLength(1)
-    expect(v2Toggle().getAttribute('aria-label')).toBe('Turn music off')
+    expect(v2Toggle().getAttribute('aria-label')).toBe('Mute sound')
     expect(sounds.isBackgroundMusicPlaying()).toBe(true)
   })
 
@@ -113,7 +114,7 @@ describe('v1 is unchanged', () => {
     expect(bg('play')).toHaveLength(1)
     expect(sounds.isBackgroundMusicPlaying()).toBe(true)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Mute background music' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Mute sound' }))
     expect(bg('pause')).toHaveLength(1)
     expect(sounds.isBackgroundMusicPlaying()).toBe(false)
     expect(bg('play')).toHaveLength(1)
@@ -121,8 +122,8 @@ describe('v1 is unchanged', () => {
 
   it('(c) the v1 toggle as the very first interaction stays silent (v1 startedRef already guarded it)', async () => {
     await freshPage('v1')
-    clickInProduction(screen.getByRole('button', { name: 'Mute background music' }))
+    clickInProduction(screen.getByRole('button', { name: 'Mute sound' }))
     expect(bg('play')).toEqual([])
-    expect(screen.getByRole('button', { name: 'Unmute background music' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Unmute sound' })).toBeTruthy()
   })
 })

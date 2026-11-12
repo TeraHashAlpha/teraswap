@@ -198,14 +198,14 @@ describe('(4) cap, floor and tier lines are v1\'s own strings', () => {
     for (const [cap, shown] of [[250, 250], [100, 100], [9999, DCA_NO_PRICE_FILL_CAP_MAX_USD]] as const) {
       const info = unpricedInfo({ effectiveCap: cap })
       expect(protectionHint(info)?.text).toBe(floorTierHint(info))
-      expect(protectionHint(info)?.text).toBe(`No market price source right now — buys capped at $${shown} and flagged`)
+      expect(protectionHint(info)?.text).toBe(`No market price source right now: buys capped at $${shown} and flagged`)
     }
   })
 
   it('renders the cap line in the card, tagged with its tier, and the Protection row is v1\'s badge label', async () => {
     h.floor = unpricedInfo({ effectiveCap: 250 })
     render(<DcaCard chainId={BASE} />)
-    expect((await screen.findByTestId('dca-tier-hint')).textContent).toBe('No market price source right now — buys capped at $250 and flagged')
+    expect((await screen.findByTestId('dca-tier-hint')).textContent).toBe('No market price source right now: buys capped at $250 and flagged')
     expect(screen.getByTestId('dca-tier-hint').getAttribute('data-tier')).toBe('unpriced')
     expect(screen.getByTestId('dca-sum-protection').textContent).toContain('No price source')
   })
@@ -231,7 +231,7 @@ describe('(4) cap, floor and tier lines are v1\'s own strings', () => {
     expect(floorConsentCopy({ tier: 'unpriced', symbols: ['USDC'], effectiveCapUsd: info.effectiveCap, registeredFeedCount: info.registeredFeedCount })).toContain('each buy is capped at $250 and flagged')
   })
 
-  it('floor: the under-minimum buy message is v1\'s (same formatter, same inputs) — shown inline and the CTA says so', async () => {
+  it('floor: the under-minimum buy message is v1\'s (same formatter, same inputs). Shown inline and the CTA says so', async () => {
     const { container } = render(<DCAPanel chainId={BASE} />)
     typeAmount(container, '0.000000000000000001')
     const v1Text = container.querySelector('p.text-amber-300')?.textContent
@@ -310,7 +310,7 @@ describe('(2) parity: every visible v1 DCA create-tab text node is in v2', () =>
       cleanup()
       const v2 = render(<DcaCard chainId={BASE} />)
       if (amount) typeAmount(v2.container, amount)
-      const allow = [...ALLOW, ...(amount ? [{ text: 'Start DCA — 10 buys over 10.0 days', reason: 'owner B6a: "Review DCA"; the v1 label also names buys and duration, which the summary rows state' }] : [])]
+      const allow = [...ALLOW, ...(amount ? [{ text: 'Start DCA: 10 buys over 10.0 days', reason: 'owner B6a: "Review DCA"; the v1 label also names buys and duration, which the summary rows state' }] : [])]
       const r = compareContent(v1Root, v2.container, allow)
       expect(r.missingText).toEqual([])
       expect(r.missingHrefs).toEqual([])

@@ -63,11 +63,11 @@ describe('the ♫ button uses them', () => {
     const { MusicToggle } = await import('../shell/Fabs')
     const { fireEvent } = await import('@testing-library/react')
     render(<MusicToggle />)
-    const button = screen.getByRole('button', { name: 'Turn music off' })
+    const button = screen.getByRole('button', { name: 'Mute sound' })
     expect(button.querySelector('svg')!.getAttribute('data-music-icon')).toBe('on')
     expect(button.textContent).toBe('') // no glyph left
     fireEvent.click(button)
-    expect(screen.getByRole('button', { name: 'Turn music on' }).querySelector('svg')!.getAttribute('data-music-icon')).toBe('off')
+    expect(screen.getByRole('button', { name: 'Unmute sound' }).querySelector('svg')!.getAttribute('data-music-icon')).toBe('off')
     vi.doUnmock('@/lib/sounds')
     vi.doUnmock('./../shell/HelpDrawer')
   })

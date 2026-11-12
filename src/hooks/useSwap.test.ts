@@ -227,7 +227,7 @@ afterEach(() => {
 })
 
 // ─────────────────────────────────────────────────────────────
-describe('useSwap — initialisation', () => {
+describe('useSwap: initialisation', () => {
   it('starts in idle state with no error', () => {
     const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
     expect(result.current.status).toBe('idle')
@@ -236,7 +236,7 @@ describe('useSwap — initialisation', () => {
   })
 })
 
-describe('useSwap — security validators block bad /api/swap responses', () => {
+describe('useSwap: security validators block bad /api/swap responses', () => {
   it('rejects truncated calldata (<10 chars) with a clear error', async () => {
     mockSwapFetch(swapResponse({ data: '0x' }))
     const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5))
@@ -346,7 +346,7 @@ describe('useSwap — security validators block bad /api/swap responses', () => 
     expect(mockSendTransaction).not.toHaveBeenCalled()
   })
 
-  it('a StaleOrTamperedSwapError does NOT trigger the 9O fallback walk — same as PriceGuardError', async () => {
+  it('a StaleOrTamperedSwapError does NOT trigger the 9O fallback walk: same as PriceGuardError', async () => {
     const QUOTE = '3000000000'
     const fetchSpy = mockSwapFetch(swapResponse({ toAmount: String(BigInt(QUOTE) / 2n) }))
     const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('1inch', QUOTE)))
@@ -389,7 +389,7 @@ describe('useSwap — security validators block bad /api/swap responses', () => 
 })
 
 // ─────────────────────────────────────────────────────────────
-describe('useSwap — [FULL-M-04] swap-state reset on account change', () => {
+describe('useSwap: [FULL-M-04] swap-state reset on account change', () => {
   const WALLET_A = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
   const WALLET_B = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
   const DEFAULT_ADDR = '0x1111111111111111111111111111111111111111'
@@ -456,7 +456,7 @@ describe('useSwap — [FULL-M-04] swap-state reset on account change', () => {
 // test coverage. Pinning it here closes the "success resets on chain change"
 // requirement from the bug's class sweep.
 // ─────────────────────────────────────────────────────────────
-describe('useSwap — [P219] swap-state reset on chain switch', () => {
+describe('useSwap: [P219] swap-state reset on chain switch', () => {
   const ADDR = '0x1111111111111111111111111111111111111111'
 
   afterEach(() => {
@@ -487,7 +487,7 @@ describe('useSwap — [P219] swap-state reset on chain switch', () => {
 // success — a completed swap's 'success' status must never leak into the
 // NEXT swap cycle on the same hook instance.
 // ─────────────────────────────────────────────────────────────
-describe('useSwap — back-to-back swaps each require their own tx before success [BUG-SWAP-APPROVE-STALE-SUCCESS]', () => {
+describe('useSwap: back-to-back swaps each require their own tx before success [BUG-SWAP-APPROVE-STALE-SUCCESS]', () => {
   it('starting a new swap after a completed one always leaves the prior success behind', async () => {
     // Drive to 'success' via the CoW flow (the simplest path to a genuine
     // success status in this mocked file).
@@ -530,7 +530,7 @@ describe('useSwap — back-to-back swaps each require their own tx before succes
 })
 
 // ─────────────────────────────────────────────────────────────
-describe('useSwap — [P209] simulation fail-open warning', () => {
+describe('useSwap: [P209] simulation fail-open warning', () => {
   it('sets simulationSkipped when the simulation is inconclusive', async () => {
     mockSwapFetch(swapResponse())
     // Inconclusive sim: proceeds (success) but unsimulated.
@@ -568,7 +568,7 @@ describe('useSwap — [P209] simulation fail-open warning', () => {
 // chain from useActiveChainId() (same as the quote pipeline), not a divergent
 // wagmi useChainId(). Otherwise simulate/broadcast could target a different
 // chain than the quote.
-describe('useSwap — chain-id source of truth [SPRINT-9G G6]', () => {
+describe('useSwap: chain-id source of truth [SPRINT-9G G6]', () => {
   it('runs the swap on the ACTIVE (wallet) chain, not a divergent wagmi useChainId', async () => {
     // Wallet on Base (8453) while wagmi useChainId() still reports mainnet (1).
     vi.mocked(useAccount).mockReturnValue({
@@ -590,7 +590,7 @@ describe('useSwap — chain-id source of truth [SPRINT-9G G6]', () => {
   })
 })
 
-describe('useSwap — [SPRINT-9R R2] frozen pendingSwap snapshot (Review-modal integrity)', () => {
+describe('useSwap: [SPRINT-9R R2] frozen pendingSwap snapshot (Review-modal integrity)', () => {
   it('freezes source, token pair and amounts into pendingSwap at confirm time', async () => {
     mockSwapFetch(swapResponse()) // toAmount = 2950000000
     const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('1inch', ACCEPTED_QUOTE)))
@@ -631,7 +631,7 @@ describe('useSwap — [SPRINT-9R R2] frozen pendingSwap snapshot (Review-modal i
 // ─────────────────────────────────────────────────────────────
 // [SPRINT-9U U1] CoW order EIP-712 review gate — no signature without a frozen review.
 // ─────────────────────────────────────────────────────────────
-describe('useSwap — [SPRINT-9U U1] CoW order review gate', () => {
+describe('useSwap: [SPRINT-9U U1] CoW order review gate', () => {
   const DEFAULT_ADDR = '0x1111111111111111111111111111111111111111'
   const OTHER_ADDR = '0x2222222222222222222222222222222222222222'
 
@@ -771,7 +771,7 @@ describe('useSwap — [SPRINT-9U U1] CoW order review gate', () => {
 // out of scope for this check, not merely skip-listed. Its bypass is
 // exercised directly (skip-list) in minimum-output.test.ts instead.
 // ─────────────────────────────────────────────────────────────
-describe('useSwap — [fix/swap-toamount-lower-bound-vs-quote] positive control, every AGGREGATOR_META source', () => {
+describe('useSwap: [fix/swap-toamount-lower-bound-vs-quote] positive control, every AGGREGATOR_META source', () => {
   const ADDR = '0x1111111111111111111111111111111111111111'
   const EXECUTABLE_CHAIN = 42161 // Arbitrum — supported chain, no QUOTE_ONLY_SOURCES_BY_CHAIN entry → every source is executable here
 
@@ -804,7 +804,7 @@ describe('useSwap — [fix/swap-toamount-lower-bound-vs-quote] positive control,
 // tests are the wiring, not the formula (that is minimum-output.test.ts):
 // disable the call in useSwap.ts and the first one goes green-to-red.
 // ─────────────────────────────────────────────────────────────
-describe('useSwap — [Auditor H-01] the accepted quote reaches the check in the NORMAL flow', () => {
+describe('useSwap: [Auditor H-01] the accepted quote reaches the check in the NORMAL flow', () => {
   const QUOTE = '3000000000'
 
   it('a quote that resolves AFTER the first render still bounds the swap (no stale closure)', async () => {
@@ -868,7 +868,7 @@ describe('useSwap — [Auditor H-01] the accepted quote reaches the check in the
 // isExecutableSource never interferes; this is about the floor, not the
 // per-chain executable-source scoping.
 // ─────────────────────────────────────────────────────────────
-describe('useSwap — [Auditor H-01] every AGGREGATOR_META source × quote state', () => {
+describe('useSwap: [Auditor H-01] every AGGREGATOR_META source × quote state', () => {
   const ADDR = '0x1111111111111111111111111111111111111111'
   const EXECUTABLE_CHAIN = 42161
   const QUOTE = '3000000000'
@@ -920,7 +920,7 @@ describe('useSwap — [Auditor H-01] every AGGREGATOR_META source × quote state
     }
   })
 
-  it('cowswap reaches no floor at all — execute() dispatches it before executeStandardSwap', async () => {
+  it('cowswap reaches no floor at all: execute() dispatches it before executeStandardSwap', async () => {
     // Why it is NOT skip-listed (Auditor M-01): a halved fill AND a missing
     // quote both proceed to the CoW review gate, because useSwap.ts:1058-1059
     // routes cowswap to executeCowSwap before any floor check exists. A
@@ -951,7 +951,7 @@ describe('useSwap — [Auditor H-01] every AGGREGATOR_META source × quote state
 // refusal never walks (:712), the whole fallback chain dead-ended. SwapBox now
 // passes the per-source map built from meta.all.
 // ─────────────────────────────────────────────────────────────
-describe('useSwap — [Architect ruling R3-2] a fallback is floored against its own quote', () => {
+describe('useSwap: [Architect ruling R3-2] a fallback is floored against its own quote', () => {
   /** Distinct /swap output per source, so a fallback is visibly worse. */
   function mockPerSourceSwapFetch(bySource: Record<string, string>) {
     return vi.spyOn(global, 'fetch').mockImplementation(async (_url, init?: RequestInit) => {
@@ -1037,7 +1037,7 @@ describe('useSwap — [Architect ruling R3-2] a fallback is floored against its 
 // A 409 is NOT a failed swap — the hook parks in idle and raises `unpricedAckRequired` so the
 // dialog opens; confirm re-executes with the ack.
 // ─────────────────────────────────────────────────────────────
-describe('useSwap — [feat/swap-price-tiers] 409 unpriced_ack_required → consent → unpricedAck', () => {
+describe('useSwap: [feat/swap-price-tiers] 409 unpriced_ack_required → consent → unpricedAck', () => {
   const ACK_409 = { error: 'No reference price for this pair', code: 'unpriced_ack_required', requiredTier: 'unpriced', unpriceable: true }
 
   it('a 409 unpriced_ack_required is not an error: idle, no message, unpricedAckRequired=true, no 9O fallback walk', async () => {
@@ -1089,7 +1089,7 @@ describe('useSwap — [feat/swap-price-tiers] 409 unpriced_ack_required → cons
 // execute('cowswap') never sent `unpricedAck` and its catch had no 409 branch — the user accepted the
 // dialog and got a raw "Swap API error 409" (fail-closed, nothing signed, but a dead end).
 // ─────────────────────────────────────────────────────────────
-describe('useSwap — [fix/unpriced-ack-paths M-1] CoW path: 409 → consent dialog; the ack rides execute(cowswap)', () => {
+describe('useSwap: [fix/unpriced-ack-paths M-1] CoW path: 409 → consent dialog; the ack rides execute(cowswap)', () => {
   const ACK_409 = { error: 'No reference price for this pair', code: 'unpriced_ack_required', requiredTier: 'unpriced', unpriceable: true }
   const ADDR = '0x1111111111111111111111111111111111111111'
   const cowParams = () => ({
@@ -1103,7 +1103,7 @@ describe('useSwap — [fix/unpriced-ack-paths M-1] CoW path: 409 → consent dia
   const cowResponse = () => ({ source: 'cowswap', toAmount: '2950000000', estimatedGas: 0, gasUsd: 0, routes: [], cowOrderParams: cowParams() })
   const bodyOf = (f: ReturnType<typeof mockSwapFetch>, i: number) => JSON.parse(String((f.mock.calls[i][1] as RequestInit).body))
 
-  it('execute(cowswap) on a 409 unpriced_ack_required parks in idle with the flag up — no error, no frozen order, nothing signed', async () => {
+  it('execute(cowswap) on a 409 unpriced_ack_required parks in idle with the flag up: no error, no frozen order, nothing signed', async () => {
     const f = mockSwapFetch(ACK_409, 409)
     const { result } = renderHook(() => useSwap(TOKEN_IN, TOKEN_OUT, '1', 0.5, quotes('cowswap', ACCEPTED_QUOTE)))
     await act(async () => { await result.current.execute('cowswap') })
@@ -1167,7 +1167,7 @@ describe('useSwap — [fix/unpriced-ack-paths M-1] CoW path: 409 → consent dia
 // the send/sign moment, independent of whatever `useActiveChainId()` reports afterward. Consumers
 // (SwapBox's explorer links, its success toast) must render against this, never the live chain.
 // ─────────────────────────────────────────────────────────────
-describe('useSwap — [fix/tx-links-remaining] txChainId tracks the SEND-time chain', () => {
+describe('useSwap: [fix/tx-links-remaining] txChainId tracks the SEND-time chain', () => {
   afterEach(() => {
     vi.mocked(useAccount).mockReturnValue({
       address: '0x1111111111111111111111111111111111111111',

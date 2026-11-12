@@ -49,7 +49,7 @@ describe('calculateAutoSlippage', () => {
   })
 })
 
-describe('SlippageModal — render', () => {
+describe('SlippageModal: render', () => {
   function makeProps(over: Partial<React.ComponentProps<typeof SlippageModal>> = {}) {
     return {
       value: 0.5,

@@ -52,7 +52,7 @@ export default function BetaBanner() {
         style={{ backgroundColor: 'rgba(255,255,255,0.04)' }}
       >
         <span>
-          Beta version — smart contracts are unaudited. Use with caution.
+          Beta version: smart contracts are unaudited. Use with caution.
         </span>
         <button
           onClick={dismiss}

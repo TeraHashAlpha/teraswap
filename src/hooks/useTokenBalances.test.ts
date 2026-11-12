@@ -68,7 +68,7 @@ beforeEach(() => {
   })
 })
 
-describe('useTokenBalances — chain-aware [SPRINT-9G G5]', () => {
+describe('useTokenBalances: chain-aware [SPRINT-9G G5]', () => {
   it('fetches Base (8453) balances over the Base chain, gated by isChainActive', () => {
     useAccountMock.mockReturnValue({
       address: '0x1111111111111111111111111111111111111111',
@@ -124,7 +124,7 @@ describe('useTokenBalances — chain-aware [SPRINT-9G G5]', () => {
   })
 })
 
-describe('useTokenBalances — widened API for the portfolio fallback [E-3]', () => {
+describe('useTokenBalances: widened API for the portfolio fallback [E-3]', () => {
   it('returns { balances, isLoading, isError } (balances is the address→balance map)', () => {
     useBalanceMock.mockReturnValue({ data: { value: 2n * 10n ** 18n }, isLoading: false, isError: false })
     const { result } = renderHook(() => useTokenBalances())

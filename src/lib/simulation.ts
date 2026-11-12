@@ -40,7 +40,7 @@ export function parseSimulationError(error: unknown): ParsedSimulationResult {
     return { success: false, error: 'Router not whitelisted on FeeCollector contract. Contact support.' }
   }
   if (msg.includes('InsufficientOutput') || matchesSelector(FEE_COLLECTOR_ERROR_SELECTORS.InsufficientOutput)) {
-    return { success: false, error: 'Swap output below minimum — price moved since quote. Try again or increase slippage.' }
+    return { success: false, error: 'Swap output below minimum: price moved since quote. Try again or increase slippage.' }
   }
   if (msg.includes('SwapFailed') || matchesSelector(FEE_COLLECTOR_ERROR_SELECTORS.SwapFailed)) {
     return { success: false, error: 'DEX router call failed. Try a different route or increase slippage.' }
@@ -53,10 +53,10 @@ export function parseSimulationError(error: unknown): ParsedSimulationResult {
     return { success: false, error: 'Insufficient ETH balance for this swap + gas.' }
   }
   if (msg.includes('STF') || msg.includes('TRANSFER_FROM_FAILED')) {
-    return { success: false, error: 'Token transfer would fail — check approval or balance.' }
+    return { success: false, error: 'Token transfer would fail: check approval or balance.' }
   }
   if (msg.includes('Too little received') || msg.includes('INSUFFICIENT_OUTPUT')) {
-    return { success: false, error: 'Swap would fail due to slippage — price moved since quote. Try again.' }
+    return { success: false, error: 'Swap would fail due to slippage: price moved since quote. Try again.' }
   }
   if (msg.includes('execution reverted')) {
     return { success: false, error: 'Simulation reverted: swap would fail on-chain. Try a different route or amount.' }

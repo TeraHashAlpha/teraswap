@@ -200,7 +200,7 @@ export default function DCAPanel({ chainId: chainIdProp }: { chainId?: number } 
     if (latestEvent.type === 'order_created') {
       stopWaitingSound()
       playSwapConfirmMP3()
-      toast({ type: 'success', title: 'DCA order placed', description: 'Your DCA is live — it will execute automatically on schedule.' })
+      toast({ type: 'success', title: 'DCA order placed', description: 'Your DCA is live: it will execute automatically on schedule.' })
     }
     if (latestEvent.type === 'dca_execution') {
       playSwapConfirmMP3()
@@ -233,7 +233,7 @@ export default function DCAPanel({ chainId: chainIdProp }: { chainId?: number } 
       // "temporarily paused" notice (no raw error) and latch the disabled state.
       if (DCA_PAUSED_RE.test(latestEvent.error || '')) {
         setFrozen(true)
-        toast({ type: 'error', title: 'DCA temporarily paused', description: 'Only new DCA orders are paused — your existing ones keep running.' })
+        toast({ type: 'error', title: 'DCA temporarily paused', description: 'Only new DCA orders are paused. Your existing ones keep running.' })
       } else {
         toast({ type: 'error', title: 'DCA order failed', description: latestEvent.error || 'Order could not be submitted.' })
       }
@@ -302,7 +302,7 @@ export default function DCAPanel({ chainId: chainIdProp }: { chainId?: number } 
 
       {/* Autonomous notice */}
       <div className="mt-3 rounded-lg border border-cream-gold/20 bg-cream-gold/5 px-3 py-2 text-[11px] text-cream-50">
-        <span className="font-semibold text-cream-gold">Autonomous execution</span> — DCA orders run 24/7 via Chainlink oracles. No browser required. Approve once, then sign — no infinite approvals, and the executor runs every buy automatically.
+        <span className="font-semibold text-cream-gold">Autonomous execution</span>: DCA orders run 24/7 via Chainlink oracles. No browser required. Approve once, then sign: no infinite approvals, and the executor runs every buy automatically.
       </div>
 
     </div>
@@ -706,7 +706,7 @@ function CreateDCAForm({
   // disconnected / before any balance (catalog or direct read) has resolved. The raw bigint
   // (spendRaw) — not this display string — drives the preset math, so there is no float drift.
   const balanceDisplay = useMemo(() => {
-    if (!isConnected || !hasSpendBalance) return '—'
+    if (!isConnected || !hasSpendBalance) return 'n/a'
     return `${spendFormatted ?? ''} ${tokenIn?.symbol ?? ''}`.trim()
   }, [isConnected, hasSpendBalance, spendFormatted, tokenIn])
 
@@ -1062,7 +1062,7 @@ function CreateDCAForm({
         {/* [CHORE-DCA-WETH-INPUT] Advisory hint when the wallet holds native ETH but no WETH. */}
         {hasNativeOnly && (
           <p className="mt-1 text-[11px] text-cream-35">
-            DCA spends an ERC-20 token. You hold native ETH — wrap it to WETH first to start a DCA.
+            DCA spends an ERC-20 token. You hold native ETH: wrap it to WETH first to start a DCA.
           </p>
         )}
         {/* [CHORE-DCA-UX-FIXES] Bug 3a: imported-token heads-up + routability block. We verify a swap
@@ -1070,7 +1070,7 @@ function CreateDCAForm({
             have no aggregator route and would silently fail at keeper execution. */}
         {hasImported && !routeBlock && (
           <p className="mt-1 text-[11px] text-amber-300" data-testid="dca-imported-notice">
-            ⚠️ Imported token — limited liquidity. We&apos;ll verify a swap route before placing the order.
+            ⚠️ Imported token: limited liquidity. We&apos;ll verify a swap route before placing the order.
           </p>
         )}
         {routeBlock && (
@@ -1115,10 +1115,10 @@ function CreateDCAForm({
           DCA into a depegged asset is exactly the case this gate exists to stop. */}
       {depegHardBlocked && (
         <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger" data-testid="dca-depeg-block">
-          <span className="font-semibold">&#9888; DCA blocked — {depegCheck.symbol} depeg.</span>{' '}
+          <span className="font-semibold">&#9888; DCA blocked: {depegCheck.symbol} depeg.</span>{' '}
           {depegCheck.message}
           <span className="mt-1 block text-xs text-danger/80">
-            The market price has diverged sharply from the protocol exchange rate — likely a depeg or oracle manipulation. This cannot be overridden. Try again once the prices reconverge.
+            The market price has diverged sharply from the protocol exchange rate, likely a depeg or oracle manipulation. This cannot be overridden. Try again once the prices reconverge.
           </span>
         </div>
       )}
@@ -1127,10 +1127,10 @@ function CreateDCAForm({
           could not check. Gated on a real amount so it never flashes on the default, inert form. */}
       {depegUnverified && tokenIn && tokenOut && Number(totalDisplay) > 0 && (
         <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger" data-testid="dca-depeg-unverified">
-          <span className="font-semibold">&#9888; DCA paused — price not verified.</span>{' '}
+          <span className="font-semibold">&#9888; DCA paused: price not verified.</span>{' '}
           {depegCheck.message}
           <span className="mt-1 block text-xs text-danger/80">
-            We could not get usable price-feed data to check this asset against its exchange rate, so we are not letting the order be created on a price we have not verified. This is not itself a depeg finding — we have not been able to make one either way. It clears once the feeds return good data.
+            We could not get usable price-feed data to check this asset against its exchange rate, so we are not letting the order be created on a price we have not verified. This is not itself a depeg finding. We have not been able to make one either way. It clears once the feeds return good data.
           </span>
         </div>
       )}
@@ -1176,18 +1176,18 @@ function CreateDCAForm({
         <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger" data-testid="dca-oracle-block">
           {oracleGate.reason === 'extreme-deviation' ? (
             <>
-              <span className="font-semibold">&#9888; DCA blocked — price moved too far from the oracle.</span>{' '}
+              <span className="font-semibold">&#9888; DCA blocked: price moved too far from the oracle.</span>{' '}
               {oracleGate.detail}
               <span className="mt-1 block text-xs text-danger/80">
-                The quoted rate and the Chainlink reference price disagree by more than we allow. This is about the price, not about the feed — it clears when they reconverge.
+                The quoted rate and the Chainlink reference price disagree by more than we allow. This is about the price, not about the feed. It clears when they reconverge.
               </span>
             </>
           ) : (
             <>
-              <span className="font-semibold">&#9888; DCA blocked — price could not be verified.</span>{' '}
+              <span className="font-semibold">&#9888; DCA blocked: price could not be verified.</span>{' '}
               {oracleGate.detail}
               <span className="mt-1 block text-xs text-danger/80">
-                This is a problem on our side with the Chainlink price feed for this pair — not a finding about {tokenOut?.symbol ?? 'this token'}, and not a sign the price moved. Every buy is signed against a minimum-output floor derived from that reference price, so we will not create an order on a price we could not verify. It clears once the feed returns good data.
+                This is a problem on our side with the Chainlink price feed for this pair, not a finding about {tokenOut?.symbol ?? 'this token'}, and not a sign the price moved. Every buy is signed against a minimum-output floor derived from that reference price, so we will not create an order on a price we could not verify. It clears once the feed returns good data.
               </span>
             </>
           )}
@@ -1283,7 +1283,7 @@ function CreateDCAForm({
             DID run and found something to say. */}
         {minChunkUncheckable && (
           <p className="mt-1 text-[11px] text-amber-300" data-testid="dca-minchunk-uncheckable">
-            The per-chunk minimum could not be checked — {tokenIn?.symbol ?? 'this token'} has no live
+            The per-chunk minimum could not be checked. {tokenIn?.symbol ?? 'this token'} has no live
             price right now. The ${dcaMinChunkUsd} minimum wasn&apos;t verified, but the base-unit
             minimum order amount still applies to every buy.
           </p>
@@ -1404,7 +1404,7 @@ function CreateDCAForm({
           </div>
           <div className="mt-2 border-t border-cream-08 pt-2 text-[11px] text-cream-35">
             Each buy routes through {INTEGRATED_DEX_SOURCE_COUNT} DEX sources via 1inch aggregation.
-            Orders execute autonomously — no browser needed.
+            Orders execute autonomously: no browser needed.
           </div>
         </div>
       )}
@@ -1475,11 +1475,10 @@ function CreateDCAForm({
                   unchanged. */}
               {signingMin != null && tokenOut && parts > 0 && (
                 <p className="mt-2 text-[11px] text-cream-35">
-                  Signed floor per order (total): ≥ {formatUnits(signingMin.minAmountOut, tokenOut.decimals)} {tokenOut.symbol} across {parts} buys
-                  {' '}— ≥ {formatUnits(perChunkRaw(signingMin.minAmountOut, parts), tokenOut.decimals)} {tokenOut.symbol} enforced per buy
+                  Signed floor per order (total): ≥ {formatUnits(signingMin.minAmountOut, tokenOut.decimals)} {tokenOut.symbol} across {parts} buys, ≥ {formatUnits(perChunkRaw(signingMin.minAmountOut, parts), tokenOut.decimals)} {tokenOut.symbol} enforced per buy
                   {!signingMin.hasFeed && (
                     <span className="ml-1 text-amber-300">
-                      (no price reference for this pair — fixed floor, not price-derived; it may
+                      (no price reference for this pair: fixed floor, not price-derived; it may
                       strand the order if price rises, or offer weak protection if it falls)
                     </span>
                   )}
@@ -1493,7 +1492,7 @@ function CreateDCAForm({
       {/* [SPRINT-DCA-UNGATE] Freeze (403) notice — submit is also disabled via canCreate. */}
       {paused && (
         <div className="mb-3 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-[12px] text-amber-300">
-          <span className="font-semibold">DCA temporarily paused.</span> New DCA orders are paused right now — existing orders are unaffected and you can still cancel them.
+          <span className="font-semibold">DCA temporarily paused.</span> New DCA orders are paused right now. Existing orders are unaffected and you can still cancel them.
         </div>
       )}
 
@@ -1523,7 +1522,7 @@ function CreateDCAForm({
             ? 'Select Tokens'
             : Number(totalDisplay) <= 0
             ? 'Enter Amount'
-            : `Start DCA — ${parts} buys over ${totalDuration}`
+            : `Start DCA: ${parts} buys over ${totalDuration}`
           }
         </button>
       )}

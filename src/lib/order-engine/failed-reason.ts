@@ -13,26 +13,26 @@
  */
 
 export const DEFAULT_FAILED_REASON =
-  'This order could not be executed on-chain (the swap route may have become unavailable). No funds were moved — you can remove it and try again with a different token, amount, or network.'
+  'This order could not be executed on-chain (the swap route may have become unavailable). No funds were moved: you can remove it and try again with a different token, amount, or network.'
 
 // Keyed by the keeper's FAILURE_REASON codes
 // (contracts/order-engine/executor/retry-policy.js). Keep the two in sync.
 export const FAILURE_REASON_LABELS: Record<string, string> = {
   expired:
-    'This order expired before all buys could complete. Any completed buys are kept and no further funds were moved — create a new order with a longer expiry to finish.',
+    'This order expired before all buys could complete. Any completed buys are kept and no further funds were moved: create a new order with a longer expiry to finish.',
   no_route_after_retries:
-    'No swap route was available for this pair after several automatic retries. Any completed buys are kept and no further funds were moved — you can remove it and try again with a different token, amount, or network.',
+    'No swap route was available for this pair after several automatic retries. Any completed buys are kept and no further funds were moved. You can remove it and try again with a different token, amount, or network.',
   insufficient_balance:
-    'Your wallet balance was too low to continue this order. Any completed buys are kept — top up and create a new order to continue.',
+    'Your wallet balance was too low to continue this order. Any completed buys are kept: top up and create a new order to continue.',
   insufficient_allowance:
-    'The token approval for this order was revoked or used up. Any completed buys are kept — re-approve and create a new order to continue.',
+    'The token approval for this order was revoked or used up. Any completed buys are kept: re-approve and create a new order to continue.',
   nonce_invalid:
     'This order is no longer valid (its nonce was replaced, or it was already executed). No further funds were moved.',
   cancelled: 'This order was cancelled. No further funds were moved.',
   // [FIX-RETRY-CAP-RESTART] Distinct from no_route_after_retries: routes existed, but none could meet the
   // minimum output this order requires (its signed floor). The fix is a different order, not a retry.
   min_output_unreachable:
-    'The minimum output this order requires could not be met by any available route after several automatic attempts — the minimum is above what the market can deliver. Any completed buys are kept and no further funds were moved. Cancel this order and re-create it with a realistic minimum.',
+    'The minimum output this order requires could not be met by any available route after several automatic attempts. The minimum is above what the market can deliver. Any completed buys are kept and no further funds were moved. Cancel this order and re-create it with a realistic minimum.',
 }
 
 export function failedOrderReason(error: string | null | undefined): string {

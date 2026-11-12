@@ -31,7 +31,7 @@
 .ts-v2-nar-still__img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .ts-v2-nar-still__veil { position: absolute; inset: 0; background: var(--nar-veil); }
 
-/* Sections that must hide the stack: positioned (so they paint after it, in DOM order) on a solid --bg. */
+/* The footer wrapper is the only thing that hides the stack now: positioned (so it paints after it, in DOM order) on a solid --bg. */
 .ts-v2-opaque { position: relative; background-color: var(--bg); }
 
 /* Credit: follows the active photo and fades with the photo's token (--t-photo). Round-5 position (MOTION-SPEC §7). */

@@ -149,8 +149,8 @@ const startDca = async () => {
   fireEvent.click(screen.getByRole('button', { name: /Start DCA/i }))
 }
 
-describe('DCAPanel [FEAT-DCA-FLOOR-TIERS] — the golden ETHFI case: refusal (2026-09-09) became consent (2026-10-11)', () => {
-  it('an output the executor cannot price needs explicit consent — the order is not submitted until the checkbox + Continue', async () => {
+describe('DCAPanel [FEAT-DCA-FLOOR-TIERS]: the golden ETHFI case: refusal (2026-09-09) became consent (2026-10-11)', () => {
+  it('an output the executor cannot price needs explicit consent. The order is not submitted until the checkbox + Continue', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-nofeed-output'))
     enterAmount('1')
@@ -183,7 +183,7 @@ describe('DCAPanel [FEAT-DCA-FLOOR-TIERS] — the golden ETHFI case: refusal (20
     expect(body).not.toMatch(/referee/i)
   })
 
-  it('consent is per attempt — a second Start asks again, nothing banks the first acknowledgement', async () => {
+  it('consent is per attempt: a second Start asks again, nothing banks the first acknowledgement', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-nofeed-output'))
     enterAmount('1')
@@ -199,7 +199,7 @@ describe('DCAPanel [FEAT-DCA-FLOOR-TIERS] — the golden ETHFI case: refusal (20
   })
 })
 
-describe('DCAPanel [FIX-DCA-NOFEED-FAIL-CLOSED] — feed-covered tokens are unaffected', () => {
+describe('DCAPanel [FIX-DCA-NOFEED-FAIL-CLOSED]: feed-covered tokens are unaffected', () => {
   it('a registered output still creates the order, and never sees a modal', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-feed-output'))
@@ -211,7 +211,7 @@ describe('DCAPanel [FIX-DCA-NOFEED-FAIL-CLOSED] — feed-covered tokens are unaf
     expect(screen.queryByTestId('dca-submit-block')).not.toBeInTheDocument()
   })
 
-  it('the DEFAULT output (native ETH) is no longer refused — it resolves to a registered token', async () => {
+  it('the DEFAULT output (native ETH) is no longer refused. It resolves to a registered token', async () => {
     // [fix/dca-native-out-signs-weth] PREMISE CHANGED — this test previously read "the DEFAULT
     // output (native ETH) is refused — the 0xEeee… sentinel is what gets SIGNED" and asserted the
     // block. That was correct while `order.tokenOut` really was the sentinel: unregistered on Base

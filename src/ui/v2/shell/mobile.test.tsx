@@ -108,7 +108,7 @@ describe('tab strip scroll', () => {
 })
 
 describe('mobile photo treatment', () => {
-  it('Round 7 D2: no solid column on mobile — the photo (with its uniform scrim) sits behind the content at every width', () => {
+  it('Round 7 D2: no solid column on mobile. The photo (with its uniform scrim) sits behind the content at every width', () => {
     render(<AppShell />)
     const col = document.querySelector('[data-ts-column]') as HTMLElement
     expect(col.className).not.toMatch(/\bbg-v2-|\bmx-3\b|sm:bg-/)
@@ -136,15 +136,16 @@ describe('fabs vs footer (mobile)', () => {
 })
 
 describe('v1 ♫ under v2', () => {
-  it('v1 BackgroundMusic still labels its button "… background music" (the selector the hide rule relies on)', () => {
+  it('v1 BackgroundMusic still marks its button data-v1-sound-toggle (the selector the hide rule relies on)', () => {
     const v1 = readFileSync(join(__dirname, '..', '..', '..', 'components', 'BackgroundMusic.tsx'), 'utf8')
-    expect(v1).toMatch(/aria-label=\{enabled \? 'Mute background music' : 'Unmute background music'\}/)
-    expect(SHELL_CSS).toContain('body:has([data-ts-ui="v2"]) button[aria-label$="background music"] { display: none; }')
+    expect(v1).toMatch(/aria-label=\{enabled \? 'Mute sound' : 'Unmute sound'\}/)
+    expect(v1).toContain('data-v1-sound-toggle=""')
+    expect(SHELL_CSS).toContain('body:has([data-ts-ui="v2"]) button[data-v1-sound-toggle] { display: none; }')
   })
 
   it('the v2 ♫ never matches that selector, so it stays visible', () => {
     render(<AppShell />)
-    expect(document.querySelectorAll('button[aria-label$="background music"]')).toHaveLength(0)
+    expect(document.querySelectorAll('button[data-v1-sound-toggle]')).toHaveLength(0)
     expect(document.querySelectorAll('[data-v2-music-toggle]')).toHaveLength(1)
   })
 })

@@ -96,7 +96,7 @@ afterEach(() => {
   localStorage.clear()
 })
 
-describe('useTokenImport — a transport failure is OUR fault, not the token’s', () => {
+describe('useTokenImport: a transport failure is OUR fault, not the token’s', () => {
   it('says the contract could not be read when the request never lands', async () => {
     stubRpc({ symbol: { reject: true }, decimals: { reject: true }, name: { reject: true } })
 
@@ -135,7 +135,7 @@ describe('useTokenImport — a transport failure is OUR fault, not the token’s
   })
 })
 
-describe('useTokenImport — only a SUCCESSFUL read may call the token invalid', () => {
+describe('useTokenImport: only a SUCCESSFUL read may call the token invalid', () => {
   it('says the token is not a valid ERC-20 when the contract answers with no data', async () => {
     // A healthy node, a clean 200, and `0x` back: an EOA or a contract with no symbol()/decimals().
     stubRpc({ symbol: { result: '0x' }, decimals: { result: '0x' }, name: { result: '0x' } })
@@ -144,7 +144,7 @@ describe('useTokenImport — only a SUCCESSFUL read may call the token invalid',
   })
 })
 
-describe('useTokenImport — the two verdicts are distinguishable [acceptance]', () => {
+describe('useTokenImport: the two verdicts are distinguishable [acceptance]', () => {
   it('produces DIFFERENT user-facing messages for a read failure and a non-ERC-20', async () => {
     stubRpc({ symbol: { reject: true }, decimals: { reject: true }, name: { reject: true } })
     const readFailure = await importAndGetError()
@@ -160,7 +160,7 @@ describe('useTokenImport — the two verdicts are distinguishable [acceptance]',
   })
 })
 
-describe('useTokenImport — the happy path still imports', () => {
+describe('useTokenImport: the happy path still imports', () => {
   it('returns the token and sets no error on a healthy read', async () => {
     stubRpc(HEALTHY_ERC20)
 
@@ -174,7 +174,7 @@ describe('useTokenImport — the happy path still imports', () => {
     expect(imported).toMatchObject({ symbol: 'TEST', name: 'Test Token', decimals: 18, chainId: 1 })
   })
 
-  it('imports even when only name() is unreadable — name falls back to the symbol', async () => {
+  it('imports even when only name() is unreadable: name falls back to the symbol', async () => {
     stubRpc({ ...HEALTHY_ERC20, name: { reject: true } })
 
     const { result } = renderHook(() => useTokenImport())

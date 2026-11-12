@@ -93,7 +93,7 @@ export default function NoFeedConsentModal({
         </div>
 
         <p className="mb-5 text-[13px] leading-relaxed text-cream-70" data-testid="nofeed-consent-body">
-          For most coins, TeraSwap watches the live market price on every buy — like a referee
+          For most coins, TeraSwap watches the live market price on every buy, like a referee
           making sure you always get a fair deal. {tokenSymbol} doesn&apos;t have that referee
           available. The floor your buys are set against is a last-resort backstop, not a fair-price
           check: it sits low enough that a bad deal could still go through. That is why TeraSwap no

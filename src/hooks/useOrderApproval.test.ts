@@ -49,7 +49,7 @@ beforeEach(() => {
   mockReadContractImpl.mockImplementation(() => ({ data: 0n, refetch: mockRefetchAllowance }))
 })
 
-describe('useOrderApproval — allowance gate', () => {
+describe('useOrderApproval: allowance gate', () => {
   it('needs approval when allowance < the full signed total', () => {
     mockReadContractImpl.mockImplementation(() => ({ data: 0n, refetch: mockRefetchAllowance }))
     const { result } = renderHook(() => useOrderApproval(WETH, TOTAL, 1))
@@ -65,7 +65,7 @@ describe('useOrderApproval — allowance gate', () => {
     expect(result.current.needsApproval).toBe(false)
   })
 
-  it('a per-CHUNK allowance does NOT satisfy the gate — the full TOTAL is required (DCA)', () => {
+  it('a per-CHUNK allowance does NOT satisfy the gate. The full TOTAL is required (DCA)', () => {
     // DCA total split into 10 buys; approving only one chunk must NOT open the gate.
     const perChunk = TOTAL / 10n
     mockReadContractImpl.mockImplementation(() => ({ data: perChunk, refetch: mockRefetchAllowance }))
@@ -82,7 +82,7 @@ describe('useOrderApproval — allowance gate', () => {
   })
 })
 
-describe('useOrderApproval — exact approve (no max-uint, chain-aware spender)', () => {
+describe('useOrderApproval: exact approve (no max-uint, chain-aware spender)', () => {
   it('approve() calls writeContract with approve(executor, EXACT total) and NEVER max-uint (mainnet)', async () => {
     const { result } = renderHook(() => useOrderApproval(WETH, TOTAL, 1))
     await act(async () => { await result.current.approve() })
@@ -98,7 +98,7 @@ describe('useOrderApproval — exact approve (no max-uint, chain-aware spender)'
     expect(call.chainId).toBe(1)
   })
 
-  it('resolves the spender per chainId — Base (8453) approves the Base executor, not mainnet', async () => {
+  it('resolves the spender per chainId. Base (8453) approves the Base executor, not mainnet', async () => {
     const { result } = renderHook(() => useOrderApproval(WETH, TOTAL, 8453))
     expect(result.current.spender).toBe(getOrderExecutor(8453))
     expect(result.current.spender).not.toBe(getOrderExecutor(1))
@@ -108,7 +108,7 @@ describe('useOrderApproval — exact approve (no max-uint, chain-aware spender)'
     expect(call.chainId).toBe(8453)
   })
 
-  it('fail-closed on an unwired chain — no spender, no approve tx', async () => {
+  it('fail-closed on an unwired chain: no spender, no approve tx', async () => {
     const { result } = renderHook(() => useOrderApproval(WETH, TOTAL, 42161)) // Arbitrum — no executor
     expect(result.current.spender).toBeNull()
     expect(result.current.needsApproval).toBe(false)
@@ -127,7 +127,7 @@ describe('useOrderApproval — exact approve (no max-uint, chain-aware spender)'
   })
 })
 
-describe('useOrderApproval — gate opens after approve confirms', () => {
+describe('useOrderApproval: gate opens after approve confirms', () => {
   it('re-reads allowance and reports ready once the approve tx receipt is successful', async () => {
     mockReceiptImpl.mockReturnValue({ isSuccess: true })
     const { result } = renderHook(() => useOrderApproval(WETH, TOTAL, 1))

@@ -118,10 +118,10 @@ export function blockCopy(reason: BlockReason): { text: string; recoverable: boo
   const text =
     reason === 'price-impact' ? 'Confirm price impact to swap'
     : reason === 'depeg-consent' ? 'Confirm depeg risk to swap'
-    : reason === 'depeg-block' ? 'Asset depegged — swap blocked'
-    : reason === 'depeg-unverified' ? 'Verifying price — try again shortly'
-    : reason === 'oracle' ? 'No oracle — swap blocked'
-    : reason === 'extreme' ? 'Price deviation too high — blocked'
-    : 'Oracle data unsafe — swap blocked'
+    : reason === 'depeg-block' ? 'Asset depegged: swap blocked'
+    : reason === 'depeg-unverified' ? 'Verifying price: try again shortly'
+    : reason === 'oracle' ? 'No oracle: swap blocked'
+    : reason === 'extreme' ? 'Price deviation too high: blocked'
+    : 'Oracle data unsafe: swap blocked'
   return { text, recoverable: reason === 'price-impact' || reason === 'depeg-consent' }
 }

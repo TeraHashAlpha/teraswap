@@ -67,7 +67,7 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllEnvs())
 
-describe('Home — DCA gate follows the selector chain [P2]', () => {
+describe('Home: DCA gate follows the selector chain [P2]', () => {
   it('no wallet + Base selected ⇒ DCA is live (tab enabled, panel mounts keyed/fed the selector chain)', async () => {
     useDisconnectedChainSelection.setState({ chainId: 8453 })
     renderSwapView()

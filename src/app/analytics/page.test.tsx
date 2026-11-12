@@ -59,7 +59,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('/analytics page — public protocol stats', () => {
+describe('/analytics page: public protocol stats', () => {
   it('renders the public protocol section with no wallet connected', async () => {
     render(<AnalyticsPage />)
     expect(await screen.findByTestId('public-protocol-stats')).toBeInTheDocument()

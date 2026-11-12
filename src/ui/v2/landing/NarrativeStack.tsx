@@ -6,7 +6,9 @@ import {
   ACTIVE_LINE,
   ACTIVE_THRESHOLDS,
   ENTER_ROOT_MARGIN,
+  FIRST_PHOTO,
   FLAT_QUERIES,
+  isWhollyInView,
   MOBILE_QUERY,
   NEAR_ROOT_MARGIN,
   NARRATIVE_SECTIONS,
@@ -52,7 +54,8 @@ function imageVars(id: NarrativePhotoId): Record<'--nar-d' | '--nar-m', string> 
  *  - `stack` (default): a fixed stack of photo layers + one constant veil; only a layer's `opacity` and `transform`
  *    (a slow scale) transition. The active layer follows the section crossing the 40 % line and the credit follows it;
  *    the layer it replaces is `data-leaving` until its transitions have run. A layer has no image until its section
- *    is within one viewport.
+ *    is within one viewport (the hero's, which is on screen at load, is there from the first render).
+ *    EVERY landing section is a narrative section (see NARRATIVE_SECTIONS), so every boundary moves the same way.
  *  - `static` (prefers-reduced-motion): no stack. Each section paints its own photo + veil (still lazy), text is shown
  *    at once, the underline is drawn.
  *  - `flat` (reduced transparency / more contrast / forced colours): no photo, no credit, flat `--bg`; nothing is requested.
@@ -62,9 +65,11 @@ function imageVars(id: NarrativePhotoId): Record<'--nar-d' | '--nar-m', string> 
 export function NarrativeStack() {
   const [mode, setMode] = useState<NarrativeMode>('stack')
   const [mobile, setMobile] = useState(false)
-  const [{ active, leaving }, setStack] = useState<Stack>({ active: null, leaving: new Set() })
-  const [credited, setCredited] = useState<NarrativePhotoId | null>(null)
-  const [loaded, setLoaded] = useState<ReadonlySet<NarrativePhotoId>>(() => new Set())
+  // The page opens on the hero, whose photo used to be a server-rendered <img>: the stack starts on that photo (active, with
+  // its image set) so the first paint is not a bare background. The mount effect moves it as soon as the real rects say so.
+  const [{ active, leaving }, setStack] = useState<Stack>({ active: FIRST_PHOTO, leaving: new Set() })
+  const [credited, setCredited] = useState<NarrativePhotoId | null>(FIRST_PHOTO)
+  const [loaded, setLoaded] = useState<ReadonlySet<NarrativePhotoId>>(() => new Set([FIRST_PHOTO]))
 
   useEffect(() => {
     if (typeof IntersectionObserver === 'undefined' || typeof matchMedia === 'undefined') return
@@ -96,9 +101,18 @@ export function NarrativeStack() {
       entered.add(el)
       enter.unobserve(el) // plays once
     }
-    /** A section already above the line (deep link, fast jump past it) is shown at once; the IO only catches crossings. */
+    /**
+     * A section already above the line (deep link, fast jump past it) is shown at once; the IO only catches crossings.
+     * The LAST section is also shown once it is entirely in view: the docs row is short and the footer follows it, so on a
+     * tall viewport the page ends before it ever reaches the line (same rule as `pickActive`).
+     */
     const showAbove = () => {
-      for (const { el } of sections) if (!entered.has(el) && el.getBoundingClientRect().top <= window.innerHeight * ACTIVE_LINE) show(el)
+      const last = sections[sections.length - 1]
+      for (const { el } of sections) {
+        if (entered.has(el)) continue
+        const r = el.getBoundingClientRect()
+        if (r.top <= window.innerHeight * ACTIVE_LINE || (el === last.el && isWhollyInView(r, window.innerHeight))) show(el)
+      }
     }
     const pick = () => {
       showAbove()

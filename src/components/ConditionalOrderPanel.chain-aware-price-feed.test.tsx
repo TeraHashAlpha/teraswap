@@ -218,7 +218,7 @@ beforeEach(() => {
   mockGetTokenPriceUSD.mockResolvedValue(20)
 })
 
-describe('ConditionalOrderPanel — order.priceFeed is the feed for THE CHAIN BEING SIGNED FOR', () => {
+describe('ConditionalOrderPanel: order.priceFeed is the feed for THE CHAIN BEING SIGNED FOR', () => {
   // Base (8453) = the v3 signing path; mainnet (1) = the v2 signing path. Same expectation.
   // Selling the WRAPPED NATIVE directly is also exactly the case PR #490's fallback existed for,
   // so these two tests double as the proof that deleting it loses nothing.
@@ -236,7 +236,7 @@ describe('ConditionalOrderPanel — order.priceFeed is the feed for THE CHAIN BE
     })
   }
 
-  it('H2 REGRESSION — a Base order never signs the MAINNET aggregator', async () => {
+  it('H2 REGRESSION: a Base order never signs the MAINNET aggregator', async () => {
     await renderOn(8453)
     await pickPair('pick-weth', 'pick-usdc')
     enterAmount('10')
@@ -251,8 +251,8 @@ describe('ConditionalOrderPanel — order.priceFeed is the feed for THE CHAIN BE
   })
 })
 
-describe('ConditionalOrderPanel — a feed that does not exist fails CLOSED', () => {
-  it('an UNCOVERED CHAIN refuses before any wallet call — never a sibling chain’s aggregator', async () => {
+describe('ConditionalOrderPanel: a feed that does not exist fails CLOSED', () => {
+  it('an UNCOVERED CHAIN refuses before any wallet call, never a sibling chain’s aggregator', async () => {
     await renderOn(UNCOVERED_CHAIN_ID)
     await pickPair('pick-link', 'pick-usdc')
     enterAmount('10')
@@ -284,7 +284,7 @@ describe('ConditionalOrderPanel — a feed that does not exist fails CLOSED', ()
     await waitFor(() => expect(mockCreateOrderInSupabase).not.toHaveBeenCalled())
   })
 
-  it('the refusal is never the zero address — address(0) would DISABLE the price condition', async () => {
+  it('the refusal is never the zero address: address(0) would DISABLE the price condition', async () => {
     // TeraSwapOrderExecutorV3.sol:1105-1108 — `priceFeed == address(0)` returns (true, ""), the DCA
     // "execute unconditionally" branch. Signing it on a conditional order would strip the trigger
     // entirely, so "no feed" must refuse rather than degrade to a zero address.

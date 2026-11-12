@@ -62,7 +62,7 @@ beforeEach(() => {
   mockReadContractImpl.mockImplementation(() => ({ data: 0n, refetch: mockRefetchAllowance }))
 })
 
-describe('useOrderApproval — v3 spender resolution [BUG-DCA-APPROVE-SPENDER-V3]', () => {
+describe('useOrderApproval: v3 spender resolution [BUG-DCA-APPROVE-SPENDER-V3]', () => {
   it('resolves spender == getOrderExecutorV3(8453) for a v3 order (isV3Order=true), NOT the v2 executor', () => {
     const { result } = renderHook(() => useOrderApproval(ETHFI, TOTAL, 8453, true))
     expect(result.current.spender).toBe(V3_ADDRESS)
@@ -93,7 +93,7 @@ describe('useOrderApproval — v3 spender resolution [BUG-DCA-APPROVE-SPENDER-V3
     expect(v3.result.current.spender).not.toBe(v2.result.current.spender)
   })
 
-  it('mainnet (chainId 1) is unaffected by a v3-Base deployment — isV3Order=true resolves null there (fail-closed)', () => {
+  it('mainnet (chainId 1) is unaffected by a v3-Base deployment: isV3Order=true resolves null there (fail-closed)', () => {
     const { result } = renderHook(() => useOrderApproval(ETHFI, TOTAL, 1, true))
     expect(result.current.spender).toBeNull()
     expect(result.current.needsApproval).toBe(false)
@@ -109,12 +109,12 @@ describe('useOrderApproval — v3 spender resolution [BUG-DCA-APPROVE-SPENDER-V3
 // constants), or null. There is no code path through which useOrderApproval's spender could ever
 // be an arbitrary/attacker-controlled address, so no allowlist extension is needed — this pins
 // that invariant so a future refactor that lets the spender come from user/API input would fail it.
-describe('useOrderApproval — spender trust boundary [BUG-DCA-APPROVE-SPENDER-V3]', () => {
-  it('never approves via the instant-swap allowlist module — the registry resolution IS the trust boundary', async () => {
+describe('useOrderApproval: spender trust boundary [BUG-DCA-APPROVE-SPENDER-V3]', () => {
+  it('never approves via the instant-swap allowlist module. The registry resolution IS the trust boundary', async () => {
     expect(useOrderApproval.toString()).not.toMatch(/isTrustedSpender/)
   })
 
-  it('the resolved spender is always the registry v2 or v3 executor for the chain — never anything else', () => {
+  it('the resolved spender is always the registry v2 or v3 executor for the chain, never anything else', () => {
     const cases: Array<[number, boolean]> = [[1, false], [8453, false], [8453, true], [42161, false], [42161, true]]
     for (const [chainId, isV3Order] of cases) {
       const { result } = renderHook(() => useOrderApproval(ETHFI, TOTAL, chainId, isV3Order))

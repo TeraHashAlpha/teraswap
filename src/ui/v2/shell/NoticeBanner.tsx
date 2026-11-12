@@ -13,7 +13,7 @@ export function NoticeBanner() {
   return (
     <Surface variant="strip" accent="teal" role="region" aria-label="Notice" className="mx-4 mt-4 flex flex-wrap items-center gap-3 px-4 py-2.5 sm:mx-8">
       <EyebrowLabel className="text-v2-teal">Notice</EyebrowLabel>
-      <p className="min-w-0 flex-1 text-sm text-v2-text">Enable notifications to know when your orders fill — even in background.</p>
+      <p className="min-w-0 flex-1 text-sm text-v2-text">Enable notifications to know when your orders fill, even in background.</p>
       <Button variant="text" onClick={request}>
         Enable
       </Button>

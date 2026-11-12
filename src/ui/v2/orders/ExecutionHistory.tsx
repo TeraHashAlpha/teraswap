@@ -109,7 +109,7 @@ export function ExecutionHistory({
                 </div>
                 {(amountIn || amountOut) && (
                   <p className="mt-0.5 font-v2-mono text-[12px] tabular-nums text-v2-text/90">
-                    {amountIn ?? '—'} → <span className="text-v2-text">{amountOut ?? '—'}</span>
+                    {amountIn ?? 'n/a'} → <span className="text-v2-text">{amountOut ?? 'n/a'}</span>
                     {price && <span className="ml-1 text-v2-muted">@ {price}</span>}
                   </p>
                 )}

@@ -56,7 +56,7 @@ function transportUrls(chain: Chain): string[] {
 const CHAIN_IDS = [1, 8453, 42161] as const
 
 describe('browser wagmi transports [fix/user-ip-privacy]', () => {
-  it('runs as a browser (window present) with the provider envs set — the case being pinned', () => {
+  it('runs as a browser (window present) with the provider envs set. The case being pinned', () => {
     expect(typeof window).toBe('object')
     expect(process.env.NEXT_PUBLIC_BASE_RPC_URL).toBe(PROVIDER_ENV.NEXT_PUBLIC_BASE_RPC_URL)
   })
@@ -156,7 +156,7 @@ describe('WalletConnect accepts the rpcMap wagmi builds from these transports [f
     await expect(createSessionProviders(wagmiRpcMap())).resolves.toEqual([1, 8453, 42161])
   })
 
-  it('control — the same session with RELATIVE proxy paths throws (what `/api/rpc` did before)', async () => {
+  it('control: the same session with RELATIVE proxy paths throws (what `/api/rpc` did before)', async () => {
     const relative = { 1: '/api/rpc', 8453: '/api/rpc?chainId=8453', 42161: '/api/rpc?chainId=42161' }
     await expect(createSessionProviders(relative)).rejects.toThrow(/not compatible with HTTP connection: \/api\/rpc/)
   })

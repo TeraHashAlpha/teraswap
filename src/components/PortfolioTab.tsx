@@ -96,7 +96,7 @@ function PortfolioRow({
         <div className="text-right">
           <div className="text-sm font-semibold text-cream tabular-nums">{balanceFormatted}</div>
           <div className="text-xs text-cream-50 tabular-nums">
-            {valueUsd !== null ? fmtUsd(valueUsd) : '—'}
+            {valueUsd !== null ? fmtUsd(valueUsd) : 'n/a'}
           </div>
         </div>
         {onSwapToken && (
@@ -156,7 +156,7 @@ function DiscoveredRow({
         <div className="text-right">
           <div className="text-sm font-semibold text-cream tabular-nums">{balanceFormatted}</div>
           <div className="text-xs text-cream-50 tabular-nums">
-            {valueUsd !== null ? fmtUsd(valueUsd) : '—'}
+            {valueUsd !== null ? fmtUsd(valueUsd) : 'n/a'}
           </div>
         </div>
         {imported ? (
@@ -296,7 +296,7 @@ export default function PortfolioTab({ onSwapToken }: PortfolioTabProps) {
               Total value
             </div>
             <div className="mt-1 text-2xl font-bold text-cream tabular-nums">
-              {totalValueUsd !== null ? fmtUsd(totalValueUsd) : '—'}
+              {totalValueUsd !== null ? fmtUsd(totalValueUsd) : 'n/a'}
             </div>
             <div className="mt-1 text-[11px] text-cream-50">
               {lastUpdated ? `Last updated ${formatLastUpdated(lastUpdated, now)}` : 'Loading prices…'}

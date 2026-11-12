@@ -173,7 +173,7 @@ beforeEach(() => {
 
 const EXPLORER_HOST: Record<number, string> = { 1: 'etherscan.io', 8453: 'basescan.org', 42161: 'arbiscan.io' }
 
-describe('SwapBox — [fix/tx-links-remaining] pending tx link is chain-aware, not etherscan-only', () => {
+describe('SwapBox: [fix/tx-links-remaining] pending tx link is chain-aware, not etherscan-only', () => {
   it.each([1, 8453, 42161])('a tx sent on chain %i links to its own explorer while swapping', (sentChainId) => {
     useSwapMock.mockReturnValue({
       status: 'swapping', txHash: '0xabc', txChainId: sentChainId, errorMessage: null, cowOrderUid: null,
@@ -203,7 +203,7 @@ describe('SwapBox — [fix/tx-links-remaining] pending tx link is chain-aware, n
   })
 })
 
-describe('SwapBox — [fix/tx-links-remaining] success tx link is chain-aware, not etherscan-only', () => {
+describe('SwapBox: [fix/tx-links-remaining] success tx link is chain-aware, not etherscan-only', () => {
   it.each([1, 8453, 42161])('a tx sent on chain %i links to its own explorer on success', (sentChainId) => {
     useSwapMock.mockReturnValue({
       status: 'success', txHash: '0xdef', txChainId: sentChainId, errorMessage: null, cowOrderUid: null,
@@ -230,7 +230,7 @@ describe('SwapBox — [fix/tx-links-remaining] success tx link is chain-aware, n
   })
 })
 
-describe('SwapBox — [fix/tx-links-remaining] success toast carries the SENT chain, not the live wallet chain', () => {
+describe('SwapBox: [fix/tx-links-remaining] success toast carries the SENT chain, not the live wallet chain', () => {
   function quoteMetaWithBest(identityChainId: number) {
     return {
       meta: { best: { source: '1inch', toAmount: '2950000000', estimatedGas: 200_000, gasUsd: 10, routes: [], tx: { to: '0x0', data: '0x', value: '0', gas: 200000 } }, all: [], fetchedAt: Date.now(), identity: testIdentity(identityChainId) },

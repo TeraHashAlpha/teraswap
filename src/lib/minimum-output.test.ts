@@ -29,7 +29,7 @@ beforeEach(() => {
 })
 afterEach(() => warnSpy.mockRestore())
 
-describe('deriveMinimumOutput — valid quotes keep a real floor (unchanged behaviour)', () => {
+describe('deriveMinimumOutput: valid quotes keep a real floor (unchanged behaviour)', () => {
   it('1% slippage → toAmount * 9900 / 10000', () => {
     expect(deriveMinimumOutput('1000000', 1)).toBe(990_000n)
   })
@@ -55,7 +55,7 @@ describe('deriveMinimumOutput — valid quotes keep a real floor (unchanged beha
   })
 })
 
-describe('deriveMinimumOutput — unusable quotes REFUSE the swap [W2-L-01]', () => {
+describe('deriveMinimumOutput: unusable quotes REFUSE the swap [W2-L-01]', () => {
   const cases: Array<[string, unknown]> = [
     ['non-numeric string', 'not-a-number'],
     ['empty string', ''],
@@ -120,16 +120,16 @@ function callAssert(
   assertSwapConsistentWithQuote({ quoteToAmount, swapToAmount, slippagePercent, source, routeViaFeeCollector })
 }
 
-describe('assertSwapConsistentWithQuote — TOLERANCE_BPS is the pinned constant', () => {
+describe('assertSwapConsistentWithQuote: TOLERANCE_BPS is the pinned constant', () => {
   it('is 50 bps (0.5%)', () => {
     expect(SWAP_QUOTE_TOLERANCE_BPS).toBe(50)
   })
 })
 
-describe('assertSwapConsistentWithQuote — boundary, exact bps arithmetic', () => {
+describe('assertSwapConsistentWithQuote: boundary, exact bps arithmetic', () => {
   const QUOTED = '1000000' // clean divisor for 10_000 bps arithmetic
 
-  it('0% slippage: floor = quote * 9950/10000 — AT the floor passes', () => {
+  it('0% slippage: floor = quote * 9950/10000. AT the floor passes', () => {
     expect(() => callAssert(QUOTED, '995000', 0)).not.toThrow()
   })
 
@@ -137,7 +137,7 @@ describe('assertSwapConsistentWithQuote — boundary, exact bps arithmetic', () 
     expect(() => callAssert(QUOTED, '994999', 0)).toThrow(StaleOrTamperedSwapError)
   })
 
-  it('5% slippage: floor = quote * 9450/10000 — AT the floor passes', () => {
+  it('5% slippage: floor = quote * 9450/10000. AT the floor passes', () => {
     expect(() => callAssert(QUOTED, '945000', 5)).not.toThrow()
   })
 
@@ -145,7 +145,7 @@ describe('assertSwapConsistentWithQuote — boundary, exact bps arithmetic', () 
     expect(() => callAssert(QUOTED, '944999', 5)).toThrow(StaleOrTamperedSwapError)
   })
 
-  it('49.99% slippage: floor = quote * 4951/10000 — AT the floor passes', () => {
+  it('49.99% slippage: floor = quote * 4951/10000. AT the floor passes', () => {
     expect(() => callAssert(QUOTED, '495100', 49.99)).not.toThrow()
   })
 
@@ -177,7 +177,7 @@ describe('assertSwapConsistentWithQuote — boundary, exact bps arithmetic', () 
     }
   })
 })
-describe('assertSwapConsistentWithQuote — skip list is uniswapv3 ONLY [Auditor M-01/M-02]', () => {
+describe('assertSwapConsistentWithQuote: skip list is uniswapv3 ONLY [Auditor M-01/M-02]', () => {
   // The list no longer mirrors validateFeeIntegrity's. 'cowswap' was dropped
   // as a dead exemption (M-01): execute() dispatches it to executeCowSwap
   // before executeStandardSwap (useSwap.ts:1058-1059) and
@@ -190,12 +190,12 @@ describe('assertSwapConsistentWithQuote — skip list is uniswapv3 ONLY [Auditor
   // can be measuring two different pools.
   const SKIP_SOURCES: AggregatorName[] = ['uniswapv3']
 
-  it.each(SKIP_SOURCES)('%s bypasses the floor entirely — even a near-zero output passes', (source) => {
+  it.each(SKIP_SOURCES)('%s bypasses the floor entirely, even a near-zero output passes', (source) => {
     expect(() => callAssert('1000000', '1', 0, source)).not.toThrow()
   })
 
   it.each(['curve', 'cowswap'] as AggregatorName[])(
-    '%s is NO LONGER exempt — a halved swap output blocks',
+    '%s is NO LONGER exempt. A halved swap output blocks',
     (source) => {
       expect(() => callAssert('1000000', '500000', 0.5, source)).toThrow(StaleOrTamperedSwapError)
     },
@@ -226,7 +226,7 @@ const malformedAmounts: Array<[string, unknown]> = [
   ['negative', '-5'],
 ]
 
-describe('assertSwapConsistentWithQuote — a missing ACCEPTED QUOTE fails closed [Auditor H-01]', () => {
+describe('assertSwapConsistentWithQuote: a missing ACCEPTED QUOTE fails closed [Auditor H-01]', () => {
   it.each(malformedAmounts)(
     'quoteToAmount = %s → throws StaleOrTamperedSwapError (nothing to compare against)',
     (_label, bad) => {
@@ -252,7 +252,7 @@ describe('assertSwapConsistentWithQuote — a missing ACCEPTED QUOTE fails close
   })
 })
 
-describe('assertSwapConsistentWithQuote — an unusable SWAP amount throws UnusableQuoteError, as deriveMinimumOutput does', () => {
+describe('assertSwapConsistentWithQuote: an unusable SWAP amount throws UnusableQuoteError, as deriveMinimumOutput does', () => {
   it.each(malformedAmounts)('swapToAmount = %s → throws UnusableQuoteError', (_label, bad) => {
     expect(() => callAssert('1000000', bad, 0.5)).toThrow(UnusableQuoteError)
   })
@@ -279,7 +279,7 @@ describe('assertSwapConsistentWithQuote — an unusable SWAP amount throws Unusa
 // floored against the gross quote, spending 10 of the 50 bps tolerance before
 // any real drift; these pin the netting and the boundary it moves.
 // ─────────────────────────────────────────────────────────────
-describe('feeAdjustedQuoteBasis — FEE_BPS netted out of the basis, once', () => {
+describe('feeAdjustedQuoteBasis: FEE_BPS netted out of the basis, once', () => {
   it('nets FEE_BPS when the route goes via the FeeCollector', () => {
     expect(feeAdjustedQuoteBasis(1_000_000n, true)).toBe(999_000n) // FEE_BPS = 10
   })
@@ -297,11 +297,11 @@ describe('feeAdjustedQuoteBasis — FEE_BPS netted out of the basis, once', () =
   })
 })
 
-describe('assertSwapConsistentWithQuote — fee-adjusted boundary [Architect ruling R3-3]', () => {
+describe('assertSwapConsistentWithQuote: fee-adjusted boundary [Architect ruling R3-3]', () => {
   const QUOTED = '1000000' // basis via FeeCollector = 999_000
   const VIA_FEE_COLLECTOR = true
 
-  it('0% slippage, fee-routed: floor = 999000 * 9950/10000 = 994005 — AT the floor passes', () => {
+  it('0% slippage, fee-routed: floor = 999000 * 9950/10000 = 994005. AT the floor passes', () => {
     expect(() => callAssert(QUOTED, '994005', 0, NON_SKIP_SOURCE, VIA_FEE_COLLECTOR)).not.toThrow()
   })
 
@@ -309,7 +309,7 @@ describe('assertSwapConsistentWithQuote — fee-adjusted boundary [Architect rul
     expect(() => callAssert(QUOTED, '994004', 0, NON_SKIP_SOURCE, VIA_FEE_COLLECTOR)).toThrow(StaleOrTamperedSwapError)
   })
 
-  it('the SAME amount is refused on a direct route (floor 995000) — the flag is load-bearing', () => {
+  it('the SAME amount is refused on a direct route (floor 995000). The flag is load-bearing', () => {
     expect(() => callAssert(QUOTED, '994005', 0, NON_SKIP_SOURCE, false)).toThrow(StaleOrTamperedSwapError)
   })
 
@@ -339,10 +339,10 @@ describe('assertSwapConsistentWithQuote — fee-adjusted boundary [Architect rul
 // [fix/stale-quote-pair-flip] Two-sided guard: |Δ| > tolerance either way refuses.
 // Tolerance unchanged: slippageBps + SWAP_QUOTE_TOLERANCE_BPS.
 // ─────────────────────────────────────────────────────────────
-describe('assertSwapConsistentWithQuote — ABOVE the quote is refused too (two-sided)', () => {
+describe('assertSwapConsistentWithQuote: ABOVE the quote is refused too (two-sided)', () => {
   const QUOTED = '1000000'
 
-  it('0% slippage: ceiling = quote * 10050/10000 — AT the ceiling passes', () => {
+  it('0% slippage: ceiling = quote * 10050/10000. AT the ceiling passes', () => {
     expect(() => callAssert(QUOTED, '1005000', 0)).not.toThrow()
   })
 
@@ -356,7 +356,7 @@ describe('assertSwapConsistentWithQuote — ABOVE the quote is refused too (two-
     }
   })
 
-  it('5% slippage: ceiling = quote * 10550/10000 — AT passes, +1 throws', () => {
+  it('5% slippage: ceiling = quote * 10550/10000. AT passes, +1 throws', () => {
     expect(() => callAssert(QUOTED, '1055000', 5)).not.toThrow()
     expect(() => callAssert(QUOTED, '1055001', 5)).toThrow(StaleOrTamperedSwapError)
   })
@@ -368,7 +368,7 @@ describe('assertSwapConsistentWithQuote — ABOVE the quote is refused too (two-
     expect(() => callAssert(QUOTED, '1005001', 0)).toThrow(StaleOrTamperedSwapError)
   })
 
-  it('fee-routed: ceiling = (quote net of FEE_BPS) * 10050/10000 = 1_003_995 — AT passes, +1 throws', () => {
+  it('fee-routed: ceiling = (quote net of FEE_BPS) * 10050/10000 = 1_003_995. AT passes, +1 throws', () => {
     expect(() => callAssert(QUOTED, '1003995', 0, NON_SKIP_SOURCE, true)).not.toThrow()
     expect(() => callAssert(QUOTED, '1003996', 0, NON_SKIP_SOURCE, true)).toThrow(StaleOrTamperedSwapError)
   })
@@ -415,7 +415,7 @@ describe('assertSwapConsistentWithQuote — ABOVE the quote is refused too (two-
   })
 })
 
-describe('assertSwapConsistentWithQuote — pair/chain key mismatch refuses [fix/stale-quote-pair-flip]', () => {
+describe('assertSwapConsistentWithQuote: pair/chain key mismatch refuses [fix/stale-quote-pair-flip]', () => {
   const A = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
   const B = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
   const PAIR = { chainId: 1, tokenIn: A, tokenOut: B, decimalsIn: 18, decimalsOut: 6 }
@@ -449,7 +449,7 @@ describe('assertSwapConsistentWithQuote — pair/chain key mismatch refuses [fix
     }
   })
 
-  it('a lone key (quote OR swap side only) is refused — fail closed on a wiring error', () => {
+  it('a lone key (quote OR swap side only) is refused: fail closed on a wiring error', () => {
     expect(() => call(PAIR, undefined)).toThrow(StaleOrTamperedSwapError)
     expect(() => call(undefined, PAIR)).toThrow(StaleOrTamperedSwapError)
   })

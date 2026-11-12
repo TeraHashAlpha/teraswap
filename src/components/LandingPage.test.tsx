@@ -49,7 +49,7 @@ beforeEach(() => {
   mockChainId = 1
 })
 
-describe('LandingPage — SwapPreview uses the real quote path [acceptance 4]', () => {
+describe('LandingPage: SwapPreview uses the real quote path [acceptance 4]', () => {
   it('calls the SAME useQuote hook SwapBox uses, for the 0.5 ETH default pair', () => {
     useQuoteMock.mockReturnValue({ meta: null, loading: true, error: null, countdown: 0, refetch: vi.fn(), refresh: vi.fn() })
     render(<LandingPage onLaunchApp={vi.fn()} />)
@@ -97,7 +97,7 @@ describe('LandingPage — SwapPreview uses the real quote path [acceptance 4]', 
 // disconnected visitor). On Base/Arbitrum that sent a mainnet address to a different
 // chain's liquidity sources, which reject it — the live "Unavailable" bug. These tests
 // pin the fix: the pair now follows the SAME chain the quote uses.
-describe('LandingPage — SwapPreview follows the widget\'s chain [fix/landing-preview-chain-aware]', () => {
+describe('LandingPage: SwapPreview follows the widget\'s chain [fix/landing-preview-chain-aware]', () => {
   beforeEach(() => {
     useQuoteMock.mockReturnValue({ meta: null, loading: true, error: null, countdown: 0, refetch: vi.fn(), refresh: vi.fn() })
   })
@@ -129,7 +129,7 @@ describe('LandingPage — SwapPreview follows the widget\'s chain [fix/landing-p
     expect(tokenOut?.address.toLowerCase()).toBe(baseUsdc?.address.toLowerCase())
   })
 
-  it('[acceptance 3] Arbitrum — native ETH resolves via the shared NATIVE_ETH sentinel, same as mainnet/Base', () => {
+  it('[acceptance 3] Arbitrum: native ETH resolves via the shared NATIVE_ETH sentinel, same as mainnet/Base', () => {
     mockChainId = 42161
     useQuoteMock.mockClear()
     render(<LandingPage onLaunchApp={vi.fn()} />)
@@ -157,7 +157,7 @@ function verificationCell(root: ParentNode) {
   return { label, numeral: label?.previousElementSibling ?? null }
 }
 
-describe('LandingPage — hero stat strip [fix/hero-stat-layout]', () => {
+describe('LandingPage: hero stat strip [fix/hero-stat-layout]', () => {
   beforeEach(() => {
     useQuoteMock.mockReturnValue({ meta: null, loading: true, error: null, countdown: 0, refetch: vi.fn(), refresh: vi.fn() })
   })
@@ -191,7 +191,7 @@ describe('LandingPage — hero stat strip [fix/hero-stat-layout]', () => {
 
 // [fix/hero-stat-layout] Only CoW routes are MEV-protected (adapters/cow.ts) and the preference is
 // opt-in — the hero paragraph must not claim every route executes MEV-protected.
-describe('LandingPage — hero paragraph MEV wording [fix/hero-stat-layout]', () => {
+describe('LandingPage: hero paragraph MEV wording [fix/hero-stat-layout]', () => {
   beforeEach(() => {
     useQuoteMock.mockReturnValue({ meta: null, loading: true, error: null, countdown: 0, refetch: vi.fn(), refresh: vi.fn() })
   })

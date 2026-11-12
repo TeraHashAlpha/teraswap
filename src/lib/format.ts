@@ -56,7 +56,7 @@ export function formatDisplay(value: number | string, maxDecimals: number = 4): 
 
 const THIN_SPACE = '\u2009'
 const MINUS = '\u2212'
-const DASH = '\u2014'
+const DASH = 'n/a'
 
 /**
  * Input accepted by the numeric formatters. null/undefined/NaN render as "—".

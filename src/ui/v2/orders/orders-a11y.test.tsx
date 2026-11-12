@@ -123,7 +123,7 @@ describe('B7 · Orders focus after the cancel sheet', () => {
     fireEvent.click(within(await screen.findByRole('dialog')).getByText('Keep my orders'))
     expect(document.activeElement).toBe(all)
     fireEvent.click(all)
-    fireEvent.click(within(await screen.findByRole('dialog')).getByText('Confirm — Cancel All'))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByText('Confirm: Cancel All'))
     await act(async () => {})
     await waitFor(() => expect(screen.queryByTestId('orders-cancel-all')).toBeNull())
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('tab', { selected: true })))
