@@ -5,7 +5,7 @@ Owner decision: the site stops recording how visitors use it; keeps orders, swap
 ### Checklist
 - [x] C1 remove our own usage tracking (commit recorded below)
 - [x] C2 Privacy §3 says what is true (v1 == v2) + aligned statements
-- [ ] C3 hand-off: `fix/ui-v2-walkthrough-polish` guard test (not on origin/main at the time of writing, see C3 below)
+- [x] C3 hand-off: not done, by design. `fix/ui-v2-walkthrough-polish` is pushed but its guard test is NOT on origin/main (checked 2026-11-12 after `git fetch`), so nothing was merged and no exemption exists to delete here. Follow-up when that PR lands: merge origin/main into this branch, delete the Privacy/Terms exemption, run `privacy-copy.test.tsx` (it already asserts no U+2014 and no spaced U+2013 in Privacy, Terms and every `PRIVACY_*` constant, v1 and v2).
 - [ ] Verify (`scripts/agent-verify.sh --codeql`), compare link
 
 ### Owner answer (premise)
