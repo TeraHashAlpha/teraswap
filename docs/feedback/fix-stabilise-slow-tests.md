@@ -33,3 +33,5 @@
 - `goal-lint` FAILs only `control-line` (goal text has no `CONTROL:` first line); the goal text is the owner's, not edited.
 - Sibling `sounds-parity.swap.test.tsx` has the same shape (first test 932 ms in one suite run, 379 in the other) — out of scope (other tests), not touched.
 - Extra reads: `shell.test.tsx`, `scripts/agent-verify.sh`, a worker CPU profile.
+- Helpers/fixtures read late (after the first push): `photos/contrast.ts`, `photos/photo-tokens.ts`, `landing/narrative.ts`, `tokens.ts`, `photos/narrative.ts`, the `photos/narrative/*` image list, `narrative.css`/`tokens.css` scrim lines. `composite`/`luminance` are pure, `V2_COLORS`/`PHOTO_TOKENS` are `as const`, nothing mutates `State.px` after build, so the (state, α) memo cannot go stale. `composite` allocates an array per pixel — that is the ~0.5 s unit cost that remains.
+- Premise check (asked once, after the push — it should have been before): photos are not re-decoded per test, and sounds-parity has nothing that waits. Owner answer: **keep as pushed** (memo + `Float64Array` sort; cold load in a `beforeAll` with an explicit 20 s budget).
