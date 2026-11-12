@@ -13,6 +13,7 @@ import { useTokenImport } from '@/hooks/useTokenImport'
 import { useActiveChainId } from '@/hooks/useChainId'
 import { getChainConfig } from '@/lib/chains/registry'
 import { isCuratedToken } from '@/lib/chains/tokens'
+import { PORTFOLIO_TRUNCATED_NOTE } from '@/lib/portfolio-view'
 
 interface PortfolioTabProps {
   onSwapToken?: (token: Token) => void
@@ -206,7 +207,7 @@ function RefreshIcon({ spinning }: { spinning?: boolean }) {
 
 export default function PortfolioTab({ onSwapToken }: PortfolioTabProps) {
   const { isConnected } = useAccount()
-  const { tokens, totalValueUsd, isLoading, isError, lastUpdated, refresh, isChainSupported } = usePortfolio()
+  const { tokens, totalValueUsd, isLoading, isError, lastUpdated, refresh, isChainSupported, truncated } = usePortfolio()
   const { importToken } = useTokenImport()
   const activeChainId = useActiveChainId()
   // [FIX-CHAIN-SCOPED-FEATURE-MESSAGES] The chain's own display name, from the registry — never a
@@ -381,6 +382,13 @@ export default function PortfolioTab({ onSwapToken }: PortfolioTabProps) {
             />
           ))}
         </div>
+      )}
+
+      {/* [fix/portfolio-tokens-view] Discovery stopped early: say so, quietly. */}
+      {truncated && (
+        <p className="px-1 pt-1 text-[11px] text-cream-35" data-testid="portfolio-truncated">
+          {PORTFOLIO_TRUNCATED_NOTE}
+        </p>
       )}
     </div>
   )

@@ -9,6 +9,7 @@ import { usePortfolio, type PortfolioData, type PortfolioToken } from '@/hooks/u
 import { useTokenImport } from '@/hooks/useTokenImport'
 import { getChainConfig } from '@/lib/chains/registry'
 import { fmtUsd } from '@/lib/format'
+import { PORTFOLIO_TRUNCATED_NOTE } from '@/lib/portfolio-view'
 import type { Token } from '@/lib/tokens'
 import { Button, Skeleton } from '../primitives'
 import { rowNavKeyDown } from '../orders/keyboard'
@@ -100,7 +101,7 @@ export interface PortfolioViewProps {
  * USD figures, the total, loading / error / availability. v1 is ONE chain at a time (the header's chain), so is this view. Every word is v1's.
  */
 export function PortfolioView({ isConnected, address, chainName, portfolio, importedKeys, importKey, onAdd, onSwap, approvalRows: approvalList, approvalCount, onRevoked }: PortfolioViewProps) {
-  const { tokens, totalValueUsd, isLoading, isError, lastUpdated, refresh, isChainSupported } = portfolio
+  const { tokens, totalValueUsd, isLoading, isError, lastUpdated, refresh, isChainSupported, truncated } = portfolio
   const activeChainId = useActiveChainId() // the curated/Discovered split follows the ACTIVE chain's list, as v1
 
   // v1's once-a-second clock for "Last updated …"; idle without a timestamp.
@@ -200,6 +201,10 @@ export function PortfolioView({ isConnected, address, chainName, portfolio, impo
               ))}
             </ul>
           </section>
+        )}
+
+        {truncated && (
+          <p className="mt-3 text-[13px] text-v2-dim" data-testid="portfolio-truncated">{PORTFOLIO_TRUNCATED_NOTE}</p>
         )}
       </div>
       {approvalsPanel}
