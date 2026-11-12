@@ -179,12 +179,12 @@ describe('B7 · settlement receipt: v1 SettlementReceiptModal ⊆ v2 sheet, same
     expect(document.activeElement).toBe(screen.getByTestId('view-receipt'))
   })
 
-  it('a fill without a runner-up says "Aggregation value: —"; the receipt numbers are format.ts bigint renders', async () => {
+  it('a fill without a runner-up says "Aggregation value:. "; The receipt numbers are format.ts bigint renders', async () => {
     render(<DcaOrdersList active={[]} history={[H1]} {...props} />)
     fireEvent.click(screen.getByTestId('view-receipt'))
     await screen.findByText('Total protocol fee')
     const rows = screen.getAllByTestId('fill-aggregation-value').map((n) => n.textContent)
-    expect(rows[0]).toBe('Aggregation value: —')
+    expect(rows[0]).toBe('Aggregation value: n/a')
     expect(rows[1]).toMatch(/^Best route: .+ → 0\.000452 WETH\. Next-best: KyberSwap → 0\.000451 WETH\. Aggregation value: \+0\.000001 WETH\.$/)
     expect(within(screen.getByTestId('settlement-totals')).getByText('3.4449 USDC')).toBeTruthy()
     expect(RECEIPT.fills).toHaveLength(3)
@@ -250,10 +250,10 @@ describe('B7 · countdown: v2 = v1 at every instant', () => {
       expect(v).toEqual({ kind: 'live', label: 'Next buy in', value: formatHMS(ms), due: false })
     }
     expect(countdownView(NOW, undefined, NOW)).toEqual({ kind: 'live', label: 'Buying now', value: 'Executing soon…', due: true })
-    expect(countdownView(null, undefined, NOW)).toEqual({ kind: 'terminal', text: '—' })
+    expect(countdownView(null, undefined, NOW)).toEqual({ kind: 'terminal', text: 'n/a' })
   })
 
-  it('reduced motion: no ring is drawn — the same words stand as static text', () => {
+  it('reduced motion: no ring is drawn. The same words stand as static text', () => {
     h.reduced = true
     installMatchMedia()
     const v1 = render(<MissionControlCard order={A1} connectedChainId={BASE} onCancel={noop} />)

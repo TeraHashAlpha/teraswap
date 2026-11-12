@@ -164,7 +164,7 @@ afterEach(async () => {
   await flushOrderWrites()
 })
 
-describe('useOrderEngine — initial state', () => {
+describe('useOrderEngine: initial state', () => {
   it('starts loading, then settles to empty after Supabase resolves', async () => {
     const { result } = renderHook(() => useOrderEngine())
     expect(result.current.orders).toEqual([])
@@ -183,7 +183,7 @@ describe('useOrderEngine — initial state', () => {
 
   // [fix/user-ip-privacy] The hook used to open a Supabase Realtime socket from the browser (IP + wallet address
   // straight to the database provider). It must not: order updates come from the poll through /api/orders.
-  it('opens NO real-time subscription — mounted, polling, or unmounted', async () => {
+  it('opens NO real-time subscription: mounted, polling, or unmounted', async () => {
     mockFetchUserOrders.mockResolvedValue([makeRow({ status: 'active' })])
     const { unmount } = renderHook(() => useOrderEngine())
     await act(async () => { await Promise.resolve() })
@@ -205,7 +205,7 @@ describe('useOrderEngine — initial state', () => {
   })
 })
 
-describe('useOrderEngine — createOrder', () => {
+describe('useOrderEngine: createOrder', () => {
   it('signs with the TeraSwapOrderExecutor v2 EIP-712 domain', async () => {
     const { result } = renderHook(() => useOrderEngine())
     await createAndConfirm(result)
@@ -304,7 +304,7 @@ describe('useOrderEngine — createOrder', () => {
   })
 })
 
-describe('useOrderEngine — [P213] nonce collision prevention', () => {
+describe('useOrderEngine: [P213] nonce collision prevention', () => {
   it('gives sequential creates incrementing nonces (on-chain 5n, then local 6n)', async () => {
     // currentNonce is mocked at 5n; wagmi doesn't re-fetch between the two
     // rapid creates, so without local tracking both would sign nonce 5n.
@@ -319,7 +319,7 @@ describe('useOrderEngine — [P213] nonce collision prevention', () => {
     expect(n2).toBe(6n)
   })
 
-  it('[SPRINT-9U U2] confirmOrder is mutex-guarded — a second confirm while signing does not double-submit', async () => {
+  it('[SPRINT-9U U2] confirmOrder is mutex-guarded. A second confirm while signing does not double-submit', async () => {
     // The "in progress" mutex moved from createOrder (now freezes) to confirmOrder (signs). Hold the
     // first signature open; a second confirm must be a no-op (pendingOrder consumed + creatingRef),
     // so only ONE signature/submit happens.
@@ -370,7 +370,7 @@ describe('useOrderEngine — [P213] nonce collision prevention', () => {
   })
 })
 
-describe('useOrderEngine — cancelOrder + cancelAllOrders', () => {
+describe('useOrderEngine: cancelOrder + cancelAllOrders', () => {
   it('cancelOrder (reviewed via confirmCancel) writes on-chain and updates Supabase', async () => {
     mockCreateOrderInSupabase.mockResolvedValue(
       makeRow({ id: 'row-1', order_hash: '0x' + 'aa'.repeat(32) }),
@@ -458,7 +458,7 @@ describe('useOrderEngine — cancelOrder + cancelAllOrders', () => {
   })
 })
 
-describe('useOrderEngine — [CANCEL-REVIEW] cancel/invalidate review gate', () => {
+describe('useOrderEngine: [CANCEL-REVIEW] cancel/invalidate review gate', () => {
   afterEach(async () => {
     const wagmi = await import('wagmi')
     ;(wagmi.useAccount as ReturnType<typeof vi.fn>).mockReturnValue({ address: ADDRESS })
@@ -520,7 +520,7 @@ describe('useOrderEngine — [CANCEL-REVIEW] cancel/invalidate review gate', () 
     expect(result.current.pendingCancel).toBeNull()
   })
 
-  it('[CHORE-ORDER-EXEC-PREP A] order creation is FAIL-CLOSED on an UNWIRED chain — no EIP-712 signature', async () => {
+  it('[CHORE-ORDER-EXEC-PREP A] order creation is FAIL-CLOSED on an UNWIRED chain: no EIP-712 signature', async () => {
     // On a chain with NO OrderExecutor wired (here 42161/Arbitrum — not in ORDER_EXECUTOR_BY_CHAIN) the
     // hook must never EIP-712-sign an order against a non-existent executor — creation fail-closes (no
     // signature, an error event, no order persisted). (Base 8453 is now WIRED —
@@ -629,7 +629,7 @@ describe('useOrderEngine — [CANCEL-REVIEW] cancel/invalidate review gate', () 
   })
 })
 
-describe('useOrderEngine — removeOrder', () => {
+describe('useOrderEngine: removeOrder', () => {
   // [P197] removeOrder now no-ops on ACTIVE orders (they must be cancelled
   // on-chain first). This test removes a terminal (cancelled) order — the
   // same behaviour it always verified, on a now-dismissible status.
@@ -652,7 +652,7 @@ describe('useOrderEngine — removeOrder', () => {
     expect(mockCancelOrderInSupabase).not.toHaveBeenCalled()
   })
 
-  it('does not remove an active order — it must be cancelled on-chain first [P197]', async () => {
+  it('does not remove an active order. It must be cancelled on-chain first [P197]', async () => {
     const { result } = renderHook(() => useOrderEngine())
     await createAndConfirm(result)
     const id = result.current.orders[0].id
@@ -693,7 +693,7 @@ describe('useOrderEngine — removeOrder', () => {
   })
 })
 
-describe('useOrderEngine — token symbols from Supabase row [P196]', () => {
+describe('useOrderEngine: token symbols from Supabase row [P196]', () => {
   it('populates tokenInSymbol/tokenOutSymbol from the row data', async () => {
     mockFetchUserOrders.mockResolvedValue([
       makeRow({ id: 'r1', token_in_symbol: 'USDC', token_out_symbol: 'ETH' }),
@@ -717,7 +717,7 @@ describe('useOrderEngine — token symbols from Supabase row [P196]', () => {
   })
 })
 
-describe('useOrderEngine — [CHORE-DCA-POSITIONS-DASHBOARD] chain + decimals threading', () => {
+describe('useOrderEngine: [CHORE-DCA-POSITIONS-DASHBOARD] chain + decimals threading', () => {
   it('maps chain_id and the REAL token decimals from the Supabase row', async () => {
     mockFetchUserOrders.mockResolvedValue([
       makeRow({ id: 'r1', chain_id: 8453, token_in_decimals: 6, token_out_decimals: 18 }),
@@ -745,7 +745,7 @@ describe('useOrderEngine — [CHORE-DCA-POSITIONS-DASHBOARD] chain + decimals th
   })
 })
 
-describe('useOrderEngine — derived filters', () => {
+describe('useOrderEngine: derived filters', () => {
   it('separates active vs history orders by status', async () => {
     mockFetchUserOrders.mockResolvedValue([
       makeRow({ id: 'r1', status: 'active' }),
@@ -788,7 +788,7 @@ describe('useOrderEngine — derived filters', () => {
   })
 })
 
-describe('useOrderEngine — persistence (encrypted localStorage [P200])', () => {
+describe('useOrderEngine: persistence (encrypted localStorage [P200])', () => {
   it('writes an encrypted (non-plain-JSON) payload to teraswap_orders_v4', async () => {
     // Encryption is real-async (AES-GCM); fake timers can't flush the crypto
     // promise chain, so this test runs on real timers + waitFor.
@@ -868,7 +868,7 @@ describe('useOrderEngine — persistence (encrypted localStorage [P200])', () =>
   })
 })
 
-describe('useOrderEngine — polling', () => {
+describe('useOrderEngine: polling', () => {
   it('does not poll when there are no active orders', async () => {
     mockFetchUserOrders.mockResolvedValue([makeRow({ status: 'filled' })])
     renderHook(() => useOrderEngine())
@@ -921,7 +921,7 @@ describe('useOrderEngine — polling', () => {
 })
 
 // [fix/user-ip-privacy] With the realtime socket gone, the poll carries everything that socket used to push.
-describe('useOrderEngine — polling replaces the realtime socket', () => {
+describe('useOrderEngine: polling replaces the realtime socket', () => {
   const HASH = '0x' + 'cd'.repeat(32)
   const dcaRow = (over: Partial<OrderRow>) =>
     makeRow({ id: 'd1', order_hash: HASH, order_type: 'dca', status: 'partially_filled' as unknown as 'active', dca_total: 5, dca_executed: 1, ...over })
@@ -965,7 +965,7 @@ describe('useOrderEngine — polling replaces the realtime socket', () => {
     expect(result.current.orders.find((o) => o.id === 'd1')!.error).toBe('slippage exceeded, will retry')
   })
 
-  it('fires order_filled exactly once — on the transition, not on every later poll of the filled row', async () => {
+  it('fires order_filled exactly once: on the transition, not on every later poll of the filled row', async () => {
     const { result } = await mountWith(dcaRow({ dca_executed: 4 }))
     expect(result.current.latestEvent).toBeNull()
 
@@ -993,7 +993,7 @@ describe('useOrderEngine — polling replaces the realtime socket', () => {
 // ─────────────────────────────────────────────────────────────
 // [SPRINT-9U U2] EIP-712 order review gate — no signature without a frozen review.
 // ─────────────────────────────────────────────────────────────
-describe('useOrderEngine — [SPRINT-9U U2] order review gate', () => {
+describe('useOrderEngine: [SPRINT-9U U2] order review gate', () => {
   afterEach(async () => {
     const wagmi = await import('wagmi')
     ;(wagmi.useAccount as ReturnType<typeof vi.fn>).mockReturnValue({ address: ADDRESS })
@@ -1111,7 +1111,7 @@ describe('useOrderEngine — [SPRINT-9U U2] order review gate', () => {
   })
 })
 
-describe('useOrderEngine — [SPRINT-9U audit] freshness guard', () => {
+describe('useOrderEngine: [SPRINT-9U audit] freshness guard', () => {
   it('confirmOrder refuses to sign an already-expired order (fail-safe, no wasted signature)', async () => {
     const { result } = renderHook(() => useOrderEngine())
     await act(async () => { await result.current.createOrder(makeConfig({ expirySeconds: -100 })) }) // expiry in the past

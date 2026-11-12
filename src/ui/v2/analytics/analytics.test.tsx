@@ -152,7 +152,7 @@ describe('B9 · content parity: v1 Analytics ⊆ v2, per state (0 missing)', () 
     expect(within(v2).getByTestId('analytics-loading').textContent).toBe('Loading analytics...')
   })
 
-  it('no dashboard and not loading: v1 draws nothing for the tab — v2 draws nothing for it either', async () => {
+  it('no dashboard and not loading: v1 draws nothing for the tab. V2 draws nothing for it either', async () => {
     h.analytics = { dashboard: null, loading: false }
     const { r, v2 } = await both()
     expectParity(r)

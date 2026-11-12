@@ -23,7 +23,7 @@ beforeEach(() => {
 })
 
 describe('chains/sequencer-check [P218]', () => {
-  it('returns true for mainnet (no sequencer feed — client never consulted)', async () => {
+  it('returns true for mainnet (no sequencer feed: client never consulted)', async () => {
     const client = {
       readContract: async () => {
         throw new Error('mainnet must not read a sequencer feed')
@@ -48,7 +48,7 @@ describe('chains/sequencer-check [P218]', () => {
   })
 })
 
-describe('chains/sequencer-check — single-flight [E2-AUDIT H-1]', () => {
+describe('chains/sequencer-check: single-flight [E2-AUDIT H-1]', () => {
   it('concurrent checks during a cache miss share ONE in-flight RPC read (no thundering herd)', async () => {
     let reads = 0
     let release!: (v: readonly [bigint, bigint, bigint, bigint, bigint]) => void

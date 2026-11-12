@@ -236,7 +236,7 @@ describe('Remove', () => {
   })
 })
 
-describe('lazy re-validation — never silently drops', () => {
+describe('lazy re-validation: never silently drops', () => {
   it('chain answers with no code → kept, shown Unavailable, not selectable, still removable', async () => {
     await importViaUi(8453)
     behaviour = 'empty' // contract gone / not an ERC-20 any more

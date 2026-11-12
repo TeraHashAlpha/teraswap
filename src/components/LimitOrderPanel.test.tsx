@@ -22,9 +22,9 @@ const useOrderNotificationsMock = vi.fn()
 const useDepegCheckMock = vi.fn()
 vi.mock('@/hooks/useDepegCheck', () => ({ useDepegCheck: (...a: unknown[]) => useDepegCheckMock(...a) }))
 const DEPEG_OK = { mode: 'ok' as const, divergence: 0, symbol: '', message: null }
-const DEPEG_CONSENT = { mode: 'consent' as const, divergence: 0.05, symbol: 'cbETH', message: 'cbETH is trading 5.0% off its exchange rate — possible depeg. Verify before swapping.' }
-const DEPEG_BLOCK = { mode: 'block' as const, divergence: 0.12, symbol: 'cbETH', message: 'cbETH is trading 12.0% off its exchange rate — likely a depeg or oracle manipulation. Swap blocked for your safety.' }
-const DEPEG_UNVERIFIED = { mode: 'unverified' as const, divergence: 0, symbol: 'cbETH', message: "We couldn't verify cbETH's price right now — try again in a moment." }
+const DEPEG_CONSENT = { mode: 'consent' as const, divergence: 0.05, symbol: 'cbETH', message: 'cbETH is trading 5.0% off its exchange rate: possible depeg. Verify before swapping.' }
+const DEPEG_BLOCK = { mode: 'block' as const, divergence: 0.12, symbol: 'cbETH', message: 'cbETH is trading 12.0% off its exchange rate, likely a depeg or oracle manipulation. Swap blocked for your safety.' }
+const DEPEG_UNVERIFIED = { mode: 'unverified' as const, divergence: 0, symbol: 'cbETH', message: "We couldn't verify cbETH's price right now: try again in a moment." }
 
 vi.mock('@/hooks/useOrderEngine', () => ({
   useOrderEngine: () => useOrderEngineMock(),
@@ -126,7 +126,7 @@ beforeEach(() => {
   useDepegCheckMock.mockReturnValue(DEPEG_OK)
 })
 
-describe('LimitOrderPanel — tabs', () => {
+describe('LimitOrderPanel: tabs', () => {
   it('renders the "New Limit Order" tab as default', () => {
     renderWithProviders(<LimitOrderPanel />)
     expect(screen.getByText(/New Limit Order/i)).toBeInTheDocument()
@@ -156,14 +156,14 @@ describe('LimitOrderPanel — tabs', () => {
   })
 })
 
-describe('LimitOrderPanel — connect prompt', () => {
+describe('LimitOrderPanel: connect prompt', () => {
   it('still mounts when the wallet is disconnected', () => {
     useAccountMock.mockReturnValue({ address: undefined, isConnected: false })
     expect(() => renderWithProviders(<LimitOrderPanel />)).not.toThrow()
   })
 })
 
-describe('LimitOrderPanel — risk notice', () => {
+describe('LimitOrderPanel: risk notice', () => {
   it('does not repeat a per-panel disclaimer (the Footer carries the single risk line)', () => {
     renderWithProviders(<LimitOrderPanel />)
     expect(screen.queryByTestId('beta-disclaimer')).not.toBeInTheDocument()
@@ -173,7 +173,7 @@ describe('LimitOrderPanel — risk notice', () => {
 // [FEAT-DEPEG-GATE-ORDER-CREATION] Extends the twice-audited cbETH depeg circuit-breaker to Limit
 // order creation. useDepegCheck is mocked (as SwapBox.test.tsx does) — only the panel's WIRING is
 // under test here, not the hook's own internals.
-describe('LimitOrderPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on order creation', () => {
+describe('LimitOrderPanel: [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on order creation', () => {
   function submitButton(): HTMLButtonElement {
     return screen.getByRole('button', { name: /place limit order/i }) as HTMLButtonElement
   }
@@ -203,7 +203,7 @@ describe('LimitOrderPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on ord
     expect(submitButton()).toBeDisabled()
   })
 
-  it('UNVERIFIED (oracle unreadable) disables submit with "not verified" copy — never claims a depeg', async () => {
+  it('UNVERIFIED (oracle unreadable) disables submit with "not verified" copy, never claims a depeg', async () => {
     useDepegCheckMock.mockReturnValue(DEPEG_UNVERIFIED)
     renderWithProviders(<LimitOrderPanel />)
     await enterAmountAndPrice()
@@ -221,7 +221,7 @@ describe('LimitOrderPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on ord
     expect(submitButton()).not.toBeDisabled()
   })
 
-  it('informed consent (mode: consent) blocks until accepted, then unblocks — mirrors SwapBox exactly', async () => {
+  it('informed consent (mode: consent) blocks until accepted, then unblocks. Mirrors SwapBox exactly', async () => {
     useDepegCheckMock.mockReturnValue(DEPEG_CONSENT)
     renderWithProviders(<LimitOrderPanel />)
     await enterAmountAndPrice()
@@ -231,7 +231,7 @@ describe('LimitOrderPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on ord
     expect(submitButton()).not.toBeDisabled()
   })
 
-  it('a blocked submit never calls createOrder — defense-in-depth guard fires even on a forced click', async () => {
+  it('a blocked submit never calls createOrder: defense-in-depth guard fires even on a forced click', async () => {
     useDepegCheckMock.mockReturnValue(DEPEG_BLOCK)
     const createOrder = vi.fn()
     useOrderEngineMock.mockReturnValue({ ...defaultEngine(), createOrder })
@@ -248,7 +248,7 @@ describe('LimitOrderPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on ord
   // doc comment). This one genuinely runs the production onClick handler with depegBlocking=true,
   // proving handleSubmit's own `if (depegBlocking) { setSubmitError(...); return }` guard — not
   // merely the button state — is what stops an order.
-  it('[L-1] the production handler itself refuses to submit while blocked — not merely the disabled attribute', async () => {
+  it('[L-1] the production handler itself refuses to submit while blocked, not merely the disabled attribute', async () => {
     useDepegCheckMock.mockReturnValue(DEPEG_BLOCK)
     const createOrder = vi.fn()
     useOrderEngineMock.mockReturnValue({ ...defaultEngine(), createOrder })
@@ -270,7 +270,7 @@ describe('LimitOrderPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on ord
 // by the keeper on every fill, so a router the chain's own executor does not whitelist yields an
 // order that can never execute. Nothing about config.ts is mocked here — the chain lookup IS the
 // module under test.
-describe('LimitOrderPanel — [ADR-020] refuses to sign on a chain with no router set', () => {
+describe('LimitOrderPanel: [ADR-020] refuses to sign on a chain with no router set', () => {
   const UNKNOWN_CHAIN_ID = 10 // [feat/arbitrum-dca-gates] was 42161, which now has a derived router set
 
   async function enterAmountAndPrice() {
@@ -302,7 +302,7 @@ describe('LimitOrderPanel — [ADR-020] refuses to sign on a chain with no route
     expect(createOrder).not.toHaveBeenCalled()
   })
 
-  it('refuses before any feed/floor work — the chain gap is reported as itself, not as a token problem', async () => {
+  it('refuses before any feed/floor work. The chain gap is reported as itself, not as a token problem', async () => {
     useOrderEngineMock.mockReturnValue({ ...defaultEngine(), createOrder: vi.fn() })
     renderWithProviders(<LimitOrderPanel />)
     await enterAmountAndPrice()

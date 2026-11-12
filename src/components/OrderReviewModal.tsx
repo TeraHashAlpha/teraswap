@@ -17,7 +17,7 @@ import { useOrderApproval } from '@/hooks/useOrderApproval'
 
 // [CANCEL-REVIEW] Exported for reuse by OrderCancelReviewModal — same decoders, no new trust surface.
 export function truncAddr(addr: string): string {
-  if (!addr || addr.length <= 12) return addr || '—'
+  if (!addr || addr.length <= 12) return addr || 'n/a'
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
 }
 
@@ -75,8 +75,7 @@ export default function OrderReviewModal({ order, onConfirm, onCancel }: Props) 
         <div className="shrink-0 border-b border-cream-08 px-5 py-4">
           <h2 className="text-base font-display font-semibold text-cream" data-testid="order-type">{TYPE_LABEL[config.orderType] ?? 'Order'}</h2>
           <p className="mt-0.5 text-xs text-cream-50">
-            You&apos;re about to <strong>sign an autonomous order</strong> (EIP-712). Verify the exact terms —
-            this is precisely what your wallet will sign and what the executor will enforce on-chain.
+            You&apos;re about to <strong>sign an autonomous order</strong> (EIP-712). Verify the exact terms. This is precisely what your wallet will sign and what the executor will enforce on-chain.
           </p>
         </div>
 
@@ -142,8 +141,8 @@ export default function OrderReviewModal({ order, onConfirm, onCancel }: Props) 
 
           <div className="mt-1 rounded-lg border border-cream-gold/20 bg-cream-gold/5 px-3 py-2 text-[11px] text-cream-gold">
             {approval.needsApproval
-              ? `Two steps: first approve the exact ${fmtAmount(o.amountIn, config.tokenIn.decimals, config.tokenIn.symbol)} on-chain (one-time, no infinite approvals), then sign the order. The executor then runs it autonomously — output is protected by the on-chain minimum received above.`
-              : 'Approved on-chain — now sign the order. The executor runs it autonomously when your condition is met; output is protected by the on-chain minimum received above. No funds move until then.'}
+              ? `Two steps: first approve the exact ${fmtAmount(o.amountIn, config.tokenIn.decimals, config.tokenIn.symbol)} on-chain (one-time, no infinite approvals), then sign the order. The executor then runs it autonomously: output is protected by the on-chain minimum received above.`
+              : 'Approved on-chain: now sign the order. The executor runs it autonomously when your condition is met; output is protected by the on-chain minimum received above. No funds move until then.'}
           </div>
         </div>
 

@@ -509,7 +509,7 @@ function CreateConditionalForm({
           type="button"
           disabled
           data-testid="sltp-stop-loss-disabled"
-          title={`${STOP_LOSS_DEFERRED_REASON} — a pinned route can fail to fill in a fast market, and for a stop-loss that is the loss.`}
+          title={`${STOP_LOSS_DEFERRED_REASON}. A pinned route can fail to fill in a fast market, and for a stop-loss that is the loss.`}
           className="flex-1 cursor-not-allowed rounded-md border border-transparent py-2 text-[12px] font-semibold text-cream-35 opacity-50"
         >
           Stop Loss · Soon
@@ -589,10 +589,10 @@ function CreateConditionalForm({
           same event reads identically wherever a user encounters it. No click-through. */}
       {depegHardBlocked && (
         <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger" data-testid="sltp-depeg-block">
-          <span className="font-semibold">&#9888; Order blocked — {depegCheck.symbol} depeg.</span>{' '}
+          <span className="font-semibold">&#9888; Order blocked: {depegCheck.symbol} depeg.</span>{' '}
           {depegCheck.message}
           <span className="mt-1 block text-xs text-danger/80">
-            The market price has diverged sharply from the protocol exchange rate — likely a depeg or oracle manipulation. This cannot be overridden. Try again once the prices reconverge.
+            The market price has diverged sharply from the protocol exchange rate, likely a depeg or oracle manipulation. This cannot be overridden. Try again once the prices reconverge.
           </span>
         </div>
       )}
@@ -601,10 +601,10 @@ function CreateConditionalForm({
           not check. */}
       {depegUnverified && (
         <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger" data-testid="sltp-depeg-unverified">
-          <span className="font-semibold">&#9888; Order paused — price not verified.</span>{' '}
+          <span className="font-semibold">&#9888; Order paused: price not verified.</span>{' '}
           {depegCheck.message}
           <span className="mt-1 block text-xs text-danger/80">
-            We could not get usable price-feed data to check this asset against its exchange rate, so we are not letting the order be created on a price we have not verified. This is not itself a depeg finding — we have not been able to make one either way. It clears once the feeds return good data.
+            We could not get usable price-feed data to check this asset against its exchange rate, so we are not letting the order be created on a price we have not verified. This is not itself a depeg finding. We have not been able to make one either way. It clears once the feeds return good data.
           </span>
         </div>
       )}
@@ -730,8 +730,8 @@ function CreateConditionalForm({
           {isSubmitting
             ? 'Signing order...'
             : orderType === 'stop_loss'
-              ? `Set Stop Loss at $${triggerPrice || '—'}`
-              : `Set Take Profit at $${triggerPrice || '—'}`}
+              ? `Set Stop Loss at $${triggerPrice || 'n/a'}`
+              : `Set Take Profit at $${triggerPrice || 'n/a'}`}
         </button>
       )}
 
@@ -753,7 +753,7 @@ function CreateConditionalForm({
         >
           This order executes when your price is met <strong className="text-cream-65">if the pinned
           route is viable</strong> at that moment; otherwise it stays open until it expires. The
-          route is fixed when you sign, so it cannot be front-run by a changed quote — but it also
+          route is fixed when you sign, so it cannot be front-run by a changed quote, but it also
           cannot re-route around a pool that has dried up.
         </div>
       )}
@@ -761,7 +761,7 @@ function CreateConditionalForm({
       {/* Info badge */}
       <div className="mt-3 flex items-center gap-2 rounded-lg border border-cream-gold/20 bg-cream-gold/5 px-3 py-2">
         <span className="text-[10px] text-cream-50">
-          <span className="font-semibold text-cream-gold">Autonomous execution</span> — Chainlink oracles monitor price on-chain. Your order executes automatically when target is hit. Approve once, then sign — no infinite approvals, no browser needed.
+          <span className="font-semibold text-cream-gold">Autonomous execution</span>: Chainlink oracles monitor price on-chain. Your order executes automatically when target is hit. Approve once, then sign: no infinite approvals, no browser needed.
         </span>
       </div>
     </div>
@@ -859,7 +859,7 @@ function ConditionalOrderCard({
 
   const amountIn = order.order?.amountIn
     ? formatUnits(BigInt(order.order.amountIn.toString()), order.tokenInDecimals)
-    : '—'
+    : 'n/a'
 
   // Target price from 8-decimal Chainlink format
   const targetPriceUsd = order.order?.targetPrice
@@ -929,7 +929,7 @@ function ConditionalOrderCard({
         {onCancel && isActive && (
           <button
             onClick={() => { onCancel(order.id); playClick() }}
-            title={chainMismatch ? `This order is on ${orderChainName} — switching your wallet is required to cancel it` : undefined}
+            title={chainMismatch ? `This order is on ${orderChainName}: switching your wallet is required to cancel it` : undefined}
             className="rounded-lg border border-cream-08 px-3 py-1.5 text-[11px] text-cream-50 transition hover:border-red-400 hover:text-red-400"
           >
             {chainMismatch ? `Switch to ${orderChainName}` : 'Cancel'}

@@ -38,7 +38,7 @@ function renderTrigger(props: { txHash: string; chainId?: number }) {
   )
 }
 
-describe('ToastProvider — [fix/tx-links-remaining] chain-aware explorer link', () => {
+describe('ToastProvider: [fix/tx-links-remaining] chain-aware explorer link', () => {
   it.each([
     [1, 'etherscan.io'],
     [8453, 'basescan.org'],
@@ -50,7 +50,7 @@ describe('ToastProvider — [fix/tx-links-remaining] chain-aware explorer link',
     expect(new URL(link.href).hostname).toBe(host)
   })
 
-  it('a toast with NO chainId falls back to mainnet (1) — never guesses, just the documented default', async () => {
+  it('a toast with NO chainId falls back to mainnet (1), never guesses, just the documented default', async () => {
     renderTrigger({ txHash: '0xabc' })
     await act(async () => { fireEvent.click(screen.getByText('fire')) })
     const link = screen.getByText('View on explorer').closest('a') as HTMLAnchorElement

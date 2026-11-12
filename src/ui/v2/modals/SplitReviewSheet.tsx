@@ -13,11 +13,11 @@ import type { ConsentValues } from './review-model'
 import type { ReviewConfirm } from './ReviewSheet'
 
 function fmtAmount(raw: string | bigint | undefined, token: Token | null): string {
-  if (raw == null || !token) return '—'
+  if (raw == null || !token) return 'n/a'
   try {
     return `${fmtToken(typeof raw === 'bigint' ? raw : BigInt(raw), token.decimals)} ${token.symbol}`
   } catch {
-    return '—'
+    return 'n/a'
   }
 }
 
@@ -45,7 +45,7 @@ function Leg({ leg, index, tokenIn, tokenOut, userAddress }: { leg: PlannedLeg; 
 
       {skipped ? (
         <p className="mt-2 border-l-2 ts-v2-accent-stroke pl-3 text-[13px] text-v2-amber">
-          Skipped — will NOT be signed. {leg.error ?? 'Failed pre-flight checks.'}
+          Skipped: will NOT be signed. {leg.error ?? 'Failed pre-flight checks.'}
         </p>
       ) : (
         <div className="mt-1 pb-3">
@@ -83,7 +83,7 @@ function Leg({ leg, index, tokenIn, tokenOut, userAddress }: { leg: PlannedLeg; 
           </ReviewRow>
           {leg.simulated === false && (
             <p className="mt-1 text-[12px] text-v2-amber">
-              Simulation unavailable — protected only by the on-chain minimum output.
+              Simulation unavailable: protected only by the on-chain minimum output.
             </p>
           )}
           {leg.routeViaFeeCollector && <p className="mt-1 text-[12px] text-v2-cream">Via TeraSwap FeeCollector (0.1% fee)</p>}
@@ -126,7 +126,7 @@ export function SplitReviewSheet({
       name="split-review"
       size="lg"
       title="Review Split Swap"
-      subtitle={`This routes across ${n} ${n === 1 ? 'leg' : 'legs'}. Verify each before signing — you'll approve ${signable} wallet ${signable === 1 ? 'prompt' : 'prompts'}, one per leg.`}
+      subtitle={`This routes across ${n} ${n === 1 ? 'leg' : 'legs'}. Verify each before signing. You'll approve ${signable} wallet ${signable === 1 ? 'prompt' : 'prompts'}, one per leg.`}
       onClose={onCancel}
       initialFocusRef={cancelRef}
     >

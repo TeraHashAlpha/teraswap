@@ -15,7 +15,7 @@ export const TOKEN_NOT_ERC20_MESSAGE = 'Not a valid ERC-20 token'
  * we were rate limited, or the node returned a JSON-RPC error. Says nothing about the token.
  */
 export const TOKEN_READ_FAILED_MESSAGE =
-  'Network error — could not read this contract. Please try again.'
+  'Network error: could not read this contract. Please try again.'
 
 /**
  * Hook to import a custom ERC-20 token by pasting its contract address.

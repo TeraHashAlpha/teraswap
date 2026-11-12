@@ -346,7 +346,7 @@ export default function SwapBox() {
   useEffect(() => {
     if (swapStatus === 'swapping' || swapStatus === 'cow_signing' || swapStatus === 'cow_pending') {
       const msg = swapStatus === 'cow_signing' ? 'Signing CoW order...'
-        : swapStatus === 'cow_pending' ? 'CoW order submitted — waiting for settlement...'
+        : swapStatus === 'cow_pending' ? 'CoW order submitted: waiting for settlement...'
         : 'Transaction pending...'
       swapToastId.current = toast({ type: 'loading', title: msg, description: `${tokenIn?.symbol} → ${tokenOut?.symbol}` })
     }
@@ -390,7 +390,7 @@ export default function SwapBox() {
       const successOutNum = successOutBig !== null
         ? Number(formatUnits(successOutBig, tokenOut.decimals))
         : null
-      const successOutDisplay = successOutNum !== null ? fmtToken(successOutNum) : '—'
+      const successOutDisplay = successOutNum !== null ? fmtToken(successOutNum) : 'n/a'
       toast({ type: 'success', title: 'Swap confirmed!', description: `${amountIn} ${tokenIn.symbol} → ${successOutDisplay} ${tokenOut.symbol}${savingsLine}`, txHash, chainId: txChainId, duration: 10000 })
       swapToastId.current = null
 
@@ -520,7 +520,7 @@ export default function SwapBox() {
   const outputDisplay = meta?.best && tokenOut && quoteDecimalsOut !== null
     ? (() => {
         const v = safeBigInt(meta.best.toAmount)
-        return v !== null ? fmtToken(v, quoteDecimalsOut) : '—'
+        return v !== null ? fmtToken(v, quoteDecimalsOut) : 'n/a'
       })()
     : '0.0'
 
@@ -749,7 +749,7 @@ export default function SwapBox() {
       const hi = amounts.reduce((a, b) => (b > a ? b : a))
       quoteSpreadPct = Number(((hi - lo) * 1_000_000n) / lo) / 10_000
     }
-    let minOut = '—'
+    let minOut = 'n/a'
     if (meta?.best && quoteDecimalsOut !== null) {
       try { minOut = fmtToken(deriveMinimumOutput(meta.best.toAmount, slippage), quoteDecimalsOut) } catch { /* unusable quote → no number */ }
     }
@@ -931,7 +931,7 @@ export default function SwapBox() {
             actual quote to block, which is the convention every sibling banner here already uses. */}
         {oracleIntegrityBlocked && !isExtremeBlock && !priceCheckStale && hasAmount && meta && (
           <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
-            <span className="font-semibold">&#9888; Swap blocked — oracle data unsafe.</span>{' '}
+            <span className="font-semibold">&#9888; Swap blocked: oracle data unsafe.</span>{' '}
             {pairCheck.message ?? 'The Chainlink price feed is stale or invalid, so this swap price cannot be independently verified.'}
             <span className="mt-1 block text-xs text-danger/80">
               This guards against trading on a manipulated or outdated oracle and cannot be overridden. Try again once the feed updates.
@@ -943,7 +943,7 @@ export default function SwapBox() {
             quote (cannot be clicked through). */}
         {isExtremeBlock && !priceCheckStale && (
           <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
-            <span className="font-semibold">&#9888; Swap blocked:</span> price deviates {fmtPct(pairCheck.deviation * 100, 1)} from the Chainlink oracle — far beyond normal price impact.
+            <span className="font-semibold">&#9888; Swap blocked:</span> price deviates {fmtPct(pairCheck.deviation * 100, 1)} from the Chainlink oracle: far beyond normal price impact.
             <span className="mt-1 block text-xs text-danger/80">
               This likely indicates price manipulation or a broken quote and cannot be overridden. Try a smaller amount or a different pair.
             </span>
@@ -956,7 +956,7 @@ export default function SwapBox() {
             by the on-chain minimum output. */}
         {priceImpactConsentNeeded && !priceCheckStale && (
           <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-            <span className="font-semibold">&#9888; High price impact:</span> this route executes ~{fmtPct(pairCheck.deviation * 100, 1)} below the Chainlink reference price — expected slippage on a low-liquidity route, not an oracle problem.
+            <span className="font-semibold">&#9888; High price impact:</span> this route executes ~{fmtPct(pairCheck.deviation * 100, 1)} below the Chainlink reference price, expected slippage on a low-liquidity route, not an oracle problem.
             <label className="mt-2 flex min-h-[44px] items-center gap-2 text-xs text-warning/90 sm:min-h-0">
               <input
                 type="checkbox"
@@ -972,10 +972,10 @@ export default function SwapBox() {
             rate: likely a depeg or a manipulated market feed. No click-through. */}
         {depegHardBlocked && !priceCheckStale && (
           <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
-            <span className="font-semibold">&#9888; Swap blocked — {depegCheck.symbol} depeg.</span>{' '}
+            <span className="font-semibold">&#9888; Swap blocked: {depegCheck.symbol} depeg.</span>{' '}
             {depegCheck.message}
             <span className="mt-1 block text-xs text-danger/80">
-              The market price has diverged sharply from the protocol exchange rate — likely a depeg or oracle manipulation. This cannot be overridden. Try again once the prices reconverge.
+              The market price has diverged sharply from the protocol exchange rate, likely a depeg or oracle manipulation. This cannot be overridden. Try again once the prices reconverge.
             </span>
           </div>
         )}
@@ -987,10 +987,10 @@ export default function SwapBox() {
             form or a first render. */}
         {depegUnverified && hasAmount && meta && !priceCheckStale && (
           <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
-            <span className="font-semibold">&#9888; Swap paused — price not verified.</span>{' '}
+            <span className="font-semibold">&#9888; Swap paused: price not verified.</span>{' '}
             {depegCheck.message}
             <span className="mt-1 block text-xs text-danger/80">
-              We could not get usable price-feed data to check this asset against its exchange rate, so we are not letting the swap through on a price we have not verified. This is not itself a depeg finding — we have not been able to make one either way. It clears once the feeds return good data.
+              We could not get usable price-feed data to check this asset against its exchange rate, so we are not letting the swap through on a price we have not verified. This is not itself a depeg finding. We have not been able to make one either way. It clears once the feeds return good data.
             </span>
           </div>
         )}
@@ -1016,7 +1016,7 @@ export default function SwapBox() {
             {oracleBlocked ? (
               <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
                 {/* [feat/swap-price-tiers] The "value cannot be verified" branch is gone (consent dialog instead). */}
-                <span className="font-semibold">&#9888; Swap blocked — no oracle verification.</span>{' '}
+                <span className="font-semibold">&#9888; Swap blocked: no oracle verification.</span>{' '}
                 This token has no Chainlink price feed. Swaps above ${fmtInt(UNVERIFIED_SWAP_BLOCK_USD)} are disabled when the price cannot be independently verified.
                 <span className="mt-1 block text-xs text-danger/80">
                   This protects against catastrophic losses from mispriced tokens (wrapped tokens, rebasing tokens, exotic pairs). Reduce the amount or swap a token with oracle coverage.
@@ -1024,7 +1024,7 @@ export default function SwapBox() {
               </div>
             ) : oracleWarnThreshold ? (
               <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-                <span className="font-semibold">&#9888; No oracle verification — high value swap.</span>{' '}
+                <span className="font-semibold">&#9888; No oracle verification: high value swap.</span>{' '}
                 This token has no Chainlink price feed. The quoted price cannot be independently verified.
                 Swaps above ${fmtInt(UNVERIFIED_SWAP_BLOCK_USD)} will be blocked.
                 <span className="mt-1 block text-xs text-warning/80">
@@ -1042,7 +1042,7 @@ export default function SwapBox() {
         {!chainActive && (
           <div className="mb-3 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-300">
             <span className="font-semibold">&#128640; Coming Soon on {chainName}.</span>{' '}
-            Swaps aren&apos;t live on this network yet — switch to Ethereum to trade. You can still browse tokens here.
+            Swaps aren&apos;t live on this network yet: switch to Ethereum to trade. You can still browse tokens here.
           </div>
         )}
 
@@ -1064,13 +1064,13 @@ export default function SwapBox() {
               document.getElementById('quote-breakdown')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
             }}
             className="mt-2 flex w-full items-center justify-center gap-1 rounded-lg border border-purple-500/20 bg-purple-500/5 px-3 py-1.5 text-[11px] text-purple-300 transition hover:border-purple-500/40 hover:bg-purple-500/10"
-            aria-label="Gasless route available — review the recommendation"
+            aria-label="Gasless route available: review the recommendation"
           >
             <span aria-hidden="true">&#128161;</span>
             <span>
               Gasless option available
               {meta.gasless.gasSavingsUsd >= 0.5 && (
-                <> — save ~{fmtUsd(meta.gasless.gasSavingsUsd)}</>
+                <>: save ~{fmtUsd(meta.gasless.gasSavingsUsd)}</>
               )}
             </span>
           </button>
@@ -1079,12 +1079,12 @@ export default function SwapBox() {
         {/* Pre-swap simulation status */}
         {simulationPassed === true && (swapStatus === 'swapping' || swapStatus === 'success') && (
           <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-emerald-400/80">
-            <span>&#10003;</span> Pre-swap simulation passed — transaction verified safe
+            <span>&#10003;</span> Pre-swap simulation passed: transaction verified safe
           </div>
         )}
         {simulationPassed === false && swapStatus === 'error' && (
           <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-danger/80">
-            <span>&#10007;</span> Pre-swap simulation caught a revert — no gas was spent
+            <span>&#10007;</span> Pre-swap simulation caught a revert: no gas was spent
           </div>
         )}
         {/* [P209 / FULL-L-05] Fail-open warning — the simulation was
@@ -1093,14 +1093,14 @@ export default function SwapBox() {
             on-chain minimumOutput still protects the fill. */}
         {simulationSkipped && (
           <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-warning/90">
-            <span aria-hidden="true">&#9888;</span> Simulation unavailable — proceed with caution
+            <span aria-hidden="true">&#9888;</span> Simulation unavailable: proceed with caution
           </div>
         )}
         {/* [SPRINT-9O Part B] Best route couldn't execute its pre-swap sim
             (e.g. mainnet Velora) → we auto-switched to a working source. */}
         {fallbackNotice && (
           <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-warning/90">
-            <span aria-hidden="true">&#8635;</span> {fallbackNotice.from} couldn&apos;t execute this route — switched to {fallbackNotice.to}
+            <span aria-hidden="true">&#8635;</span> {fallbackNotice.from} couldn&apos;t execute this route: switched to {fallbackNotice.to}
           </div>
         )}
 
@@ -1111,7 +1111,7 @@ export default function SwapBox() {
         {swapStatus === 'swapping' && txHash && (
           <div className="mt-3 text-center text-sm">
             <a href={explorerTxUrl(txHash, txChainId ?? activeChainId)} target="_blank" rel="noopener noreferrer" className="text-cream-35 transition hover:text-cream hover:underline">
-              Transaction sent — track on explorer &#8599;
+              Transaction sent: track on explorer &#8599;
             </a>
           </div>
         )}
@@ -1134,7 +1134,7 @@ export default function SwapBox() {
               const savedDisplay = savedPercent > 0.01 ? fmtPct(savedPercent) : null
               const shareText = savedDisplay
                 ? `I just saved ${savedDisplay} on my ${tokenIn.symbol} → ${tokenOut.symbol} swap by comparing ${meta.all.length} DEX sources with @TeraSwapDEX 🔥\n\nTeraSwap meta-aggregates ${INTEGRATED_DEX_SOURCE_COUNT} DEX sources for the best price.\nhttps://www.teraswap.app`
-                : `Just swapped ${tokenIn.symbol} → ${tokenOut.symbol} via @TeraSwapDEX — compared ${meta.all.length} sources for the best price 🔥\n\nhttps://www.teraswap.app`
+                : `Just swapped ${tokenIn.symbol} → ${tokenOut.symbol} via @TeraSwapDEX: compared ${meta.all.length} sources for the best price 🔥\n\nhttps://www.teraswap.app`
               return (
                 <button
                   onClick={() => {
@@ -1147,7 +1147,7 @@ export default function SwapBox() {
                   className="flex w-full items-center justify-center gap-2 rounded-xl border border-cream-08 bg-surface-tertiary py-2.5 text-[13px] font-semibold text-cream-65 transition-all hover:border-cream-35 hover:text-cream active:scale-[0.98]"
                 >
                   <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-                  {savedDisplay ? `Share — saved ${savedDisplay}%` : 'Share swap'}
+                  {savedDisplay ? `Share: saved ${savedDisplay}%` : 'Share swap'}
                 </button>
               )
             })()}
@@ -1185,7 +1185,7 @@ export default function SwapBox() {
             // quote state — so the modal always matches the calldata being signed (incl. after a 9O
             // source fallback). [11-L-01] safeBigInt: malformed toAmount → "—".
             const v = safeBigInt(pendingSwap.swapToAmount)
-            return v !== null ? fmtToken(v, pendingSwap.tokenOut.decimals) : '—'
+            return v !== null ? fmtToken(v, pendingSwap.tokenOut.decimals) : 'n/a'
           })()}
           routeViaFeeCollector={pendingSwap.routeViaFeeCollector}
           minimumOutput={pendingSwap.minimumOutput}

@@ -58,7 +58,7 @@ vi.mock('@/config/product-claims', async () => {
 
 import { INTEGRATED_DEX_SOURCE_NAMES, SWAP_CHAIN_LIST_LABEL } from '@/config/product-claims'
 import { LandingV2 } from './index'
-import { NARRATIVE_SECTIONS, staggerDelayMs } from './narrative'
+import { NARRATIVE_SECTIONS, photoFor, staggerDelayMs } from './narrative'
 import { heroStats, securityStats } from './slots'
 
 const SRC = join(__dirname)
@@ -82,8 +82,8 @@ describe('structure: ten sections in the pack order', () => {
   it('header · hero · performance · why · security · experience · features · roadmap · CTA · docs · footer', () => {
     mount()
     const main = document.querySelector('main')!
-    const order = Array.from(main.querySelectorAll(':scope > section')).map((s) => s.id || '(cta)')
-    expect(order).toEqual(['hero', 'performance', 'why-teraswap', 'security', 'experience', 'features', 'roadmap', '(cta)', 'docs'])
+    const order = Array.from(main.querySelectorAll(':scope > section')).map((s) => s.id)
+    expect(order).toEqual(['hero', 'performance', 'why-teraswap', 'security', 'experience', 'features', 'roadmap', 'cta', 'docs'])
     const header = screen.getByRole('banner')
     const footer = screen.getByRole('contentinfo')
     expect(header.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -131,35 +131,26 @@ describe('structure: ten sections in the pack order', () => {
     expect(css).toMatch(/@media \(max-width: 600px\)\s*\{\s*\.ts-v2-photo-credit--desktop\s*\{\s*display:\s*none;\s*\}\s*\.ts-v2-photo-credit--mobile\s*\{\s*display:\s*inline-block;/)
   })
 
-  it('one grade, no bands: the hero, Performance, Why and the bottom CTA each paint a baked bg-* still (veiled); no round-4/5 raster is left on the landing', () => {
+  it('one grade, no bands: the hero, Performance, Why and the bottom CTA are layers of the one stack (baked bg-* files, one veil); no static still and no round-4/5 raster is left on the landing', () => {
     mount()
-    const still = (host: Element | null) => host?.querySelector<HTMLElement>('[data-ts-narrative-still]') ?? null
-    const stills = {
-      hero: still(document.querySelector('#hero')),
-      perf: still(document.querySelector('#performance')),
-      why: still(document.querySelector('#why-teraswap')),
-      cta: still(document.querySelector('main > section.ts-v2-opaque:not([id])')),
-    }
-    expect(stills.hero?.dataset.photo).toBe('overpass') // the pack's hero photo (MOTION-SPEC §2 "the overpass (hero and §8)"; round-8 hero credit MAG Photography)
-    expect(stills.perf?.dataset.photo).toBe('tunnel')
-    expect(stills.why?.dataset.photo).toBe('zakim') // the pack's P4 proposal
-    expect(stills.cta?.dataset.photo).toBe('highway')
-    for (const [name, el] of Object.entries(stills)) {
-      const id = el!.dataset.photo!
-      const srcs = Array.from(el!.querySelectorAll('source, img'), (n) => n.getAttribute('srcset') ?? n.getAttribute('src'))
-      expect(srcs).toHaveLength(4)
-      for (const u of srcs) expect(u).toContain(`bg-${id}-`)
-      // the hero is the LCP image (eager, high priority); the others are below the fold (lazy)
-      expect(el!.querySelector('img')!.getAttribute('loading'), name).toBe(name === 'hero' ? 'eager' : 'lazy')
-      expect(el!.querySelector('.ts-v2-nar-still__veil')).not.toBeNull()
-    }
+    // [fix/ui-v2-walkthrough-polish C2] no section paints a static photo of its own any more: that is what made their boundaries hard cuts
+    expect(document.querySelectorAll('[data-ts-narrative-still], .ts-v2-nar-still')).toHaveLength(0)
+    const layerOf = (photo: string) => document.querySelector<HTMLElement>(`.ts-v2-nar__layer[data-photo="${photo}"]`)
+    expect(photoFor('hero', false)).toBe('overpass') // the pack's hero photo (MOTION-SPEC §2 "the overpass (hero and §8)"; round-8 hero credit MAG Photography)
+    expect(photoFor('performance', false)).toBe('tunnel')
+    expect(photoFor('why-teraswap', false)).toBe('zakim') // the pack's P4 proposal
+    expect(photoFor('cta', false)).toBe('highway')
+    for (const id of ['overpass', 'tunnel', 'zakim', 'highway']) expect(layerOf(id), id).not.toBeNull()
+    // the hero is on screen at load, so its layer carries the image from the first render (no bare background) and is the active one
+    expect(layerOf('overpass')!.hasAttribute('data-loaded')).toBe(true)
+    expect(layerOf('overpass')!.hasAttribute('data-active')).toBe(true)
+    expect(layerOf('overpass')!.getAttribute('style')).toContain('bg-overpass-1920')
+    expect(document.querySelectorAll('.ts-v2-nar__veil')).toHaveLength(1) // one constant veil for every state
     // no round-4/5 PhotoBackground (CSS grade, fades, halftone) anywhere on the landing: the hero's near-black raster + its dark fades are gone
     expect(document.querySelectorAll('.ts-v2-photo')).toHaveLength(0)
     expect(document.querySelectorAll('.ts-v2-photo__dots, .ts-v2-photo__fade, [data-photo="trails"]')).toHaveLength(0)
-    // owner, design review 1: no section is a solid band — every section that hides the fixed stack paints a photo of its own
-    for (const s of Array.from(document.querySelectorAll('main > section.ts-v2-opaque'))) {
-      expect(s.querySelector('[data-ts-narrative-still]'), `${s.id || s.className} is an opaque band with no photo`).not.toBeNull()
-    }
+    // owner, design review 1: no section is a solid band — and none hides the fixed stack any more
+    expect(document.querySelectorAll('main .ts-v2-opaque')).toHaveLength(0)
   })
 
   it('the shell footer closes the page and carries every still-photo author, in the footer container only', () => {
@@ -168,12 +159,12 @@ describe('structure: ten sections in the pack order', () => {
     expect(footer.textContent).toContain('Photo MAG Photography · Владимир Николаевич · Phil Evenden · Oleksiy Yeshtokyn / Pexels')
     expect(footer.textContent).toContain('Smart contracts have not been externally audited. Use at your own risk.')
     expect(footer.textContent).toContain('Fee 0.7%')
-    for (const fab of [screen.getByRole('button', { name: /music/i }), screen.getByRole('button', { name: 'Open help' })]) {
+    for (const fab of [screen.getByRole('button', { name: /sound/i }), screen.getByRole('button', { name: 'Open help' })]) {
       expect(footer.contains(fab)).toBe(false)
     }
-    // photos sit inside their sections (absolute), not as a second fixed layer: the four baked stills (hero · §2 · §3 · §8)
+    // photos are layers of the ONE fixed stack: no per-section photo element is left (hero · §2 · §3 · §8 used to have one each)
     expect(document.querySelectorAll('.ts-v2-photo--section')).toHaveLength(0)
-    expect(document.querySelectorAll('.ts-v2-nar-still')).toHaveLength(4)
+    expect(document.querySelectorAll('.ts-v2-nar-still')).toHaveLength(0)
     expect(document.querySelectorAll('.ts-v2-photo:not(.ts-v2-photo--section)')).toHaveLength(0)
   })
 })
@@ -391,24 +382,32 @@ describe('scroll narrative: markup (MOTION-SPEC §1, §4)', () => {
   const rvOf = (id: string) => Array.from(document.querySelectorAll<HTMLElement>(`#${id} .ts-v2-rv`))
   const idx = (el: HTMLElement) => (el.style.getPropertyValue('--i') === '' ? 0 : Number(el.style.getPropertyValue('--i')))
 
-  it('only §4–§7 and §9 are narrative sections; the hero, §2, §3 and §8 stay opaque (they cover the stack), as does the footer', () => {
+  it('EVERY section is a narrative section (same motion hook as the last one); only the footer covers the stack', () => {
     mount()
     const narrative = Array.from(document.querySelectorAll('[data-ts-narrative]')).map((s) => s.id)
-    expect(narrative).toEqual(['security', 'experience', 'features', 'roadmap', 'docs'])
+    expect(narrative).toEqual(['hero', 'performance', 'why-teraswap', 'security', 'experience', 'features', 'roadmap', 'cta', 'docs'])
     expect(narrative).toEqual([...NARRATIVE_SECTIONS])
-    const opaque = Array.from(document.querySelectorAll('main > .ts-v2-opaque')).map((s) => s.id || '(cta)')
-    expect(opaque).toEqual(['hero', 'performance', 'why-teraswap', '(cta)'])
-    for (const id of NARRATIVE_SECTIONS) expect(document.getElementById(id)!.classList.contains('ts-v2-opaque')).toBe(false)
+    // each section's hook is its own id, and every <section> of <main> has one: the first boundaries are not special
+    const sections = Array.from(document.querySelectorAll('main > section'))
+    expect(sections.map((s) => s.getAttribute('data-ts-narrative'))).toEqual(sections.map((s) => s.id))
+    const last = sections[sections.length - 1]
+    expect(last.id).toBe('docs')
+    for (const s of sections) {
+      expect(s.hasAttribute('data-ts-narrative'), s.id).toBe(last.hasAttribute('data-ts-narrative'))
+      expect(s.classList.contains('ts-v2-opaque'), `${s.id} must not hide the stack`).toBe(false)
+    }
+    expect(document.querySelectorAll('main .ts-v2-opaque')).toHaveLength(0)
     expect(document.querySelector('[data-ts-footer]')!.closest('.ts-v2-opaque')).not.toBeNull()
   })
 
-  it('the stack sits before the header, outside <main>, and only the narrative sections carry .ts-v2-rv', () => {
+  it('the stack sits before the header, outside <main>, and every section after the hero carries .ts-v2-rv (the hero keeps its own mount rise)', () => {
     mount()
     const stack = document.querySelector('[data-ts-narrative-stack]')!
     expect(document.querySelector('main')!.contains(stack)).toBe(false)
     expect(stack.compareDocumentPosition(screen.getByRole('banner')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    for (const id of ['hero', 'performance', 'why-teraswap']) expect(rvOf(id)).toHaveLength(0)
-    for (const id of NARRATIVE_SECTIONS) expect(rvOf(id).length).toBeGreaterThan(0)
+    expect(rvOf('hero')).toHaveLength(0) // the hero is on screen at load: ts-v2-rise plays on mount, a scroll-in reveal on top would fight it
+    expect(document.querySelectorAll('#hero .ts-v2-rise').length).toBeGreaterThan(0)
+    for (const id of NARRATIVE_SECTIONS.filter((x) => x !== 'hero')) expect(rvOf(id).length, id).toBeGreaterThan(0)
   })
 
   it('headers, copy blocks and cards carry .rv, indexed in order for the stagger', () => {
@@ -428,13 +427,16 @@ describe('scroll narrative: markup (MOTION-SPEC §1, §4)', () => {
     expect(Math.max(...cards.map((c) => staggerDelayMs(idx(c))))).toBe(160)
   })
 
-  it('Round 7 D2: every narrative section has its own local scrim and no box — copy sits straight on the photo', () => {
+  it('Round 7 D2: every narrative section has its own local scrim and no box. Copy sits straight on the photo', () => {
     mount()
     const BOXED = /\b(bg-v2-surface2?(\/\d+)?|border-v2-border|rounded-v2-(card|control|chip))\b/
     for (const id of NARRATIVE_SECTIONS) {
       const sec = document.getElementById(id)!
       expect(sec.classList.contains('ts-v2-scrim'), id).toBe(true)
-      expect(Array.from(sec.querySelectorAll('[class]')).filter((e) => BOXED.test(e.getAttribute('class')!)).map((e) => e.className), id).toEqual([])
+      // the hero's live swap preview is a card by design (it is the product, not copy); every other section is copy on the photo
+      if (id === 'hero') continue
+      // a <button> is a control, not a box around copy (the bottom CTA's Launch app)
+      expect(Array.from(sec.querySelectorAll('[class]:not(button)')).filter((e) => BOXED.test(e.getAttribute('class')!)).map((e) => e.className), id).toEqual([])
     }
     expect(document.getElementById('features')!.classList.contains('ts-v2-scrim--features')).toBe(true)
     // and no opaque text plate is left anywhere in the landing (the credit chip is the one kept container)

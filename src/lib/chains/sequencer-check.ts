@@ -30,7 +30,7 @@ export class SequencerDownError extends Error {
     try {
       chainName = getChainConfig(chainId).name
     } catch { /* unknown chain — keep the numeric label */ }
-    super(`${chainName} sequencer is down or recovering — quotes are paused until it stabilizes.`)
+    super(`${chainName} sequencer is down or recovering: quotes are paused until it stabilizes.`)
     this.name = 'SequencerDownError'
     this.chainId = chainId
   }

@@ -67,7 +67,7 @@ export function ctaFor(i: CtaInput): CtaState {
   const inFlight = (label: string): CtaState => ({ kind: 'in-flight', label, disabled: true })
   if (i.approvalStatus === 'approving_permit2') return inFlight('Approving...')
   if (i.approvalStatus === 'signing') return inFlight('Signing...')
-  if (i.approvalStatus === 'error') return { kind: 'retry', label: 'Approval error — retry', disabled: false }
+  if (i.approvalStatus === 'error') return { kind: 'retry', label: 'Approval error: retry', disabled: false }
   if (i.approvalReady === false) return i.splitActive ? { kind: 'split-swap', label: 'Approve & Swap', disabled: false } : { kind: 'review', label: 'Review swap', disabled: false }
   switch (i.swapStatus) {
     case 'fetching_swap': return inFlight('Preparing swap...')
@@ -77,7 +77,7 @@ export function ctaFor(i: CtaInput): CtaState {
     case 'cow_pending': return inFlight('Waiting for solver...')
     case 'swapping': return inFlight('Executing swap...')
     case 'success': return { kind: 'complete', label: 'Swap complete', disabled: true }
-    case 'error': return { kind: 'retry', label: 'Error — retry', disabled: false }
+    case 'error': return { kind: 'retry', label: 'Error: retry', disabled: false }
   }
   return i.splitActive ? { kind: 'split-swap', label: 'Swap', disabled: false } : { kind: 'review', label: 'Review swap', disabled: false }
 }

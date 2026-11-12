@@ -303,7 +303,7 @@ beforeEach(() => {
   mockFetchDefiLlamaPrice.mockResolvedValue(null)
 })
 
-describe('DCAPanel — a leg the executor cannot price is refused BEFORE any wallet interaction', () => {
+describe('DCAPanel: a leg the executor cannot price is refused BEFORE any wallet interaction', () => {
   it('an unregistered, unpriceable tokenOut asks for UNPRICED consent: nothing is approved/signed until the checkbox', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-unregistered-out'))
@@ -335,7 +335,7 @@ describe('DCAPanel — a leg the executor cannot price is refused BEFORE any wal
     const dialog = await screen.findByTestId('floor-consent-dialog')
     expect(dialog.getAttribute('data-tier')).toBe('offchain-price')
     expect(screen.getByTestId('floor-consent-body').textContent).toBe(
-      'A small set of tokens on this network have a Chainlink price feed registered in our contract, which lets the contract reject a bad fill on its own. ETHFI doesn\'t have one yet, so protection comes from our executor instead — it checks each buy against live market prices and holds the buy if they disagree. This is how most tokens work today.',
+      'A small set of tokens on this network have a Chainlink price feed registered in our contract, which lets the contract reject a bad fill on its own. ETHFI doesn\'t have one yet, so protection comes from our executor instead. It checks each buy against live market prices and holds the buy if they disagree. This is how most tokens work today.',
     )
     expectNoWalletInteraction()
   })
@@ -366,7 +366,7 @@ describe('DCAPanel — a leg the executor cannot price is refused BEFORE any wal
     expectNoWalletInteraction()
   })
 
-  it('NON-VACUITY — the same flow with a registered tokenOut reaches the real approve button', async () => {
+  it('NON-VACUITY: the same flow with a registered tokenOut reaches the real approve button', async () => {
     // Without this the test above would pass just as well if the button were simply broken. Here
     // the review modal mounts, its real Approve button renders, and clicking it calls the very
     // writeContractAsync the blocked case asserts was never called.
@@ -382,7 +382,7 @@ describe('DCAPanel — a leg the executor cannot price is refused BEFORE any wal
     expect(mockSignTypedDataAsync).toHaveBeenCalledTimes(1)  // and so was the real sign button
   })
 
-  it('a registry it cannot READ is classified UNPRICED (strongest warning) — "could not check" is never "checked, fine"', async () => {
+  it('a registry it cannot READ is classified UNPRICED (strongest warning): "could not check" is never "checked, fine"', async () => {
     registryThrows = true
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-registered-out'))
@@ -436,7 +436,7 @@ describe('DCAPanel — a leg the executor cannot price is refused BEFORE any wal
   })
 })
 
-describe('DCAPanel — the check is asked of the executor on the ACTIVE chain', () => {
+describe('DCAPanel: the check is asked of the executor on the ACTIVE chain', () => {
   it('queries tokenUsdFeeds on the active chain\'s executor, for BOTH signed legs', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-registered-out'))
@@ -469,7 +469,7 @@ describe('DCAPanel — the check is asked of the executor on the ACTIVE chain', 
   })
 })
 
-describe('DCAPanel — the superseded no-feed modal stays out of the DCA flow', () => {
+describe('DCAPanel: the superseded no-feed modal stays out of the DCA flow', () => {
   it('an unregistered output shows the NEW dialog, never the old "you\'re not unprotected" modal', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-unregistered-out'))
@@ -483,7 +483,7 @@ describe('DCAPanel — the superseded no-feed modal stays out of the DCA flow', 
 })
 
 // ── [feat/dca-tier-server-side] The browser asks the server; it never classifies ──────────────────
-describe('DCAPanel [feat/dca-tier-server-side] — the pair tier comes from GET /api/dca-floor-cap', () => {
+describe('DCAPanel [feat/dca-tier-server-side]: the pair tier comes from GET /api/dca-floor-cap', () => {
   const urls: string[] = []
   const leg = (registered: boolean | null, priced: boolean | null) => ({ registered, priced })
   /** Canned server answer; the classifier is NOT run, so any registry read below is a browser one. */

@@ -37,7 +37,7 @@ export interface RouteCheckResult {
 }
 
 export const NO_ROUTE_REASON =
-  'No swap route found for this pair on this network. This token may have too little liquidity to trade — pick a different token, amount, or network before placing the order.'
+  'No swap route found for this pair on this network. This token may have too little liquidity to trade: pick a different token, amount, or network before placing the order.'
 
 export async function checkRoute(p: RouteCheckParams): Promise<RouteCheckResult> {
   const qs = new URLSearchParams({

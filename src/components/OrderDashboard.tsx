@@ -92,7 +92,7 @@ export default function OrderDashboard() {
       {readAuthDenied && (
         <div className="flex items-center justify-between gap-3 rounded-2xl border border-cream-08 bg-surface-secondary/60 px-4 py-3 backdrop-blur-md">
           <p className="text-xs text-cream-50">
-            Your active orders are private — sign a free message (no transaction) to view them.
+            Your active orders are private: sign a free message (no transaction) to view them.
           </p>
           <button
             type="button"
@@ -461,7 +461,7 @@ function OrderCard({
             {isActive && (
               <button
                 onClick={(e) => { e.stopPropagation(); playTouchMP3(); onCancel() }}
-                title={chainMismatch ? `This order is on ${chainName} — switching your wallet is required to cancel it` : undefined}
+                title={chainMismatch ? `This order is on ${chainName}: switching your wallet is required to cancel it` : undefined}
                 className="min-h-[44px] flex-1 rounded-xl border border-red-500/20 bg-red-500/10 py-2.5 text-xs font-semibold text-red-400 transition-colors hover:bg-red-500/20"
               >
                 {chainMismatch ? `Switch to ${chainName}` : 'Cancel Order'}

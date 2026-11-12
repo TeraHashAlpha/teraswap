@@ -275,7 +275,7 @@ export default function ExecutionTimeline({
 
                   {(amountIn || amountOut) && (
                     <p className="mt-0.5 text-[11px] text-cream-65">
-                      {amountIn ?? '—'} → <span className="text-cream">{amountOut ?? '—'}</span>
+                      {amountIn ?? 'n/a'} → <span className="text-cream">{amountOut ?? 'n/a'}</span>
                       {priceLabel && (
                         <span className="ml-1 text-cream-40">@ {priceLabel}</span>
                       )}

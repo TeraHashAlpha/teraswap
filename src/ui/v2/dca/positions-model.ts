@@ -59,7 +59,7 @@ export type CountdownView =
 
 /** v1 CountdownCenter, as data: a terminal label (or "—"), else "Next buy in" + HH:MM:SS, or "Buying now" + "Executing soon…" once due. */
 export function countdownView(targetMs: number | null, terminal: string | undefined, now: number, label = 'Next buy in'): CountdownView {
-  if (targetMs == null) return { kind: 'terminal', text: terminal ?? '—' }
+  if (targetMs == null) return { kind: 'terminal', text: terminal ?? 'n/a' }
   const remaining = targetMs - now
   const due = isDue(remaining)
   return { kind: 'live', label: due ? 'Buying now' : label, value: due ? 'Executing soon…' : formatHMS(remaining), due }
@@ -123,7 +123,7 @@ export const POSITION_STATUS_LABEL: Record<string, string> = {
 
 /** v1 DCAOrderCard total: `fmtToken(formatUnits(amountIn, decimals))` — the same number through format.ts's bigint path. */
 export function historyTotal(order: AutonomousOrder): string {
-  if (!order.order?.amountIn) return '—'
+  if (!order.order?.amountIn) return 'n/a'
   return fmtToken(BigInt(order.order.amountIn.toString()), order.tokenInDecimals)
 }
 
@@ -131,20 +131,20 @@ export function historyTotal(order: AutonomousOrder): string {
 
 /** v1 DCAFillsTimeline `fmtAmount`: raw → `fmtToken` + symbol, "—" when absent or unparseable (bigint path, decimals given). */
 export function fillAmount(raw: string | null | undefined, decimals: number, symbol: string): string {
-  if (raw == null || raw === '') return '—'
+  if (raw == null || raw === '') return 'n/a'
   try {
     const v = BigInt(String(raw).split('.')[0])
     const n = Number(formatUnits(v, decimals))
-    return Number.isFinite(n) ? `${fmtToken(v, decimals)} ${symbol}` : '—'
+    return Number.isFinite(n) ? `${fmtToken(v, decimals)} ${symbol}` : 'n/a'
   } catch {
-    return '—'
+    return 'n/a'
   }
 }
 
 /** v1 DCAFillsTimeline `fmtUsd`: per-fill USD via `fillUsd`; "—" when the token has no known price, `<$0.01`, else `~$x`. */
 export function fillUsdText(raw: string | null | undefined, decimals: number, symbol: string): string {
   const v = fillUsd(raw, decimals, symbol)
-  if (v == null) return '—'
+  if (v == null) return 'n/a'
   if (v > 0 && v < 0.01) return '<$0.01'
   return `~${fmtUsd(v)}`
 }
@@ -172,7 +172,7 @@ export function isFillSuccess(status: string): boolean {
 /** v1 DCAPositionStats `fmtDate` (month + day, the viewer's locale). */
 function statDate(iso: string): string {
   const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  return Number.isNaN(d.getTime()) ? 'n/a' : d.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
 /** v1 DCAPositionStats `dateRange`. */
@@ -180,5 +180,5 @@ export function statRange(first: string | null, last: string | null): string | n
   if (!first || !last) return null
   const a = statDate(first)
   const b = statDate(last)
-  return a === b ? a : `${a} – ${b}`
+  return a === b ? a : `${a} to ${b}`
 }

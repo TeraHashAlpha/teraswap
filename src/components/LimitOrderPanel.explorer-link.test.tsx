@@ -118,7 +118,7 @@ function openOrdersTab() {
 
 const EXPLORER_HOST: Record<number, string> = { 1: 'etherscan.io', 8453: 'basescan.org', 42161: 'arbiscan.io' }
 
-describe('LimitOrderPanel — [fix/tx-links-remaining] filled-order tx link is chain-aware, not etherscan-only', () => {
+describe('LimitOrderPanel: [fix/tx-links-remaining] filled-order tx link is chain-aware, not etherscan-only', () => {
   it.each([1, 8453, 42161])("a filled order on chain %i links to that chain's own explorer", (chainId) => {
     useOrderEngineMock.mockReturnValue({ ...defaultEngine(), limitOrders: [filledOrder(chainId, '0xabc')] })
     renderWithProviders(<LimitOrderPanel />, { toast: false })

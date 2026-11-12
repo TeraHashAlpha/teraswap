@@ -296,7 +296,7 @@ function OverviewTab({ dashboard, metrics, period, allTrades }: {
   const heatmapData = dashboard.byHour.map(h => ({
     label: `${h.hour}:00`,
     value: h.volumeUsd,
-    tooltip: `${h.hour}:00 UTC — ${formatUsd(h.volumeUsd)} (${h.tradeCount} trades)`,
+    tooltip: `${h.hour}:00 UTC: ${formatUsd(h.volumeUsd)} (${h.tradeCount} trades)`,
   }))
 
   return (
@@ -602,7 +602,7 @@ function SybilTab({ scores, clusters }: { scores: SybilScore[]; clusters: Wallet
               <div key={i} className="flex items-start gap-2 text-[10px]">
                 <span className="mt-0.5 text-[#FBBF24]">▸</span>
                 <span className="font-bold text-[#FBBF24]">{f.rule}</span>
-                <span className="text-cream-50">— {f.details || f.description}</span>
+                <span className="text-cream-50">{f.details || f.description}</span>
                 <span className="text-[#445566]">(+{fmtFixed(f.weight, 0)})</span>
               </div>
             ))}
@@ -625,7 +625,7 @@ function SybilTab({ scores, clusters }: { scores: SybilScore[]; clusters: Wallet
                 <span className="font-mono text-cream-50">
                   {c.wallets.map(w => shortAddr(w)).join(' ↔ ')}
                 </span>
-                <span className="text-[#445566]">— {c.sharedTimestamps} co-occurrences</span>
+                <span className="text-[#445566]">{c.sharedTimestamps} co-occurrences</span>
               </div>
             ))}
           </div>

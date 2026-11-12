@@ -102,7 +102,7 @@ describe('fields match the quote object', () => {
     expect(cell('review-cow-gas')).toBe('Gas fee $0.00 (paid by solver)')
   })
 
-  it('without frozen calldata (B4) the decoded rows are absent — no recipient / validation is claimed that was not decoded', () => {
+  it('without frozen calldata (B4) the decoded rows are absent: no recipient / validation is claimed that was not decoded', () => {
     render(<ReviewSheet model={model()} onConfirm={() => {}} onCancel={() => {}} />)
     for (const id of ['review-recipient', 'review-validation', 'review-selector', 'review-decoded']) expect(screen.queryByTestId(id)).toBeNull()
   })

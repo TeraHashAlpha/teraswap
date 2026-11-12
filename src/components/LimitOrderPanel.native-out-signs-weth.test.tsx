@@ -235,7 +235,7 @@ beforeEach(() => {
   mockFetchCurrentPrice.mockResolvedValue(0.0005)
 })
 
-describe('LimitOrderPanel — a native-ETH output is SIGNED as the chain\'s wrapped native', () => {
+describe('LimitOrderPanel: a native-ETH output is SIGNED as the chain\'s wrapped native', () => {
   // Base (8453) = the v3 signing path; mainnet (1) = the v2 signing path. Same expectation.
   for (const chainId of [8453, 1]) {
     it(`chain ${chainId}: order.tokenOut === getWrappedNative(${chainId}), never the sentinel`, async () => {
@@ -293,7 +293,7 @@ describe('LimitOrderPanel — a native-ETH output is SIGNED as the chain\'s wrap
   // it was silently exercising the defect. WETH is the non-stable Base sell leg that genuinely
   // has a Base feed; the assertions (tokenOut passed through, never rewritten to the wrapped
   // native) are unchanged and still the point of the test.
-  it('NEGATIVE CONTROL — a non-native tokenOut is passed through completely untouched', async () => {
+  it('NEGATIVE CONTROL: a non-native tokenOut is passed through completely untouched', async () => {
     await renderOn(8453)
     fireEvent.click(sell('pick-weth'))   // non-stable sell leg => the feed token is the SELL leg
     fireEvent.click(buy('pick-usdc'))    // buy USDC
@@ -309,7 +309,7 @@ describe('LimitOrderPanel — a native-ETH output is SIGNED as the chain\'s wrap
   })
 })
 
-describe('LimitOrderPanel — the screen matches the signature', () => {
+describe('LimitOrderPanel: the screen matches the signature', () => {
   it('the BUY selector reads WETH (not ETH) once native output is chosen', async () => {
     await renderOn(8453)
     fireEvent.click(sell('pick-link'))
@@ -321,7 +321,7 @@ describe('LimitOrderPanel — the screen matches the signature', () => {
     expect(screen.getAllByTestId('symbol')[0].textContent).toBe('LINK')
   })
 
-  it('the review modal names the pair the user is about to SIGN — USDC → WETH', async () => {
+  it('the review modal names the pair the user is about to SIGN. USDC → WETH', async () => {
     // Driven on the v2 path (chain 1) deliberately: there the modal mounts even with the OLD
     // behaviour, so this fails on the COPY ("USDC → ETH") rather than on the modal being absent —
     // which is the thing being pinned. The struct itself is pinned on both chains above.

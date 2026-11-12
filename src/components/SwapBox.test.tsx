@@ -215,7 +215,7 @@ beforeEach(() => {
   setHookDefaults()
 })
 
-describe('SwapBox — chain-aware balance [SPRINT-9F bug4]', () => {
+describe('SwapBox: chain-aware balance [SPRINT-9F bug4]', () => {
   it('queries the balance on the ACTIVE chain (mainnet → chainId 1)', () => {
     renderWithProviders(<SwapBox />)
     expect(vi.mocked(useBalance)).toHaveBeenCalledWith(
@@ -232,7 +232,7 @@ describe('SwapBox — chain-aware balance [SPRINT-9F bug4]', () => {
   })
 })
 
-describe('SwapBox — active-chain logo [CHORE-POLISH P6]', () => {
+describe('SwapBox: active-chain logo [CHORE-POLISH P6]', () => {
   it('shows the Ethereum chain logo when the active chain is mainnet', () => {
     mockChainId = 1
     renderWithProviders(<SwapBox />)
@@ -246,7 +246,7 @@ describe('SwapBox — active-chain logo [CHORE-POLISH P6]', () => {
   })
 })
 
-describe('SwapBox — active-chain badge NAME [BUG-SWAPCARD-CHAIN-LABEL]', () => {
+describe('SwapBox: active-chain badge NAME [BUG-SWAPCARD-CHAIN-LABEL]', () => {
   it('shows "Ethereum" for chainId 1, paired with the matching icon', () => {
     mockChainId = 1
     renderWithProviders(<SwapBox />)
@@ -270,7 +270,7 @@ describe('SwapBox — active-chain badge NAME [BUG-SWAPCARD-CHAIN-LABEL]', () =>
   })
 })
 
-describe('SwapBox — renders', () => {
+describe('SwapBox: renders', () => {
   it('mounts with default ETH → USDC tokens (no crash)', () => {
     renderWithProviders(<SwapBox />)
     expect(screen.getAllByTestId('token-selector')).toHaveLength(2)
@@ -283,7 +283,7 @@ describe('SwapBox — renders', () => {
   })
 })
 
-describe('SwapBox — amount input', () => {
+describe('SwapBox: amount input', () => {
   it('updating the amount input renders the value back into the field', () => {
     const { container } = renderWithProviders(<SwapBox />)
     const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')
@@ -293,7 +293,7 @@ describe('SwapBox — amount input', () => {
   })
 })
 
-describe('SwapBox — slippage modal toggle', () => {
+describe('SwapBox: slippage modal toggle', () => {
   it('opens the slippage modal and the modal close button hides it', async () => {
     renderWithProviders(<SwapBox />)
     // We need a quote with `meta` to expose the edit-slippage link.
@@ -305,7 +305,7 @@ describe('SwapBox — slippage modal toggle', () => {
   })
 })
 
-describe('SwapBox — quote states', () => {
+describe('SwapBox: quote states', () => {
   it('does not render QuoteBreakdown when meta is null', () => {
     useQuoteMock.mockReturnValue({
       meta: null,
@@ -342,7 +342,7 @@ describe('SwapBox — quote states', () => {
   })
 })
 
-describe('SwapBox — wallet disconnected', () => {
+describe('SwapBox: wallet disconnected', () => {
   it('still mounts and renders the SwapButton (the button itself decides label/disabled)', () => {
     mockIsConnected = false
     renderWithProviders(<SwapBox />)
@@ -350,7 +350,7 @@ describe('SwapBox — wallet disconnected', () => {
   })
 })
 
-describe('SwapBox — quote-before-wallet [feat/quote-before-wallet]', () => {
+describe('SwapBox: quote-before-wallet [feat/quote-before-wallet]', () => {
   // [Acceptance 1] A quote is a READ — it must stay enabled without a wallet.
   // This test FAILS if `isConnected` (or `isConnected && isCorrectChain`)
   // returns to useQuote's 4th (enabled) argument.
@@ -385,7 +385,7 @@ describe('SwapBox — quote-before-wallet [feat/quote-before-wallet]', () => {
   })
 })
 
-describe('SwapBox — DigitRoller visibility [P195]', () => {
+describe('SwapBox: DigitRoller visibility [P195]', () => {
   it('shows the DigitRoller when a quote value exists even during a refresh poll', async () => {
     // meta.best present AND loading:true → a 15s refresh poll is in flight
     // while the previous quote is still displayed. The roller must stay up.
@@ -431,7 +431,7 @@ describe('SwapBox — DigitRoller visibility [P195]', () => {
   })
 })
 
-describe('SwapBox — split route indicator', () => {
+describe('SwapBox: split route indicator', () => {
   it('renders the split-route visualiser when splitRecommended is true and split is active', async () => {
     useSplitRouteMock.mockReturnValue({
       splitResult: {
@@ -494,7 +494,7 @@ function quoteMeta(toAmount: string) {
   }
 }
 
-describe('SwapBox — [fix/stale-quote-pair-flip] a quote only renders for the pair it answered', () => {
+describe('SwapBox: [fix/stale-quote-pair-flip] a quote only renders for the pair it answered', () => {
   it('⇅ flip after a resolved quote → RECEIVE is empty, no stale number, no quote breakdown, gates see no quote', async () => {
     useChainlinkPriceMock.mockReturnValue(HEALTHY_OK)
     useQuoteMock.mockReturnValue(quoteMeta('2950000000')) // ETH→USDC quote, identity of that pair
@@ -547,7 +547,7 @@ describe('SwapBox — [fix/stale-quote-pair-flip] a quote only renders for the p
   })
 })
 
-describe('SwapBox — J1 price-impact informed consent', () => {
+describe('SwapBox: J1 price-impact informed consent', () => {
   it('a healthy-oracle price-impact deviation is CONSENT, not the old indefinite block', async () => {
     useChainlinkPriceMock.mockReturnValue(HEALTHY_PRICE_IMPACT)
     useQuoteMock.mockReturnValue(quoteMeta('2950000000'))
@@ -641,13 +641,13 @@ describe('SwapBox — J1 price-impact informed consent', () => {
 // fail-CLOSED mapping is unit-tested in depeg-gate.test.ts + useDepegCheck.test.ts). HEALTHY_OK on
 // the price-impact gate keeps depeg the only active verdict.
 // ─────────────────────────────────────────────────────────────
-const DEPEG_CONSENT_5 = { mode: 'consent' as const, divergence: 0.05, symbol: 'cbETH', message: 'cbETH is trading 5.0% off its exchange rate — possible depeg. Verify before swapping.' }
-const DEPEG_BLOCK_12 = { mode: 'block' as const, divergence: 0.12, symbol: 'cbETH', message: 'cbETH is trading 12.0% off its exchange rate — likely a depeg or oracle manipulation. Swap blocked for your safety.' }
+const DEPEG_CONSENT_5 = { mode: 'consent' as const, divergence: 0.05, symbol: 'cbETH', message: 'cbETH is trading 5.0% off its exchange rate: possible depeg. Verify before swapping.' }
+const DEPEG_BLOCK_12 = { mode: 'block' as const, divergence: 0.12, symbol: 'cbETH', message: 'cbETH is trading 12.0% off its exchange rate, likely a depeg or oracle manipulation. Swap blocked for your safety.' }
 const DEPEG_OK = { mode: 'ok' as const, divergence: 0.003, symbol: 'cbETH', message: null }
 // [FIX-ORACLE-FAIL-CLOSED] Applies but could not be checked (read error / revert / stale / unresolved chain).
-const DEPEG_UNVERIFIED = { mode: 'unverified' as const, divergence: 0, symbol: 'cbETH', message: "We couldn't verify cbETH's price right now — try again in a moment." }
+const DEPEG_UNVERIFIED = { mode: 'unverified' as const, divergence: 0, symbol: 'cbETH', message: "We couldn't verify cbETH's price right now: try again in a moment." }
 
-describe('SwapBox — [SPRINT-9W-oracle] cbETH depeg circuit-breaker', () => {
+describe('SwapBox: [SPRINT-9W-oracle] cbETH depeg circuit-breaker', () => {
   it('market ≈ ER (0.3%) → no friction', async () => {
     useChainlinkPriceMock.mockReturnValue(HEALTHY_OK)
     useDepegCheckMock.mockReturnValue(DEPEG_OK)
@@ -731,7 +731,7 @@ describe('SwapBox — [SPRINT-9W-oracle] cbETH depeg circuit-breaker', () => {
     expect(screen.queryByRole('checkbox')).toBeNull()
   })
 
-  it('unverified copy tells the user we could not CHECK — it never claims a depeg', async () => {
+  it('unverified copy tells the user we could not CHECK. It never claims a depeg', async () => {
     useChainlinkPriceMock.mockReturnValue(HEALTHY_OK)
     useDepegCheckMock.mockReturnValue(DEPEG_UNVERIFIED)
     useQuoteMock.mockReturnValue(quoteMeta('2950000000'))
@@ -744,7 +744,7 @@ describe('SwapBox — [SPRINT-9W-oracle] cbETH depeg circuit-breaker', () => {
     expect(screen.queryByText(/Swap blocked — cbETH depeg/i)).toBeNull()
   })
 
-  it('pending (reads in flight) adds NO friction — a first render is not a scary error', async () => {
+  it('pending (reads in flight) adds NO friction. A first render is not a scary error', async () => {
     useChainlinkPriceMock.mockReturnValue(HEALTHY_OK)
     useDepegCheckMock.mockReturnValue({ mode: 'pending', divergence: 0, symbol: 'cbETH', message: null })
     useQuoteMock.mockReturnValue(quoteMeta('2950000000'))
@@ -776,7 +776,7 @@ describe('SwapBox — [SPRINT-9W-oracle] cbETH depeg circuit-breaker', () => {
 // (larger) amount's approval confirmed, SwapButton's swapStatus === 'success'
 // branch fired again with NO new swap ever sent — the exact prod repro.
 // ─────────────────────────────────────────────────────────────
-describe('SwapBox — stale success reset on quick-fill amount change [BUG-SWAP-APPROVE-STALE-SUCCESS]', () => {
+describe('SwapBox: stale success reset on quick-fill amount change [BUG-SWAP-APPROVE-STALE-SUCCESS]', () => {
   it('clicking MAX after a completed swap resets the swap state (ready to swap again, not stale success)', async () => {
     const resetSwapSpy = vi.fn()
     useSwapMock.mockReturnValue({
@@ -864,7 +864,7 @@ describe('SwapBox — stale success reset on quick-fill amount change [BUG-SWAP-
   })
 })
 
-describe('SwapBox — [SPRINT-9R R2] Review modal renders the frozen pendingSwap (not live quote)', () => {
+describe('SwapBox: [SPRINT-9R R2] Review modal renders the frozen pendingSwap (not live quote)', () => {
   const FROZEN_PENDING = {
     source: 'uniswapv3', // a post-fallback target source ≠ any live "best"
     txTo: '0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459' as `0x${string}`,

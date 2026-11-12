@@ -66,10 +66,10 @@ describe('numbers go through @/lib/format (README §3)', () => {
     tie.all[1] = { ...tie.all[1], toAmount: tie.best.toAmount }
     expect(buildQuoteView({ ...base, meta: tie }).delta).toBeNull()
   })
-  it('a malformed toAmount renders — instead of throwing (10-L-01)', () => {
+  it('a malformed toAmount renders: instead of throwing (10-L-01)', () => {
     const m = fixtureMeta()
     m.all[2] = { ...m.all[2], toAmount: 'not-a-number' }
-    expect(buildQuoteView({ ...base, meta: m }).compare[2].amount).toBe('—')
+    expect(buildQuoteView({ ...base, meta: m }).compare[2].amount).toBe('n/a')
   })
 })
 
@@ -87,10 +87,10 @@ describe('Min. output is the on-chain derivation, not a float', () => {
     const v = buildQuoteView({ ...base, meta: big })
     expect(v.minOutput.startsWith(`99${THIN}700${THIN}000${THIN}000${THIN}000`)).toBe(true) // 99 700 000 000 000.0000
   })
-  it('an unusable quote shows — (never a fabricated floor of 0)', () => {
+  it('an unusable quote shows: (never a fabricated floor of 0)', () => {
     const m = fixtureMeta()
     m.best = { ...m.best, toAmount: '0' }
-    expect(buildQuoteView({ ...base, meta: m }).minOutput).toBe('—')
+    expect(buildQuoteView({ ...base, meta: m }).minOutput).toBe('n/a')
   })
 })
 
@@ -200,9 +200,9 @@ describe('est. gas: USD first, ETH at 2 significant digits, never "~0"', () => {
     ['same, estimate returns null (no gas price yet)', [{ estimatedGas: 0, gasUsd: 1.23 }, false, () => null, 2490], '$1.23 (~0.00049 ETH)'],
     ['units known, no price anywhere → v1\'s unit fallback', [{ estimatedGas: 210_000, gasUsd: 0 }, false, undefined], `~210${THIN}000 gas`],
     ['ETH known but no USD (no oracle price) → ETH, 2 sf', [{ estimatedGas: 210_000, gasUsd: 0 }, false, est(0.0031, 0)], '~0.0031 ETH'],
-    ['nothing known (0 units, no USD) → a dash, never ~0', [{ estimatedGas: 0, gasUsd: 0 }, false, zero], '—'],
-    ['0 units, 0 USD, no estimate → a dash', [{ estimatedGas: 0, gasUsd: 0 }, false, undefined], '—'],
-    ['NaN / negative USD is not a price', [{ estimatedGas: 0, gasUsd: Number.NaN }, false, zero], '—'],
+    ['nothing known (0 units, no USD) → a dash, never ~0', [{ estimatedGas: 0, gasUsd: 0 }, false, zero], 'n/a'],
+    ['0 units, 0 USD, no estimate → a dash', [{ estimatedGas: 0, gasUsd: 0 }, false, undefined], 'n/a'],
+    ['NaN / negative USD is not a price', [{ estimatedGas: 0, gasUsd: Number.NaN }, false, zero], 'n/a'],
     ['intent order (CoW): the solver pays', [{ estimatedGas: 0, gasUsd: 0 }, true, zero], 'Free (solver-paid)'],
   ]
   it.each(rows)('%s', (_name, args, expected) => {
@@ -224,7 +224,7 @@ describe('est. gas: USD first, ETH at 2 significant digits, never "~0"', () => {
 describe('buildShareText (v1 SwapBox.tsx\'s Share button text, verbatim)', () => {
   it('more than one source compared: the saved-% line, with the real source count and claim', () => {
     const share = buildShareText(fixtureMeta(), ETH, USDC)
-    expect(share?.label).toBe('Share — saved 0.27%')
+    expect(share?.label).toBe('Share: saved 0.27%')
     expect(share?.text).toBe(
       `I just saved 0.27% on my ETH → USDC swap by comparing 5 DEX sources with @TeraSwapDEX 🔥\n\n` +
         `TeraSwap meta-aggregates ${INTEGRATED_DEX_SOURCE_COUNT} DEX sources for the best price.\nhttps://www.teraswap.app`,
@@ -236,11 +236,11 @@ describe('buildShareText (v1 SwapBox.tsx\'s Share button text, verbatim)', () =>
     const share = buildShareText({ ...m, all: [m.best, m.best] }, ETH, USDC)
     expect(share?.label).toBe('Share swap')
     expect(share?.text).toBe(
-      'Just swapped ETH → USDC via @TeraSwapDEX — compared 2 sources for the best price 🔥\n\nhttps://www.teraswap.app',
+      'Just swapped ETH → USDC via @TeraSwapDEX: compared 2 sources for the best price 🔥\n\nhttps://www.teraswap.app',
     )
   })
 
-  it('only one source: null — v1 never shows Share without a comparison', () => {
+  it('only one source: null: v1 never shows Share without a comparison', () => {
     const m = fixtureMeta()
     expect(buildShareText({ ...m, all: [m.best] }, ETH, USDC)).toBeNull()
   })

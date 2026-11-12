@@ -36,7 +36,7 @@ async function loadApi() {
   return import('@/lib/api')
 }
 
-describe('fetchMetaQuote — CoW is still queried and ranked like any source [retire-force-mev]', () => {
+describe('fetchMetaQuote: CoW is still queried and ranked like any source [retire-force-mev]', () => {
   beforeEach(() => { fakeRegistry = [] })
   afterEach(() => { vi.restoreAllMocks() })
 

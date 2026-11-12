@@ -191,7 +191,7 @@ beforeEach(() => {
   mockFetchDefiLlamaPrice.mockResolvedValue({ price: 2000, symbol: 'X', timestamp: 0, confidence: 1 })
 })
 
-describe('DCAPanel — chain-scoped availability vs. oracle price-verification [FIX-CHAIN-SCOPED-FEATURE-MESSAGES]', () => {
+describe('DCAPanel: chain-scoped availability vs. oracle price-verification [FIX-CHAIN-SCOPED-FEATURE-MESSAGES]', () => {
   it('no executor for the chain (Arbitrum One): shows the availability message naming the chain, not the oracle banner', async () => {
     useAccountMock.mockReturnValue({ address: ADDRESS, isConnected: true, chain: { id: ARBITRUM_CHAIN_ID } })
     useChainIdMock.mockReturnValue(ARBITRUM_CHAIN_ID)
@@ -219,7 +219,7 @@ describe('DCAPanel — chain-scoped availability vs. oracle price-verification [
     expect(screen.queryByTestId('dca-chain-unavailable')).toBeNull()
   })
 
-  it('a healthy Base order still signs — the fix does not touch the working v3 path', async () => {
+  it('a healthy Base order still signs. The fix does not touch the working v3 path', async () => {
     useAccountMock.mockReturnValue({ address: ADDRESS, isConnected: true, chain: { id: 8453 } })
     useChainIdMock.mockReturnValue(8453)
     renderWithProviders(<DCAPanel />)

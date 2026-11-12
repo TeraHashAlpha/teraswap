@@ -10,7 +10,7 @@ import { FEE_COLLECTOR_ADDRESS, PERMIT2_ADDRESS, ZEROX_ALLOWANCE_HOLDER } from '
 const quote = (toAmount: string): NormalizedQuote =>
   ({ source: 'bebop', toAmount, estimatedGas: 0, gasUsd: 0, routes: [] } as NormalizedQuote)
 
-describe('api — fetchApproveSpender per-chain [P226]', () => {
+describe('api: fetchApproveSpender per-chain [P226]', () => {
   it('returns the mainnet spender for chainId=1', async () => {
     // 0x is FeeCollector-incompatible → it approves a 0x contract directly.
     // [ADR-021] Was Permit2, for the permit2 endpoint family. Mainnet now uses the
@@ -37,7 +37,7 @@ describe('api — fetchApproveSpender per-chain [P226]', () => {
 // for source-monitoring. Three outcomes — crucially a resolved `null` is a
 // no-route (not a failure), and a present-but-unusable amount stays a 'Zero
 // output' failure, so the two are no longer conflated under one label.
-describe('api — classifyAdapterResult [SPRINT-9F backlog]', () => {
+describe('api: classifyAdapterResult [SPRINT-9F backlog]', () => {
   it('a rejected result is a failure carrying the reason', () => {
     const r = classifyAdapterResult({ status: 'rejected', reason: new Error('Bebop 502') })
     expect(r.kind).toBe('failure')
@@ -91,7 +91,7 @@ vi.mock('./chains/clients', async (importOriginal) => {
   }
 })
 
-describe('api — fetchMetaQuote L2 sequencer gate [E-2]', () => {
+describe('api: fetchMetaQuote L2 sequencer gate [E-2]', () => {
   beforeEach(() => {
     isSequencerUpMock.mockReset()
     // No adapter may reach the network in these tests.

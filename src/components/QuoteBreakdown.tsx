@@ -103,12 +103,12 @@ export default function QuoteBreakdown({
   const inputAmount = Number(amountIn)
   const rate = outputAmountValid && inputAmount > 0
     ? fmtToken(outputAmount / inputAmount)
-    : '—'
+    : 'n/a'
   // [SPRINT-9Q Q2] Display-only inverse (1 tokenOut = N tokenIn). Guard zero output so a
   // div-by-zero never produces Infinity; fmtToken handles separators + tiny values.
   const inverseRate = outputAmountValid && outputAmount > 0 && inputAmount > 0
     ? fmtToken(inputAmount / outputAmount)
-    : '—'
+    : 'n/a'
   // [fix/zerox-partner-fee-armed] Name the mechanism that actually collects the
   // fee instead of OR-ing two unrelated conditions. The old expression was
   // `FEE_NATIVE_SOURCES.includes(best.source) || isFeeCollectorActive()`: for a
@@ -200,7 +200,7 @@ export default function QuoteBreakdown({
           depeg gate draws between "depegged" and "could not check". */}
       {priceCheck.oracleUnavailable && priceCheck.oracleReadFailed && (
         <div className="rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-300" data-testid="oracle-read-failed-notice">
-          <span className="font-semibold">&#9888; Price not verified</span> — the Chainlink feed could not be read right now.
+          <span className="font-semibold">&#9888; Price not verified</span>: the Chainlink feed could not be read right now.
           {' '}This is not a problem with the token: we simply could not reach the oracle, so this price has not been
           independently verified. It clears as soon as the feed responds.
         </div>
@@ -234,10 +234,9 @@ export default function QuoteBreakdown({
           minimum-output. */}
       {meta.lowConfidence && (
         <div className="rounded-lg border border-cream-08 bg-surface-tertiary px-3 py-2 text-xs text-cream-50">
-          <span className="font-semibold text-cream-80">Low confidence</span>
-          {' '}— only {meta.all.length} {meta.all.length === 1 ? 'source' : 'sources'} responded with a usable
+          <span className="font-semibold text-cream-80">Low confidence</span>: only {meta.all.length} {meta.all.length === 1 ? 'source' : 'sources'} responded with a usable
           quote, so this price couldn&apos;t be cross-checked. Your swap is still protected by the on-chain{' '}
-          <strong>minimum-output</strong> guarantee — double-check the rate looks right before swapping.
+          <strong>minimum-output</strong> guarantee: double-check the rate looks right before swapping.
         </div>
       )}
 
@@ -281,7 +280,7 @@ export default function QuoteBreakdown({
         >
           <span className="font-semibold">&#10003; You&apos;re using the gasless route</span>
           {gasless.gasSavingsUsd >= 0.5 && (
-            <span> — saving ~{fmtUsd(gasless.gasSavingsUsd)} in gas.</span>
+            <span>, saving ~{fmtUsd(gasless.gasSavingsUsd)} in gas.</span>
           )}
         </div>
       )}
@@ -351,7 +350,7 @@ export default function QuoteBreakdown({
         {bestIsIntent && bestTime && (
           <div className="mb-2 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-xs text-blue-300">
             <span className="font-medium">Execution time: ~{bestTime}s</span>
-            <span className="text-blue-300/70"> — Solvers compete in batch auctions for the best fill.</span>
+            <span className="text-blue-300/70">. Solvers compete in batch auctions for the best fill.</span>
           </div>
         )}
 
@@ -364,9 +363,9 @@ export default function QuoteBreakdown({
               // but claiming the token "has no Chainlink oracle" is false for an outage — the same
               // lie this fix removes from the notice above.
               priceCheck.oracleReadFailed
-                ? `⚠ Chainlink feed could not be read — price NOT independently verified. This is a temporary feed/network problem, not a property of ${tokenIn.symbol}.`
+                ? `⚠ Chainlink feed could not be read: price NOT independently verified. This is a temporary feed/network problem, not a property of ${tokenIn.symbol}.`
                 : priceCheck.oracleUnavailable
-                  ? `⚠ No Chainlink oracle for ${tokenIn.symbol} — price NOT independently verified. Risk of mispricing on wrapped/exotic tokens.`
+                  ? `⚠ No Chainlink oracle for ${tokenIn.symbol}: price NOT independently verified. Risk of mispricing on wrapped/exotic tokens.`
                   : priceCheck.chainlinkPrice != null
                     ? `✓ Verified by Chainlink (${fmtUsd(priceCheck.chainlinkPrice)})`
                     : undefined
@@ -513,7 +512,7 @@ export default function QuoteBreakdown({
         {/* Permit2 security note — anti-phishing awareness */}
         {approvalPlan?.method === 'permit2' && (
           <div className="mb-1 rounded bg-blue-500/8 px-2 py-1.5 text-[10px] leading-relaxed text-cream-50">
-            <span className="font-semibold text-blue-400">Permit2 Signature</span> — Deadline capped at 30 min. Never sign Permit2 requests from unknown dApps.
+            <span className="font-semibold text-blue-400">Permit2 Signature</span>: Deadline capped at 30 min. Never sign Permit2 requests from unknown dApps.
           </div>
         )}
 
@@ -561,12 +560,12 @@ export default function QuoteBreakdown({
                   {isBest && <span>&#10003;</span>}
                   {sourceLabel(q.source)}
                   {qMeta?.isDirect && (
-                    <span className="inline-flex items-center rounded bg-orange-500/20 px-1 py-0 text-[9px] font-bold text-orange-400" title="Direct on-chain swap — no API middleman">
+                    <span className="inline-flex items-center rounded bg-orange-500/20 px-1 py-0 text-[9px] font-bold text-orange-400" title="Direct on-chain swap: no API middleman">
                       Direct
                     </span>
                   )}
                   {!isExecutableSource(q.source, chainId) && (
-                    <span className="inline-flex items-center rounded bg-cream-08 px-1 py-0 text-[9px] font-bold text-cream-35" title="Price shown for comparison — this source can't settle swaps on this network yet, so it is never used for execution.">
+                    <span className="inline-flex items-center rounded bg-cream-08 px-1 py-0 text-[9px] font-bold text-cream-35" title="Price shown for comparison: this source can't settle swaps on this network yet, so it is never used for execution.">
                       Quote only
                     </span>
                   )}
@@ -581,7 +580,7 @@ export default function QuoteBreakdown({
                     </span>
                   )}
                 </span>
-                <span className="font-mono tabular-nums">{out !== null ? `${fmtToken(out)} ${tokenOut.symbol}` : '—'}</span>
+                <span className="font-mono tabular-nums">{out !== null ? `${fmtToken(out)} ${tokenOut.symbol}` : 'n/a'}</span>
               </div>
             )
           })}

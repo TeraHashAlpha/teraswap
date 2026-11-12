@@ -65,7 +65,7 @@ export function installBrowser() {
     const r = rects[this.getAttribute('data-ts-narrative') as NarrativeSectionId] ?? { top: 99999, bottom: 100899 }
     return { ...r, left: 0, right: 0, width: 0, height: r.bottom - r.top, x: 0, y: r.top, toJSON: () => ({}) }
   })
-  scrollTo(2400) // scroll 0: the first narrative section starts well below the first screen
+  scrollTo(0) // scroll 0: the page opens on the hero (the first section), the others stacked below it
 }
 
 export function mountPage() {

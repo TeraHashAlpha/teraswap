@@ -152,7 +152,7 @@ export function useSwapLifecycle(a: LifecycleArgs) {
   const swapToastId = useRef<string | null>(null)
   useEffect(() => {
     if (swap.status === 'swapping' || swap.status === 'cow_signing' || swap.status === 'cow_pending') {
-      const msg = swap.status === 'cow_signing' ? 'Signing CoW order...' : swap.status === 'cow_pending' ? 'CoW order submitted — waiting for settlement...' : 'Transaction pending...'
+      const msg = swap.status === 'cow_signing' ? 'Signing CoW order...' : swap.status === 'cow_pending' ? 'CoW order submitted: waiting for settlement...' : 'Transaction pending...'
       // v1 overwrites the id when cow_signing → cow_pending, leaving the first loading toast sticky; replace it instead.
       if (swapToastId.current) dismiss(swapToastId.current)
       swapToastId.current = toast({ type: 'loading', title: msg, description: `${tokenIn?.symbol} → ${tokenOut?.symbol}` })

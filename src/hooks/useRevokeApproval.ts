@@ -32,7 +32,7 @@ export const REVOKE_COPY = {
   retry: 'Retry',
   switchTo: (chainName: string) => `Switch to ${chainName}`, // v1 SwapButton's wrong-network label
   /** The one owner-approved addition to v1's copy (content-map delta): a record whose chain is unknown. */
-  unknownChain: 'Network unknown — reconnect on the chain where you approved',
+  unknownChain: 'Network unknown: reconnect on the chain where you approved',
 } as const
 
 export type RevokeAction =

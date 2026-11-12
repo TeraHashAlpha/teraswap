@@ -152,7 +152,7 @@ export default function PublicProtocolStats({
           Protocol performance
         </h1>
         <p className="text-xs text-cream-35">
-          Public totals from the protocol stats API — swap counts, quote counts, and source rankings.
+          Public totals from the protocol stats API: swap counts, quote counts, and source rankings.
         </p>
       </header>
 

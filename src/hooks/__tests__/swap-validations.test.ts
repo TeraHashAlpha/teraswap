@@ -87,7 +87,7 @@ function buildV3ExactInputSingleCalldata(recipient: string): string {
 // A1 — Router address whitelist
 // ═══════════════════════════════════════════════════════════════
 
-describe('A1 — validateRouterAddress', () => {
+describe('A1: validateRouterAddress', () => {
   it('accepts a known 1inch v6 router', () => {
     const result = validateRouterAddress(ROUTER_1INCH_V6, '1inch')
     expect(result.valid).toBe(true)
@@ -116,7 +116,7 @@ describe('A1 — validateRouterAddress', () => {
     consoleSpy.mockRestore()
   })
 
-  it('normalises checksum vs lowercase — same address either way', () => {
+  it('normalises checksum vs lowercase: same address either way', () => {
     const lower = validateRouterAddress(ROUTER_1INCH_V6, '1inch')
     const upper = validateRouterAddress(ROUTER_1INCH_V6.toUpperCase().replace('0X', '0x'), '1inch')
     expect(lower.valid).toBe(true)
@@ -128,7 +128,7 @@ describe('A1 — validateRouterAddress', () => {
 // A2 — Swap selector allowlist
 // ═══════════════════════════════════════════════════════════════
 
-describe('A2 — isKnownSwapSelector', () => {
+describe('A2: isKnownSwapSelector', () => {
   it('returns true for every selector in KNOWN_SWAP_SELECTORS', () => {
     for (const sel of KNOWN_SWAP_SELECTORS) {
       // Pad with arbitrary calldata body so the function sees a full hex string.
@@ -157,7 +157,7 @@ describe('A2 — isKnownSwapSelector', () => {
 // A3 — Calldata recipient validation
 // ═══════════════════════════════════════════════════════════════
 
-describe('A3 — validateCallDataRecipient', () => {
+describe('A3: validateCallDataRecipient', () => {
   it('Group A selector → valid with implicitRecipient (msg.sender)', () => {
     // 0xe449022e — 1inch uniswapV3Swap (msg.sender by design)
     const calldata = '0xe449022e' + '00'.repeat(64)
@@ -208,7 +208,7 @@ describe('A3 — validateCallDataRecipient', () => {
 // A4 — Fee integrity validation
 // ═══════════════════════════════════════════════════════════════
 
-describe('A4 — validateFeeIntegrity', () => {
+describe('A4: validateFeeIntegrity', () => {
   it('swap output within normal range of quote → valid', () => {
     // 1% lower than quote — well within the 2% tolerance band.
     const result = validateFeeIntegrity('1000000', '990000', '1inch')
@@ -222,18 +222,18 @@ describe('A4 — validateFeeIntegrity', () => {
     expect(result.reason).toContain('Fee integrity check failed')
   })
 
-  it('quote = 0 → valid (skip — no fee to verify)', () => {
+  it('quote = 0 → valid (skip: no fee to verify)', () => {
     const result = validateFeeIntegrity('0', '1000000', '1inch')
     expect(result.valid).toBe(true)
   })
 
-  it('uniswapv3 source → valid (skip — no FeeCollector fee on direct path)', () => {
+  it('uniswapv3 source → valid (skip: no FeeCollector fee on direct path)', () => {
     // Even a wildly higher swap output passes because uniswapv3 skips the check.
     const result = validateFeeIntegrity('1000000', '5000000', 'uniswapv3')
     expect(result.valid).toBe(true)
   })
 
-  it('cowswap source → valid (skip — surplus paid via solver, not deduction)', () => {
+  it('cowswap source → valid (skip: surplus paid via solver, not deduction)', () => {
     const result = validateFeeIntegrity('1000000', '5000000', 'cowswap')
     expect(result.valid).toBe(true)
   })
@@ -284,7 +284,7 @@ function runFeeIntegrityCallSite(args: {
   return { ran: false, valid: true }
 }
 
-describe('A4b — fee integrity call-site guard [P156]', () => {
+describe('A4b: fee integrity call-site guard [P156]', () => {
   // ── Case 1: FeeCollector route (irrelevant — fee is on-chain) ──
 
   it('FeeCollector route + non-partner source → SKIPS validateFeeIntegrity', () => {
@@ -397,7 +397,7 @@ describe('A4b — fee integrity call-site guard [P156]', () => {
 // Takes slippage as a PERCENT (0.5 = 0.5%), exactly like the hooks.
 // ═══════════════════════════════════════════════════════════════
 
-describe('A5 — deriveMinimumOutput (src/lib/minimum-output.ts) [W2-L-01]', () => {
+describe('A5: deriveMinimumOutput (src/lib/minimum-output.ts) [W2-L-01]', () => {
   it('valid toAmount with 1% slippage → toAmount * 9900 / 10000', () => {
     // 1_000_000 * 9900 / 10000 = 990_000
     expect(deriveMinimumOutput('1000000', 1)).toBe(990_000n)
@@ -466,7 +466,7 @@ function makeToken(address: string): Token {
   }
 }
 
-describe('B — CoW Protocol path guards', () => {
+describe('B: CoW Protocol path guards', () => {
   it('native ETH detection: NATIVE_ETH pseudoaddress → true (would be blocked)', () => {
     expect(isNativeETH(makeToken(NATIVE_ETH))).toBe(true)
   })

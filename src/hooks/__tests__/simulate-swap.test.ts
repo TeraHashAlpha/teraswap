@@ -19,7 +19,7 @@ import {
 
 // ── FeeCollector custom errors ───────────────────────────
 
-describe('parseSimulationError — FeeCollector custom errors', () => {
+describe('parseSimulationError: FeeCollector custom errors', () => {
   it('matches RouterNotWhitelisted by decoded name', () => {
     const err = new Error('execution reverted with reason RouterNotWhitelisted()')
     const result = parseSimulationError(err)
@@ -80,7 +80,7 @@ describe('parseSimulationError — FeeCollector custom errors', () => {
 
 // ── Generic reverts ──────────────────────────────────────
 
-describe('parseSimulationError — generic reverts', () => {
+describe('parseSimulationError: generic reverts', () => {
   it('matches "insufficient funds" → ETH balance message', () => {
     const err = new Error('insufficient funds for transfer')
     const result = parseSimulationError(err)
@@ -121,7 +121,7 @@ describe('parseSimulationError — generic reverts', () => {
 
 // ── Non-blocking unknown errors ──────────────────────────
 
-describe('parseSimulationError — unknown errors are non-blocking', () => {
+describe('parseSimulationError: unknown errors are non-blocking', () => {
   it('returns success=true for an unrecognised message (RPC timeout etc.)', () => {
     const err = new Error('Network request timed out after 10s')
     const result = parseSimulationError(err)

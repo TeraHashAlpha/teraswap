@@ -115,7 +115,7 @@ describe('Active Approvals — parity with v1', () => {
     expect(v1.querySelector('button')).toBeNull()
     expect(within(rowOf(v2, 'OLD')).queryByRole('button')).toBeNull()
     expect(within(rowOf(v2, 'OLD')).queryByTestId('approval-chain')).toBeNull()
-    expect(within(rowOf(v2, 'OLD')).getByTestId('approval-chain-unknown').textContent).toBe('Network unknown — reconnect on the chain where you approved')
+    expect(within(rowOf(v2, 'OLD')).getByTestId('approval-chain-unknown').textContent).toBe('Network unknown: reconnect on the chain where you approved')
     expect(within(v2).getByTestId('approvals-count').textContent).toBe('1') // still an open allowance: counted, just not revocable blind
   })
 

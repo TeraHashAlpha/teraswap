@@ -47,7 +47,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('canonical-route [SPRINT-P1B] — determinism (the load-bearing property)', () => {
+describe('canonical-route [SPRINT-P1B]: determinism (the load-bearing property)', () => {
   it('same inputs ⇒ byte-identical calldata and hash, across repeated calls', () => {
     const a = buildCanonicalRoute(params())
     const b = buildCanonicalRoute(params())
@@ -84,7 +84,7 @@ describe('canonical-route [SPRINT-P1B] — determinism (the load-bearing propert
   })
 })
 
-describe('canonical-route [SPRINT-P1B] — field-by-field contract mirror', () => {
+describe('canonical-route [SPRINT-P1B]: field-by-field contract mirror', () => {
   it('decodes to exactly the signed values, with recipient = executor and amountIn = netAmount', () => {
     const p = params()
     const { routerData, netAmountIn } = buildCanonicalRoute(p)
@@ -127,7 +127,7 @@ describe('canonical-route [SPRINT-P1B] — field-by-field contract mirror', () =
   })
 })
 
-describe('canonical-route [SPRINT-P1B] — approve == signing == calldata recipient', () => {
+describe('canonical-route [SPRINT-P1B]: approve == signing == calldata recipient', () => {
   /**
    * Extends the BUG-DCA-APPROVE-SPENDER-V3 invariant to non-DCA v3.
    *
@@ -157,7 +157,7 @@ describe('canonical-route [SPRINT-P1B] — approve == signing == calldata recipi
     expect(bad.routerDataHash).not.toBe(good.routerDataHash)
   })
 
-  it('the owner is never the recipient — output must land on the executor first', () => {
+  it('the owner is never the recipient: output must land on the executor first', () => {
     const owner = '0x1111111111111111111111111111111111111111' as `0x${string}`
     const { routerData } = buildCanonicalRoute(params({ recipient: EXECUTOR_V3 }))
     const [decoded] = decodeAbiParameters(EXACT_INPUT_SINGLE_PARAMS, `0x${routerData.slice(10)}`)
@@ -166,7 +166,7 @@ describe('canonical-route [SPRINT-P1B] — approve == signing == calldata recipi
   })
 })
 
-describe('canonical-route [SPRINT-P1B] — fail-closed validation', () => {
+describe('canonical-route [SPRINT-P1B]: fail-closed validation', () => {
   it('rejects a non-canonical fee tier', () => {
     // @ts-expect-error deliberately invalid tier
     expect(() => buildCanonicalRoute(params({ feeTier: 1234 }))).toThrow(/fee tier/i)

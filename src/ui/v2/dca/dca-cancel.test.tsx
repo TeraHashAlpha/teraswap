@@ -128,7 +128,7 @@ async function v2Positions() {
 }
 
 describe('cancel one: v1 and v2 hand the engine the same calls', () => {
-  it('Cancel → cancelOrder(id) · confirm → confirmCancel() · the event plays v1\'s sound and toast — equal sequences', async () => {
+  it('Cancel → cancelOrder(id) · confirm → confirmCancel() · the event plays v1\'s sound and toast: equal sequences', async () => {
     await v1Positions()
     fireEvent.click(screen.getAllByRole('button', { name: 'Cancel' })[0])
     expect(fake.seq).toEqual([['cancelOrder', 'a1']])
@@ -218,7 +218,7 @@ describe('Cancel All: v1 and v2 freeze the same invalidate plan', () => {
     const sheet = await screen.findByRole('dialog')
     expect(within(sheet).getByRole('heading', { level: 2 }).textContent).toBe('Cancel all orders')
     expect(within(sheet).getByTestId('dca-invalidate-count').textContent).toContain('2')
-    expect(within(sheet).getByTestId('dca-invalidate-tx-summary').textContent).toContain('2 total (2 cancelOrder calls — DCA orders)')
+    expect(within(sheet).getByTestId('dca-invalidate-tx-summary').textContent).toContain('2 total (2 cancelOrder calls for DCA orders)')
     expect(within(sheet).getAllByTestId('dca-invalidate-row').length).toBe(2)
     for (const s of ['2 on-chain transactions', '2 individual cancelOrder calls for the DCA orders below', 'Your wallet will prompt 2 times', 'Orders affected', 'expect 2 wallet prompts. No funds move.']) {
       expect(v1Text, `v1 lacks "${s}"`).toContain(s)
@@ -265,7 +265,7 @@ describe('the cancel sheet is v1\'s OrderCancelReviewModal, word for word', () =
     if (review.action === 'invalidate') {
       expect(v2.container.textContent).toContain('1 order on other chains (Arbitrum One) were NOT included')
       expect(v2.container.textContent).toContain('New invalidation nonce')
-      expect(v2.container.textContent).toContain('2 total (1 nonce invalidation) (1 cancelOrder call — DCA orders)')
+      expect(v2.container.textContent).toContain('2 total (1 nonce invalidation) (1 cancelOrder call for DCA orders)')
     }
   })
 })

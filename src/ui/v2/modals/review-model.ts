@@ -37,7 +37,7 @@ export function unpricedConsentValues(meta: MetaQuoteResult, tokenIn: Token, tok
     const hi = amounts.reduce((a, b) => (b > a ? b : a))
     quoteSpreadPct = Number(((hi - lo) * 1_000_000n) / lo) / 10_000
   }
-  let minOut = '—'
+  let minOut = 'n/a'
   try {
     minOut = fmtToken(deriveMinimumOutput(meta.best.toAmount, slippage), decimalsOut)
   } catch {
@@ -89,7 +89,7 @@ export function buildReviewModel(i: {
   tier: SwapPriceTierResponse | null | undefined
 }): ReviewModel {
   const { view: v, meta, tokenIn, tokenOut } = i
-  let send = '—'
+  let send = 'n/a'
   try {
     send = fmtToken(parseUnits(i.amountIn, tokenIn.decimals), tokenIn.decimals)
   } catch {
@@ -103,7 +103,7 @@ export function buildReviewModel(i: {
     symbolIn: tokenIn.symbol,
     symbolOut: tokenOut.symbol,
     send,
-    receive: out !== null ? fmtToken(out, tokenOut.decimals) : '—',
+    receive: out !== null ? fmtToken(out, tokenOut.decimals) : 'n/a',
     rate: `1 ${tokenIn.symbol} = ${v.rate} ${tokenOut.symbol}`,
     route: v.route,
     slippage: v.slippage,
@@ -162,6 +162,6 @@ export function withFrozenSwap(
     symbolIn: frozen.tokenIn.symbol,
     symbolOut: frozen.tokenOut.symbol,
     send: fmtToken(frozen.rawAmountBn, frozen.tokenIn.decimals),
-    receive: out !== null ? fmtToken(out, frozen.tokenOut.decimals) : '—',
+    receive: out !== null ? fmtToken(out, frozen.tokenOut.decimals) : 'n/a',
   }
 }

@@ -54,7 +54,7 @@ beforeEach(() => {
   mockGetChainConfig.mockReturnValue({ contracts: { feeCollector: FEE_COLLECTOR_ADDRESS } })
 })
 
-describe('swap-simulation — buildSimulationTx FeeCollector address [P225]', () => {
+describe('swap-simulation: buildSimulationTx FeeCollector address [P225]', () => {
   it('uses the mainnet FeeCollector for chainId=1', () => {
     const tx = buildSimulationTx(params({ chainId: 1 }))
     expect(tx.to.toLowerCase()).toBe(FEE_COLLECTOR_ADDRESS.toLowerCase())
@@ -73,7 +73,7 @@ describe('swap-simulation — buildSimulationTx FeeCollector address [P225]', ()
   })
 })
 
-describe('swap-simulation — buildSimulationTx unusable quote [W2-L-01]', () => {
+describe('swap-simulation: buildSimulationTx unusable quote [W2-L-01]', () => {
   it('throws UnusableQuoteError on a malformed toAmount for a fee-routed swap (never minimumOutput 0)', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const swapData = makeSwapData()
@@ -88,7 +88,7 @@ describe('swap-simulation — buildSimulationTx unusable quote [W2-L-01]', () =>
     expect(() => buildSimulationTx(params({ swapData }))).toThrow(UnusableQuoteError)
   })
 
-  it('leaves direct (non-FeeCollector) routes untouched — adapter calldata forwarded unchanged', () => {
+  it('leaves direct (non-FeeCollector) routes untouched: adapter calldata forwarded unchanged', () => {
     // Direct routes never take a minimumOutput argument; a malformed toAmount
     // there is not a W2-L-01 refusal (the router's own amountOutMin governs).
     const swapData = makeSwapData()

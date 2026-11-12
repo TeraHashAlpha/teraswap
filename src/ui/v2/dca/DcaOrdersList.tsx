@@ -185,7 +185,7 @@ export function DcaPositionCard({ order, latestEvent, connectedChainId, onCancel
         <div className="ts-dca-pos-actions flex justify-end gap-3">
           {isLive && onCancel && (
             <Button variant="text" tone="danger" onClick={() => { playClick(); onCancel(order.id) }} data-testid="order-cancel" data-row-nav=""
-              title={chainMismatch ? `This order is on ${chainName} — switching your wallet is required to cancel it` : undefined}>
+              title={chainMismatch ? `This order is on ${chainName}: switching your wallet is required to cancel it` : undefined}>
               {chainMismatch ? `Switch to ${chainName}` : 'Cancel'}
             </Button>
           )}

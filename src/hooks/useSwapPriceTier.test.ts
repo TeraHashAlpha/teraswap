@@ -52,7 +52,7 @@ describe('useSwapPriceTier', () => {
     expect(f).not.toHaveBeenCalled()
   })
 
-  it('a non-2xx, a network error or a malformed body is UNKNOWN (null) — the client never guesses a tier (D1)', async () => {
+  it('a non-2xx, a network error or a malformed body is UNKNOWN (null). The client never guesses a tier (D1)', async () => {
     const bads = [
       () => stubFetch({ error: 'x' }, 500),
       () => stubFetch({ tier: 'blocked', legs: {} }),

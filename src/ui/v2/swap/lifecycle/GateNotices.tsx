@@ -35,32 +35,32 @@ export function GateNotices({ gates, pairCheck, hasQuote, hasAmount, stale, pric
       )}
       {g.oracleIntegrityBlocked && !g.isExtremeBlock && !stale && live && (
         <Notice tone="red" testId="gate-oracle-integrity">
-          <span className="font-semibold">Swap blocked — oracle data unsafe.</span> {pairCheck.message ?? 'The Chainlink price feed is stale or invalid, so this swap price cannot be independently verified.'}
+          <span className="font-semibold">Swap blocked: oracle data unsafe.</span> {pairCheck.message ?? 'The Chainlink price feed is stale or invalid, so this swap price cannot be independently verified.'}
           <Sub>This guards against trading on a manipulated or outdated oracle and cannot be overridden. Try again once the feed updates.</Sub>
         </Notice>
       )}
       {g.isExtremeBlock && !stale && (
         <Notice tone="red" testId="gate-extreme">
-          <span className="font-semibold">Swap blocked:</span> price deviates {fmtPct(pairCheck.deviation * 100, 1)} from the Chainlink oracle — far beyond normal price impact.
+          <span className="font-semibold">Swap blocked:</span> price deviates {fmtPct(pairCheck.deviation * 100, 1)} from the Chainlink oracle: far beyond normal price impact.
           <Sub>This likely indicates price manipulation or a broken quote and cannot be overridden. Try a smaller amount or a different pair.</Sub>
         </Notice>
       )}
       {g.priceImpactConsentNeeded && !stale && (
         <Notice tone="amber" testId="gate-price-impact">
-          <span className="font-semibold">High price impact:</span> this route executes ~{fmtPct(pairCheck.deviation * 100, 1)} below the Chainlink reference price — expected slippage on a low-liquidity route, not an oracle problem.
+          <span className="font-semibold">High price impact:</span> this route executes ~{fmtPct(pairCheck.deviation * 100, 1)} below the Chainlink reference price, expected slippage on a low-liquidity route, not an oracle problem.
           <Consent id="gate-price-impact-checkbox" checked={g.priceImpactAccepted} onChange={g.setPriceImpactAccepted}>I understand the price impact and want to proceed.</Consent>
         </Notice>
       )}
       {g.depegHardBlocked && !stale && (
         <Notice tone="red" testId="gate-depeg-block">
-          <span className="font-semibold">Swap blocked — {g.depegCheck.symbol} depeg.</span> {g.depegCheck.message}
-          <Sub>The market price has diverged sharply from the protocol exchange rate — likely a depeg or oracle manipulation. This cannot be overridden. Try again once the prices reconverge.</Sub>
+          <span className="font-semibold">Swap blocked: {g.depegCheck.symbol} depeg.</span> {g.depegCheck.message}
+          <Sub>The market price has diverged sharply from the protocol exchange rate, likely a depeg or oracle manipulation. This cannot be overridden. Try again once the prices reconverge.</Sub>
         </Notice>
       )}
       {g.depegUnverified && live && !stale && (
         <Notice tone="red" testId="gate-depeg-unverified">
-          <span className="font-semibold">Swap paused — price not verified.</span> {g.depegCheck.message}
-          <Sub>We could not get usable price-feed data to check this asset against its exchange rate, so we are not letting the swap through on a price we have not verified. This is not itself a depeg finding — we have not been able to make one either way. It clears once the feeds return good data.</Sub>
+          <span className="font-semibold">Swap paused: price not verified.</span> {g.depegCheck.message}
+          <Sub>We could not get usable price-feed data to check this asset against its exchange rate, so we are not letting the swap through on a price we have not verified. This is not itself a depeg finding. We have not been able to make one either way. It clears once the feeds return good data.</Sub>
         </Notice>
       )}
       {g.depegConsentNeeded && !stale && (
@@ -72,12 +72,12 @@ export function GateNotices({ gates, pairCheck, hasQuote, hasAmount, stale, pric
       {g.oracleUnavailable && live && !g.priceGateBlocked &&
         (g.oracleBlocked ? (
           <Notice tone="red" testId="gate-no-oracle-block">
-            <span className="font-semibold">Swap blocked — no oracle verification.</span> This token has no Chainlink price feed. Swaps above ${fmtInt(UNVERIFIED_SWAP_BLOCK_USD)} are disabled when the price cannot be independently verified.
+            <span className="font-semibold">Swap blocked: no oracle verification.</span> This token has no Chainlink price feed. Swaps above ${fmtInt(UNVERIFIED_SWAP_BLOCK_USD)} are disabled when the price cannot be independently verified.
             <Sub>This protects against catastrophic losses from mispriced tokens (wrapped tokens, rebasing tokens, exotic pairs). Reduce the amount or swap a token with oracle coverage.</Sub>
           </Notice>
         ) : g.oracleWarnThreshold ? (
           <Notice tone="amber" testId="gate-no-oracle-warn">
-            <span className="font-semibold">No oracle verification — high value swap.</span> This token has no Chainlink price feed. The quoted price cannot be independently verified. Swaps above ${fmtInt(UNVERIFIED_SWAP_BLOCK_USD)} will be blocked.
+            <span className="font-semibold">No oracle verification: high value swap.</span> This token has no Chainlink price feed. The quoted price cannot be independently verified. Swaps above ${fmtInt(UNVERIFIED_SWAP_BLOCK_USD)} will be blocked.
             <Sub>Verify the price manually on CoinGecko or Etherscan before proceeding.</Sub>
           </Notice>
         ) : null)}

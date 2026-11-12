@@ -33,7 +33,7 @@ function renderTabs(overrides: Partial<{ active: string; onSelect: (mode: string
   return { ...utils, onSelect }
 }
 
-describe('ModeTabs — no clipping (regression: "Analytics" rendered as "Analy")', () => {
+describe('ModeTabs: no clipping (regression: "Analytics" rendered as "Analy")', () => {
   it('renders every tab label FULL and unabbreviated, never a truncated substring', () => {
     renderTabs()
     for (const tab of TABS) {
@@ -56,7 +56,7 @@ describe('ModeTabs — no clipping (regression: "Analytics" rendered as "Analy")
     }
   })
 
-  it('no tab button uses flex-1 at any breakpoint — the exact class that caused the desktop clip regression', () => {
+  it('no tab button uses flex-1 at any breakpoint. The exact class that caused the desktop clip regression', () => {
     renderTabs()
     for (const btn of screen.getAllByRole('button')) {
       const classes = btn.className.split(/\s+/)
@@ -88,7 +88,7 @@ describe('ModeTabs — no clipping (regression: "Analytics" rendered as "Analy")
   })
 })
 
-describe('ModeTabs — active styling + Soon badges preserved', () => {
+describe('ModeTabs: active styling + Soon badges preserved', () => {
   it('marks the active tab via aria-current + data-active, and gives it the gold treatment', () => {
     renderTabs({ active: 'dca' })
     const activeBtn = screen.getByRole('button', { name: /^DCA/ })
@@ -113,7 +113,7 @@ describe('ModeTabs — active styling + Soon badges preserved', () => {
   })
 })
 
-describe('ModeTabs — routing/gating untouched', () => {
+describe('ModeTabs: routing/gating untouched', () => {
   it('calls onSelect with the tab mode when a live tab is clicked', () => {
     const { onSelect } = renderTabs()
     fireEvent.click(screen.getByRole('button', { name: /^History/ }))

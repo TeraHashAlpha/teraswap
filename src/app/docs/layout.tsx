@@ -6,7 +6,7 @@ import type { Metadata } from 'next'
 export const metadata: Metadata = {
   title: 'Documentation | TeraSwap',
   description:
-    'TeraSwap technical documentation — architecture, security, liquidity sources, smart routing, and more.',
+    'TeraSwap technical documentation: architecture, security, liquidity sources, smart routing, and more.',
 }
 
 export default function DocsLayout({ children }: { children: React.ReactNode }) {

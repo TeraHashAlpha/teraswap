@@ -49,7 +49,7 @@ beforeEach(() => {
   useBalanceMock.mockReturnValue({ data: undefined, isLoading: false, isError: false })
 })
 
-describe('useTokenBalance — arbitrary ERC-20 (imported token)', () => {
+describe('useTokenBalance: arbitrary ERC-20 (imported token)', () => {
   it('reads balanceOf for the selected token + chain and reports the raw + formatted balance', () => {
     useReadContractMock.mockReturnValue({ data: 123_000000000000000000n, isLoading: false, isError: false })
     const { result } = renderHook(() => useTokenBalance(ETHFI, 8453))
@@ -98,7 +98,7 @@ describe('useTokenBalance — arbitrary ERC-20 (imported token)', () => {
   })
 })
 
-describe('useTokenBalance — native token', () => {
+describe('useTokenBalance: native token', () => {
   it('reads native ETH via useBalance (not balanceOf) for a native token', () => {
     useBalanceMock.mockReturnValue({ data: { value: 500000000000000000n }, isLoading: false, isError: false })
     const { result } = renderHook(() => useTokenBalance(NATIVE, 1))

@@ -63,7 +63,7 @@ export function DcaSignSheet({
   const primary = (() => {
     if (phase === 'created') return { label: 'View positions', onPress: onViewPositions, testId: 'dca-sign-view-positions' }
     // Owner (2026-10-30): the retry wears v1's form CTA (`Start DCA — N buys over D`, DCAPanel.tsx:1524), from the frozen struct.
-    if (phase === 'failed') return { label: `Start DCA — ${Number(o.dcaTotal)} buys over ${totalDurationText(Number(o.dcaTotal), Number(o.dcaInterval))}`, onPress: onRetry, testId: 'dca-sign-retry' }
+    if (phase === 'failed') return { label: `Start DCA: ${Number(o.dcaTotal)} buys over ${totalDurationText(Number(o.dcaTotal), Number(o.dcaInterval))}`, onPress: onRetry, testId: 'dca-sign-retry' }
     if (phase === 'signing') return { label: 'Signing order...', onPress: () => {}, testId: 'dca-sign-confirm' }
     if (approval.needsApproval) {
       // v1 OrderReviewModal.tsx:163-167
@@ -75,12 +75,11 @@ export function DcaSignSheet({
   const secondary = phase === 'created' || phase === 'failed' ? { label: 'New DCA', onPress: onDone } : { label: 'Cancel', onPress: onCancel }
   const title = phase === 'created' ? 'DCA order placed' : failure ? failure.title : (TYPE_LABEL[config.orderType] ?? 'Order')
   const subtitle =
-    phase === 'created' ? 'Your DCA is live — it will execute automatically on schedule.'
+    phase === 'created' ? 'Your DCA is live: it will execute automatically on schedule.'
     : failure ? null
     : (
       <>
-        You&apos;re about to <strong className="font-semibold text-v2-text">sign an autonomous order</strong> (EIP-712). Verify the exact terms —
-        this is precisely what your wallet will sign and what the executor will enforce on-chain.
+        You&apos;re about to <strong className="font-semibold text-v2-text">sign an autonomous order</strong> (EIP-712). Verify the exact terms. This is precisely what your wallet will sign and what the executor will enforce on-chain.
       </>
     )
   const dismissable = phase !== 'signing' && !busy
@@ -108,8 +107,8 @@ export function DcaSignSheet({
       {phase === 'frozen' && (
         <p data-testid="dca-sign-note" className="mt-4 border-l-2 ts-v2-accent-stroke pl-4 text-[13px] leading-relaxed text-v2-text/90">
           {approval.needsApproval
-            ? `Two steps: first approve the exact ${total} on-chain (one-time, no infinite approvals), then sign the order. The executor then runs it autonomously — output is protected by the on-chain minimum received above.`
-            : 'Approved on-chain — now sign the order. The executor runs it autonomously when your condition is met; output is protected by the on-chain minimum received above. No funds move until then.'}
+            ? `Two steps: first approve the exact ${total} on-chain (one-time, no infinite approvals), then sign the order. The executor then runs it autonomously: output is protected by the on-chain minimum received above.`
+            : 'Approved on-chain: now sign the order. The executor runs it autonomously when your condition is met; output is protected by the on-chain minimum received above. No funds move until then.'}
         </p>
       )}
 

@@ -152,7 +152,7 @@ describe('network dropdown', () => {
     expect(screen.queryByPlaceholderText(/search/i)).toBeNull()
   })
 
-  it('subtitle is "Change" on every network — one slot constant, independent of isDcaLive', () => {
+  it('subtitle is "Change" on every network. One slot constant, independent of isDcaLive', () => {
     expect(NETWORK_SUBTITLE).toBe('Change')
     for (const live of [new Set<number>(), new Set([8453]), new Set([8453, 42161])]) {
       h.dcaLive = live
@@ -208,7 +208,7 @@ describe('tabs', () => {
     }
   })
 
-  it('Limit / SL/TP stay disabled "Soon" even when v1\'s isLimitLive gate says live — v2 has no pane for them (owner decision)', () => {
+  it('Limit / SL/TP stay disabled "Soon" even when v1\'s isLimitLive gate says live: v2 has no pane for them (owner decision)', () => {
     for (const chain of [1, 8453, 42161]) {
       cleanup()
       h.limitLive = true
@@ -234,7 +234,7 @@ describe('tabs', () => {
 })
 
 describe('DCA tab', () => {
-  it('Ethereum: the gate names every DCA chain (v1\'s DCA_CHAINS) with a switch for each — whatever is live', () => {
+  it('Ethereum: the gate names every DCA chain (v1\'s DCA_CHAINS) with a switch for each. Whatever is live', () => {
     h.pathname = '/dca'
     for (const live of [new Set([8453]), new Set([8453, 42161]), new Set<number>()]) {
       h.dcaLive = live
@@ -257,7 +257,7 @@ describe('DCA tab', () => {
     expect(useDisconnectedChainSelection.getState().chainId).toBe(42161)
   })
 
-  it('on a DCA chain, the plain pane shows — no claim, never "Soon"', () => {
+  it('on a DCA chain, the plain pane shows: no claim, never "Soon"', () => {
     h.pathname = '/dca'
     useDisconnectedChainSelection.setState({ chainId: 8453 })
     render(<AppShell />)
@@ -269,7 +269,7 @@ describe('DCA tab', () => {
   // shouldShowDcaGate are BOTH false on every chain — the tab used to fall all the way through to the permanent
   // empty skeleton. It must show v1's ComingSoonPanel instead; the tab STRIP's own label still never says "Soon"
   // (unaffected — that is the DCA tab's own, deliberate difference from Limit/SL-TP, pinned in 'tabs' above).
-  it('with the launch flag unset, v1\'s ComingSoonPanel shows on a DCA chain — never the skeleton, never a bare unclaimed pane', () => {
+  it('with the launch flag unset, v1\'s ComingSoonPanel shows on a DCA chain, never the skeleton, never a bare unclaimed pane', () => {
     h.pathname = '/dca'
     h.dcaLive = new Set() // the real isDcaLive would also say false for every chain once the flag is off
     useDisconnectedChainSelection.setState({ chainId: 8453 })
@@ -317,7 +317,7 @@ describe('DCA tab · per selected network (the gate, never the skeleton, when DC
   // [H-1, A75] Arbitrum is in DCA_CHAINS (the allowlist) but, per docs/DEPLOYMENTS.md, OrderExecutorV3 is not yet
   // operational there — the network is neither "wrong" (so the gate never shows, confirmed above) nor live, so
   // v1's ComingSoonPanel must carry the tab, never the permanent skeleton.
-  it('chain 42161: neither the gate nor the live card — v1\'s ComingSoonPanel, never the skeleton', () => {
+  it('chain 42161: neither the gate nor the live card. V1\'s ComingSoonPanel, never the skeleton', () => {
     h.pathname = '/dca'
     h.dcaLive = new Set([8453]) // Arbitrum's v3 executor is not wired (real isDcaLive would also say false)
     useDisconnectedChainSelection.setState({ chainId: 42161 })
@@ -347,7 +347,7 @@ describe('photo credit placement (owner review 26 Oct: never over the floating ?
     const footer = document.querySelector('[data-ts-footer]')!
     const credit = screen.getByText('Photo Phil Evenden / Pexels')
     expect(footer.contains(credit)).toBe(true)
-    const fabs = [screen.getByRole('button', { name: /music/i }), screen.getByRole('button', { name: 'Open help' })]
+    const fabs = [screen.getByRole('button', { name: /sound/i }), screen.getByRole('button', { name: 'Open help' })]
     for (const fab of fabs) {
       expect(footer.contains(fab)).toBe(false)
       expect(fab.contains(credit) || credit.contains(fab)).toBe(false)
@@ -370,7 +370,7 @@ describe('photo credit placement (owner review 26 Oct: never over the floating ?
 
   it('under 640 px the fabs sit at the bottom edge (the footer reserves that space), from sm up above the photo band', () => {
     render(<AppShell tab="swap" />)
-    for (const fab of [screen.getByRole('button', { name: /music/i }), screen.getByRole('button', { name: 'Open help' })]) {
+    for (const fab of [screen.getByRole('button', { name: /sound/i }), screen.getByRole('button', { name: 'Open help' })]) {
       expect(fab.className).toContain('bottom-3')
       expect(fab.className).toContain('sm:bottom-[calc(var(--photo-footer-band)+12px)]')
     }
@@ -403,7 +403,7 @@ describe('panes', () => {
 
   // [L-1, owner decision: BUILD in v2] v1's SwapHistory sits below SwapBox on the Swap tab (page.tsx); v2's
   // RecentSwaps is its sibling here, below the Swap card — not v1's SwapHistory itself (own component, own test).
-  it('swap carries v1\'s "Recent swaps" below the card, same shared store — hidden until there is a record', () => {
+  it('swap carries v1\'s "Recent swaps" below the card, same shared store: hidden until there is a record', () => {
     useSwapHistory.setState({ records: [] })
     render(<AppShell tab="swap" />)
     expect(screen.queryByText(/Recent swaps/)).toBeNull()
@@ -577,12 +577,12 @@ describe('help drawer + fabs', () => {
     const sounds = await import('@/lib/sounds')
     const spy = vi.spyOn(sounds, 'toggleBackgroundMusic').mockReturnValueOnce(false).mockReturnValueOnce(true)
     render(<AppShell />)
-    const btn = screen.getByRole('button', { name: 'Turn music off' })
+    const btn = screen.getByRole('button', { name: 'Mute sound' })
     expect(icon(btn)).toBe('on')
     await act(async () => void fireEvent.click(btn))
-    expect(icon(screen.getByRole('button', { name: 'Turn music on' }))).toBe('off')
-    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Turn music on' })))
-    expect(icon(screen.getByRole('button', { name: 'Turn music off' }))).toBe('on')
+    expect(icon(screen.getByRole('button', { name: 'Unmute sound' }))).toBe('off')
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Unmute sound' })))
+    expect(icon(screen.getByRole('button', { name: 'Mute sound' }))).toBe('on')
     spy.mockRestore()
   })
 })
@@ -591,7 +591,7 @@ describe('help drawer + fabs', () => {
 // button instead of taking down the whole page. AppShell wraps {pane} the same way — every tab, not only Swap,
 // since v2 consolidates them behind one shell.
 describe('pane error boundary (L-2, v1 copy: SwapErrorBoundary)', () => {
-  it('a crash in the pane shows v1\'s reset UI, not a blank page — the shell (header, tabs) survives', () => {
+  it('a crash in the pane shows v1\'s reset UI, not a blank page. The shell (header, tabs) survives', () => {
     h.crashSwap = true
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     render(<AppShell tab="swap" />)

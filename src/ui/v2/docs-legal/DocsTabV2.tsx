@@ -106,7 +106,7 @@ function ComingSoonBanner({ note }: { note?: string }) {
     <Surface variant="strip" accent="amber" className="mb-5 flex items-start gap-3 px-4 py-3">
       <DocTag>Coming Soon</DocTag>
       <p className="text-[13px] leading-relaxed text-v2-muted">
-        {note ?? 'This feature is not yet available — the section below is a preview of upcoming functionality.'}
+        {note ?? 'This feature is not yet available. The section below is a preview of upcoming functionality.'}
       </p>
     </Surface>
   )
@@ -276,7 +276,7 @@ export function DocsTabV2() {
               TeraSwap is a <strong className="text-v2-text">meta-aggregator</strong> for decentralized exchanges. Instant swaps are live on{' '}
               {SWAP_CHAIN_LIST_LABEL}. Instead of searching manually across multiple DEXs, TeraSwap queries
               <strong className="text-v2-text"> {INTEGRATED_DEX_SOURCE_COUNT} independent liquidity sources</strong> simultaneously and
-              automatically routes your trade through whichever offers the best net output — accounting for gas costs, slippage, and pool fees.
+              automatically routes your trade through whichever offers the best net output, accounting for gas costs, slippage, and pool fees.
             </p>
             <p className="mb-6 text-[15px] leading-relaxed text-v2-muted">
               Every swap is validated against <strong className="text-v2-text">Chainlink price oracles</strong> and{' '}
@@ -306,7 +306,7 @@ export function DocsTabV2() {
             </p>
             <FlowDiagram />
             <p className="text-[15px] leading-relaxed text-v2-muted">
-              Each source has an independent timeout — if one API is slow, the others still compete. The winning quote is then executed directly
+              Each source has an independent timeout: if one API is slow, the others still compete. The winning quote is then executed directly
               from the user&apos;s wallet with a single transaction.
             </p>
           </section>
@@ -359,14 +359,14 @@ export function DocsTabV2() {
             <p className="mb-2 text-[15px] leading-relaxed text-v2-muted">The routing engine runs several optimization layers to find the true best execution:</p>
             <div>
               {[
-                { num: '01', title: 'Parallel Fan-Out', desc: `All registered sources are queried simultaneously, each with an independent ${QUOTE_TIMEOUT_SEC}-second timeout. No source blocks another — a slow API simply drops out of that round.` },
+                { num: '01', title: 'Parallel Fan-Out', desc: `All registered sources are queried simultaneously, each with an independent ${QUOTE_TIMEOUT_SEC}-second timeout. No source blocks another. A slow API simply drops out of that round.` },
                 { num: '02', title: 'Gas-Aware Ranking', desc: 'Quotes ranked by net output considering estimated gas costs in USD. When outputs are close, cheaper gas wins the tiebreak. CoW Protocol (gasless for users) naturally benefits.' },
                 { num: '03', title: 'Statistical Outlier Detection', desc: `True median-based filtering removes manipulated quotes. Amounts sorted independently, median computed (average of two middle values for even counts), anything above ${OUTLIER_MEDIAN_MULTIPLE}× median is rejected.` },
                 { num: '04', title: 'Uniswap V3 Fee-Tier Detection', desc: `Automatically tests all ${UNISWAP_FEE_TIER_COUNT} fee tiers (${UNISWAP_FEE_TIER_LABELS.join(', ')}) and selects the pool with best output. Results are cached for faster subsequent quotes.` },
                 { num: '05', title: 'Oracle Validation', desc: `Before execution, the quoted rate is compared against Chainlink price feeds. Deviations above ${PRICE_DEVIATION_WARN_PCT} trigger a warning; above ${PRICE_DEVIATION_BLOCK_PCT} the swap is blocked. A second server-side check via DefiLlama blocks swaps >${DEFILLAMA_BLOCK_PCT} below fair market value.` },
                 { num: '06', title: 'Cross-Quote Consensus', desc: `The winning quote is compared against the median of all responding sources. If it deviates >${CROSS_QUOTE_WARN_PCT} from consensus, a warning is raised. Quotes >${OUTLIER_MEDIAN_MULTIPLE}× above median are automatically removed as outliers.` },
-                { num: '07', title: 'Slippage Safety', desc: `User-configurable slippage clamped to [${SLIPPAGE_CLAMP_MIN_PCT}%, ${SLIPPAGE_CLAMP_MAX_PCT}%] — impossible to create negative factors. Enforced at both UI input and calculation level across every source.` },
-                { num: '08', title: 'Chain-Aware EIP-712', desc: "EIP-712 signing binds to the wallet's current chainId dynamically. This is what lets the order engine operate per-chain today — a separate OrderExecutor is deployed on both Ethereum Mainnet and Base — rather than being mainnet-only." },
+                { num: '07', title: 'Slippage Safety', desc: `User-configurable slippage clamped to [${SLIPPAGE_CLAMP_MIN_PCT}%, ${SLIPPAGE_CLAMP_MAX_PCT}%]: impossible to create negative factors. Enforced at both UI input and calculation level across every source.` },
+                { num: '08', title: 'Chain-Aware EIP-712', desc: "EIP-712 signing binds to the wallet's current chainId dynamically. This is what lets the order engine operate per-chain today, a separate OrderExecutor is deployed on both Ethereum Mainnet and Base, rather than being mainnet-only." },
               ].map((step) => (
                 <StepRow key={step.num} num={step.num} title={step.title} desc={step.desc} />
               ))}
@@ -381,12 +381,12 @@ export function DocsTabV2() {
             <p className="mb-2 text-[15px] leading-relaxed text-v2-muted">TeraSwap is designed with multiple security layers that protect users at every stage of a trade:</p>
             <div>
               {[
-                { title: 'Chainlink Oracle Validation', desc: `Every swap rate is cross-referenced with decentralized price feeds — both the input and output token of each swap are checked. The ${chainName} registry covers ${feedCount} token feeds, with automatic deviation detection: warns at ${PRICE_DEVIATION_WARN_PCT}, hard-blocks at ${PRICE_DEVIATION_BLOCK_PCT}. ${CHAINLINK_STALENESS_CLAIM}`, badge: 'Oracle' },
+                { title: 'Chainlink Oracle Validation', desc: `Every swap rate is cross-referenced with decentralized price feeds, both the input and output token of each swap are checked. The ${chainName} registry covers ${feedCount} token feeds, with automatic deviation detection: warns at ${PRICE_DEVIATION_WARN_PCT}, hard-blocks at ${PRICE_DEVIATION_BLOCK_PCT}. ${CHAINLINK_STALENESS_CLAIM}`, badge: 'Oracle' },
                 { title: 'DefiLlama Server-Side Check', desc: `A second independent oracle validates swap output on the server before returning calldata. Blocks swaps where output is >${DEFILLAMA_BLOCK_PCT} below fair market value. If this secondary oracle is unreachable, swaps estimated above ${DEFILLAMA_HIGH_VALUE_USD_LABEL} are blocked while small swaps fail open.`, badge: 'Oracle' },
                 { title: 'Cross-Quote Consensus', desc: `The winning quote is validated against the median of all aggregator responses. Deviations >${CROSS_QUOTE_WARN_PCT} are flagged; quotes >${OUTLIER_MEDIAN_MULTIPLE}× above median are removed automatically.`, badge: 'Safety' },
                 { title: 'Privacy Proxy', desc: `${PRIVACY_PROXY_CLAIM} ${PRIVACY_DIRECT_NOTE}`, badge: 'Privacy' },
-                { title: 'Exact-Amount Approvals', desc: "Approvals are always scoped to the exact amount needed and granted directly to the actual spender, which is checked against a trusted allowlist — never an infinite/max-uint approval. (The 0x source uses Permit2's pull model, which still requires an on-chain approve to the Permit2 contract — TeraSwap does not ship gasless off-chain signature approvals as the general path.)", badge: 'Approval' },
-                { title: 'Non-Custodial', desc: 'TeraSwap never takes custody of your tokens. The fee-collector contract pulls funds, takes the fee, forwards the net to the DEX router, and atomically refunds any leftovers in the same transaction — it never holds user funds between transactions.', badge: 'Trust' },
+                { title: 'Exact-Amount Approvals', desc: "Approvals are always scoped to the exact amount needed and granted directly to the actual spender, which is checked against a trusted allowlist, never an infinite/max-uint approval. (The 0x source uses Permit2's pull model, which still requires an on-chain approve to the Permit2 contract. TeraSwap does not ship gasless off-chain signature approvals as the general path.)", badge: 'Approval' },
+                { title: 'Non-Custodial', desc: 'TeraSwap never takes custody of your tokens. The fee-collector contract pulls funds, takes the fee, forwards the net to the DEX router, and atomically refunds any leftovers in the same transaction. It never holds user funds between transactions.', badge: 'Trust' },
                 { title: 'Permissionless · No KYC', desc: 'There is no sign-up, no account, and no identity check. You connect a wallet and trade directly with on-chain contracts.', badge: 'Access' },
                 { title: 'Token-Catalog Guard (CI)', desc: 'Every curated token is verified against its on-chain reality before it ships: contract bytecode must exist (no dead addresses), on-chain symbol() and decimals() must match the catalog entry (decimals are fund-affecting for swap sizing), the address must appear in a reputable per-chain token list, and no two catalog tokens may share a symbol on the same chain. This runs as a CI gate.', badge: 'Safety' },
                 { title: 'On-Chain Admin Timelocks', desc: `Sensitive contract admin actions are time-locked: changing the whitelist of allowed DEX routers, adding/removing a whitelisted executor, and fund sweeps each take effect only after a ${ADMIN_TIMELOCK_HOURS}-hour delay (and expire if not executed within a ${ADMIN_TIMELOCK_GRACE_DAYS}-day grace window). An emergency pause is also available.`, badge: 'Contract' },
@@ -413,7 +413,7 @@ export function DocsTabV2() {
               MEV (Maximal Extractable Value) is profit that block builders and searchers can capture by reordering, inserting, or censoring
               transactions inside the block they produce. For DEX users this most often appears as a <strong className="text-v2-text">sandwich attack</strong>: a
               bot spots a pending swap in the public mempool, places its own buy directly in front of it to push the price up, then sells
-              immediately after at the inflated price — taking the difference out of the user&apos;s slippage budget. Researchers at Flashbots
+              immediately after at the inflated price, taking the difference out of the user&apos;s slippage budget. Researchers at Flashbots
               and elsewhere estimate cumulative MEV extracted from Ethereum users in the billions of USD since 2020.
             </p>
 
@@ -428,11 +428,11 @@ export function DocsTabV2() {
               </li>
               <li>
                 Professional solvers compete in a <strong className="text-v2-text">batch auction</strong> to fill the order. How that auction treats
-                MEV is part of CoW Protocol&apos;s own design, described in its documentation — not a TeraSwap guarantee.
+                MEV is part of CoW Protocol&apos;s own design, described in its documentation, not a TeraSwap guarantee.
               </li>
             </ul>
             <p className="mb-6 text-[15px] leading-relaxed text-v2-muted">
-              Every other route — aggregator APIs and direct on-chain swaps (Uniswap V3, Curve, SushiSwap) — is a public-mempool transaction.
+              Every other route, aggregator APIs and direct on-chain swaps (Uniswap V3, Curve, SushiSwap), is a public-mempool transaction.
               To reduce mempool exposure in general, you can configure a privacy-focused RPC in your wallet settings (see <em>Privacy</em>).
             </p>
           </section>
@@ -484,7 +484,7 @@ export function DocsTabV2() {
               TeraSwap charges a flat <strong className="text-v2-text">{PLATFORM_FEE_LABEL} ({PLATFORM_FEE_BPS} bps)</strong> platform fee,
               deducted from the input amount before the swap and collected on-chain by the <strong className="text-v2-text">TeraSwapFeeCollector</strong>{' '}
               contract. The collector pulls the input, takes the fee, forwards the net amount to the DEX router, and atomically refunds any
-              leftover input and ETH in the same transaction — so it never holds your funds between transactions. Token approvals to the
+              leftover input and ETH in the same transaction, so it never holds your funds between transactions. Token approvals to the
               collector are <strong className="text-v2-text">exact-amount</strong> (never infinite / max-uint), granted directly to the spender.
               No spread markup, no hidden costs.
             </p>
@@ -493,7 +493,7 @@ export function DocsTabV2() {
               head={['Fee Type', 'Amount', 'Notes']}
               rows={[
                 ['Platform fee', PLATFORM_FEE_LABEL, 'Deducted from input amount before swap. Fully transparent.'],
-                ['Pool fee (Uniswap V3)', `${UNISWAP_FEE_TIER_LABELS[0]} – ${UNISWAP_FEE_TIER_LABELS[UNISWAP_FEE_TIER_LABELS.length - 1]}`, 'Charged by the liquidity pool. TeraSwap auto-selects the cheapest tier.'],
+                ['Pool fee (Uniswap V3)', `${UNISWAP_FEE_TIER_LABELS[0]} to ${UNISWAP_FEE_TIER_LABELS[UNISWAP_FEE_TIER_LABELS.length - 1]}`, 'Charged by the liquidity pool. TeraSwap auto-selects the cheapest tier.'],
                 ['Gas', 'Variable', 'Network gas paid in ETH. CoW Protocol swaps are gasless for the user.'],
                 ['Hidden fees', 'None', 'No spread markup, no referral fees, no deposit or withdrawal fees.'],
               ]}
@@ -509,34 +509,33 @@ export function DocsTabV2() {
               Limit orders, stop-loss / take-profit, and DCA are all <strong className="text-v2-text">conditional orders</strong> on a single
               on-chain engine: the non-upgradeable <strong className="text-v2-text">TeraSwapOrderExecutor</strong> contract (EIP-712 domain{' '}
               <span className="font-v2-mono text-[13px] text-v2-text">TeraSwapOrderExecutor</span> version 2). You place an order by signing it{' '}
-              <strong className="text-v2-text">off-chain with EIP-712</strong> — there is no on-chain transaction to create an order — and an
+              <strong className="text-v2-text">off-chain with EIP-712</strong>, there is no on-chain transaction to create an order, and an
               autonomous keeper later executes it on-chain when its conditions are met. Conditional orders are{' '}
               <strong className="text-v2-text">not</strong> routed through CoW Protocol; CoW is only used for instant swaps, where it is compared like
               any other liquidity source.
             </p>
             <p className="mb-2 text-[15px] leading-relaxed text-v2-muted">
               There are three order types: <strong className="text-v2-text">LIMIT</strong>, <strong className="text-v2-text">STOP_LOSS</strong>,
-              and <strong className="text-v2-text">DCA</strong>. Take-profit is not a separate type — it is a STOP_LOSS order with an
+              and <strong className="text-v2-text">DCA</strong>. Take-profit is not a separate type. It is a STOP_LOSS order with an
               &ldquo;above&rdquo; price condition (stop-loss uses &ldquo;below&rdquo;).
             </p>
 
             <div>
               {[
-                { num: '01', title: 'Sign Once, Off-Chain (EIP-712)', desc: 'You sign the order with your wallet and grant a direct, exact-amount ERC-20 allowance to the executor contract for the order total — never an infinite/max-uint approval, and not Permit2. The executor pulls tokens via a direct transferFrom when it executes. No transaction is broadcast to place the order.' },
+                { num: '01', title: 'Sign Once, Off-Chain (EIP-712)', desc: 'You sign the order with your wallet and grant a direct, exact-amount ERC-20 allowance to the executor contract for the order total, never an infinite/max-uint approval, and not Permit2. The executor pulls tokens via a direct transferFrom when it executes. No transaction is broadcast to place the order.' },
                 { num: '02', title: 'Whitelisted DEX Routing', desc: 'When a keeper executes an order, the contract routes the swap through a whitelisted DEX router (1inch by default) and enforces a per-execution minimum-output (slippage) floor. The router set is governed on-chain by an allowlist.' },
-                { num: '03', title: 'On-Chain Validation (canExecute)', desc: 'Before any execution the contract independently re-checks the order signature, that it is not cancelled or nonce-invalidated, that it has not expired, the router whitelist, the schedule, the price condition, and that your balance and allowance still cover the amount. The same checks are re-enforced inside executeOrder — the gate is on-chain, not advisory.' },
-                { num: '04', title: 'Chainlink Price Conditions', desc: 'Limit and stop-loss / take-profit orders carry a Chainlink price feed plus a target price and a direction (above / below). The order is only eligible once the on-chain feed crosses the trigger. (A pure DCA order carries no price condition — see the DCA section.)' },
+                { num: '03', title: 'On-Chain Validation (canExecute)', desc: 'Before any execution the contract independently re-checks the order signature, that it is not cancelled or nonce-invalidated, that it has not expired, the router whitelist, the schedule, the price condition, and that your balance and allowance still cover the amount. The same checks are re-enforced inside executeOrder. The gate is on-chain, not advisory.' },
+                { num: '04', title: 'Chainlink Price Conditions', desc: 'Limit and stop-loss / take-profit orders carry a Chainlink price feed plus a target price and a direction (above / below). The order is only eligible once the on-chain feed crosses the trigger. (A pure DCA order carries no price condition: see the DCA section.)' },
                 { num: '05', title: 'Cancel & Mass-Invalidate', desc: 'Any order can be cancelled on-chain at any time, and a single mass nonce-invalidation can void all of your pending orders at once. You stay in control of your own funds throughout.' },
                 { num: '06', title: 'Keeper Signs in an HSM', desc: `The off-chain keeper that submits executions signs with a key held in a hardware security module (AWS KMS): the private key never leaves the HSM and only signatures are returned. Adding or rotating a keeper, changing the router whitelist, or sweeping funds is gated by a ${ADMIN_TIMELOCK_HOURS}-hour on-chain timelock (admin transfer uses a longer ${ADMIN_TRANSFER_TIMELOCK_DAYS}-day delay), each with a ${ADMIN_TIMELOCK_GRACE_DAYS}-day grace window.` },
-                { num: '07', title: 'Fail-Closed, Chain-Aware', desc: "The engine refuses to sign, read, or execute on any chain without a wired OrderExecutor, and the EIP-712 domain is bound to the connected chain. Order creation is rejected server-side — before the signature is even verified — for any chain whose executor is not in the fixed allowlist. Today only Ethereum Mainnet and Base are wired." },
+                { num: '07', title: 'Fail-Closed, Chain-Aware', desc: "The engine refuses to sign, read, or execute on any chain without a wired OrderExecutor, and the EIP-712 domain is bound to the connected chain. Order creation is rejected server-side, before the signature is even verified, for any chain whose executor is not in the fixed allowlist. Today only Ethereum Mainnet and Base are wired." },
               ].map((step) => (
                 <StepRow key={step.num} num={step.num} title={step.title} desc={step.desc} />
               ))}
             </div>
 
             <div className="mt-4 text-xs text-v2-muted">
-              <span className="font-semibold text-v2-text">Deployments:</span> the OrderExecutor is deployed and verified on the block explorer —
-              Ethereum Mainnet at <span className="font-v2-mono">0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130</span> and Base at{' '}
+              <span className="font-semibold text-v2-text">Deployments:</span> the OrderExecutor is deployed and verified on the block explorer: Ethereum Mainnet at <span className="font-v2-mono">0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130</span> and Base at{' '}
               <span className="font-v2-mono">0x135B339902Ea4E0fB4CF059961dc8856bA1D2598</span>. Conditional-order creation panels are
               chain-agnostic in the UI; per-chain availability is enforced centrally by the fail-closed engine.
             </div>
@@ -548,7 +547,7 @@ export function DocsTabV2() {
           <section id="limit-orders" className="scroll-mt-28">
             <SectionTitle icon="⊕" title="Limit Orders" />
             {!isOrderTypeLive('limit') && (
-              <ComingSoonBanner note="Limit-order creation is not currently exposed in the app — the section below previews the flow on the order engine. Watch the roadmap for availability." />
+              <ComingSoonBanner note="Limit-order creation is not currently exposed in the app. The section below previews the flow on the order engine. Watch the roadmap for availability." />
             )}
             <div className={isOrderTypeLive('limit') ? '' : 'opacity-50'}>
               <p className="mb-2 text-[15px] leading-relaxed text-v2-muted">
@@ -562,8 +561,8 @@ export function DocsTabV2() {
                 {[
                   { num: '01', title: 'Set Target Price', desc: 'Define exactly how many tokens you want to receive per unit sold. The market price is shown for reference, with percentage difference calculated in real-time.' },
                   { num: '02', title: 'Choose Expiry', desc: 'Orders carry an expiry; the contract refuses to execute an order past its expiry, and expired orders stop being eligible.' },
-                  { num: '03', title: 'EIP-712 Signing', desc: 'Sign the order off-chain with your wallet — no on-chain transaction to place it. You grant an exact-amount allowance to the executor; your tokens stay in your wallet until the order executes.' },
-                  { num: '04', title: 'Chainlink-Gated Execution', desc: 'The order is monitored against a Chainlink feed. When the trigger is reached, the keeper executes it on-chain via the OrderExecutor through a whitelisted DEX router (1inch by default) — you pay no gas at execution time because the keeper sends the transaction.' },
+                  { num: '03', title: 'EIP-712 Signing', desc: 'Sign the order off-chain with your wallet: no on-chain transaction to place it. You grant an exact-amount allowance to the executor; your tokens stay in your wallet until the order executes.' },
+                  { num: '04', title: 'Chainlink-Gated Execution', desc: 'The order is monitored against a Chainlink feed. When the trigger is reached, the keeper executes it on-chain via the OrderExecutor through a whitelisted DEX router (1inch by default). You pay no gas at execution time because the keeper sends the transaction.' },
                   { num: '05', title: 'On-Chain Min-Output Floor', desc: 'Execution enforces a per-order minimum-output (slippage) floor on-chain, so a fill below your tolerance reverts rather than settling against you.' },
                 ].map((step) => (
                   <StepRow key={step.num} num={step.num} title={step.title} desc={step.desc} />
@@ -578,7 +577,7 @@ export function DocsTabV2() {
           <section id="stop-loss" className="scroll-mt-28">
             <SectionTitle icon="⛊" title="Stop Loss / Take Profit" />
             {!isOrderTypeLive('stopLoss') && !isOrderTypeLive('takeProfit') && (
-              <ComingSoonBanner note="Stop-loss / take-profit creation is not currently exposed in the app — the section below previews the flow on the order engine. Watch the roadmap for availability." />
+              <ComingSoonBanner note="Stop-loss / take-profit creation is not currently exposed in the app. The section below previews the flow on the order engine. Watch the roadmap for availability." />
             )}
             <div className={isOrderTypeLive('stopLoss') && isOrderTypeLive('takeProfit') ? '' : 'opacity-50'}>
               <p className="mb-4 text-[15px] leading-relaxed text-v2-muted">
@@ -597,10 +596,10 @@ export function DocsTabV2() {
               <div>
                 {[
                   { num: '01', title: 'Set Trigger Price', desc: 'Define your stop loss or take profit level. For stop loss, the order becomes eligible when price drops below your target; for take profit, when price rises above it.' },
-                  { num: '02', title: 'Chainlink Oracle Monitoring', desc: 'The trigger is evaluated against Chainlink on-chain price feeds — the industry standard for reliable, tamper-proof prices. The condition is checked on-chain inside the contract before any execution.' },
-                  { num: '03', title: 'Automatic Execution', desc: 'You sign once upfront. When the trigger fires, the keeper executes the order on-chain via the OrderExecutor — no manual action needed at trigger time, and no gas paid by you at execution.' },
+                  { num: '02', title: 'Chainlink Oracle Monitoring', desc: 'The trigger is evaluated against Chainlink on-chain price feeds, the industry standard for reliable, tamper-proof prices. The condition is checked on-chain inside the contract before any execution.' },
+                  { num: '03', title: 'Automatic Execution', desc: 'You sign once upfront. When the trigger fires, the keeper executes the order on-chain via the OrderExecutor: no manual action needed at trigger time, and no gas paid by you at execution.' },
                   { num: '04', title: 'Whitelisted-Router Fill', desc: 'The triggered swap routes through a whitelisted DEX router (1inch by default), with a per-order minimum-output floor enforced on-chain.' },
-                  { num: '05', title: 'Adaptive Slippage', desc: 'Stop loss orders use 5% default slippage to ensure execution during sharp price drops — speed matters more than precision when protecting against losses. Take profit uses the standard 2% slippage since there is no urgency to exit.' },
+                  { num: '05', title: 'Adaptive Slippage', desc: 'Stop loss orders use 5% default slippage to ensure execution during sharp price drops: speed matters more than precision when protecting against losses. Take profit uses the standard 2% slippage since there is no urgency to exit.' },
                 ].map((step) => (
                   <StepRow key={step.num} num={step.num} title={step.title} desc={step.desc} />
                 ))}
@@ -614,11 +613,11 @@ export function DocsTabV2() {
           <section id="dca" className="scroll-mt-28">
             <SectionTitle icon="⟳" title="DCA (Dollar-Cost Averaging)" />
             {!isOrderTypeLive('dca') && (
-              <ComingSoonBanner note="DCA ships with launch — it is not live yet. It rolls out first on Base (L2). The section below previews how it works." />
+              <ComingSoonBanner note="DCA ships with launch: it is not live yet. It rolls out first on Base (L2). The section below previews how it works." />
             )}
             <div className={isOrderTypeLive('dca') ? '' : 'opacity-50'}>
               <p className="mb-4 text-[15px] leading-relaxed text-v2-muted">
-                DCA splits a single buy into a series of smaller, scheduled purchases that run autonomously —{' '}
+                DCA splits a single buy into a series of smaller, scheduled purchases that run autonomously,{' '}
                 <strong className="text-v2-text">without you signing each one</strong>. You set the input token, the output token, the total
                 amount, the number of buys, and the interval between them. Each buy is settled at execution time by the keeper through the
                 single whitelisted DEX router committed in your signed order (1inch by default), bounded by your per-buy minimum-output
@@ -627,7 +626,7 @@ export function DocsTabV2() {
               <p className="mb-2 text-[15px] leading-relaxed text-v2-muted">
                 Setup is two steps: a one-time, <strong className="text-v2-text">exact-amount</strong> ERC-20 approval to the OrderExecutor for
                 the full total (never an infinite/max approval), and a <strong className="text-v2-text">single EIP-712 signature</strong> over
-                the whole plan. Because the contract pulls the input via a direct ERC-20 transfer, the input is always an ERC-20 — a native-ETH
+                the whole plan. Because the contract pulls the input via a direct ERC-20 transfer, the input is always an ERC-20. A native-ETH
                 input is automatically wrapped to WETH before signing. From there a self-hosted keeper executes each buy on-chain when its turn
                 comes due, paying the gas itself.
               </p>
@@ -635,19 +634,18 @@ export function DocsTabV2() {
               <div>
                 {[
                   { num: '01', title: 'Sign Once, Run Autonomously', desc: "One exact-amount WETH approval to the OrderExecutor plus a single EIP-712 signature covers the whole series. The keeper supplies fresh swap calldata each run; it never asks you to sign again. There is no per-execution signing." },
-                  { num: '02', title: 'Cumulative Chunk Accounting', desc: 'Each buy is sized by cumulative accounting: executeAmount = total × (n+1) / count − total × n / count, with the final buy taking the exact remainder. Across all executions the amounts sum to exactly your total — no buy is skipped, duplicated, or double-spent, and no dust is stranded.' },
+                  { num: '02', title: 'Cumulative Chunk Accounting', desc: 'Each buy is sized by cumulative accounting: executeAmount = total × (n+1) / count − total × n / count, with the final buy taking the exact remainder. Across all executions the amounts sum to exactly your total: no buy is skipped, duplicated, or double-spent, and no dust is stranded.' },
                   { num: '03', title: 'On-Chain Gating Each Run', desc: "Before each execution the contract independently re-checks your balance, your allowance, the schedule interval (it will not run early), and the order's expiry. An execution counter only advances after a successful swap, so the schedule can never run ahead of itself." },
                   { num: '04', title: 'Schedule-Only, No Oracle Needed', desc: 'A pure DCA order carries no price condition (priceFeed = address(0) ⇒ the price check is always true): it runs on schedule regardless of price. It is not price-aware. An optional Chainlink condition can be attached, but the shipped DCA flow runs purely on a fixed interval for a fixed number of buys.' },
                   { num: '05', title: 'Routed at Market, Floor Enforced On-Chain', desc: 'At each turn the keeper builds a swap at market time and settles it through the single whitelisted DEX router committed in your signed order (1inch by default), with your per-buy minimum-output floor enforced on-chain. Unlike the instant-swap path, conditional and DCA orders are not routed through CoW.' },
-                  { num: '06', title: 'You Stay in Control', desc: 'Any order can be cancelled on-chain at any time, and a single mass nonce-invalidation can void all pending orders. A manual circuit-breaker can pause the creation of new DCA orders — but it only delays: it never cancels or moves funds, existing orders keep running, and they can still be cancelled.' },
+                  { num: '06', title: 'You Stay in Control', desc: 'Any order can be cancelled on-chain at any time, and a single mass nonce-invalidation can void all pending orders. A manual circuit-breaker can pause the creation of new DCA orders, but it only delays: it never cancels or moves funds, existing orders keep running, and they can still be cancelled.' },
                 ].map((step) => (
                   <StepRow key={step.num} num={step.num} title={step.title} desc={step.desc} />
                 ))}
               </div>
 
               <div className="mt-4 text-xs text-v2-muted">
-                <span className="font-semibold text-v2-text">Why Base first:</span> DCA is offered only on Base (an Ethereum L2), by design —
-                never on mainnet. A recurring series of small buys on Ethereum Mainnet would be dominated by per-execution gas, so DCA rolls out
+                <span className="font-semibold text-v2-text">Why Base first:</span> DCA is offered only on Base (an Ethereum L2), by design, never on mainnet. A recurring series of small buys on Ethereum Mainnet would be dominated by per-execution gas, so DCA rolls out
                 on a low-fee L2 where small, frequent buys are viable. It ships with launch and is not presented as live until then.
               </div>
             </div>
@@ -667,8 +665,8 @@ export function DocsTabV2() {
               {[
                 { num: '01', title: 'Quote Collection', desc: 'Split-eligible sources are queried at multiple sub-amounts in parallel (the set of percentages is derived from the candidate split configurations). Each source reports its output for each partial amount.' },
                 { num: '02', title: 'Combinatorial Optimization', desc: 'The engine tests all 2-way and 3-way split configurations across eligible sources. Pre-defined splits (50/50, 60/40, 70/30, 80/20, 50/30/20, etc.) are evaluated for every pairwise and triple source combination.' },
-                { num: '03', title: 'Gas-Adjusted Comparison', desc: `Each split candidate's total output is compared against the best single-source quote. Gas costs are factored in — a split that gains ${SPLIT_MIN_IMPROVEMENT_PCT} but doubles gas cost may not be worth it.` },
-                { num: '04', title: 'Visualization & Execution', desc: `When a split improves output by ≥${SPLIT_MIN_IMPROVEMENT_PCT} (${SPLIT_MIN_IMPROVEMENT_BPS_SLOT} bps), the UI shows a visual breakdown with per-source allocation bars. Users can toggle split on/off. Execution sends multiple transactions — one per leg — with the pre-computed amounts.` },
+                { num: '03', title: 'Gas-Adjusted Comparison', desc: `Each split candidate's total output is compared against the best single-source quote. Gas costs are factored in. A split that gains ${SPLIT_MIN_IMPROVEMENT_PCT} but doubles gas cost may not be worth it.` },
+                { num: '04', title: 'Visualization & Execution', desc: `When a split improves output by ≥${SPLIT_MIN_IMPROVEMENT_PCT} (${SPLIT_MIN_IMPROVEMENT_BPS_SLOT} bps), the UI shows a visual breakdown with per-source allocation bars. Users can toggle split on/off. Execution sends multiple transactions, one per leg, with the pre-computed amounts.` },
               ].map((step) => (
                 <StepRow key={step.num} num={step.num} title={step.title} desc={step.desc} />
               ))}
@@ -687,11 +685,11 @@ export function DocsTabV2() {
             <SectionTitle icon="◫" title="Analytics Dashboard" />
             <p className="mb-2 text-[15px] leading-relaxed text-v2-muted">
               The built-in Analytics Dashboard provides real-time visibility into protocol activity: trade volumes, fee generation, aggregator
-              performance, and wallet tracking — all updated live with each swap.
+              performance, and wallet tracking: all updated live with each swap.
             </p>
             <div>
               {[
-                { n: '1', title: 'KPI Metrics', desc: 'Total volume, fees collected, unique wallets, and average trade size — filterable by period (24h, 7d, 30d, All Time).' },
+                { n: '1', title: 'KPI Metrics', desc: 'Total volume, fees collected, unique wallets, and average trade size: filterable by period (24h, 7d, 30d, All Time).' },
                 { n: '2', title: 'Aggregator Ranking', desc: 'Volume and win-rate per source, showing which DEX routes deliver the best execution for your trades.' },
                 { n: '3', title: 'Hourly Heatmap', desc: 'Visual breakdown of volume by hour (UTC), revealing peak trading windows.' },
                 { n: '4', title: 'Wallet Tracker', desc: 'Automatic wallet profiling with trade counts and volumes. Export snapshots for airdrop planning or loyalty programs.' },
@@ -752,7 +750,7 @@ export function DocsTabV2() {
                     'Further multi-chain expansion (Arbitrum, Optimism)',
                     'Cross-chain swaps via LI.FI',
                     'Uniswap V4 Hooks integration',
-                    'TeraShield — premium privacy mode (paid feature)',
+                    'TeraShield: premium privacy mode (paid feature)',
                     'Stealth addresses (ERC-5564 / ERC-6538)',
                     'Railgun shielded swaps (zkSNARK with sanctions compliance)',
                     'Governance token',

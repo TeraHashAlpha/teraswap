@@ -151,7 +151,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('useOrderEngine — v3 signing branch [SPRINT-V3-P2]', () => {
+describe('useOrderEngine: v3 signing branch [SPRINT-V3-P2]', () => {
   it('config.maxSlippageBps set + v3 configured ⇒ signs with the v3 domain (version "3")', async () => {
     const { result } = renderHook(() => useOrderEngine())
     await createAndConfirm(result, makeConfig({ maxSlippageBps: 300 }))

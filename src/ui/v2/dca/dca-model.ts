@@ -261,7 +261,7 @@ export function signSteps(i: { phase: DcaSignPhase; approvalListed: boolean; app
 /** v1's DCAPanel event effect: the freeze-403 is told as a pause, everything else as a failure. Same titles, same descriptions. */
 export const DCA_PAUSED_RE = /temporarily paused/i
 export function failureCopy(error: string | null): { title: string; description: string } {
-  if (DCA_PAUSED_RE.test(error || '')) return { title: 'DCA temporarily paused', description: 'Only new DCA orders are paused — your existing ones keep running.' }
+  if (DCA_PAUSED_RE.test(error || '')) return { title: 'DCA temporarily paused', description: 'Only new DCA orders are paused. Your existing ones keep running.' }
   return { title: 'DCA order failed', description: error || 'Order could not be submitted.' }
 }
 

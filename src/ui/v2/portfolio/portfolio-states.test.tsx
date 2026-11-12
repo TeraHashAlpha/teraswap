@@ -66,7 +66,7 @@ function expectParity(label: string) {
   return { v1, v2 }
 }
 
-describe('Portfolio states — v2 text equals v1\'s', () => {
+describe('Portfolio states: v2 text equals v1\'s', () => {
   it('connected, priced + unpriced rows, total, "Last updated just now"', () => {
     const { v2 } = expectParity('populated')
     expect(v2.querySelector('[data-testid="portfolio-total"]')?.textContent).toBe('$357.20')
@@ -86,7 +86,7 @@ describe('Portfolio states — v2 text equals v1\'s', () => {
     expect(v2.querySelector('[data-testid="portfolio-chain-unavailable"]')?.textContent).toMatch(/^Portfolio isn't available on .+ yet\.$/)
     expect(within(v2).queryByText('Total value')).toBeNull() // none of the loading / error / empty states apply
   })
-  it('initial load: "Loading prices…", four skeleton rows, total "—"', () => {
+  it('initial load: "Loading prices…", four skeleton rows, total ". "', () => {
     h.data = state({ tokens: [], totalValueUsd: null, isLoading: true, lastUpdated: null })
     const { v2 } = expectParity('loading')
     expect(v2.querySelector('[data-testid="portfolio-loading"]')?.getAttribute('aria-busy')).toBe('true')
@@ -122,10 +122,10 @@ describe('Portfolio states — v2 text equals v1\'s', () => {
     const { v2 } = expectParity(`empty ${chainId}`)
     expect(v2.querySelector('[data-testid="portfolio-empty"]')?.textContent).toContain(name)
   })
-  it('unpriced total shows v1\'s "—"', () => {
+  it('unpriced total shows v1\'s ". "', () => {
     h.data = state({ tokens: [ROWS[2]], totalValueUsd: null })
     const { v2 } = expectParity('unpriced total')
-    expect(v2.querySelector('[data-testid="portfolio-total"]')?.textContent).toBe('—')
+    expect(v2.querySelector('[data-testid="portfolio-total"]')?.textContent).toBe('n/a')
   })
   it.each([[7_000, 'Last updated 7s ago'], [95_000, 'Last updated 1m ago'], [3 * 3_600_000, 'Last updated 3h ago']])('"Last updated" clock, %i ms old', (ms, text) => {
     vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })

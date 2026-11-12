@@ -166,7 +166,7 @@ function sendNotification(title: string, body: string, level: 'success' | 'info'
         ? '/icons/x-circle.svg'
         : '/icons/info.svg'
 
-    const n = new Notification(`TeraSwap — ${title}`, {
+    const n = new Notification(`TeraSwap: ${title}`, {
       body,
       icon: icon,
       badge: '/favicon.ico',

@@ -206,21 +206,21 @@ export const DISABLED_SOURCES: Record<string, string> = {
   // ever (T-SAF W7-L-02, 2026-07-02). Re-enable ONLY after migrating
   // src/lib/adapters/balancer.ts to the Balancer v3 GraphQL SOR
   // (POST /graphql, sorGetSwapPaths).
-  balancer: 'SOR order endpoint dead (404) — re-enable requires migrating to the Balancer v3 GraphQL SOR (sorGetSwapPaths)',
+  balancer: 'SOR order endpoint dead (404): re-enable requires migrating to the Balancer v3 GraphQL SOR (sorGetSwapPaths)',
   // Odos ceased ALL operations 2026-07-30 (vendor shutdown, announced
   // publicly). PERMANENT — re-enable is impossible, the company no longer
   // exists. Adapter file kept (never delete, see CLAUDE.md) with a
   // @deprecated header; the on-chain router whitelist entries stay too
   // (immutable on Arbitrum by design) — dormant and harmless since the API
   // layer never quotes it.
-  odos: 'vendor shutdown 2026-07-30 — permanent, re-enable impossible (company no longer exists)',
+  odos: 'vendor shutdown 2026-07-30: permanent, re-enable impossible (company no longer exists)',
   // [CHORE-2026-09-03 / INC-2026-09-03-001] Measured in production
   // 2026-09-03 10:01-10:06 UTC: every probe returns HttpError 403 (an HTML
   // Cloudflare challenge on a JSON endpoint). The vendor publishes no key
   // programme and never answered the owner's request for one. RE-ENABLE
   // CRITERION: a vendor-issued key (or documented public endpoint) returns
   // 200 JSON for the canonical USDC→USDT probe on chains 1 and 8453.
-  openocean: 'HttpError 403 on every probe (Cloudflare challenge, no key programme) — re-enable requires a vendor-issued key or documented public endpoint returning 200 JSON for USDC→USDT on chains 1 and 8453',
+  openocean: 'HttpError 403 on every probe (Cloudflare challenge, no key programme): re-enable requires a vendor-issued key or documented public endpoint returning 200 JSON for USDC→USDT on chains 1 and 8453',
   // [CHORE-2026-09-03 / INC-2026-09-03-001] Measured in production
   // 2026-09-03 10:01-10:06 UTC: "[bebop] skipped on every chain —
   // BEBOP_API_KEY not set" on every tick. The owner never received a key
@@ -228,7 +228,7 @@ export const DISABLED_SOURCES: Record<string, string> = {
   // source has never quoted in production. RE-ENABLE CRITERION:
   // BEBOP_API_KEY issued by the vendor, set in production, and a firm JAM
   // quote returns an executable settlement on chains 1 and 8453.
-  bebop: 'BEBOP_API_KEY never issued by vendor — skipped on every tick, never quoted in production — re-enable requires a vendor-issued key set in production plus a firm JAM quote returning executable settlement on chains 1 and 8453',
+  bebop: 'BEBOP_API_KEY never issued by vendor: skipped on every tick, never quoted in production. Re-enable requires a vendor-issued key set in production plus a firm JAM quote returning executable settlement on chains 1 and 8453',
 }
 
 // FeeCollector ABI (only the functions we call from the frontend)
