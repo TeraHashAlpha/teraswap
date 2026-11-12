@@ -16,7 +16,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('wagmi', () => ({
   useAccount: () => ({ isConnected: false, chain: undefined }),
@@ -90,6 +90,13 @@ async function baseline(run: (s: typeof import('@/lib/sounds')) => void): Promis
   return log
 }
 
+// Nothing here waits (no timers; a repeat `freshPage()` costs ~20 ms). The cost is the ONE cold load of the shell's module tree
+// (node_modules reads + transforms), measured ~1.1-1.5 s on an idle Mac (CPU profile: node:fs reads of externals). It used to land in
+// the first test and, at 5 s, timed out on a loaded runner. Pay it once here, under its own explicit budget; the parity tests keep the default.
+beforeAll(async () => {
+  await freshPage()
+  vi.unstubAllGlobals()
+}, 20_000)
 beforeEach(() => vi.useRealTimers())
 afterEach(() => {
   cleanup()
