@@ -16,7 +16,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import sharp from 'sharp'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { composite, contrastRatio, hexToRgb, luminance, type RGB } from '../photos/contrast'
 import { PHOTO_TOKENS } from '../photos/photo-tokens'
 import { V2_COLORS } from '../tokens'
@@ -81,15 +81,29 @@ function veiledLuminances(px: Float32Array): number[] {
   return out.sort((a, b) => a - b)
 }
 /** Veil, then the section's scrim at `alpha`, over a backdrop: the sorted luminance list the text actually sits on. */
-function scrimmedLuminances(px: Float32Array, alpha: number): number[] {
-  const out: number[] = []
+function scrimmedLuminances(px: Float32Array, alpha: number): Float64Array {
+  // A Float64Array sorts numerically with the engine's native sort (no comparator callback): the same ascending list of the same doubles.
+  const out = new Float64Array(px.length / 3)
   for (let i = 0; i < px.length; i += 3) {
     const veiled = composite(VEIL, VEIL_A, [Math.round(px[i]), Math.round(px[i + 1]), Math.round(px[i + 2])])
-    out.push(luminance(composite(BG, alpha, veiled)))
+    out[i / 3] = luminance(composite(BG, alpha, veiled))
   }
-  return out.sort((a, b) => a - b)
+  return out.sort()
 }
-const p95 = (sorted: number[]) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))]
+const p95 = (sorted: ArrayLike<number>) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))]
+/**
+ * p95 of `scrimmedLuminances(s.px, alpha)`, computed ONCE per (state, alpha) for the whole file. Seven tests below ask for the
+ * same pairs (every text token × every state × every section); recomputing each one (a 20 k-pixel composite + sort) took ~1 s per
+ * test and timed out at 5 s on a loaded CI runner. Same pixels, same percentile: only the repetition is gone.
+ */
+const scrimP95Memo = new WeakMap<State, Map<number, number>>()
+function scrimmedP95(s: State, alpha: number): number {
+  let byAlpha = scrimP95Memo.get(s)
+  if (!byAlpha) scrimP95Memo.set(s, (byAlpha = new Map()))
+  let v = byAlpha.get(alpha)
+  if (v === undefined) byAlpha.set(alpha, (v = p95(scrimmedLuminances(s.px, alpha))))
+  return v
+}
 const lum = (c: RGB) => luminance(c)
 const ratioOnLuminance = (fg: RGB, bgLum: number) => {
   const [hi, lo] = [lum(fg), bgLum].sort((a, b) => b - a)
@@ -201,6 +215,11 @@ const report: string[] = []
 describe('scroll-narrative contrast (WCAG AA, 95th-percentile backdrop)', async () => {
   await buildStates()
 
+  // Fill the memo once, here, for exactly the (state, section) pairs the tests read, instead of inside whichever test asks first.
+  beforeAll(() => {
+    for (const s of states) for (const sec of s.sections) scrimmedP95(s, scrimFor(sec, s.vp).alpha)
+  })
+
   it('covers every state: 7 desktop + 5 mobile photos, every section boundary that fades (worst of 0.1…0.9) and its two 50 % mid-fade orders, in AVIF and WebP', () => {
     // per ext: desktop 7 photos + 8 fades + 8×2 mid-fades, mobile 5 photos + 6 fades + 6×2 mid-fades
     // (desktop: 9 sections, 8 boundaries, all change photo; mobile: 9 sections, 8 boundaries, 2 keep the photo and do not fade)
@@ -219,7 +238,7 @@ describe('scroll-narrative contrast (WCAG AA, 95th-percentile backdrop)', async 
     for (const s of states) {
       for (const sec of s.sections.filter((id) => sections.includes(id))) {
         const { alpha, token: scrim } = scrimFor(sec, s.vp)
-        const r = ratioOnLuminance(fg, p95(scrimmedLuminances(s.px, alpha)))
+        const r = ratioOnLuminance(fg, scrimmedP95(s, alpha))
         if (r < worst) [worst, where] = [r, `${s.name} · ${sec} · ${scrim} α${alpha}`]
       }
     }
@@ -233,7 +252,7 @@ describe('scroll-narrative contrast (WCAG AA, 95th-percentile backdrop)', async 
     let scrimmed = Infinity
     for (const s of states) {
       veilOnly = Math.min(veilOnly, ratioOnLuminance(fg, s.p95))
-      for (const sec of s.sections) scrimmed = Math.min(scrimmed, ratioOnLuminance(fg, p95(scrimmedLuminances(s.px, scrimFor(sec, s.vp).alpha))))
+      for (const sec of s.sections) scrimmed = Math.min(scrimmed, ratioOnLuminance(fg, scrimmedP95(s, scrimFor(sec, s.vp).alpha)))
     }
     report.push(`muted worst: veil only ${veilOnly.toFixed(2)} → with scrim ${scrimmed.toFixed(2)}`)
     expect(scrimmed).toBeGreaterThanOrEqual(veilOnly)
