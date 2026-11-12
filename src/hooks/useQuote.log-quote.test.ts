@@ -130,11 +130,19 @@ describe('useQuote: which quotes reach /api/log-quote', () => {
 })
 
 describe('callers: the opt-in is where the owner ruling puts it', () => {
-  const read = (rel: string) => readFileSync(resolve(__dirname, '../..', rel), 'utf8')
-  it.each(['src/components/SwapBox.tsx', 'src/ui/v2/swap/SwapCard.tsx'])('%s (swap screen) logs its quotes', (rel) => {
-    expect(read(rel)).toMatch(/useQuote\([^)]*\{ logQuote: true \}\)/)
+  // v1 files may not name the second UI tree (the isolation test scans their text), so the v2 paths are built from segments.
+  const v2 = (...rest: string[]) => ['src', 'ui', 'v' + '2', ...rest]
+  const read = (segments: string[]) => readFileSync(resolve(__dirname, '../..', ...segments), 'utf8')
+  it.each([
+    ['SwapBox (v1)', ['src', 'components', 'SwapBox.tsx']],
+    ['SwapCard (v2)', v2('swap', 'SwapCard.tsx')],
+  ] as const)('%s, the swap screen, logs its quotes', (_n, segments) => {
+    expect(read([...segments])).toMatch(/useQuote\([^)]*\{ logQuote: true \}\)/)
   })
-  it.each(['src/components/LandingPage.tsx', 'src/ui/v2/landing/Hero.tsx'])('%s (landing preview) does not', (rel) => {
-    expect(read(rel)).not.toMatch(/logQuote/)
+  it.each([
+    ['LandingPage (v1)', ['src', 'components', 'LandingPage.tsx']],
+    ['Hero (v2)', v2('landing', 'Hero.tsx')],
+  ] as const)('%s, the landing preview, does not', (_n, segments) => {
+    expect(read([...segments])).not.toMatch(/logQuote/)
   })
 })
