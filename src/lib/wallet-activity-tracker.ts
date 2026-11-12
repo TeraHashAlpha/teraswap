@@ -25,18 +25,6 @@ export interface WalletEvent {
   metadata?: Record<string, unknown>
 }
 
-// ── Session ID (reuses the same key as UsageTracker) ──
-function getSessionId(): string {
-  if (typeof window === 'undefined') return ''
-  const KEY = 'teraswap_session_id'
-  let id = sessionStorage.getItem(KEY)
-  if (!id) {
-    id = crypto.randomUUID()
-    sessionStorage.setItem(KEY, id)
-  }
-  return id
-}
-
 // ── Beacon / fetch helper ──
 function sendEvents(events: Record<string, unknown>[]) {
   const payload = JSON.stringify({ events })
@@ -85,7 +73,6 @@ export function trackWalletActivity(wallet: string, event: WalletEvent): void {
 
   buffer.push({
     wallet: wallet.toLowerCase(),
-    session_id: getSessionId(),
     category: event.category,
     action: event.action,
     source: event.source ?? null,

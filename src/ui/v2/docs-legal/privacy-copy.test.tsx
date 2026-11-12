@@ -83,11 +83,13 @@ describe.each(LEGAL)('Privacy Policy — %s', (_ui, mount) => {
     expect(proxy).not.toMatch(/shields your IP address|your browser never makes direct requests|What is (not )?protected|maximum privacy/i)
   })
 
-  it('§8 names the analytics that does run, and stops claiming there is none', () => {
+  // [fix/privacy-no-usage-tracking] Vercel Web Analytics is removed (package, <Analytics />, built chunks): §8 says there is none.
+  it('§8 says: no cookies for visitors, no analytics service, no ad scripts, no browser error-reporting service; browser storage is for convenience', () => {
     const cookies = section(mount(), 'pp-cookies')
-    expect(cookies).toContain('The Interface does not use cookies for tracking or advertising purposes, and it runs no advertising scripts.')
-    expect(cookies).toContain('Page views are counted by Vercel Web Analytics, our hosting provider’s analytics, which is loaded from our own domain.')
+    expect(cookies).toContain('The Interface sets no cookies for visitors, uses no analytics service, and runs no advertising scripts.')
     expect(cookies).toContain('No third-party error-reporting or session-replay service runs in your browser.')
+    expect(cookies).toContain('Any data stored in your browser (local storage, session storage, and the wallet libraries’ own storage) is used solely for your convenience and remains on your device.')
+    expect(cookies).not.toMatch(/Vercel|page views|in aggregate|hosting provider/i)
     expect(cookies).not.toMatch(/do not employ any third-party analytics/i)
   })
 })
@@ -98,7 +100,7 @@ describe.each(LEGAL)('Privacy Policy §3.3 — %s', (_ui, mount) => {
   it("says the local copies stay local AND that every swap and order is stored server-side (the Auditor's wording)", () => {
     const collect = section(mount(), 'pp-collect')
     expect(collect).toContain(
-      'These copies stay in your browser and are never uploaded as such; separately, every swap and order you make is sent to our server and stored with your wallet address (see 3.2) — that server record is what the History tab shows.',
+      'These copies stay in your browser and are never uploaded as such. Separately, every swap and order you make is sent to our server and stored with your wallet address (see 3.2); that server record is what the History tab shows.',
     )
     expect(collect).not.toMatch(/never transmitted to our servers|remains exclusively on your device/i)
   })
@@ -124,6 +126,89 @@ describe.each(LEGAL)('Privacy Policy §6 — %s', (_ui, mount) => {
     expect(sharing).toContain(
       'When you request a swap quote, or submit a CoW Protocol order you have signed, the Interface sends your wallet address and transaction parameters (for a CoW Protocol order, the signed order itself) to the APIs of third-party aggregator and DEX protocols via our server-side proxy. Your IP address is not exposed to these services.',
     )
+  })
+
+  // [fix/privacy-no-usage-tracking, owner 2026-11-12] a reservation, not a practice; no analytics provider is named.
+  it('reserves disclosure of the 3.2 records when a law or a valid legal order requires it, and names no analytics provider', () => {
+    const sharing = section(mount(), 'pp-sharing')
+    expect(sharing).toContain('We may disclose the records described in section 3.2 when a law or a valid legal order requires it.')
+    expect(sharing).not.toMatch(/analytics provider|screen/i)
+  })
+})
+
+// [fix/privacy-no-usage-tracking] The site stops recording how visitors use it; §3 says only what the code does.
+describe.each(LEGAL)('Privacy Policy §3 and no usage tracking — %s', (_ui, mount) => {
+  it('§3.1 says we read public on-chain data for the connected address, and no longer claims wallet screening', () => {
+    const collect = section(mount(), 'pp-collect')
+    expect(collect).toContain('we read publicly-available blockchain data for the connected address, such as token balances and allowances, and we look up the orders and swap history our server holds for that address (see 3.2), to show them to you.')
+    expect(collect).not.toMatch(/screen wallet|blockchain analytics provider/i)
+  })
+
+  it('§3.2 says we do not record pages or clicks, collect device, OS or browser, set no tracking cookies and use no analytics service', () => {
+    const collect = section(mount(), 'pp-collect')
+    expect(collect).toContain('Our own code does not record the pages you view or your clicks, and it does not collect your device type, operating system, or browser. The Interface sets no tracking cookies and uses no analytics service.')
+    expect(collect).not.toMatch(/Vercel|page views|in aggregate/i)
+    expect(collect).toContain('We do not collect or store your name, email address, home address, or date of birth.')
+    expect(collect).toContain(PRIVACY_IP_STORAGE_NOTE)
+    expect(collect).toContain(PRIVACY_WALLET_STORAGE_NOTE)
+    expect(PRIVACY_WALLET_STORAGE_NOTE).toMatch(/orders, swap history and quotes/)
+    expect(collect).toContain("Each quote you request on the swap screen, including its automatic refresh, is logged with its token pair, amount, and the sources' answers; the log carries your wallet address when a wallet is connected and no identifier when none is.")
+    expect(collect).not.toMatch(/may automatically collect|general usage patterns\./i)
+  })
+
+  it('no other section promises screening, usage analysis or analytics-provider sharing', () => {
+    const c = mount()
+    const all = textOf(c)
+    expect(all).not.toMatch(/Screen wallets|Analyze usage patterns|blockchain analytics providers|automatically collected technical data/i)
+  })
+})
+
+// [fix/privacy-no-usage-tracking A78 S-5] §10 promised deletion "only for as long as necessary"; the code has no job that deletes anything.
+describe.each(LEGAL)('Privacy Policy §10 — %s', (_ui, mount) => {
+  it('says records are kept until the visitor asks for deletion or we no longer need them, with no fixed period', () => {
+    const retention = section(mount(), 'pp-retention')
+    expect(retention).toContain('We keep the records described in section 3.2 until you ask us to delete them (see section 11) or we no longer need them; no fixed deletion period applies.')
+    expect(retention).toContain('On-chain data exists permanently on public blockchains, which we cannot modify or delete.')
+    expect(retention).not.toMatch(/only for as long as necessary/i)
+  })
+})
+
+describe('"no cookies for visitors" is backed by the code', () => {
+  it('the only cookie the app sets is ts_ui, from the owner-only /api/admin/ui-version route; nothing in the page writes one', async () => {
+    const { execFileSync } = await import('node:child_process')
+    const { resolve } = await import('node:path')
+    const root = resolve(__dirname, '../../../..')
+    const out = execFileSync('grep', ['-rnE', 'document\\.cookie|cookies\\.set\\(|cookieStorage|[sS]et-[cC]ookie', 'src', '--include=*.ts', '--include=*.tsx', '-l'], { cwd: root, encoding: 'utf8' })
+    const files = out.split('\n').filter((f) => f && !/\.test\.tsx?$/.test(f))
+    expect(files).toEqual(['src/app/api/admin/ui-version/route.ts'])
+  })
+
+  it('no page, layout or provider names the Vercel analytics script or package any more', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { resolve } = await import('node:path')
+    const root = resolve(__dirname, '../../../..')
+    expect(readFileSync(resolve(root, 'src/app/layout.tsx'), 'utf8')).not.toMatch(/analytics/i)
+    expect(readFileSync(resolve(root, 'package.json'), 'utf8')).not.toContain('@vercel/analytics')
+  })
+})
+
+// The owner's typography rule for Privacy, Terms and every privacy claim: no em dash, no spaced en dash.
+const BAD_DASH = /\u2014|\s\u2013\s/
+describe('Privacy, Terms and the privacy claims carry no em dash and no spaced en dash', () => {
+  it.each([
+    ['v1 privacy', () => render(<LegalPage type="privacy" />).container],
+    ['v1 terms', () => render(<LegalPage type="terms" />).container],
+    ['v2 privacy', () => render(<LegalPageV2 type="privacy" />).container],
+    ['v2 terms', () => render(<LegalPageV2 type="terms" />).container],
+  ] as const)('%s', (_name, mount) => {
+    expect(textOf(mount())).not.toMatch(BAD_DASH)
+  })
+
+  it('every PRIVACY_* claim constant', async () => {
+    const claims = (await import('@/config/product-claims')) as Record<string, unknown>
+    const privacy = Object.entries(claims).filter(([k, v]) => k.startsWith('PRIVACY_') && typeof v === 'string')
+    expect(privacy.length).toBeGreaterThanOrEqual(6)
+    for (const [k, v] of privacy) expect(v as string, k).not.toMatch(BAD_DASH)
   })
 })
 

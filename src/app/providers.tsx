@@ -9,7 +9,6 @@ import { ThemeProvider, useTheme } from '@/contexts/ThemeContext'
 import { ToastProvider } from '@/components/ToastProvider'
 import BackgroundMusic from '@/components/BackgroundMusic'
 import WalletSessionGuard from '@/components/WalletSessionGuard'
-import UsageTracker from '@/components/UsageTracker'
 import { assertEnv } from '@/lib/env-validation'
 
 import '@rainbow-me/rainbowkit/styles.css'
@@ -60,7 +59,6 @@ export default function Providers({ children }: { children: ReactNode }) {
             <ToastProvider>
               <BackgroundMusic />
               <WalletSessionGuard />
-              <UsageTracker />
               {children}
             </ToastProvider>
           </RainbowKitWithTheme>
