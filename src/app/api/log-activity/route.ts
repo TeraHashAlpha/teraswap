@@ -83,7 +83,9 @@ export async function POST(req: Request) {
       })
       .map(e => ({
         wallet:      (e.wallet as string).toLowerCase().slice(0, 42),
-        session_id:  cap(e.session_id, 64),
+        // No session id is stored (privacy: no per-visit identifier). Old cached
+        // bundles may still send one; it is ignored here.
+        session_id:  null,
         category:    cap(e.category, 20),
         action:      cap(e.action, 60),
         source:      cap(e.source, 30),

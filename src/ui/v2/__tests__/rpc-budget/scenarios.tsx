@@ -21,7 +21,7 @@ import { rpcCounter, resetRpcCounter, totalRpcCalls } from '@/test-utils/rpc-har
 export type Ui = 'v1' | 'v2'
 /**
  * Globals every harness test file needs (call from `beforeAll`). The test file itself must also hoist these mocks:
- * `@/lib/rpc-guarded-transport` (→ `mockGuardedTransportModule()`), `@/components/BackgroundMusic`, `@/components/UsageTracker`,
+ * `@/lib/rpc-guarded-transport` (→ `mockGuardedTransportModule()`), `@/components/BackgroundMusic`,
  * `@/lib/sounds`, `@/ui/v2/font-loader`, `@/components/ParticleNetwork` — see `harness.test.tsx`.
  */
 export function installHarnessGlobals(): void {
