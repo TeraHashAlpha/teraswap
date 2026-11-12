@@ -59,7 +59,7 @@ describe('Portfolio: truncated note', () => {
   })
 
   it('the note carries no U+2014 and is not a link', () => {
-    expect(PORTFOLIO_TRUNCATED_NOTE.includes('—')).toBe(false)
+    expect(PORTFOLIO_TRUNCATED_NOTE.includes(String.fromCharCode(0x2014))).toBe(false)
     h.data = state({ truncated: true })
     const { v1, v2 } = both()
     expect(v1.querySelector('[data-testid="portfolio-truncated"] a')).toBeNull()

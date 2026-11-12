@@ -82,17 +82,18 @@ describe('chain switch (the header menu changes the chain; the hook follows it, 
   })
 
   it('an import on one chain does not mark the same address imported on another (chain from the token, not the wallet)', async () => {
-    const SPAM = ERC20_BY_CHAIN[1].find((t) => t.symbol === 'SPAM')!
-    h.importToken.mockResolvedValue({ address: SPAM.address, symbol: 'SPAM' })
+    // ETHFI (priced, plain name): shown by default. The unpriced SPAM row is hidden and masked (portfolio-view.test.tsx).
+    const ETHFI_ROW = ERC20_BY_CHAIN[1].find((t) => t.symbol === 'ETHFI')!
+    h.importToken.mockResolvedValue({ address: ETHFI_ROW.address, symbol: 'ETHFI' })
     const { container, rerender } = render(<PortfolioTab />)
     await waitFor(() => expect(total(container)).toBe(expectedTotalText(1)), { timeout: 8_000 })
-    fireEvent.click(within(container).getByLabelText('Add SPAM to tokens'))
-    await waitFor(() => expect(within(container).getByLabelText('Swap SPAM')).toBeTruthy())
+    fireEvent.click(within(container).getByLabelText('Add ETHFI to tokens'))
+    await waitFor(() => expect(within(container).getByLabelText('Swap ETHFI')).toBeTruthy())
 
     h.chainId = 8453 // the SAME address is held on Base too (fixture) — still un-imported there
     rerender(<PortfolioTab />)
     await waitFor(() => expect(total(container)).toBe(expectedTotalText(8453)), { timeout: 8_000 })
-    expect(within(container).getByLabelText('Add SPAM to tokens')).toBeTruthy()
+    expect(within(container).getByLabelText('Add ETHFI to tokens')).toBeTruthy()
     expect(h.importToken).toHaveBeenCalledTimes(1)
   })
 })

@@ -58,6 +58,14 @@ async function mount() {
   return { v1: v1.container as HTMLElement, v2: v2.container as HTMLElement }
 }
 
+/** [fix/portfolio-tokens-view] Open the "Show all tokens (N hidden)" control, when the wallet has hidden rows. */
+function openAll(...roots: HTMLElement[]) {
+  for (const root of roots) {
+    const btn = within(root).queryByRole('button', { name: /^Show all tokens \(\d+ hidden\)$/ })
+    if (btn) fireEvent.click(btn)
+  }
+}
+
 describe.each([1, 8453, 42161])('Portfolio holdings: chain %i', (chainId) => {
   beforeEach(() => { h.chainId = chainId })
 
@@ -83,6 +91,7 @@ describe.each([1, 8453, 42161])('Portfolio holdings: chain %i', (chainId) => {
 
   it('rows: same order (USD desc, unpriced last), same symbols, balances and USD as v1', async () => {
     const { v1, v2 } = await mount()
+    openAll(v1, v2) // the unpriced SPAM row is hidden until the control is pressed
     const rows = Array.from(v2.querySelectorAll('[data-testid="holding-row"]'))
     const v2Rows = rows.map((r) => normalize(r.textContent ?? ''))
     // v1 rows are the bordered flex rows: those holding a Swap / Add control
@@ -119,6 +128,7 @@ describe.each([1, 8453, 42161])('Portfolio holdings: chain %i', (chainId) => {
 
   it('Add imports the token and the row rejoins the curated look (Swap, no address), as v1', async () => {
     const { v1, v2 } = await mount()
+    openAll(v1, v2)
     const token = ERC20_BY_CHAIN[chainId].find((t) => t.symbol === 'ETHFI')
     if (!token) return // Arbitrum's fixture holds no unknown token
     h.importToken.mockResolvedValue({ address: token.address, symbol: 'ETHFI' })
@@ -133,8 +143,8 @@ describe.each([1, 8453, 42161])('Portfolio holdings: chain %i', (chainId) => {
     expect(h.importToken).toHaveBeenNthCalledWith(2, token.address)
     expect(within(v2).getByLabelText('Swap ETHFI')).toBeTruthy()
     expect(visibleTextNodes(v2)).toEqual(visibleTextNodes(v1))
-    // the still-un-imported unknown keeps its Add and its shortened address
-    expect(within(v2).getByLabelText('Add SPAM to tokens')).toBeTruthy()
+    // the still-un-imported unknown keeps its Add; its junk name ("Airdrop Claim") is masked, so it is named by its short address
+    expect(within(v2).getByLabelText('Add Unverified token 0x3ff0…3ca0 to tokens')).toBeTruthy()
   })
 
   it('Swap goes to the Swap tab (v1: setSwapMode("instant")), carrying nothing else', async () => {

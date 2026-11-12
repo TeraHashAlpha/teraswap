@@ -3,17 +3,22 @@
 import { fmtUsd } from '@/lib/format'
 import { useEffect, useMemo, useState } from 'react'
 import { useAccount } from 'wagmi'
-import {
-  CATEGORY_DISPLAY_ORDER,
-  type Token,
-  type TokenCategory,
-} from '@/lib/tokens'
+import { type Token } from '@/lib/tokens'
 import { usePortfolio, type PortfolioToken } from '@/hooks/usePortfolio'
 import { useTokenImport } from '@/hooks/useTokenImport'
 import { useActiveChainId } from '@/hooks/useChainId'
 import { getChainConfig } from '@/lib/chains/registry'
-import { isCuratedToken } from '@/lib/chains/tokens'
-import { PORTFOLIO_TRUNCATED_NOTE } from '@/lib/portfolio-view'
+import {
+  ALL_HIDDEN_NOTE,
+  HIDE_SMALL_LABEL,
+  PORTFOLIO_TRUNCATED_NOTE,
+  THIRD_PARTY_NOTE,
+  UNVERIFIED_TOKEN_NAME,
+  buildPortfolioView,
+  shortAddress as shortenAddress,
+  showAllLabel,
+  type RowView,
+} from '@/lib/portfolio-view'
 
 interface PortfolioTabProps {
   onSwapToken?: (token: Token) => void
@@ -21,15 +26,8 @@ interface PortfolioTabProps {
 
 // A discovered token that is NOT in the ACTIVE chain's curated list (isCuratedToken — mainnet's
 // DEFAULT_TOKENS on chain 1, the Base/Arbitrum catalog elsewhere) is rendered in the "Discovered
-// in Wallet" section with the dashed-border treatment and the Add-to-Tokens CTA.
-function isDefaultToken(token: Token, chainId: number): boolean {
-  return isCuratedToken(token.address, chainId)
-}
-
-function shortenAddress(addr: string): string {
-  if (!addr || addr.length < 10) return addr
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`
-}
+// in Wallet" section with the dashed-border treatment and the Add-to-Tokens CTA. The split, the
+// $1.00 default filter, the ordering and the junk-name masking live in @/lib/portfolio-view, shared with v2.
 
 function formatLastUpdated(date: Date | null, now: number): string {
   if (!date) return ''
@@ -42,22 +40,18 @@ function formatLastUpdated(date: Date | null, now: number): string {
   return `${hours}h ago`
 }
 
-function categoryIndex(cat: TokenCategory): number {
-  const idx = CATEGORY_DISPLAY_ORDER.indexOf(cat)
-  return idx === -1 ? CATEGORY_DISPLAY_ORDER.length : idx
-}
-
 // Initials avatar shown when a token logo fails to load. Cream-gold disc
 // with the symbol's first letter — same palette as the rest of the app.
-function TokenAvatar({ token }: { token: Token }) {
+// A masked (junk-metadata) token never loads its logo and never shows its symbol: "?".
+function TokenAvatar({ token, masked = false }: { token: Token; masked?: boolean }) {
   const [errored, setErrored] = useState(false)
-  if (errored || !token.logoURI) {
+  if (masked || errored || !token.logoURI) {
     return (
       <div
         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cream-gold text-[11px] font-bold text-[#080B10]"
         aria-hidden
       >
-        {token.symbol.charAt(0).toUpperCase()}
+        {masked ? '?' : token.symbol.charAt(0).toUpperCase()}
       </div>
     )
   }
@@ -117,17 +111,17 @@ function PortfolioRow({
 // ── Discovered row (Alchemy non-DEFAULT_TOKENS) ──────────
 
 function DiscoveredRow({
-  entry,
+  row,
   imported,
   onAdd,
   onSwapToken,
 }: {
-  entry: PortfolioToken
+  row: RowView
   imported: boolean
   onAdd: (token: Token) => void
   onSwapToken?: (token: Token) => void
 }) {
-  const { token, balanceFormatted, valueUsd } = entry
+  const { token, balanceFormatted, valueUsd } = row.entry
   // After import the row visually rejoins the curated set (solid border,
   // Swap button). Pre-import: dashed border, address shown, Add CTA.
   return (
@@ -139,16 +133,23 @@ function DiscoveredRow({
       }`}
     >
       <div className="flex min-w-0 items-center gap-3">
-        <TokenAvatar token={token} />
+        <TokenAvatar token={token} masked={row.masked} />
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-cream">{token.symbol}</div>
-          <div className="truncate text-[11px] text-cream-50">{token.name}</div>
-          {!imported && (
+          <div className="truncate text-sm font-semibold text-cream">{row.masked ? UNVERIFIED_TOKEN_NAME : token.symbol}</div>
+          <div className={`truncate text-[11px] ${row.masked ? 'font-mono text-cream-35' : 'text-cream-50'}`} title={row.masked ? token.address : undefined}>
+            {row.subtitle}
+          </div>
+          {!imported && !row.masked && (
             <div
               className="mt-0.5 font-mono text-[11px] text-cream-35"
               title={token.address}
             >
               {shortenAddress(token.address)}
+            </div>
+          )}
+          {row.nonCatalog && (
+            <div className="mt-0.5 text-[10px] leading-snug text-cream-35" data-testid="portfolio-third-party">
+              {THIRD_PARTY_NOTE}
             </div>
           )}
         </div>
@@ -165,7 +166,7 @@ function DiscoveredRow({
             <button
               onClick={() => onSwapToken(token)}
               className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-cream-08 px-2.5 text-[11px] font-medium text-cream-50 transition hover:border-cream-35 hover:text-cream"
-              aria-label={`Swap ${token.symbol}`}
+              aria-label={`Swap ${row.label}`}
             >
               Swap
             </button>
@@ -174,7 +175,7 @@ function DiscoveredRow({
           <button
             onClick={() => onAdd(token)}
             className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-cream-gold/40 bg-cream-gold/10 px-2.5 text-[11px] font-medium text-cream-gold transition hover:bg-cream-gold/20"
-            aria-label={`Add ${token.symbol} to tokens`}
+            aria-label={`Add ${row.label} to tokens`}
           >
             Add
           </button>
@@ -244,28 +245,19 @@ export default function PortfolioTab({ onSwapToken }: PortfolioTabProps) {
     return () => clearInterval(id)
   }, [lastUpdated])
 
+  // [fix/portfolio-tokens-view] Closed on every page load (plain state, never persisted).
+  const [showAll, setShowAll] = useState(false)
+
   // Split tokens into the curated set (rendered in CATEGORY_DISPLAY_ORDER
   // buckets) and the discovered-non-default set (rendered last under
-  // "Discovered in Wallet").
-  const { grouped, discovered } = useMemo(() => {
-    const buckets = new Map<TokenCategory, PortfolioToken[]>()
-    const discoveredList: PortfolioToken[] = []
-    for (const entry of tokens) {
-      if (isDefaultToken(entry.token, activeChainId)) {
-        const list = buckets.get(entry.token.category) ?? []
-        list.push(entry)
-        buckets.set(entry.token.category, list)
-      } else {
-        discoveredList.push(entry)
-      }
-    }
-    return {
-      grouped: Array.from(buckets.entries()).sort(
-        ([a], [b]) => categoryIndex(a) - categoryIndex(b),
-      ),
-      discovered: discoveredList,
-    }
-  }, [tokens, activeChainId])
+  // "Discovered in Wallet"). Rows under $1.00 / unpriced are left out unless `showAll`.
+  const { grouped, discovered, smallCount, visibleCount } = useMemo(
+    () => buildPortfolioView(tokens, activeChainId, showAll),
+    [tokens, activeChainId, showAll],
+  )
+  // Prices have not landed yet: every row is "unpriced" for a moment. Show the skeleton, not an
+  // empty list and a false "nothing is worth $1.00".
+  const awaitingPrices = !isError && isLoading && lastUpdated === null && tokens.length > 0
 
   if (!isConnected) {
     return (
@@ -328,7 +320,7 @@ export default function PortfolioTab({ onSwapToken }: PortfolioTabProps) {
       )}
 
       {/* Loading skeleton (initial fetch, no rows yet) */}
-      {isLoading && tokens.length === 0 && !isError && (
+      {((isLoading && tokens.length === 0 && !isError) || awaitingPrices) && (
         <div className="space-y-2">
           {[...Array(4)].map((_, i) => (
             <div
@@ -346,18 +338,33 @@ export default function PortfolioTab({ onSwapToken }: PortfolioTabProps) {
         </div>
       )}
 
+      {/* [fix/portfolio-tokens-view] Small balances and unpriced tokens are hidden by default; nothing is removed. */}
+      {!awaitingPrices && smallCount > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0 px-1" data-testid="portfolio-small-toggle">
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            aria-expanded={showAll}
+            className="inline-flex min-h-[44px] items-center rounded-lg text-[12px] font-medium text-cream-50 transition hover:text-cream"
+          >
+            {showAll ? HIDE_SMALL_LABEL : showAllLabel(smallCount)}
+          </button>
+          {!showAll && visibleCount === 0 && <span className="text-[12px] text-cream-35">{ALL_HIDDEN_NOTE}</span>}
+        </div>
+      )}
+
       {/* Curated token list — grouped by category */}
-      {grouped.length > 0 && (
+      {!awaitingPrices && grouped.length > 0 && (
         <div className="space-y-4">
           {grouped.map(([category, entries]) => (
             <div key={category} className="space-y-1.5">
               <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-cream-35">
                 {category}
               </div>
-              {entries.map((entry) => (
+              {entries.map((row) => (
                 <PortfolioRow
-                  key={entry.token.address}
-                  entry={entry}
+                  key={row.entry.token.address}
+                  entry={row.entry}
                   onSwapToken={onSwapToken}
                 />
               ))}
@@ -367,16 +374,16 @@ export default function PortfolioTab({ onSwapToken }: PortfolioTabProps) {
       )}
 
       {/* Discovered (Alchemy-only) — appended at the very end */}
-      {discovered.length > 0 && (
+      {!awaitingPrices && discovered.length > 0 && (
         <div className="space-y-1.5 pt-2">
           <div className="px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cream-35">
             Discovered in Wallet
           </div>
-          {discovered.map((entry) => (
+          {discovered.map((row) => (
             <DiscoveredRow
-              key={entry.token.address}
-              entry={entry}
-              imported={importedAddrs.has(entry.token.address.toLowerCase())}
+              key={row.entry.token.address}
+              row={row}
+              imported={importedAddrs.has(row.entry.token.address.toLowerCase())}
               onAdd={handleAdd}
               onSwapToken={onSwapToken}
             />

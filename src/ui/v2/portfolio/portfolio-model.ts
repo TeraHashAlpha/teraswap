@@ -26,7 +26,11 @@ export interface PortfolioGroups {
   discovered: PortfolioToken[]
 }
 
-/** v1's split (PortfolioTab useMemo): curated → category buckets, the rest → Discovered in Wallet. */
+/**
+ * v1's split (PortfolioTab useMemo): curated → category buckets, the rest → Discovered in Wallet.
+ * [fix/portfolio-tokens-view] No longer used by the tab: both UIs render `buildPortfolioView` (@/lib/portfolio-view), which adds the $1.00
+ * default filter, the USD ordering and the junk-name masking. Kept, unreferenced, rather than deleted.
+ */
 export function groupPortfolio(tokens: readonly PortfolioToken[], chainId: number): PortfolioGroups {
   const buckets = new Map<TokenCategory, PortfolioToken[]>()
   const discovered: PortfolioToken[] = []

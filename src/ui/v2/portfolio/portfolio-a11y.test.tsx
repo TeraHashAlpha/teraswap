@@ -28,7 +28,7 @@ const CSS = readFileSync(join(__dirname, 'portfolio.css'), 'utf8')
 const BASE_TOKENS = getChainTokenList(8453)
 const eth = BASE_TOKENS.find((t) => t.symbol === 'ETH')!
 const usdc = BASE_TOKENS.find((t) => t.symbol === 'USDC')!
-const odd = { address: '0x6c240dda6b5c336df09a4d011139beaaa1ea2aa2' as `0x${string}`, symbol: 'ETHFI', name: 'ether.fi governance token', decimals: 18, logoURI: '', category: 'Other' as const }
+const odd = { address: '0x6c240dda6b5c336df09a4d011139beaaa1ea2aa2' as `0x${string}`, symbol: 'ETHFI', name: 'EtherFi governance token', decimals: 18, logoURI: '', category: 'Other' as const }
 const row = (token: PortfolioToken['token'], balance: bigint, valueUsd: number | null): PortfolioToken => ({ token, balance, balanceFormatted: fmtToken(balance, token.decimals), priceUsd: 1, valueUsd })
 const approval = (symbol: string): ApprovalRecord => ({
   id: symbol, tokenAddress: usdc.address as `0x${string}`, tokenSymbol: symbol, spenderAddress: '0x000000000000000000000000000000000000dEaD', spenderLabel: 'Velora',

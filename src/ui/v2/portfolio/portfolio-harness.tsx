@@ -16,12 +16,12 @@ export const ERC20_BY_CHAIN: Record<number, Held[]> = {
   1: [
     { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', symbol: 'USDC', name: 'USD Coin', decimals: 6, balance: 2_500_000_000n, priceCents: 100n },
     { address: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', symbol: 'WBTC', name: 'Wrapped BTC', decimals: 8, balance: 10_000_000n, priceCents: 6_000_000n },
-    { address: '0x6c240dda6b5c336df09a4d011139beaaa1ea2aa2', symbol: 'ETHFI', name: 'ether.fi governance token', decimals: 18, balance: 460n * 10n ** 18n, priceCents: 50n },
+    { address: '0x6c240dda6b5c336df09a4d011139beaaa1ea2aa2', symbol: 'ETHFI', name: 'EtherFi governance token', decimals: 18, balance: 460n * 10n ** 18n, priceCents: 50n },
     { address: '0x3ff0000000000000000000000000000000033ca0', symbol: 'SPAM', name: 'Airdrop Claim', decimals: 18, balance: 1n * 10n ** 18n, priceCents: null },
   ],
   8453: [
     { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', symbol: 'USDC', name: 'USD Coin', decimals: 6, balance: 1_250_000_000n, priceCents: 100n },
-    { address: '0x6c240dda6b5c336df09a4d011139beaaa1ea2aa2', symbol: 'ETHFI', name: 'ether.fi governance token', decimals: 18, balance: 460n * 10n ** 18n, priceCents: 50n },
+    { address: '0x6c240dda6b5c336df09a4d011139beaaa1ea2aa2', symbol: 'ETHFI', name: 'EtherFi governance token', decimals: 18, balance: 460n * 10n ** 18n, priceCents: 50n },
     { address: '0x3ff0000000000000000000000000000000033ca0', symbol: 'SPAM', name: 'Airdrop Claim', decimals: 18, balance: 1n * 10n ** 18n, priceCents: null },
   ],
   42161: [
