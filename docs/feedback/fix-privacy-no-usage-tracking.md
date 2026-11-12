@@ -1,4 +1,4 @@
-## Feedback — fix/privacy-no-usage-tracking
+## Feedback: fix/privacy-no-usage-tracking
 
 Owner decision: the site stops recording how visitors use it; keeps orders, swap history, quotes (with the wallet address) and Vercel Web Analytics' aggregate page-view counter (Privacy §8). v1 and v2 together.
 
@@ -14,7 +14,7 @@ Owner decision: the site stops recording how visitors use it; keeps orders, swap
 swap/approval/quote/order/error/`ui` events to `/api/log-activity` (table `wallet_activity`). Owner: **drop the session id only**; the
 wallet-keyed product events stay and Privacy §3.2 must disclose them.
 
-### Evidence 1 — what the tracker sent, and proof nothing is sent now
+### Evidence 1: what the tracker sent, and proof nothing is sent now
 - Sent to `/api/log-event` (`archive/src/components/UsageTracker.tsx`): `session_id` (random UUID in `sessionStorage` `teraswap_session_id`, :6-13),
   `event_type` (`page_view` / `click` / `session_end`), `page` (pathname), `referrer` (`document.referrer`), `screen_w` (`window.innerWidth`),
   `user_agent` (`navigator.userAgent`), `duration_ms` (time on page), and for clicks `click_target` (label/text ≤ 80), `click_tag`, `click_id`, `click_class`.
@@ -24,7 +24,7 @@ wallet-keyed product events stay and Privacy §3.2 must disclose them.
   fetch/sendBeacon to `/api/log-event`, no `teraswap_session_id`. Mutation check: re-mounting the archived tracker made both tests fail. `route.test.ts` (204, body not read, no DB).
   `wallet-activity-tracker.no-session-id.test.ts` and `log-activity/route.no-session-id.test.ts` (session id not sent, stored as null even from an old bundle).
 
-### Evidence 2 — readers of the usage-event data (table `usage_events`)
+### Evidence 2: readers of the usage-event data (table `usage_events`)
 | reader | before | after |
 |---|---|---|
 | `src/app/api/monitor/route.ts` (`GET /api/monitor`, Bearer MONITOR_SECRET) | selected 10 000 rows, built `usage{totals,totalClicks,avgSessionDurationSec,devices,pageBreakdown,topClicks,dailyUsageTimeseries}` | no query; `usage: { collected: false, note: 'not collected' }` (`route.usage-not-collected.test.ts`) |
@@ -36,7 +36,7 @@ Nothing a visitor sees read it. **Database untouched:** table `usage_events` (ro
 - Extra read beyond the allow-list: `src/lib/wallet-activity-tracker.ts`, `src/app/api/log-activity/route.ts`, `src/components/AdminMonitor.tsx`, `src/app/admin/page.tsx`, rpc-budget tests (they mocked `@/components/UsageTracker`; mocks removed).
 - Test gap noted: no test existed for `/api/monitor`; only the usage section is covered now.
 
-### Evidence 3 — content-map delta (Privacy v1 `LegalPage.tsx` == v2 `LegalPageV2.tsx`; Help, Docs and Terms inherit the constants)
+### Evidence 3: content-map delta (Privacy v1 `LegalPage.tsx` == v2 `LegalPageV2.tsx`; Help, Docs and Terms inherit the constants)
 Grep for any wallet-screening call (`chainalysis|trm|elliptic|scorechain|ofac|sanctions list|blockchain analytics` over src, workers, scripts, supabase, .github): **no hit in code**, only in the Privacy/Terms copy itself. So the screening and analytics-sharing sentences were false.
 | where | before | after | proof |
 |---|---|---|---|
@@ -44,7 +44,7 @@ Grep for any wallet-screening call (`chainalysis|trm|elliptic|scorechain|ofac|sa
 | §3.2 (heading now "Data We Collect and Store") | "we may automatically collect … device type, operating system, browser type and version, and general usage patterns" | "Our own code does not collect your device type, operating system, browser, clicks, or usage patterns, and the Interface sets no tracking cookies. Page views are counted by Vercel Web Analytics, which uses no cookies and reports them in aggregate by country, device type, operating system, and browser (see section 8)." (round 2: "Our own code", and the Vercel clause) | Evidence 1; only cookie is `ts_ui`, set by the owner-only `api/admin/ui-version/route.ts:61`; `<Analytics />` `layout.tsx:106` |
 | §3.2 IP sentence | unchanged (`PRIVACY_IP_STORAGE_NOTE`) | unchanged | `client-ip-key.ts:8` |
 | §3.2 / Help / Docs note (`PRIVACY_WALLET_STORAGE_NOTE`) | "We do store wallet addresses for orders, swap history and activity." | "We store your wallet address with your orders, swap history and quotes, because the Orders, History and Analytics tabs are built from them, and with a log of the steps of each swap, approval, quote and order (including errors), which we use for debugging and support." | orders `api/orders/route.ts`, swaps `log-swap/route.ts:134`, quotes `log-quote/route.ts:59-71` (read by `/api/stats` `stats/route.ts:24,40`, fetched by the Analytics tab `use-public-stats.ts:22`), log = `wallet_activity` `log-activity/route.ts:106`, `wallet-activity-server.ts:41` |
-| §3.3 (`PRIVACY_LOCAL_COPIES_NOTE`) | same meaning; "…; separately, … (see 3.2) — that server record…" | same meaning, em dash and semicolon replaced by two sentences and a semicolon | `privacy-copy.test.tsx` §3.3 |
+| §3.3 (`PRIVACY_LOCAL_COPIES_NOTE`) | same meaning; "…; separately, … (see 3.2) [em dash] that server record…" | same meaning, em dash and semicolon replaced by two sentences and a semicolon | `privacy-copy.test.tsx` §3.3 |
 | §4 | list had "Screen wallets for compliance …" and "Analyze usage patterns …" | both removed; added "Show you the orders, swap history, and analytics for your connected wallet" | screening: grep above; usage: Evidence 1 |
 | §6 | "We may share wallet addresses with blockchain analytics providers to comply with applicable laws and regulations." | round 1: sentence removed. Round 2 (owner): added after "We do not sell, rent, or trade …": "We may disclose the records described in section 3.2 when a law or a valid legal order requires it." A reservation, no analytics provider named | grep above; `privacy-copy.test.tsx` §6 test (also asserts no "analytics provider" / "screen") |
 | §8 | "…Page views are counted by Vercel Web Analytics, our hosting provider's analytics, which is loaded from our own domain. No third-party error-reporting …" | adds: "It uses no cookies, and it reports page views in aggregate by country, device type, operating system, and browser. TeraSwap's own code does not collect or store any of that." | Vercel docs below; `privacy-copy.test.tsx` §8 test |
@@ -60,7 +60,7 @@ Vercel's aggregate breakdown (owner decision 2026-11-12, verified against Vercel
 - Limits of that evidence (so the copy does not claim more): the pages never say "no first-party storage" (the privacy page says "third-party cookies", the main page says "does not use cookies"); the data-point table lists per-event fields and the docs do not say whether a per-visitor view exists in the dashboard or API. The copy therefore says "uses no cookies" and "reports ... in aggregate", and says nothing about per-visitor storage. The API also documents `visitorId`/`userId` fields in its aggregate response schema; the owner may want to read that against "aggregate" before an Auditor signs off.
 CLAUDE.md/AGENTS.md: the generated "Test files: vitest" count is 476 after the merge (main 471 + five new test files); regenerated, not hand-merged.
 
-### Evidence 4 — verify (`scripts/agent-verify.sh --codeql`, head 632324d, base origin/main 0062400)
+### Evidence 4: verify (`scripts/agent-verify.sh --codeql`, head 632324d, base origin/main 0062400)
 suite PASS 10348 tests, 0 failed, 473 files · lint-delta PASS +0 err +0 warn · tsc PASS 0 · build PASS · v1v2-parity PASS 111 · rpc-budget PASS 33 · CodeQL security-extended PASS head 13 / base 13 / new 0
 Also: `check-product-claims.mjs` PASS; `gen-claude-state.mjs --check` PASS; `check-agents-parity.mjs` PASS; third-party-hosts capture (marker build, `e2e/third-party-hosts`, v1+v2, 3 chains, wallets, bundle) 13 passed.
 First verify run (0dbf387) failed 3: my Providers test imported `ui/v2` (isolation + parity), and the archived tracker raised one `react-hooks/purity` warning at its new path; both fixed in the last commit.
