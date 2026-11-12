@@ -61,8 +61,9 @@ function PrivacyPolicy() {
 
       <SubTitle>3.2 Data We Collect and Store</SubTitle>
       <P>
-        We do not collect your device type, operating system, browser, clicks, or usage patterns, and the
-        Interface sets no tracking cookies. Page views are counted in aggregate by Vercel Web Analytics (see section 8).
+        Our own code does not collect your device type, operating system, browser, clicks, or usage patterns, and the
+        Interface sets no tracking cookies. Page views are counted by Vercel Web Analytics, which uses no cookies and
+        reports them in aggregate by country, device type, operating system, and browser (see section 8).
         We do not collect or store your name, email address, home address, or date of birth. {PRIVACY_IP_STORAGE_NOTE} {PRIVACY_WALLET_STORAGE_NOTE}
       </P>
 
@@ -107,7 +108,8 @@ function PrivacyPolicy() {
       </P>
       <P>
         We do not sell, rent, or trade your personal information to any
-        third party for marketing purposes.
+        third party for marketing purposes. We may disclose the records described in section 3.2 when a
+        law or a valid legal order requires it.
       </P>
 
       <SectionTitle id="pp-chainlink">7. Oracle Price Verification</SectionTitle>
@@ -122,7 +124,9 @@ function PrivacyPolicy() {
       <P>
         The Interface does not use cookies for tracking or advertising purposes, and it runs no
         advertising scripts. Page views are counted by Vercel Web Analytics, our hosting
-        provider&rsquo;s analytics, which is loaded from our own domain. No third-party
+        provider&rsquo;s analytics, which is loaded from our own domain. It uses no cookies, and it reports
+        page views in aggregate by country, device type, operating system, and browser. TeraSwap&rsquo;s own
+        code does not collect or store any of that. No third-party
         error-reporting or session-replay service runs in your browser. Any data stored in your browser
         (via localStorage) is used solely for your convenience and remains on your device.
       </P>

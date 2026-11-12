@@ -53,7 +53,7 @@ const VIEW: DcaReviewView = {
 }
 
 describe('review sheet · consent gates the CTA (server tier = authority)', () => {
-  it('on-chain feed: nothing to consent to — Create DCA is live and hands over NO acknowledgement (the card re-runs prepare(); the sheet holds no draft to send)', () => {
+  it('on-chain feed: nothing to consent to. Create DCA is live and hands over NO acknowledgement (the card re-runs prepare(); the sheet holds no draft to send)', () => {
     const onCreate = vi.fn()
     render(<DcaReviewSheet review={reviewFor(onchainInfo())} view={VIEW} onCreate={onCreate} onClose={() => {}} />)
     expect(screen.queryByTestId('dca-consent')).toBeNull()
@@ -94,7 +94,7 @@ describe('review sheet · consent gates the CTA (server tier = authority)', () =
 
   it('the cap line (the tier line) shows the REAL cap, clamped to v1\'s ceiling', () => {
     render(<DcaReviewSheet review={reviewFor(unpricedInfo({ effectiveCap: 100 }))} view={VIEW} onCreate={() => {}} onClose={() => {}} />)
-    expect(screen.getByTestId('dca-review-tier').textContent).toContain('No market price source right now — buys capped at $100 and flagged')
+    expect(screen.getByTestId('dca-review-tier').textContent).toContain('No market price source right now: buys capped at $100 and flagged')
     expect(screen.getByTestId('dca-consent-body').textContent).toContain('capped at $100')
   })
 
@@ -107,7 +107,7 @@ describe('review sheet · consent gates the CTA (server tier = authority)', () =
     expect(t('dca-review-every')).toContain('Every 1d')
     expect(t('dca-review-duration')).toContain('10.0 days')
     expect(t('dca-review-expires')).toContain('30d')
-    expect(t('dca-review-floor')).toContain('≥ 1 200 USDC — ≥ 120 USDC enforced per buy')
+    expect(t('dca-review-floor')).toContain('≥ 1 200 USDC, ≥ 120 USDC enforced per buy')
     expect(t('dca-review-protection')).toContain('Off-chain check')
   })
 })
@@ -206,7 +206,7 @@ describe('Positions · v2 rows show v1\'s fields for the same order objects', ()
     progress: root.textContent?.includes(`${o.dcaExecuted} of ${o.dcaTotal} buys`),
   })
 
-  it('each active and history order: pair, filled/total, status label, tier badge, chain — present in v1 AND v2', () => {
+  it('each active and history order: pair, filled/total, status label, tier badge, chain. Present in v1 AND v2', () => {
     const orders = [ACTIVE, TIERED, DONE, CANCELLED]
     const v1 = renderV1([ACTIVE, TIERED], [DONE, CANCELLED])
     const v1Rows = v1.container

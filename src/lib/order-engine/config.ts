@@ -39,7 +39,7 @@ export function getOrderExecutorDomain(chainId: number) {
   const verifyingContract = getOrderExecutor(chainId)
   if (!verifyingContract) {
     throw new Error(
-      `No OrderExecutor deployed on chain ${chainId} — conditional orders are unavailable there`,
+      `No OrderExecutor deployed on chain ${chainId}: conditional orders are unavailable there`,
     )
   }
   return {
@@ -181,7 +181,7 @@ export function getOrderExecutorV3Domain(chainId: number) {
   const verifyingContract = getOrderExecutorV3(chainId)
   if (!verifyingContract) {
     throw new Error(
-      `No OrderExecutorV3 deployed on chain ${chainId} — v3 conditional orders are unavailable there`,
+      `No OrderExecutorV3 deployed on chain ${chainId}: v3 conditional orders are unavailable there`,
     )
   }
   return {
@@ -213,7 +213,7 @@ export function getCancelOrderDomain(chainId: number) {
   if (getOrderExecutor(chainId)) return getOrderExecutorDomain(chainId)
   if (getOrderExecutorV3(chainId)) return getOrderExecutorV3Domain(chainId)
   throw new Error(
-    `No OrderExecutor deployed on chain ${chainId} — conditional orders are unavailable there`,
+    `No OrderExecutor deployed on chain ${chainId}: conditional orders are unavailable there`,
   )
 }
 
@@ -352,7 +352,7 @@ const NO_ROUTERS = Object.freeze({}) as Record<string, RouterEntry>
  * apart, and so a reviewer can grep ONE string to find every refusal site.
  */
 export const NO_ROUTER_FOR_CHAIN_REASON =
-  'Conditional orders are unavailable on this network — no whitelisted router is configured for it.'
+  'Conditional orders are unavailable on this network: no whitelisted router is configured for it.'
 
 /**
  * Get whitelisted routers for a given chainId. [ADR-020 / finding B6] A chain this file does not

@@ -246,9 +246,8 @@ describe('sweep · shell surfaces · fabs', () => {
     cleanup()
     const v2 = render(<><HelpFab /><MusicToggle /></>)
     const v2Names = names(v2.container)
-    // v1 names the music control by its action ("Mute background music" while on); v2 words it "Turn music off" — same control, same state.
-    const EQUIV: Record<string, string> = { 'mute background music': 'turn music off', 'unmute background music': 'turn music on' }
-    expect(v1Names.map((n) => EQUIV[n] ?? n).filter((n) => !v2Names.includes(n))).toEqual([])
+    // Owner decision (walkthrough polish): v1 and v2 word the sound control identically ("Mute sound" / "Unmute sound").
+    expect(v1Names.filter((n) => !v2Names.includes(n))).toEqual([])
   })
 })
 
@@ -301,8 +300,8 @@ describe('sweep · Swap · Share (v1 SwapBox.tsx button + tweet text)', () => {
   it('a comparison across sources with a saving: label and tweet text are v1\'s, bar the doubled %', () => {
     const v1 = share('v1', taggedFixture(fixtureMeta(), '1'))
     const v2 = share('v2', taggedFixture(fixtureMeta(), '1'))
-    expect(v1.label).toMatch(/^Share — saved \d[\d.,]*%%$/) // the v1 typo is real today; if v1 fixes it, the allow-list entry goes stale and fails
-    expect(v2.label).toMatch(/^Share — saved \d[\d.,]*%$/)
+    expect(v1.label).toMatch(/^Share: saved \d[\d.,]*%%$/) // the v1 typo is real today; if v1 fixes it, the allow-list entry goes stale and fails
+    expect(v2.label).toMatch(/^Share: saved \d[\d.,]*%$/)
     const page = (x: { label: string | null; text: string | null }) => {
       const d = document.createElement('div')
       for (const t of [x.label, x.text]) d.appendChild(document.createElement('p')).textContent = t

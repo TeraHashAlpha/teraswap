@@ -40,7 +40,7 @@ export function CowOrderReviewSheet({ order, onConfirm, onCancel }: { order: Pic
       title="Review CoW Protocol Order"
       subtitle={
         <>
-          You&apos;re about to <strong className="font-semibold text-v2-text">sign a CoW Protocol order</strong> (no on-chain transaction). Verify the exact terms below — this is precisely what your wallet will sign.
+          You&apos;re about to <strong className="font-semibold text-v2-text">sign a CoW Protocol order</strong> (no on-chain transaction). Verify the exact terms below. This is precisely what your wallet will sign.
         </>
       }
       onClose={onCancel}
@@ -71,7 +71,7 @@ export function CowOrderReviewSheet({ order, onConfirm, onCancel }: { order: Pic
       </div>
 
       <p data-testid="cow-explanation" className="mt-4 border-l-2 ts-v2-accent-stroke pl-4 text-[13px] leading-relaxed text-v2-green">
-        ✓ Settled via CoW Protocol — solvers compete in a batch auction. Your wallet signs this order off-chain; no gas to submit.
+        ✓ Settled via CoW Protocol: solvers compete in a batch auction. Your wallet signs this order off-chain; no gas to submit.
       </p>
 
       <div className="mt-6 flex flex-col gap-1">

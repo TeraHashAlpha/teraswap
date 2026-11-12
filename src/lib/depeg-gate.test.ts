@@ -31,7 +31,7 @@ describe('evaluateDepeg [SPRINT-9W-oracle]', () => {
     expect(r.message).toContain('Swap blocked')
   })
 
-  it('is SYMMETRIC — cbETH cheap (market < ER) trips the same as expensive', () => {
+  it('is SYMMETRIC: cbETH cheap (market < ER) trips the same as expensive', () => {
     expect(evaluateDepeg(0.95, 1.0, 'cbETH').mode).toBe('consent') // 5% discount
     expect(evaluateDepeg(0.88, 1.0, 'cbETH').mode).toBe('block')   // 12% discount
     // identical divergence whichever side is larger
@@ -57,7 +57,7 @@ describe('evaluateDepeg [SPRINT-9W-oracle]', () => {
     expect(evaluateDepeg(-1, 1.0, 'cbETH').mode).toBe('unverified')
   })
 
-  it('unverified copy says we could not CHECK — never that the asset is depegged', () => {
+  it('unverified copy says we could not CHECK, never that the asset is depegged', () => {
     const r = evaluateDepeg(null, 1.0, 'cbETH')
     expect(r.message).toContain("couldn't verify")
     expect(r.message).toContain('cbETH')
@@ -74,7 +74,7 @@ describe('evaluateDepeg [SPRINT-9W-oracle]', () => {
     expect(r.message).not.toMatch(/depeg/i)
   })
 
-  it('PENDING is frictionless and distinct from UNVERIFIED — an in-flight read is not a failure', () => {
+  it('PENDING is frictionless and distinct from UNVERIFIED. An in-flight read is not a failure', () => {
     const p = PENDING('cbETH')
     expect(p.mode).toBe('pending')
     expect(p.message).toBeNull()          // nothing scary on a first render
@@ -111,14 +111,14 @@ describe('hasReadFailed [FIX-DEPEG-RETRY-WINDOW / M-01]', () => {
     expect(hasReadFailed({ failureCount: 0, errorUpdateCount: 7 })).toBe(true)
   })
 
-  it('is monotonic in practice — a later successful FETCH does not clear the error history', () => {
+  it('is monotonic in practice: a later successful FETCH does not clear the error history', () => {
     // errorUpdateCount is never decremented by query-core (only ++ on the 'error' action), so the
     // predicate stays true. Recovery is signalled by DATA arriving, never by this going false.
     expect(hasReadFailed({ failureCount: 0, errorUpdateCount: 3 })).toBe(true)
   })
 })
 
-describe('priceFromValidRound [SPRINT-9W-oracle] — per-leg integrity + 9V staleness', () => {
+describe('priceFromValidRound [SPRINT-9W-oracle]: per-leg integrity + 9V staleness', () => {
   const now = 1_780_000_000
   const fresh = BigInt(now - 3_600)            // 1h old
   // [roundId, answer, startedAt, updatedAt, answeredInRound]

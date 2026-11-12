@@ -69,7 +69,7 @@ describe('NoFeedConsentModal', () => {
 
 // ── Relocated from DCAPanel.nofeed-consent.test.tsx (the panel no longer renders this modal) ──
 
-describe('NoFeedConsentModal [FIX-DCA-NOFEED-CONSENT] — plain-language copy, zero jargon', () => {
+describe('NoFeedConsentModal [FIX-DCA-NOFEED-CONSENT]: plain-language copy, zero jargon', () => {
   const JARGON_DENYLIST = [/\boracle\b/i, /\bfeed\b/i, /\bslippage\b/i, /\bminamountout\b/i, /\bminimumoutput\b/i]
 
   it('title + body contain none of the technical terms on the denylist', () => {

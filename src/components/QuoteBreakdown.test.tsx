@@ -81,7 +81,7 @@ function makeProps(over: Partial<React.ComponentProps<typeof QuoteBreakdown>> = 
   }
 }
 
-describe('QuoteBreakdown — render', () => {
+describe('QuoteBreakdown: render', () => {
   it('renders the source label (1inch)', () => {
     renderWithProviders(<QuoteBreakdown {...makeProps()} />)
     expect(screen.getAllByText(/1inch/i).length).toBeGreaterThan(0)
@@ -167,7 +167,7 @@ describe('QuoteBreakdown — render', () => {
   // [FIX-PRICE-ORACLE-FAIL-CLOSED] A feed that exists but could not be READ is also
   // oracleUnavailable — but saying the token "has no Chainlink oracle" is false during an outage.
   // The two notices must not be interchangeable.
-  it('a READ FAILURE says the feed could not be read — never that the token has no oracle', () => {
+  it('a READ FAILURE says the feed could not be read, never that the token has no oracle', () => {
     renderWithProviders(
       <QuoteBreakdown
         {...makeProps({
@@ -200,7 +200,7 @@ describe('QuoteBreakdown — render', () => {
   })
 })
 
-describe('QuoteBreakdown — safeBigInt guard [10-L-01]', () => {
+describe('QuoteBreakdown: safeBigInt guard [10-L-01]', () => {
   it('does not crash when best.toAmount is malformed', () => {
     expect(() =>
       renderWithProviders(
@@ -208,11 +208,11 @@ describe('QuoteBreakdown — safeBigInt guard [10-L-01]', () => {
       ),
     ).not.toThrow()
     // The rate row falls back to a dash placeholder when toAmount is invalid.
-    expect(screen.getByText(/—|--/)).toBeInTheDocument()
+    expect(screen.getByText(/n\/a|--/)).toBeInTheDocument()
   })
 })
 
-describe('QuoteBreakdown — Base/mainnet Compare parity rendering [SPRINT-9E]', () => {
+describe('QuoteBreakdown: Base/mainnet Compare parity rendering [SPRINT-9E]', () => {
   // The component is chain-agnostic: the SAME markup renders for Base and mainnet
   // given a multi-source meta. This proves the "single-source Direct DEX" view is
   // purely a function of meta.all.length, not a chain conditional.
@@ -228,7 +228,7 @@ describe('QuoteBreakdown — Base/mainnet Compare parity rendering [SPRINT-9E]',
     } as MetaQuoteResult
   }
 
-  it('renders the Compare list for a multi-source meta (>1 source) — same component on every chain', () => {
+  it('renders the Compare list for a multi-source meta (>1 source): same component on every chain', () => {
     renderWithProviders(<QuoteBreakdown {...makeProps({ meta: multiMeta() })} />)
     expect(screen.getByText(/Compare \(4 sources\)/i)).toBeInTheDocument()
     expect(screen.getAllByText(/velora/i).length).toBeGreaterThan(0)
@@ -244,7 +244,7 @@ describe('QuoteBreakdown — Base/mainnet Compare parity rendering [SPRINT-9E]',
   })
 })
 
-describe('QuoteBreakdown — [SPRINT-9Q Q2] rate-invert toggle', () => {
+describe('QuoteBreakdown: [SPRINT-9Q Q2] rate-invert toggle', () => {
   beforeEach(() => { try { sessionStorage.clear() } catch {} })
 
   it('flips the rate direction on click (display-only, no math drift) and back', () => {
@@ -262,11 +262,11 @@ describe('QuoteBreakdown — [SPRINT-9Q Q2] rate-invert toggle', () => {
     expect(btn().textContent).toMatch(/1\s*ETH\s*=.*USDC/)
   })
 
-  it('guards a zero output (no Infinity) — inverse shows the — placeholder', () => {
+  it('guards a zero output (no Infinity), inverse shows the, placeholder', () => {
     renderWithProviders(<QuoteBreakdown {...makeProps({ meta: makeMeta({ toAmount: '0' }) })} />)
     const btn = screen.getByRole('button', { name: /flip rate direction/i })
     fireEvent.click(btn)
-    expect(btn.textContent).toMatch(/1\s*USDC\s*=\s*—\s*ETH/)
+    expect(btn.textContent).toMatch(/1\s*USDC\s*=\s*n\/a\s*ETH/)
   })
 
   it('persists the chosen direction for the session (survives remount)', () => {
@@ -280,7 +280,7 @@ describe('QuoteBreakdown — [SPRINT-9Q Q2] rate-invert toggle', () => {
   })
 })
 
-describe('QuoteBreakdown — [SPRINT-9S S2] one calm, specific oracle notice', () => {
+describe('QuoteBreakdown: [SPRINT-9S S2] one calm, specific oracle notice', () => {
   // [feat/swap-price-tiers] The 9S S2 "No Chainlink oracle … multi-source price comparison" amber is gone:
   // it pre-dated the value gate and claimed a reference the client never had. The notice now follows the
   // SERVER's tier (D1): single-source → the owner amber; unpriced → a heads-up that consent will be asked;
@@ -333,7 +333,7 @@ describe('QuoteBreakdown — [SPRINT-9S S2] one calm, specific oracle notice', (
 
 // [chore/swap-fee-usd-fix] Platform-fee USD must be valued from the reliably-priced
 // side, never the fee (input) token × the other leg's price.
-describe('QuoteBreakdown — platform fee USD (non-oracle fee token)', () => {
+describe('QuoteBreakdown: platform fee USD (non-oracle fee token)', () => {
   const AERO: Token = {
     address: '0x940181a94A35A4569E4529A3CDfB74e38FD98631' as `0x${string}`,
     symbol: 'AERO',
@@ -413,7 +413,7 @@ describe('QuoteBreakdown — platform fee USD (non-oracle fee token)', () => {
 // whitelist, e.g. Sushi v7 via RedSnwapper) is shown in the compare list
 // for price context but labeled informational.
 // ─────────────────────────────────────────────────────────────
-describe('QuoteBreakdown — quote-only source label [CHORE-SUSHI-V7]', () => {
+describe('QuoteBreakdown: quote-only source label [CHORE-SUSHI-V7]', () => {
   function compareMeta(sources: Array<[string, string]>): MetaQuoteResult {
     const quotes = sources.map(([source, toAmount]) => ({
       source, toAmount, estimatedGas: 0, gasUsd: 0, routes: [],
@@ -454,8 +454,8 @@ describe('QuoteBreakdown — quote-only source label [CHORE-SUSHI-V7]', () => {
 // of the oracle-less notice above). The flag was previously set but
 // rendered nowhere — a dead safety signal.
 // ─────────────────────────────────────────────────────────────
-describe('QuoteBreakdown — low-confidence quorum cue [CHORE-QUORUM-LOWCONFIDENCE-FIX]', () => {
-  it('renders the cue when meta.lowConfidence is set — singular copy for a single usable source', () => {
+describe('QuoteBreakdown: low-confidence quorum cue [CHORE-QUORUM-LOWCONFIDENCE-FIX]', () => {
+  it('renders the cue when meta.lowConfidence is set: singular copy for a single usable source', () => {
     renderWithProviders(
       <QuoteBreakdown {...makeProps({ meta: { ...makeMeta(), lowConfidence: true } })} />,
     )
@@ -492,7 +492,7 @@ describe('QuoteBreakdown — low-confidence quorum cue [CHORE-QUORUM-LOWCONFIDEN
   })
 })
 
-describe('QuoteBreakdown — [fix/functional-chain-ui] route names (F2) and gas precision (F3)', () => {
+describe('QuoteBreakdown: [fix/functional-chain-ui] route names (F2) and gas precision (F3)', () => {
   const rowText = (label: string) => screen.getByText(label).parentElement?.textContent ?? ''
 
   it('F3: an L2-sized 0.0000012 ETH gas cost renders "~0.0000012 ETH" (never "~0.0000 ETH"), USD first', () => {

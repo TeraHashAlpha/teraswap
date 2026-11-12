@@ -14,17 +14,17 @@ const props = () => ({
   onConfirm: vi.fn(), onCancel: vi.fn(),
 })
 
-describe('SwapUnpricedConsentDialog — owner copy with real values', () => {
+describe('SwapUnpricedConsentDialog: owner copy with real values', () => {
   it('heading, body and checkbox carry the owner copy; {A} {B} {N} {d} {minOut} are the real values', () => {
     renderWithProviders(<SwapUnpricedConsentDialog {...props()} />)
     expect(screen.getByTestId('unpriced-consent-heading').textContent).toBe('No reference price for this pair')
     expect(screen.getByTestId('unpriced-consent-body').textContent).toBe(
       "We couldn't find a Chainlink, DefiLlama or CoinGecko price for AERO or ETHFI, so we can't estimate this trade's USD value or apply value-based limits. " +
-      'What still protects you: 3 sources quoted within 0.42% of each other, and the on-chain minimum output of 1 234.5678 ETHFI — if a fill would return less, the transaction reverts.',
+      'What still protects you: 3 sources quoted within 0.42% of each other, and the on-chain minimum output of 1 234.5678 ETHFI. If a fill would return less, the transaction reverts.',
     )
-    expect(screen.getByLabelText('I understand — continue')).toBeInTheDocument()
+    expect(screen.getByLabelText('I understand: continue')).toBeInTheDocument()
     expect(UNPRICED_CONSENT_HEADING).toBe('No reference price for this pair')
-    expect(UNPRICED_CONSENT_CHECKBOX).toBe('I understand — continue')
+    expect(UNPRICED_CONSENT_CHECKBOX).toBe('I understand: continue')
   })
 
   it('Continue stays disabled until the checkbox is ticked, then confirms exactly once', () => {

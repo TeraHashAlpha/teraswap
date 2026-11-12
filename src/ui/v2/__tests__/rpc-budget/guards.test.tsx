@@ -35,7 +35,7 @@ const BUDGET_PER_MIN: Record<State, number> = { a0: 1, a: 1, b: 6, c: 12, c20: 1
 /** One-time page-load burst ceilings (block + 2 fee reads + Chainlink/gas multicall, plus wallet reads). */
 const MOUNT_CEILING: Record<State, number> = { a0: 4, a: 4, b: 4, c: 12, c20: 12, p: 12, an: 12, docs: 4 }
 
-describe.each(['v1', 'v2'] as Ui[])('browser RPC budgets — %s', (ui) => {
+describe.each(['v1', 'v2'] as Ui[])('browser RPC budgets: %s', (ui) => {
   it.each(Object.keys(BUDGET_PER_MIN) as State[])('state %s: visible ≤ budget, hidden = 0, return refreshes once', async (state) => {
     const r = await runScenario({ ui, state, hide: true })
     const perMin = sum(r.steady)

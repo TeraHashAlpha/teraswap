@@ -14,7 +14,7 @@ const body = () => screen.getByTestId('floor-consent-body').textContent ?? ''
 // Two legs ("A and B") take the plural verb.
 const verb = (sym: string) => (sym.includes(' and ') ? "don't" : "doesn't")
 const OFFCHAIN = (lead: string, sym: string) =>
-  `${lead} a Chainlink price feed registered in our contract, which lets the contract reject a bad fill on its own. ${sym} ${verb(sym)} have one yet, so protection comes from our executor instead — it checks each buy against live market prices and holds the buy if they disagree. This is how most tokens work today.`
+  `${lead} a Chainlink price feed registered in our contract, which lets the contract reject a bad fill on its own. ${sym} ${verb(sym)} have one yet, so protection comes from our executor instead. It checks each buy against live market prices and holds the buy if they disagree. This is how most tokens work today.`
 const UNPRICED = (lead: string, sym: string, cap: number) =>
   `${lead} a Chainlink price feed registered in our contract. ${sym} ${verb(sym)}, and at the moment no market price source is answering for it, so the executor can't check the fill. To limit risk, each buy is capped at $${cap} and flagged. Buys resume normal protection when a price source comes back.`
 const FALLBACK_LEAD = 'A small set of tokens on this network have'
@@ -25,7 +25,7 @@ describe('DcaFloorConsentDialog copy [fix/dca-consent-copy-and-tier-check]', () 
     render(<DcaFloorConsentDialog tier="offchain-price" symbols={['AAVE']} chainId={8453} onConfirm={() => {}} onCancel={() => {}} />)
     expect(screen.getByTestId('floor-consent-heading').textContent).toBe('How DCA buys are protected')
     expect(screen.getByRole('dialog').getAttribute('aria-labelledby')).toBe('floor-consent-heading')
-    expect(screen.getByTestId('floor-consent-checkbox').closest('label')!.textContent).toBe('Got it — continue')
+    expect(screen.getByTestId('floor-consent-checkbox').closest('label')!.textContent).toBe('Got it: continue')
     expect(screen.getByTestId('floor-consent-cancel').textContent).toBe('Cancel')
     expect(screen.getByTestId('floor-consent-confirm').textContent).toBe('Continue')
   })
@@ -48,7 +48,7 @@ describe('DcaFloorConsentDialog copy [fix/dca-consent-copy-and-tier-check]', () 
     expect(floorConsentCopy({ tier: 'unpriced', symbols: ['ETH', 'AAVE'], registeredFeedCount: 3 })).toBe(UNPRICED('3 tokens on this network have', 'ETH and AAVE', MAX))
   })
 
-  it('fallback: N missing / null / 0 / junk renders without a number — never "0 tokens"', () => {
+  it('fallback: N missing / null / 0 / junk renders without a number, never "0 tokens"', () => {
     for (const n of [undefined, null, 0, -1, 2.5, NaN]) {
       for (const tier of ['offchain-price', 'unpriced'] as const) {
         const text = floorConsentCopy({ tier, symbols: ['AAVE'], registeredFeedCount: n })

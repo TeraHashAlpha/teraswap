@@ -135,7 +135,7 @@ function DigitRoller({ value, prefix, className }: DigitRollerProps) {
   }
 
   // safeBigInt failure fallback — render the dash statically, no rollers.
-  if (value === '—') {
+  if (value === 'n/a') {
     return (
       <span ref={containerRef} className={`tabular-nums ${className ?? ''}`}>
         {prefix}

@@ -264,7 +264,7 @@ export function useDcaForm(chainId: number, paused: boolean) {
   }, [customMode, expiryIdx, interval.seconds, parts])
 
   const balanceDisplay = useMemo(() => {
-    if (!isConnected || !hasSpendBalance) return '—'
+    if (!isConnected || !hasSpendBalance) return 'n/a'
     return `${spendFormatted ?? ''} ${tokenIn?.symbol ?? ''}`.trim()
   }, [isConnected, hasSpendBalance, spendFormatted, tokenIn])
   const presetsDisabled = !isConnected || spendRaw === 0n

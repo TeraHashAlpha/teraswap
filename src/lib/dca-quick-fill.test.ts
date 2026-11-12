@@ -4,7 +4,7 @@ import { quickFillRaw, perChunkRaw, formatMinBuyUnit, formatMinBuyMessage } from
 const ONE = 10n ** 18n // 1 WETH in smallest units (18 decimals)
 const MIN_ORDER_AMOUNT = 10_000n // mirrors lib/order-engine/config.ts — NOT re-imported to keep this a pure unit test
 
-describe('quickFillRaw — DCA quick-fill % presets (BigInt, no float drift)', () => {
+describe('quickFillRaw: DCA quick-fill % presets (BigInt, no float drift)', () => {
   it('25% of 1 WETH = 0.25 WETH (exact)', () => {
     expect(quickFillRaw(ONE, 25)).toBe(ONE / 4n)
   })
@@ -13,7 +13,7 @@ describe('quickFillRaw — DCA quick-fill % presets (BigInt, no float drift)', (
     expect(quickFillRaw(ONE, 50)).toBe(ONE / 2n)
   })
 
-  it('100% returns the full balance unchanged — exact to the wei', () => {
+  it('100% returns the full balance unchanged: exact to the wei', () => {
     // 1.000000000000000001 WETH: a Number() round-trip drops the trailing +1 wei.
     const odd = ONE + 1n
     expect(quickFillRaw(odd, 100)).toBe(odd)
@@ -37,7 +37,7 @@ describe('quickFillRaw — DCA quick-fill % presets (BigInt, no float drift)', (
   })
 })
 
-describe('perChunkRaw — per-buy floor split (mirrors contract / useOrderEngine)', () => {
+describe('perChunkRaw: per-buy floor split (mirrors contract / useOrderEngine)', () => {
   it('splits the total across N buys with floor division', () => {
     expect(perChunkRaw(100n, 7)).toBe(14n) // floor(100/7)
     expect(perChunkRaw(ONE, 4)).toBe(ONE / 4n)
@@ -58,7 +58,7 @@ describe('perChunkRaw — per-buy floor split (mirrors contract / useOrderEngine
 // [fix/dca-min-buy-copy] The per-buy floor error used to read "N base units" — developer-speak.
 // These pin the human/USD rewrite across 3 decimal shapes (cbBTC 8dec, USDC 6dec, WETH 18dec) plus
 // the price-unavailable fallback. COPY ONLY — MIN_ORDER_AMOUNT itself is untouched (mirrored above).
-describe('formatMinBuyUnit — token-unit + approx-USD floor label', () => {
+describe('formatMinBuyUnit: token-unit + approx-USD floor label', () => {
   it('cbBTC (8 dec): 10,000 base units = 0.0001 cbBTC, priced at ~$14', () => {
     expect(formatMinBuyUnit(MIN_ORDER_AMOUNT, 8, 'cbBTC', 140_000)).toBe('0.0001 cbBTC (~$14.00)')
   })
@@ -67,7 +67,7 @@ describe('formatMinBuyUnit — token-unit + approx-USD floor label', () => {
     expect(formatMinBuyUnit(MIN_ORDER_AMOUNT, 6, 'USDC', 1)).toBe('0.01 USDC (~$0.01)')
   })
 
-  it('WETH (18 dec): 10,000 base units = 1e-14 WETH — sub-cent USD renders as "<$0.01" (§3), not "$0.00"', () => {
+  it('WETH (18 dec): 10,000 base units = 1e-14 WETH. Sub-cent USD renders as "<$0.01" (§3), not "$0.00"', () => {
     expect(formatMinBuyUnit(MIN_ORDER_AMOUNT, 18, 'WETH', 3500)).toBe('0.00000000000001 WETH (<$0.01)')
   })
 
@@ -76,7 +76,7 @@ describe('formatMinBuyUnit — token-unit + approx-USD floor label', () => {
   })
 })
 
-describe('formatMinBuyMessage — full actionable copy (max buys / min total)', () => {
+describe('formatMinBuyMessage: full actionable copy (max buys / min total)', () => {
   it('cbBTC: computes the max buys the current total supports and includes it in the fix', () => {
     // 50,000 base units total ⇒ floor(50000/10000) = 5 max buys at the floor.
     const msg = formatMinBuyMessage({

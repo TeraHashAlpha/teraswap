@@ -84,7 +84,7 @@ export function floorTierHint(info: PairFloorInfo | null): string | null {
     const c = info.effectiveCap
     const cap = typeof c === 'number' && Number.isFinite(c) && c > 0
       ? Math.min(c, DCA_NO_PRICE_FILL_CAP_MAX_USD) : DCA_NO_PRICE_FILL_CAP_MAX_USD
-    return `No market price source right now — buys capped at $${cap} and flagged`
+    return `No market price source right now: buys capped at $${cap} and flagged`
   }
   return null
 }

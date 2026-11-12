@@ -47,7 +47,7 @@ const fmtPrice = fmtToken
 function fmtDate(iso: string): string {
   const d = new Date(iso)
   return Number.isNaN(d.getTime())
-    ? '—'
+    ? 'n/a'
     : d.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
@@ -55,7 +55,7 @@ function dateRange(first: string | null, last: string | null): string | null {
   if (!first || !last) return null
   const a = fmtDate(first)
   const b = fmtDate(last)
-  return a === b ? a : `${a} – ${b}`
+  return a === b ? a : `${a} to ${b}`
 }
 
 // ── Component ──────────────────────────────────────────
@@ -140,7 +140,7 @@ export default function DCAPositionStats({
         <Stat label="Avg price">
           {stats.avgBuyPrice != null
             ? `${fmtPrice(stats.avgBuyPrice)} ${tokenInSymbol}/${tokenOutSymbol}`
-            : '—'}
+            : 'n/a'}
         </Stat>
         <Stat label="Fills">
           {stats.fillsExecuted}/{stats.fillsPlanned} ({stats.pctComplete}%)

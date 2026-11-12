@@ -16,7 +16,7 @@ import { fmtToken } from '@/lib/format'
 import type { PendingCowOrder } from '@/hooks/useSwap'
 
 function truncAddr(addr: string): string {
-  if (!addr || addr.length <= 12) return addr || '—'
+  if (!addr || addr.length <= 12) return addr || 'n/a'
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
 }
 
@@ -56,7 +56,7 @@ export default function CowOrderReviewModal({ order, onConfirm, onCancel }: Prop
           <h2 className="text-base font-display font-semibold text-cream">Review CoW Protocol Order</h2>
           <p className="mt-0.5 text-xs text-cream-50">
             You&apos;re about to <strong>sign a CoW Protocol order</strong> (no on-chain transaction). Verify the
-            exact terms below — this is precisely what your wallet will sign.
+            exact terms below. This is precisely what your wallet will sign.
           </p>
         </div>
 
@@ -105,7 +105,7 @@ export default function CowOrderReviewModal({ order, onConfirm, onCancel }: Prop
           </div>
 
           <div className="mt-1 rounded-lg border border-success/20 bg-success/5 px-3 py-2 text-[11px] text-success">
-            &#10003; Settled via CoW Protocol — solvers compete in a batch auction. Your wallet signs this
+            &#10003; Settled via CoW Protocol: solvers compete in a batch auction. Your wallet signs this
             order off-chain; no gas to submit.
           </div>
         </div>

@@ -96,7 +96,7 @@ describe('decodeOrderExecutedLog', () => {
     expect(decodeOrderExecutedLog(makeTransferLog())).toBeNull()
   })
 
-  it('filters by allowed executor address — a log from an unrelated contract is skipped', () => {
+  it('filters by allowed executor address. A log from an unrelated contract is skipped', () => {
     const log = makeOrderExecutedLog({ address: OTHER_ADDRESS, amountIn: 1n, amountOut: 1n, fee: 1n })
     expect(decodeOrderExecutedLog(log, [EXECUTOR_ADDRESS])).toBeNull()
     expect(decodeOrderExecutedLog(log, [OTHER_ADDRESS])).not.toBeNull()
@@ -131,7 +131,7 @@ describe('computeNetworkCostWei', () => {
     )
   })
 
-  it('ignores a non-bigint l1Fee (defensive — real receipts either have a bigint or nothing)', () => {
+  it('ignores a non-bigint l1Fee (defensive: real receipts either have a bigint or nothing)', () => {
     expect(computeNetworkCostWei({ gasUsed: 100n, effectiveGasPrice: 10n, l1Fee: null })).toBe(1000n)
   })
 })
@@ -368,7 +368,7 @@ describe('buildSettlementReceipt', () => {
     expect(receipt.estimate.realizedFeeBps).toBeNull()
   })
 
-  it('caches the assembled receipt per orderHash — a second call does not re-fetch', async () => {
+  it('caches the assembled receipt per orderHash. A second call does not re-fetch', async () => {
     const log1 = makeOrderExecutedLog({ amountIn: 1n, amountOut: 1n, fee: 0n })
     let calls = 0
     const client: ReceiptClient = {
@@ -399,12 +399,12 @@ describe('buildSettlementReceipt', () => {
 })
 
 // ── [CHORE-DCA-AGGREGATION-VALUE] Aggregation value: best route vs next-best source ──
-describe('computeAggregationValueRaw — gross-vs-gross, always >= 0, honest on missing data', () => {
+describe('computeAggregationValueRaw: gross-vs-gross, always >= 0, honest on missing data', () => {
   it('is the exact difference when our output beats the runner-up', () => {
     expect(computeAggregationValueRaw('1000', '950')).toBe('50')
   })
 
-  it('is "0" (never negative) when our output is BELOW the runner-up — clamped, not fabricated', () => {
+  it('is "0" (never negative) when our output is BELOW the runner-up: clamped, not fabricated', () => {
     // The deviation guard bounds this to a small window, but nothing guarantees our committed
     // route beats every single quote every single round; clamp rather than show a demoralizing
     // (or dishonest-looking) negative "value".
@@ -415,7 +415,7 @@ describe('computeAggregationValueRaw — gross-vs-gross, always >= 0, honest on 
     expect(computeAggregationValueRaw('1000', '1000')).toBe('0')
   })
 
-  it('is null when there was no runner-up at all (single-source round) — never a fabricated number', () => {
+  it('is null when there was no runner-up at all (single-source round), never a fabricated number', () => {
     expect(computeAggregationValueRaw('1000', null)).toBeNull()
   })
 
@@ -425,7 +425,7 @@ describe('computeAggregationValueRaw — gross-vs-gross, always >= 0, honest on 
   })
 })
 
-describe('fetchFillReceipt — threads next_best_out/source through verbatim (no on-chain derivation)', () => {
+describe('fetchFillReceipt: threads next_best_out/source through verbatim (no on-chain derivation)', () => {
   it('carries nextBestOutRaw/nextBestSource and computes aggregationValueRaw when present', async () => {
     const log = makeOrderExecutedLog({ amountIn: 100n, amountOut: 1000n, fee: 1n })
     const client: ReceiptClient = {
@@ -460,7 +460,7 @@ describe('fetchFillReceipt — threads next_best_out/source through verbatim (no
   })
 })
 
-describe('computeSettlementTotals — total aggregation value, honest when no fill has data', () => {
+describe('computeSettlementTotals: total aggregation value, honest when no fill has data', () => {
   const base = {
     executionNumber: 1, txHash: '0xf', txUrl: '', timestamp: null,
     amountInRaw: '100', amountOutRaw: '1000', effectivePrice: null,
@@ -477,7 +477,7 @@ describe('computeSettlementTotals — total aggregation value, honest when no fi
     expect(totals.totalAggregationValueRaw).toBe('150')
   })
 
-  it('is null (not "0") when NO fill has any comparison data — honest "—", not a fabricated zero', () => {
+  it('is null (not "0") when NO fill has any comparison data, honest ", ", not a fabricated zero', () => {
     const fills: FillReceipt[] = [
       { ...base, nextBestOutRaw: null, nextBestSource: null, aggregationValueRaw: null },
     ]

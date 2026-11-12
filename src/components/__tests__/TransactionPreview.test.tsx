@@ -93,7 +93,7 @@ function renderPreview(props: Partial<Parameters<typeof TransactionPreview>[0]> 
 // Recipient badge — 4 states (T1-T4)
 // ═══════════════════════════════════════════════════════════════
 
-describe('TransactionPreview — recipient badge', () => {
+describe('TransactionPreview: recipient badge', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -152,7 +152,7 @@ describe('TransactionPreview — recipient badge', () => {
 // Minimum output enforcement (T5-T6)
 // ═══════════════════════════════════════════════════════════════
 
-describe('TransactionPreview — minimum output', () => {
+describe('TransactionPreview: minimum output', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -192,7 +192,7 @@ describe('TransactionPreview — minimum output', () => {
 // Decode failure (T7)
 // ═══════════════════════════════════════════════════════════════
 
-describe('TransactionPreview — decode failure', () => {
+describe('TransactionPreview: decode failure', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -229,7 +229,7 @@ describe('TransactionPreview — decode failure', () => {
 // CoW gasless display (T8)
 // ═══════════════════════════════════════════════════════════════
 
-describe('TransactionPreview — CoW Protocol gasless', () => {
+describe('TransactionPreview: CoW Protocol gasless', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -260,7 +260,7 @@ describe('TransactionPreview — CoW Protocol gasless', () => {
 // Deadline display (T9)
 // ═══════════════════════════════════════════════════════════════
 
-describe('TransactionPreview — deadline rendering', () => {
+describe('TransactionPreview: deadline rendering', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })

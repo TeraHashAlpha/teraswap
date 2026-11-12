@@ -40,12 +40,12 @@ describe('CTA matrix (v1 SwapButton order; Swap → Review swap)', () => {
   })
 })
 
-describe('B5 — SwapButton\'s remaining states, in v1\'s order and words', () => {
+describe('B5: SwapButton\'s remaining states, in v1\'s order and words', () => {
   const full: [string, Partial<CtaInput>, string, string, boolean][] = [
-    ['price-gate block beats approval and swap states', { blockReason: 'oracle', approvalStatus: 'approving_permit2' }, 'blocked', 'No oracle — swap blocked', true],
+    ['price-gate block beats approval and swap states', { blockReason: 'oracle', approvalStatus: 'approving_permit2' }, 'blocked', 'No oracle: swap blocked', true],
     ['approving', { approvalStatus: 'approving_permit2', approvalReady: false }, 'in-flight', 'Approving...', true],
     ['signing the approval', { approvalStatus: 'signing', approvalReady: false }, 'in-flight', 'Signing...', true],
-    ['approval error → retry', { approvalStatus: 'error', approvalReady: false }, 'retry', 'Approval error — retry', false],
+    ['approval error → retry', { approvalStatus: 'error', approvalReady: false }, 'retry', 'Approval error: retry', false],
     ['approval still needed (single route: the review sheet carries "Approve & Swap")', { approvalReady: false }, 'review', 'Review swap', false],
     ['approval still needed (split route: no review → v1\'s own label)', { approvalReady: false, splitActive: true }, 'split-swap', 'Approve & Swap', false],
     ['ready, split route', { approvalReady: true, splitActive: true }, 'split-swap', 'Swap', false],
@@ -56,7 +56,7 @@ describe('B5 — SwapButton\'s remaining states, in v1\'s order and words', () =
     ['CoW: waiting for solver', { approvalReady: true, swapStatus: 'cow_pending' }, 'in-flight', 'Waiting for solver...', true],
     ['executing', { approvalReady: true, swapStatus: 'swapping' }, 'in-flight', 'Executing swap...', true],
     ['complete', { approvalReady: true, swapStatus: 'success' }, 'complete', 'Swap complete', true],
-    ['error → retry', { approvalReady: true, swapStatus: 'error' }, 'retry', 'Error — retry', false],
+    ['error → retry', { approvalReady: true, swapStatus: 'error' }, 'retry', 'Error: retry', false],
   ]
   it.each(full)('%s', (_n, over, kind, label, disabled) => {
     const r = row(over)

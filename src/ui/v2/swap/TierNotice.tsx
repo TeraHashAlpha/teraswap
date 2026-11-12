@@ -8,7 +8,7 @@ import { Notice } from './QuotePanel'
  *   unpriced → one line, VERBATIM (owner, B3 goal); the informed-consent dialog that v1 opens is B4.
  */
 export const SINGLE_SOURCE_TAIL = 'Value-based limits use that price; double-check the rate before swapping.'
-export const UNPRICED_LINE = 'No reference price — consent required before swapping'
+export const UNPRICED_LINE = 'No reference price: consent required before swapping'
 
 export function TierNotice({ tier }: { tier: SwapPriceTierResponse | null | undefined }) {
   if (tier?.tier === 'single-source') {

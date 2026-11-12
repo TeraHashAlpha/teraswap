@@ -87,6 +87,7 @@ describe.each(LEGAL)('Privacy Policy — %s', (_ui, mount) => {
     const cookies = section(mount(), 'pp-cookies')
     expect(cookies).toContain('The Interface does not use cookies for tracking or advertising purposes, and it runs no advertising scripts.')
     expect(cookies).toContain('Page views are counted by Vercel Web Analytics, our hosting provider’s analytics, which is loaded from our own domain.')
+    expect(cookies).toContain('It uses no cookies, and it reports page views in aggregate by country, device type, operating system, and browser. TeraSwap’s own code does not collect or store any of that.')
     expect(cookies).toContain('No third-party error-reporting or session-replay service runs in your browser.')
     expect(cookies).not.toMatch(/do not employ any third-party analytics/i)
   })
@@ -125,6 +126,13 @@ describe.each(LEGAL)('Privacy Policy §6 — %s', (_ui, mount) => {
       'When you request a swap quote, or submit a CoW Protocol order you have signed, the Interface sends your wallet address and transaction parameters (for a CoW Protocol order, the signed order itself) to the APIs of third-party aggregator and DEX protocols via our server-side proxy. Your IP address is not exposed to these services.',
     )
   })
+
+  // [fix/privacy-no-usage-tracking, owner 2026-11-12] a reservation, not a practice; no analytics provider is named.
+  it('reserves disclosure of the 3.2 records when a law or a valid legal order requires it, and names no analytics provider', () => {
+    const sharing = section(mount(), 'pp-sharing')
+    expect(sharing).toContain('We may disclose the records described in section 3.2 when a law or a valid legal order requires it.')
+    expect(sharing).not.toMatch(/analytics provider|screen/i)
+  })
 })
 
 // [fix/privacy-no-usage-tracking] The site stops recording how visitors use it; §3 says only what the code does.
@@ -137,8 +145,8 @@ describe.each(LEGAL)('Privacy Policy §3 and no usage tracking — %s', (_ui, mo
 
   it('§3.2 says we do not collect device, OS, browser, clicks or usage patterns, sets no tracking cookies, and counts page views in aggregate', () => {
     const collect = section(mount(), 'pp-collect')
-    expect(collect).toContain('We do not collect your device type, operating system, browser, clicks, or usage patterns, and the Interface sets no tracking cookies.')
-    expect(collect).toContain('Page views are counted in aggregate by Vercel Web Analytics (see section 8).')
+    expect(collect).toContain('Our own code does not collect your device type, operating system, browser, clicks, or usage patterns, and the Interface sets no tracking cookies.')
+    expect(collect).toContain('Page views are counted by Vercel Web Analytics, which uses no cookies and reports them in aggregate by country, device type, operating system, and browser (see section 8).')
     expect(collect).toContain('We do not collect or store your name, email address, home address, or date of birth.')
     expect(collect).toContain(PRIVACY_IP_STORAGE_NOTE)
     expect(collect).toContain(PRIVACY_WALLET_STORAGE_NOTE)

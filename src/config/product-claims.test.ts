@@ -78,7 +78,7 @@ afterEach(() => {
 
 const QUOTING_COUNT = ADAPTER_REGISTRY.filter((a) => !DISABLED_SOURCES[a.name]).length
 
-describe('product-claims — source count from ADAPTER_REGISTRY minus DISABLED_SOURCES', () => {
+describe('product-claims: source count from ADAPTER_REGISTRY minus DISABLED_SOURCES', () => {
   it('excludes registry entries that are permanently disabled', () => {
     expect(QUOTING_COUNT).toBeLessThan(ADAPTER_REGISTRY.length)
     expect(INTEGRATED_DEX_SOURCE_COUNT).toBe(QUOTING_COUNT)
@@ -121,7 +121,7 @@ describe('product-claims — source count from ADAPTER_REGISTRY minus DISABLED_S
   })
 })
 
-describe('product-claims — meta description', () => {
+describe('product-claims: meta description', () => {
   it("embeds the derived count, not a handwritten digit", () => {
     expect(SITE_META_DESCRIPTION).toContain(
       `compares quotes across ${QUOTING_COUNT} liquidity sources`,
@@ -170,7 +170,7 @@ describe('product-claims — meta description', () => {
   })
 })
 
-describe('product-claims — swap chains from the registry', () => {
+describe('product-claims: swap chains from the registry', () => {
   it('lists the same chain ids the registry exports', () => {
     expect([...SWAP_CHAIN_IDS]).toEqual(getSupportedChainIds())
   })
@@ -182,7 +182,7 @@ describe('product-claims — swap chains from the registry', () => {
   })
 })
 
-describe('product-claims — order types from launch flags', () => {
+describe('product-claims: order types from launch flags', () => {
   it('instant swaps are live with no flag', () => {
     expect(isOrderTypeLive('instant')).toBe(true)
     expect(orderTypeStatusLabel('instant')).toBe('Live')
@@ -214,7 +214,7 @@ describe('product-claims — order types from launch flags', () => {
   })
 })
 
-describe('product-claims — helpers', () => {
+describe('product-claims: helpers', () => {
   it('spellCount uses words for small integers and digits otherwise', () => {
     expect(spellCount(0)).toBe('zero')
     expect(spellCount(2)).toBe('two')
@@ -232,7 +232,7 @@ describe('product-claims — helpers', () => {
   })
 })
 
-describe('product-claims — C1 integratedSourcesFor(chainId)', () => {
+describe('product-claims: C1 integratedSourcesFor(chainId)', () => {
   it('is the registry minus DISABLED_SOURCES on every swap chain', () => {
     for (const id of getSupportedChainIds()) {
       expect([...integratedSourcesFor(id)]).toEqual(
@@ -258,7 +258,7 @@ describe('product-claims — C1 integratedSourcesFor(chainId)', () => {
   })
 })
 
-describe('product-claims — C2 verification stages / checks', () => {
+describe('product-claims: C2 verification stages / checks', () => {
   it('has the two stages and a summary built from the same lists', () => {
     expect([...VERIFICATION_STAGES]).toEqual(['pre-trade', 'post-execution'])
     expect(VERIFICATION_STAGE_COUNT).toBe(VERIFICATION_STAGES.length)
@@ -276,7 +276,7 @@ describe('product-claims — C2 verification stages / checks', () => {
   })
 })
 
-describe('product-claims — C3 chainlinkFeedCountFor(chainId)', () => {
+describe('product-claims: C3 chainlinkFeedCountFor(chainId)', () => {
   it('equals the number of configured tokens the feed registry lists for that chain', () => {
     for (const id of getSupportedChainIds()) {
       expect(chainlinkFeedCountFor(id)).toBe(listConfiguredFeedTokens().filter((t) => t.chainId === id).length)
@@ -291,7 +291,7 @@ describe('product-claims — C3 chainlinkFeedCountFor(chainId)', () => {
   })
 })
 
-describe('product-claims — C4 thresholds interpolate the constants', () => {
+describe('product-claims: C4 thresholds interpolate the constants', () => {
   it('formats the deviation band from PRICE_DEVIATION_WARN / BLOCK', () => {
     expect(PRICE_DEVIATION_WARN_PCT).toBe(`${PRICE_DEVIATION_WARN * 100}%`)
     expect(PRICE_DEVIATION_BLOCK_PCT).toBe(formatPercent(PRICE_DEVIATION_BLOCK))
@@ -311,7 +311,7 @@ describe('product-claims — C4 thresholds interpolate the constants', () => {
   })
 })
 
-describe('product-claims — C7 dcaFeatureTitle()', () => {
+describe('product-claims: C7 dcaFeatureTitle()', () => {
   it('names exactly the chains isDcaLive says are live (no hand-typed chain list)', () => {
     const live = DCA_CHAINS.filter((id) => isDcaLive(id)).map((id) => CHAIN_CONFIGS[id].name)
     expect([...dcaLiveChainNames()]).toEqual(live)
@@ -338,7 +338,7 @@ describe('product-claims — C7 dcaFeatureTitle()', () => {
   })
 })
 
-describe('product-claims — slots read from their declaring export', () => {
+describe('product-claims: slots read from their declaring export', () => {
   it('fee, timeout, high-value gate, fee tiers and split threshold come from the constants', () => {
     expect(PLATFORM_FEE_LABEL).toBe(`${FEE_PERCENT}%`)
     expect(QUOTE_TIMEOUT_SEC).toBe(QUOTE_TIMEOUT_MS / 1000)
@@ -349,7 +349,7 @@ describe('product-claims — slots read from their declaring export', () => {
   })
 })
 
-describe('product-claims — mirrored constants cannot drift from their declaring file', () => {
+describe('product-claims: mirrored constants cannot drift from their declaring file', () => {
   for (const c of MIRRORED_CONSTANTS) {
     it(`${c.id} = ${c.value} in ${c.file}`, () => {
       const src = readFileSync(join(process.cwd(), c.file), 'utf8')
@@ -381,7 +381,7 @@ describe('[fix/functional-chain-ui C8] PRIVACY_DIRECT_NOTE matches what the brow
   })
 })
 
-describe('[fix/user-ip-privacy] privacy claims — the owner wording, each sentence backed by the code', () => {
+describe('[fix/user-ip-privacy] privacy claims: the owner wording, each sentence backed by the code', () => {
   it('the five sentences are exactly the owner’s (2026-11-06; the wallet-storage sentence replaced 2026-11-12, fix/privacy-no-usage-tracking)', () => {
     expect([PRIVACY_PROXY_CLAIM, PRIVACY_DIRECT_NOTE, PRIVACY_WALLET_ADVICE, PRIVACY_IP_STORAGE_NOTE, PRIVACY_WALLET_STORAGE_NOTE].join(' ')).toBe(
       "TeraSwap's server relays all RPC reads on Ethereum, Base and Arbitrum, every aggregator quote and swap request, every CoW Protocol order you sign and its status checks, and token logos, so those providers see our server's IP address, not yours. " +
@@ -392,7 +392,7 @@ describe('[fix/user-ip-privacy] privacy claims — the owner wording, each sente
     )
   })
 
-  it('"all RPC reads on Ethereum, Base and Arbitrum" names exactly the chains the registry — and the proxy allow-list — cover', async () => {
+  it('"all RPC reads on Ethereum, Base and Arbitrum" names exactly the chains the registry, and the proxy allow-list, cover', async () => {
     const { RPC_POLICY_CHAIN_IDS } = await import('@/lib/rpc-method-policy')
     const sorted = (xs: readonly number[]) => [...xs].sort((a, b) => a - b)
     expect(sorted(RPC_POLICY_CHAIN_IDS)).toEqual(sorted(SWAP_CHAIN_IDS))
@@ -405,7 +405,7 @@ describe('[fix/user-ip-privacy] privacy claims — the owner wording, each sente
 
   // [fix/user-ip-privacy A76 S-1] "every CoW Protocol order you sign and its status checks": the browser submits and
   // polls through our origin, and the CSP gives the page no CoW host to reach even if a caller tried.
-  it('"every CoW Protocol order you sign and its status checks" — /api/cow/* only, and no CoW host in connect-src', async () => {
+  it('"every CoW Protocol order you sign and its status checks": /api/cow/* only, and no CoW host in connect-src', async () => {
     expect(PRIVACY_PROXY_CLAIM).toContain('every CoW Protocol order you sign and its status checks')
     const { COW_PROXY_PATHS } = await import('@/lib/cow-proxy-paths')
     for (const path of Object.values(COW_PROXY_PATHS)) expect(path).toMatch(/^\/api\/cow\/[a-z-]+$/)
@@ -413,12 +413,12 @@ describe('[fix/user-ip-privacy] privacy claims — the owner wording, each sente
     expect(CONNECT_SRC.filter((src) => /cow/i.test(src))).toEqual([])
   })
 
-  it('the browser really has one RPC address per chain, ours — the claim is "all RPC reads", so no chain may be direct', async () => {
+  it('the browser really has one RPC address per chain, ours. The claim is "all RPC reads", so no chain may be direct', async () => {
     const { proxyRpcPath } = await import('@/lib/rpc-proxy-url')
     for (const id of SWAP_CHAIN_IDS) expect(proxyRpcPath(id)).toMatch(/^\/api\/rpc(\?chainId=\d+)?$/)
   })
 
-  it('"our rate limiter only ever sees a one-way hash" — the limiter key is 32 hex characters, not an address', async () => {
+  it('"our rate limiter only ever sees a one-way hash". The limiter key is 32 hex characters, not an address', async () => {
     const { hashClientIp } = await import('@/lib/client-ip-key')
     expect(hashClientIp('203.0.113.7')).toMatch(/^[0-9a-f]{32}$/)
   })

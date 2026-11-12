@@ -48,7 +48,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('WalletSessionGuard — mobile lifecycle [SPRINT-9Z]', () => {
+describe('WalletSessionGuard: mobile lifecycle [SPRINT-9Z]', () => {
   it('does NOT disconnect a fresh connect even when a stale connectedAt is present', () => {
     // A stale baseline left in the tab from an earlier session (2h ago) — exactly
     // what made the old guard kill the mobile deep-link return.

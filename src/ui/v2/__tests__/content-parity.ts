@@ -71,8 +71,8 @@ export function compareContent(v1: Element, v2: Element, allow: readonly Allowed
   const staleAllow: string[] = []
   for (const a of allow) {
     const text = normalize(a.text)
-    if (!v1Nodes.some((n) => n.includes(text))) staleAllow.push(`${a.text} — matches nothing in v1 (${a.reason})`)
-    else if (v2Text.includes(text)) staleAllow.push(`${a.text} — still present in v2, so it was not removed (${a.reason})`)
+    if (!v1Nodes.some((n) => n.includes(text))) staleAllow.push(`${a.text}: matches nothing in v1 (${a.reason})`)
+    else if (v2Text.includes(text)) staleAllow.push(`${a.text}, still present in v2, so it was not removed (${a.reason})`)
   }
 
   const missingText: string[] = []

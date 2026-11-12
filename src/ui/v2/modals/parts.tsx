@@ -46,6 +46,6 @@ export function ConsentBlock({ values, checked, onChange, checkboxRef }: { value
 }
 
 export function truncAddr(addr: string): string {
-  if (!addr || addr.length <= 12) return addr || '—'
+  if (!addr || addr.length <= 12) return addr || 'n/a'
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
 }

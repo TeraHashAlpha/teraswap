@@ -20,17 +20,17 @@ function fmtEth(wei: string): string {
   return `${fmtGas(num)} ETH`
 }
 function fmtPrice(price: number | null, tokenInSymbol: string, tokenOutSymbol: string): string {
-  if (price == null) return '—'
+  if (price == null) return 'n/a'
   return `${fmtTokenValue(price)} ${tokenInSymbol} / ${tokenOutSymbol}`
 }
 function fmtBps(bps: number | null): string {
-  if (bps == null) return '—'
+  if (bps == null) return 'n/a'
   return fmtPct(bps / 100)
 }
 function fmtTimestamp(ms: number | null): string {
-  if (ms == null) return '—'
+  if (ms == null) return 'n/a'
   const d = new Date(ms)
-  if (Number.isNaN(d.getTime())) return '—'
+  if (Number.isNaN(d.getTime())) return 'n/a'
   return fmtDate(d)
 }
 
@@ -45,7 +45,7 @@ export function bestRouteLabel(router: string | null | undefined, chainId: numbe
 /** v1 `receiptToText` — the "Copy as text" payload, line for line. */
 export function receiptToText(receipt: SettlementReceipt, routeLabel: string): string {
   const lines: string[] = []
-  lines.push(`TeraSwap DCA settlement receipt — ${receipt.tokenInSymbol} -> ${receipt.tokenOutSymbol}`)
+  lines.push(`TeraSwap DCA settlement receipt: ${receipt.tokenInSymbol} -> ${receipt.tokenOutSymbol}`)
   lines.push(`Status: ${receipt.status}`)
   lines.push(`Order: ${receipt.orderHash}`)
   lines.push('')
@@ -57,7 +57,7 @@ export function receiptToText(receipt: SettlementReceipt, routeLabel: string): s
   lines.push(
     `Aggregation value: ${
       receipt.totals.totalAggregationValueRaw == null
-        ? '—'
+        ? 'n/a'
         : `+${fmtToken(receipt.totals.totalAggregationValueRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}`
     }`,
   )
@@ -69,10 +69,10 @@ export function receiptToText(receipt: SettlementReceipt, routeLabel: string): s
   for (const f of receipt.fills) {
     const agg =
       f.nextBestOutRaw == null
-        ? 'Aggregation value: —'
+        ? 'Aggregation value: n/a'
         : `Best route: ${routeLabel} -> ${fmtToken(f.amountOutRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}. Next-best: ${f.nextBestSource} -> ${fmtToken(f.nextBestOutRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}. Aggregation value: +${fmtToken(f.aggregationValueRaw ?? '0', receipt.tokenOutDecimals, receipt.tokenOutSymbol)}.`
     lines.push(
-      `  #${f.executionNumber} ${fmtTimestamp(f.timestamp)} — ${fmtToken(f.amountInRaw, receipt.tokenInDecimals, receipt.tokenInSymbol)} -> ${fmtToken(f.amountOutRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}, fee ${fmtToken(f.protocolFeeRaw, receipt.tokenInDecimals, receipt.tokenInSymbol)}, ${f.txUrl}`,
+      `  #${f.executionNumber} ${fmtTimestamp(f.timestamp)}: ${fmtToken(f.amountInRaw, receipt.tokenInDecimals, receipt.tokenInSymbol)} -> ${fmtToken(f.amountOutRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}, fee ${fmtToken(f.protocolFeeRaw, receipt.tokenInDecimals, receipt.tokenInSymbol)}, ${f.txUrl}`,
     )
     lines.push(`    ${agg}`)
   }
@@ -147,7 +147,7 @@ export function ReceiptSheet({ order, onClose }: { order: AutonomousOrder; onClo
         })
         if (!cancelled) setReceipt(built)
       } catch {
-        if (!cancelled) setError('Could not build the settlement receipt — try again shortly.')
+        if (!cancelled) setError('Could not build the settlement receipt: try again shortly.')
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -197,7 +197,7 @@ export function ReceiptSheet({ order, onClose }: { order: AutonomousOrder; onClo
             <div className={SECTION} data-testid="settlement-aggregation-value-total">
               <ReviewRow label="Aggregation value">
                 {receipt.totals.totalAggregationValueRaw == null
-                  ? '—'
+                  ? 'n/a'
                   : `+${fmtToken(receipt.totals.totalAggregationValueRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}`}
               </ReviewRow>
               <p className="mt-1 text-[12px] text-v2-muted">What our routing delivered vs. the next-best quoted source, across every fill.</p>
@@ -232,7 +232,7 @@ export function ReceiptSheet({ order, onClose }: { order: AutonomousOrder; onClo
                     </div>
                     <div className="mt-1 text-v2-muted" data-testid="fill-aggregation-value">
                       {f.nextBestOutRaw == null ? (
-                        <span>Aggregation value: —</span>
+                        <span>Aggregation value: n/a</span>
                       ) : (
                         <span>
                           Best route: {routeLabel} → {fmtToken(f.amountOutRaw, receipt.tokenOutDecimals, receipt.tokenOutSymbol)}.{' '}

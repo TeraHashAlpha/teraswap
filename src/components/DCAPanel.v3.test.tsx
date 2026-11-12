@@ -206,7 +206,7 @@ beforeEach(() => {
   mockFetchDefiLlamaPrice.mockResolvedValue({ price: 2000, symbol: 'X', timestamp: 0, confidence: 1 })
 })
 
-describe('DCAPanel — v3 signing branch [SPRINT-V3-P2]', () => {
+describe('DCAPanel: v3 signing branch [SPRINT-V3-P2]', () => {
   it('signs with the v3 domain (version "3") and includes maxSlippageBps in the message', async () => {
     renderWithProviders(<DCAPanel />)
     enterAmount('100')

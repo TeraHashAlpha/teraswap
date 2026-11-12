@@ -66,7 +66,7 @@ function TokenIdentity({ token, chainId }: { token: Token; chainId: number }) {
   return (
     <span className="inline-flex items-center gap-2 font-v2-mono text-[12px] text-v2-muted">
       <span
-        title={verified ? 'Verified — identity cross-checked across catalog sources. Not an endorsement: receipt/wrapped tokens (e.g. aUSDC) are verified too.' : 'Imported token — verify the address before trading'}
+        title={verified ? 'Verified: identity cross-checked across catalog sources. Not an endorsement: receipt/wrapped tokens (e.g. aUSDC) are verified too.' : 'Imported token: verify the address before trading'}
         className={verified ? 'text-v2-green' : 'text-v2-amber'}
       >
         <span aria-hidden="true">{verified ? '✓' : '⚠'}</span>
@@ -330,7 +330,7 @@ export function SwapCard() {
     meta?.best && quoteDecimalsOut !== null
       ? (() => {
           const v = safeBigInt(meta.best.toAmount)
-          return v !== null ? fmtToken(v, quoteDecimalsOut) : '—'
+          return v !== null ? fmtToken(v, quoteDecimalsOut) : 'n/a'
         })()
       : '0.0'
   const balanceDisplay = balanceIn ? fmtToken(balanceIn.value, balanceIn.decimals) : null
@@ -474,7 +474,7 @@ export function SwapCard() {
           {tokenIn && (
             <div className="mt-1 flex items-center justify-between gap-3 text-[13px] text-v2-muted">
               <span className="flex flex-col">
-                <span>Balance: {balanceDisplay ? `${balanceDisplay} ${tokenIn.symbol}` : '—'}</span>
+                <span>Balance: {balanceDisplay ? `${balanceDisplay} ${tokenIn.symbol}` : 'n/a'}</span>
                 <TokenIdentity token={tokenIn} chainId={activeChainId} />
               </span>
               {balanceIn && (
@@ -583,10 +583,10 @@ export function SwapCard() {
           <Button
             variant="text"
             className="mt-2 w-full"
-            aria-label="Gasless route available — review the recommendation"
+            aria-label="Gasless route available: review the recommendation"
             onClick={() => document.getElementById('quote-breakdown')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
           >
-            Gasless option available{meta.gasless.gasSavingsUsd >= 0.5 ? ` — save ~${fmtUsd(meta.gasless.gasSavingsUsd)}` : ''}
+            Gasless option available{meta.gasless.gasSavingsUsd >= 0.5 ? `: save ~${fmtUsd(meta.gasless.gasSavingsUsd)}` : ''}
           </Button>
         )}
       </div>

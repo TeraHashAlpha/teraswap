@@ -57,7 +57,7 @@ async function loadApi() {
   return import('@/lib/api')
 }
 
-describe('fetchMetaQuote — 0x breaker OPEN via 429 still resolves from other sources [T4 acceptance]', () => {
+describe('fetchMetaQuote: 0x breaker OPEN via 429 still resolves from other sources [T4 acceptance]', () => {
   beforeEach(() => {
     fakeRegistry = []
   })

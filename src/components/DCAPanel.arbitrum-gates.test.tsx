@@ -250,7 +250,7 @@ beforeEach(() => {
   mockFetchDefiLlamaPrice.mockResolvedValue(null)
 })
 
-describe('[feat/arbitrum-dca-gates] the two gates are open on 42161 — REAL config, env slot = the DEPLOYMENTS.md address', () => {
+describe('[feat/arbitrum-dca-gates] the two gates are open on 42161. REAL config, env slot = the DEPLOYMENTS.md address', () => {
   it('sanity: 42161 is eligible, the env slot resolves the extracted executor, and the Arbitrum default router is Augustus V6', () => {
     expect(ORDER_EXECUTOR_V3_ELIGIBLE_CHAINS).toContain(ARBITRUM)
     expect(getOrderExecutorV3(ARBITRUM)).toBe(ARBITRUM_V3)
@@ -320,7 +320,7 @@ describe('[feat/arbitrum-dca-gates -> FEAT-DCA-FLOOR-TIERS] the registry state d
     expect(approval.address.toLowerCase()).toBe(WETH) // the spend leg's ERC-20
   })
 
-  it('THE THIRD GATE (opened): after the approval, confirmOrder signs under the V3 domain of the DEPLOYMENTS.md executor (version "3", chainId 42161) and POSTs the order for 42161 — the v2 precondition is gone', async () => {
+  it('THE THIRD GATE (opened): after the approval, confirmOrder signs under the V3 domain of the DEPLOYMENTS.md executor (version "3", chainId 42161) and POSTs the order for 42161. The v2 precondition is gone', async () => {
     // Flipped deliberately from the predecessor's "flow stops here" pin, with the cancel half proven
     // in the same change (hook + API suites named in the header). Arbitrum STILL has no v2 executor —
     // the gate opened because the precondition became version-aware, not because v2 appeared:

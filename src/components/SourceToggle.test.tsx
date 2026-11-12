@@ -15,7 +15,7 @@ import { INTEGRATED_DEX_SOURCE_COUNT } from '@/config/product-claims'
 import { AGGREGATOR_META, DISABLED_SOURCES, type AggregatorName } from '@/lib/constants'
 import SourceToggle, { TOGGLEABLE_SOURCES } from './SourceToggle'
 
-describe('SourceToggle — list completeness [CHORE-2026-09-03]', () => {
+describe('SourceToggle: list completeness [CHORE-2026-09-03]', () => {
   it('never silently diverges from ADAPTER_REGISTRY minus DISABLED_SOURCES', () => {
     const registryNames = ADAPTER_REGISTRY.map(a => a.name)
     const expectedToggleable = registryNames.filter(name => !DISABLED_SOURCES[name])
@@ -53,7 +53,7 @@ describe('SourceToggle — list completeness [CHORE-2026-09-03]', () => {
   })
 })
 
-describe('SourceToggle — render + toggle [CHORE-2026-09-03]', () => {
+describe('SourceToggle: render + toggle [CHORE-2026-09-03]', () => {
   it('renders a still-enabled source row and toggling it calls onToggle', () => {
     const onToggle = vi.fn()
     const target = TOGGLEABLE_SOURCES[0]
@@ -66,7 +66,7 @@ describe('SourceToggle — render + toggle [CHORE-2026-09-03]', () => {
     expect(onToggle).toHaveBeenCalledWith(target)
   })
 
-  it('labels the toggle with the enabled count — "N sources enabled" when none are excluded, never a bare "x/y"', () => {
+  it('labels the toggle with the enabled count. "N sources enabled" when none are excluded, never a bare "x/y"', () => {
     renderWithProviders(<SourceToggle excludedSources={new Set()} onToggle={vi.fn()} />)
     expect(INTEGRATED_DEX_SOURCE_COUNT).toBe(TOGGLEABLE_SOURCES.length)
     expect(screen.getByText(`${INTEGRATED_DEX_SOURCE_COUNT} sources enabled`)).toBeInTheDocument()

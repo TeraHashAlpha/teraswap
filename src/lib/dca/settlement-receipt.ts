@@ -24,7 +24,7 @@ import { getOrderExecutor, getOrderExecutorV3 } from '@/lib/order-engine'
 // protocol fee. When v4 (ADR-015, user-pays-gas estimate-with-cap) ships, this ONE string changes
 // to something like "Paid by you, capped at $X" — no other code in this module or its UI consumers
 // needs to change for that wording flip.
-export const NETWORK_COST_LABEL = 'Network cost — covered by TeraSwap'
+export const NETWORK_COST_LABEL = 'Network cost: covered by TeraSwap'
 
 // OrderExecuted(bytes32 indexed orderHash, address indexed owner, uint8 indexed orderType,
 //               address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOut, uint256 fee)

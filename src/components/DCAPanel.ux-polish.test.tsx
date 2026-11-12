@@ -141,7 +141,7 @@ beforeEach(() => {
 
 // [CHORE-DCA-UX-FIXES] Bug 1: a selected token that is ABSENT from the curated useTokenBalances
 // catalog (imported/unverified) still shows its balance + drives quick-fill, via the direct read.
-describe('DCAPanel spend step — imported-token balance (direct read fallback)', () => {
+describe('DCAPanel spend step: imported-token balance (direct read fallback)', () => {
   it('shows the direct balance when the selected token is not in the curated catalog', () => {
     setBalances({}) // catalog multicall has no entry for this token
     setDirectBalance({ raw: 100_000000000000000000n, formatted: '100', hasValue: true })
@@ -158,34 +158,34 @@ describe('DCAPanel spend step — imported-token balance (direct read fallback)'
     expect(amountInput()).toHaveValue('1.000000000000000001')
   })
 
-  it('still shows "—" when neither the catalog nor the direct read has a value yet', () => {
+  it('still shows ": " when neither the catalog nor the direct read has a value yet', () => {
     setBalances({})
     setDirectBalance({ hasValue: false, isLoading: true })
     renderWithProviders(<DCAPanel />)
-    expect(screen.getByTestId('dca-spend-balance')).toHaveTextContent('Balance: —')
+    expect(screen.getByTestId('dca-spend-balance')).toHaveTextContent('Balance: n/a')
   })
 })
 
-describe('DCAPanel spend step — balance line', () => {
+describe('DCAPanel spend step: balance line', () => {
   it('shows the connected wallet balance of the selected spend token', () => {
     renderWithProviders(<DCAPanel />)
     expect(screen.getByTestId('dca-spend-balance')).toHaveTextContent('Balance: 2.5 WETH')
   })
 
-  it('shows "—" while balances are loading', () => {
+  it('shows ": " while balances are loading', () => {
     setBalances({ isLoading: true })
     renderWithProviders(<DCAPanel />)
-    expect(screen.getByTestId('dca-spend-balance')).toHaveTextContent('Balance: —')
+    expect(screen.getByTestId('dca-spend-balance')).toHaveTextContent('Balance: n/a')
   })
 
-  it('shows "—" when the wallet is disconnected', () => {
+  it('shows ": " when the wallet is disconnected', () => {
     useAccountMock.mockReturnValue({ address: undefined, isConnected: false })
     renderWithProviders(<DCAPanel />)
-    expect(screen.getByTestId('dca-spend-balance')).toHaveTextContent('Balance: —')
+    expect(screen.getByTestId('dca-spend-balance')).toHaveTextContent('Balance: n/a')
   })
 })
 
-describe('DCAPanel spend step — quick-fill % presets', () => {
+describe('DCAPanel spend step: quick-fill % presets', () => {
   it('100% fills the input with the exact full balance (to the wei)', () => {
     // 1.000000000000000001 WETH — a Number() round-trip would drop the +1 wei.
     setBalances({ raw: ONE + 1n, formatted: '1' })
@@ -223,7 +223,7 @@ describe('DCAPanel spend step — quick-fill % presets', () => {
   })
 })
 
-describe('DCAPanel spend step — per-chunk MIN re-validation', () => {
+describe('DCAPanel spend step: per-chunk MIN re-validation', () => {
   it('surfaces the min hint after a preset fills a sub-floor per-chunk amount', () => {
     // 50,000 base units total; default 10 buys ⇒ floor(50000/10)=5,000 < 10,000 floor.
     setBalances({ raw: 50_000n, formatted: '<0.0001' })
@@ -245,7 +245,7 @@ describe('DCAPanel spend step — per-chunk MIN re-validation', () => {
   })
 })
 
-describe('DCAPanel — Order Expiry always visible', () => {
+describe('DCAPanel: Order Expiry always visible', () => {
   it('renders the Order Expiry control without expanding Advanced settings', () => {
     renderWithProviders(<DCAPanel />)
     expect(screen.getByText(/Advanced settings/i)).toBeInTheDocument() // collapsed by default

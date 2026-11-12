@@ -153,7 +153,7 @@ export const PRIVACY_LOCAL_COPIES_NOTE =
 export const PRIVACY_BADGE = 'Proxied RPC & quotes'
 
 export const SITE_META_DESCRIPTION =
-  `Maximum liquidity. Verified prices. TeraSwap is an EVM meta-aggregator on ${SWAP_CHAIN_LIST_LABEL} that compares quotes across ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources — with multi-oracle price protection (Chainlink + DefiLlama) and a server-side proxy for RPC and quote requests.`
+  `Maximum liquidity. Verified prices. TeraSwap is an EVM meta-aggregator on ${SWAP_CHAIN_LIST_LABEL} that compares quotes across ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources, with multi-oracle price protection (Chainlink + DefiLlama) and a server-side proxy for RPC and quote requests.`
 
 // ── MEV / CoW protection: RETIRED claim ──────────────────────────────────────
 /**

@@ -31,7 +31,7 @@ afterAll(() => {
       .join(' ')
   const rows = results.map(
     (r) =>
-      `| ${r.ui} | ${r.state} | ${sum(r.mount)} (${methods(r.mount)}) | ${sum(r.steady)} | ${methods(r.steady) || '—'} | ${r.hidden ? sum(r.hidden) : '—'} | ${r.returned ? sum(r.returned) : '—'} |`,
+      `| ${r.ui} | ${r.state} | ${sum(r.mount)} (${methods(r.mount)}) | ${sum(r.steady)} | ${methods(r.steady) || 'n/a'} | ${r.hidden ? sum(r.hidden) : 'n/a'} | ${r.returned ? sum(r.returned) : 'n/a'} |`,
   )
   const table = [
     '| UI | state | mount burst (by method) | steady calls/min | steady by method | hidden 60 s | on return (5 s) |',
@@ -44,7 +44,7 @@ afterAll(() => {
 
 const STATES: State[] = ['a0', 'a', 'b', 'c', 'c20', 'p', 'an']
 
-describe.each(['v1', 'v2'] as Ui[])('browser RPC harness — %s', (ui) => {
+describe.each(['v1', 'v2'] as Ui[])('browser RPC harness: %s', (ui) => {
   it.each(STATES)('state %s: visible then hidden', async (state) => {
     const r = await runScenario({ ui, state, hide: true })
     results.push(r)

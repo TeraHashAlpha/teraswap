@@ -77,18 +77,18 @@ function overallIndicator(data: StatusData | null, error: boolean): { label: str
 }
 
 function formatLatency(ms: number | null): string {
-  if (ms === null) return '\u2014'
+  if (ms === null) return 'n/a'
   if (ms < 1000) return `${ms}ms`
   return `${fmtFixed(ms / 1000, 1)}s`
 }
 
 function formatUptime(pct: number | null): string {
-  if (pct === null) return '\u2014'
+  if (pct === null) return 'n/a'
   return fmtPct(pct, 1)
 }
 
 function timeAgo(iso: string | null): string {
-  if (!iso) return '\u2014'
+  if (!iso) return 'n/a'
   const seconds = Math.round((Date.now() - new Date(iso).getTime()) / 1000)
   if (seconds < 0) return 'just now'
   if (seconds < 60) return `${seconds}s ago`

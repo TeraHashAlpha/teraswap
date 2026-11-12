@@ -91,7 +91,7 @@ function makeInvalidateReview(): Extract<PendingCancelReview, { action: 'invalid
   }
 }
 
-describe('OrderCancelReviewModal [CANCEL-REVIEW] — single-order cancel', () => {
+describe('OrderCancelReviewModal [CANCEL-REVIEW]: single-order cancel', () => {
   it('renders the frozen cancel fields (action/type/pair/amount/nonce/expiry) field-by-field', () => {
     renderWithProviders(<OrderCancelReviewModal review={makeCancelReview()} onConfirm={vi.fn()} onCancel={vi.fn()} />)
     expect(screen.getByTestId('cancel-action').textContent).toMatch(/cancel order/i)
@@ -141,7 +141,7 @@ function makeMixedInvalidateReview(): Extract<PendingCancelReview, { action: 'in
   }
 }
 
-describe('OrderCancelReviewModal [BUG-MASS-CANCEL-DCA-ONCHAIN] — mixed batch (v2/non-DCA nonce + v3 DCA individual cancels)', () => {
+describe('OrderCancelReviewModal [BUG-MASS-CANCEL-DCA-ONCHAIN]: mixed batch (v2/non-DCA nonce + v3 DCA individual cancels)', () => {
   it('states the real transaction breakdown instead of "one transaction" when DCA orders are present', () => {
     renderWithProviders(<OrderCancelReviewModal review={makeMixedInvalidateReview()} onConfirm={vi.fn()} onCancel={vi.fn()} />)
     // 1 nonce invalidation tx (v2) + 2 individual cancelOrder txs (the DCA orders) = 3 total.
@@ -185,7 +185,7 @@ describe('OrderCancelReviewModal [BUG-MASS-CANCEL-DCA-ONCHAIN] — mixed batch (
   })
 })
 
-describe('OrderCancelReviewModal [CANCEL-REVIEW] — invalidate-all', () => {
+describe('OrderCancelReviewModal [CANCEL-REVIEW]: invalidate-all', () => {
   it('renders the frozen invalidation nonce and every affected order', () => {
     renderWithProviders(<OrderCancelReviewModal review={makeInvalidateReview()} onConfirm={vi.fn()} onCancel={vi.fn()} />)
     expect(screen.getByTestId('cancel-action').textContent).toMatch(/cancel all/i)

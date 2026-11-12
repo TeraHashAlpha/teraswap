@@ -11,10 +11,17 @@ type WebkitWindow = Window & { webkitAudioContext?: typeof AudioContext }
 
 let audioCtx: AudioContext | null = null
 
+// ── One master switch ────────────────────────────────────
+// The sound button (v1 BackgroundMusic, v2 shell ♫) flips this through toggleBackgroundMusic(). While it is false
+// EVERY play and start function below returns before it creates an Audio element or touches the AudioContext, and the
+// two loops (music, waiting) are stopped. Default: on. Not persisted: a reload starts on, like the music always did.
+let soundEnabled = true
+
 // ── MP3-based sound players ──────────────────────────────
 const audioCache = new Map<string, HTMLAudioElement>()
 
 function playMP3(src: string, volume = 1.0) {
+  if (!soundEnabled) return
   try {
     // Clone from cache for overlapping playback support
     let template = audioCache.get(src)
@@ -46,10 +53,9 @@ export function playCancelOrderMP3() {
 
 // ── Background Music Manager ─────────────────────────────
 let bgMusic: HTMLAudioElement | null = null
-let bgMusicEnabled = true
 
 export function startBackgroundMusic() {
-  if (bgMusic || !bgMusicEnabled) return // already playing, or switched off (a stale first-interaction listener must not undo the toggle)
+  if (bgMusic || !soundEnabled) return // already playing, or switched off (a stale first-interaction listener must not undo the toggle)
   try {
     bgMusic = new Audio('/sounds/background.mp3')
     bgMusic.loop = true
@@ -57,7 +63,7 @@ export function startBackgroundMusic() {
     bgMusic.play().catch(() => {
       // Autoplay blocked — will retry on first user interaction
       const resumeOnInteraction = () => {
-        if (bgMusic && bgMusicEnabled) {
+        if (bgMusic && soundEnabled) {
           bgMusic.play().catch(() => {})
         }
         document.removeEventListener('click', resumeOnInteraction)
@@ -77,18 +83,24 @@ export function stopBackgroundMusic() {
   }
 }
 
+/**
+ * The sound button. Flips the master switch and returns the new state (true = sound on).
+ * Off: the music and a playing waiting loop are stopped, and every later play and start call is a no-op.
+ * On: the music starts again; the waiting loop and the short sounds come back with their next trigger.
+ */
 export function toggleBackgroundMusic(): boolean {
-  bgMusicEnabled = !bgMusicEnabled
-  if (bgMusicEnabled) {
+  soundEnabled = !soundEnabled
+  if (soundEnabled) {
     startBackgroundMusic()
   } else {
     stopBackgroundMusic()
+    stopWaitingSound()
   }
-  return bgMusicEnabled
+  return soundEnabled
 }
 
 export function isBackgroundMusicPlaying(): boolean {
-  return bgMusicEnabled && bgMusic !== null && !bgMusic.paused
+  return soundEnabled && bgMusic !== null && !bgMusic.paused
 }
 
 // ── Waiting/Pending Sound (loops until stopped) ──────────
@@ -97,6 +109,7 @@ let waitingAudio: HTMLAudioElement | null = null
 /** Start looping waiting sound — call stopWaitingSound() when done */
 export function startWaitingSound() {
   stopWaitingSound() // stop any existing
+  if (!soundEnabled) return
   try {
     waitingAudio = new Audio('/sounds/waiting.mp3')
     waitingAudio.loop = true
@@ -136,6 +149,7 @@ function gain(ctx: AudioContext, volume: number, t: number): GainNode {
  * Very quiet, sub-bass pulse
  */
 export function playClick() {
+  if (!soundEnabled) return
   try {
     const ctx = getCtx()
     const t = ctx.currentTime
@@ -159,6 +173,7 @@ export function playClick() {
  * Sub-bass + high harmonic ping
  */
 export function playQuoteReceived() {
+  if (!soundEnabled) return
   try {
     const ctx = getCtx()
     const t = ctx.currentTime
@@ -195,6 +210,7 @@ export function playQuoteReceived() {
  * Token selection — subtle tonal shift
  */
 export function playTokenSelect() {
+  if (!soundEnabled) return
   try {
     const ctx = getCtx()
     const t = ctx.currentTime
@@ -217,6 +233,7 @@ export function playTokenSelect() {
  * Approval sent — medium-depth confirmation tone
  */
 export function playApproval() {
+  if (!soundEnabled) return
   try {
     const ctx = getCtx()
     const t = ctx.currentTime
@@ -242,6 +259,7 @@ export function playApproval() {
  * Swap initiated — rising deep tone
  */
 export function playSwapInitiated() {
+  if (!soundEnabled) return
   try {
     const ctx = getCtx()
     const t = ctx.currentTime
@@ -272,6 +290,7 @@ export function playSwapInitiated() {
  * Multi-layered: deep bass boom + rising synth + shimmer + harmonic chord
  */
 export function playSwapSuccess() {
+  if (!soundEnabled) return
   try {
     const ctx = getCtx()
     const t = ctx.currentTime
@@ -369,6 +388,7 @@ export function playSwapSuccess() {
  * Two quick ascending pings + soft bass, feels like a "purchase tick"
  */
 export function playDCABuy() {
+  if (!soundEnabled) return
   try {
     const ctx = getCtx()
     const t = ctx.currentTime
@@ -421,6 +441,7 @@ export function playDCABuy() {
  * Rising arpeggio (A4 → C#5 → E5) + soft reverb tail
  */
 export function playLimitPlaced() {
+  if (!soundEnabled) return
   try {
     const ctx = getCtx()
     const t = ctx.currentTime
@@ -473,6 +494,7 @@ export function playLimitPlaced() {
  * Descending alert tone + fast pulse to signal automatic execution
  */
 export function playTriggerAlert() {
+  if (!soundEnabled) return
   try {
     const ctx = getCtx()
     const t = ctx.currentTime
@@ -524,6 +546,7 @@ export function playTriggerAlert() {
  * Error sound — dissonant low tone
  */
 export function playError() {
+  if (!soundEnabled) return
   try {
     const ctx = getCtx()
     const t = ctx.currentTime

@@ -43,7 +43,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('ExecutionTimeline — explorer link [RQ-2026-06-11]', () => {
+describe('ExecutionTimeline: explorer link [RQ-2026-06-11]', () => {
   it('renders the execution tx link as the mainnet explorer URL (byte-identical pin)', async () => {
     renderWithProviders(
       <ExecutionTimeline
@@ -63,7 +63,7 @@ describe('ExecutionTimeline — explorer link [RQ-2026-06-11]', () => {
   })
 })
 
-describe('ExecutionTimeline — per-chain explorer link [fix/v1-maintenance C1]', () => {
+describe('ExecutionTimeline: per-chain explorer link [fix/v1-maintenance C1]', () => {
   // Hostname is asserted exactly via new URL() — never a substring match.
   it.each([
     [1, 'etherscan.io'],
@@ -88,7 +88,7 @@ describe('ExecutionTimeline — per-chain explorer link [fix/v1-maintenance C1]'
   })
 })
 
-describe('ExecutionTimeline — gas row [fix/dca-chain-switch / P4]', () => {
+describe('ExecutionTimeline: gas row [fix/dca-chain-switch / P4]', () => {
   const props = {
     orderId: 'order-1',
     wallet: '0x1111111111111111111111111111111111111111',

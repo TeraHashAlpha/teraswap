@@ -185,7 +185,7 @@ describe('TokenLogo [SPRINT token-selector-ux P1]', () => {
   })
 
   // (e) #207: resets the fallback when the token changes IN PLACE — no stale avatar.
-  it('resets the fallback when the token changes in place — no stale avatar (guards the trigger)', () => {
+  it('resets the fallback when the token changes in place: no stale avatar (guards the trigger)', () => {
     const WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' as const
     const { rerender } = render(
       <TokenLogo token={{ address: USDC, symbol: 'USDC', logoURI: '', chainId: 1 }} />,

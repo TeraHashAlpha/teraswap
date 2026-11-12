@@ -84,7 +84,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('L-1 — Confirm is gated like the CTA, never a silent no-op', () => {
+describe('L-1: Confirm is gated like the CTA, never a silent no-op', () => {
   it('a hard block lands while the review is open: Confirm is disabled with v1\'s block copy, and pressing it starts nothing', async () => {
     openReview()
     expect(confirm().disabled).toBe(false)
@@ -128,7 +128,7 @@ describe('L-1 — Confirm is gated like the CTA, never a silent no-op', () => {
   it.each([
     ['the balance drops below the amount (an external transfer)', () => { h.wallet = { chainId: 1, balance: 10n ** 17n } }, 'Insufficient balance'],
     ['the wallet moves to another network', () => { h.wallet = { chainId: 8453, balance: 3n * 10n ** 18n } }, 'Switch to Ethereum'],
-  ])('a hard block is active behind a CTA that outranks it — %s: Confirm is disabled with the CTA\'s own words, never a silent no-op', async (_why, change, label) => {
+  ])('a hard block is active behind a CTA that outranks it: %s: Confirm is disabled with the CTA\'s own words, never a silent no-op', async (_why, change, label) => {
     openReview()
     expect(confirm().disabled).toBe(false)
     h.depeg = { mode: 'block', divergence: 0.12, symbol: 'cbETH', message: 'x' } // the gate block that ranks behind the CTA state below
@@ -171,7 +171,7 @@ describe('L-1 — Confirm is gated like the CTA, never a silent no-op', () => {
   })
 })
 
-describe('L-2 — Cancel on the CoW order sheet does not bring the single-route review back', () => {
+describe('L-2: Cancel on the CoW order sheet does not bring the single-route review back', () => {
   it('review → Confirm → CoW order sheet → Cancel → nothing is open (v1: onCancel={resetSwap} ends the flow)', async () => {
     const m = fixtureMeta()
     const cow = { ...m.all[0], source: 'cowswap' as const, gasUsd: 0 }
@@ -195,7 +195,7 @@ describe('L-2 — Cancel on the CoW order sheet does not bring the single-route 
   })
 })
 
-describe('L-3 — the Permit2 explainer is reachable: it opens instead of the review, in v1\'s order', () => {
+describe('L-3: the Permit2 explainer is reachable: it opens instead of the review, in v1\'s order', () => {
   it('Confirm → approve → explainer (alone) → Continue → the review returns, working; Cancel → the review returns, ready', async () => {
     const confirmEdu = vi.fn()
     const cancelEdu = vi.fn()

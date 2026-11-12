@@ -5,7 +5,7 @@ import type { Metadata } from 'next'
 // to set the page <title> and <meta> tags.
 export const metadata: Metadata = {
   title: 'Privacy Policy | TeraSwap',
-  description: 'TeraSwap Privacy Policy — how we handle user data, IP proxying, and analytics.',
+  description: 'TeraSwap Privacy Policy: how we handle user data and IP proxying.',
 }
 
 export default function PrivacyLayout({ children }: { children: React.ReactNode }) {

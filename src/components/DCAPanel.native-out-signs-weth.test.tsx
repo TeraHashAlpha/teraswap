@@ -242,7 +242,7 @@ beforeEach(() => {
   mockFetchDefiLlamaPrice.mockResolvedValue(null)
 })
 
-describe('DCAPanel — a native-ETH output is SIGNED as the chain\'s wrapped native', () => {
+describe('DCAPanel: a native-ETH output is SIGNED as the chain\'s wrapped native', () => {
   // Base (8453) = the v3 signing path; mainnet (1) = the v2 signing path. Same expectation.
   for (const chainId of [8453, 1]) {
     it(`chain ${chainId}: order.tokenOut === getWrappedNative(${chainId}), never the sentinel`, async () => {
@@ -280,7 +280,7 @@ describe('DCAPanel — a native-ETH output is SIGNED as the chain\'s wrapped nat
     })
   }
 
-  it('NEGATIVE CONTROL — a non-native tokenOut is passed through completely untouched', async () => {
+  it('NEGATIVE CONTROL: a non-native tokenOut is passed through completely untouched', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-usdc-out')) // buy USDC; spend stays the default WETH
     enterAmount('100')
@@ -293,7 +293,7 @@ describe('DCAPanel — a native-ETH output is SIGNED as the chain\'s wrapped nat
   })
 })
 
-describe('DCAPanel — the screen matches the signature', () => {
+describe('DCAPanel: the screen matches the signature', () => {
   it('the BUY selector reads WETH (not ETH) once native output is chosen', () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-native-out'))
@@ -302,7 +302,7 @@ describe('DCAPanel — the screen matches the signature', () => {
     expect(screen.getByTestId('symbol-out').textContent).toBe('WETH')
   })
 
-  it('the review modal names the pair the user is about to SIGN — USDC → WETH', async () => {
+  it('the review modal names the pair the user is about to SIGN. USDC → WETH', async () => {
     // Driven on the v2 path (chain 1) deliberately: there the modal mounts even with the OLD
     // behaviour, so this fails on the COPY ("USDC → ETH") rather than on the modal being absent —
     // which is the thing being pinned. The struct itself is pinned on both chains above.

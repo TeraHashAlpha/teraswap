@@ -19,16 +19,16 @@ import type { Token } from '@/lib/tokens'
 import type { PlannedLeg } from '@/hooks/useSplitSwap'
 
 function truncAddr(addr: string): string {
-  if (!addr || addr.length <= 12) return addr || '—'
+  if (!addr || addr.length <= 12) return addr || 'n/a'
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
 }
 
 function fmtAmount(raw: string | bigint | undefined, token: Token | null): string {
-  if (raw == null || !token) return '—'
+  if (raw == null || !token) return 'n/a'
   try {
     return `${fmtToken(typeof raw === 'bigint' ? raw : BigInt(raw), token.decimals)} ${token.symbol}`
   } catch {
-    return '—'
+    return 'n/a'
   }
 }
 
@@ -77,7 +77,7 @@ function LegRow({
 
       {skipped ? (
         <div className="mt-2 rounded-lg border border-warning/30 bg-warning/10 px-2 py-1.5 text-[11px] text-warning">
-          &#9888; Skipped — will NOT be signed. {leg.error ?? 'Failed pre-flight checks.'}
+          &#9888; Skipped: will NOT be signed. {leg.error ?? 'Failed pre-flight checks.'}
         </div>
       ) : (
         <>
@@ -127,7 +127,7 @@ function LegRow({
           </div>
           {/* [P209] Fail-open flag — leg simulated inconclusively */}
           {leg.simulated === false && (
-            <div className="mt-1 text-[11px] text-warning">&#9888; Simulation unavailable — protected only by the on-chain minimum output.</div>
+            <div className="mt-1 text-[11px] text-warning">&#9888; Simulation unavailable: protected only by the on-chain minimum output.</div>
           )}
           {leg.routeViaFeeCollector && (
             <div className="mt-1 text-[11px] text-cream-gold">Via TeraSwap FeeCollector (0.1% fee)</div>
@@ -154,7 +154,7 @@ export default function SplitReviewModal({
           <h2 className="text-base font-display font-semibold text-cream">Review Split Swap</h2>
           <p className="mt-0.5 text-xs text-cream-50">
             This routes across {plannedLegs.length} {plannedLegs.length === 1 ? 'leg' : 'legs'}.
-            Verify each before signing — you&apos;ll approve {signableCount} wallet {signableCount === 1 ? 'prompt' : 'prompts'}, one per leg.
+            Verify each before signing. You&apos;ll approve {signableCount} wallet {signableCount === 1 ? 'prompt' : 'prompts'}, one per leg.
           </p>
         </div>
 

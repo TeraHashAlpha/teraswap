@@ -140,7 +140,7 @@ export function formatGas(best: Pick<NormalizedQuote, 'estimatedGas' | 'gasUsd'>
   if (usd !== null) return eth !== null ? `${fmtUsd(usd)} (~${fmtGas(eth)} ETH)` : fmtUsd(usd)
   if (eth !== null) return `~${fmtGas(eth)} ETH`
   if (best.estimatedGas > 0) return `~${formatWithSeparator(best.estimatedGas.toString()).replace(/\s/g, '\u2009')} gas`
-  return '—'
+  return 'n/a'
 }
 
 /** v1's `outputAmountValid` / `Number(formatUnits(...))`, kept so a malformed `toAmount` renders `—`, not a crash. */
@@ -157,8 +157,8 @@ export function buildQuoteView(i: QuoteViewInput): QuoteView {
   const inAmt = Number(amountIn)
   const intentBased = bestMeta?.intentBased ?? false
 
-  const rate = out !== null && inAmt > 0 ? fmtToken(out / inAmt) : '—'
-  const inverseRate = out !== null && out > 0 && inAmt > 0 ? fmtToken(inAmt / out) : '—'
+  const rate = out !== null && inAmt > 0 ? fmtToken(out / inAmt) : 'n/a'
+  const inverseRate = out !== null && out > 0 && inAmt > 0 ? fmtToken(inAmt / out) : 'n/a'
 
   const mode = feeMode(best.source, chainId)
   const collected = isFeeCollected(best.source, chainId)
@@ -171,7 +171,7 @@ export function buildQuoteView(i: QuoteViewInput): QuoteView {
   const gasFree = best.estimatedGas === 0 && intentBased
   const gas = formatGas(best, intentBased, i.gasEstimate, i.ethUsdPrice)
 
-  let minOutput = '—'
+  let minOutput = 'n/a'
   try {
     minOutput = fmtToken(deriveMinimumOutput(best.toAmount, slippage), tokenOut.decimals)
   } catch {
@@ -228,7 +228,7 @@ export function buildQuoteView(i: QuoteViewInput): QuoteView {
       return {
         source: q.source,
         label: sourceLabel(q.source),
-        amount: o !== null ? `${fmtToken(o)} ${tokenOut.symbol}` : '—',
+        amount: o !== null ? `${fmtToken(o)} ${tokenOut.symbol}` : 'n/a',
         isBest: idx === 0,
         direct: m?.isDirect ?? false,
         quoteOnly: !isExecutableSource(q.source, chainId),
@@ -278,10 +278,10 @@ export function buildShareText(meta: MetaQuoteResult | null, tokenIn: Token | nu
   return savedDisplay
     ? {
         text: `I just saved ${savedDisplay} on my ${tokenIn.symbol} → ${tokenOut.symbol} swap by comparing ${meta.all.length} DEX sources with @TeraSwapDEX 🔥\n\nTeraSwap meta-aggregates ${INTEGRATED_DEX_SOURCE_COUNT} DEX sources for the best price.\nhttps://www.teraswap.app`,
-        label: `Share — saved ${savedDisplay}`,
+        label: `Share: saved ${savedDisplay}`,
       }
     : {
-        text: `Just swapped ${tokenIn.symbol} → ${tokenOut.symbol} via @TeraSwapDEX — compared ${meta.all.length} sources for the best price 🔥\n\nhttps://www.teraswap.app`,
+        text: `Just swapped ${tokenIn.symbol} → ${tokenOut.symbol} via @TeraSwapDEX: compared ${meta.all.length} sources for the best price 🔥\n\nhttps://www.teraswap.app`,
         label: 'Share swap',
       }
 }

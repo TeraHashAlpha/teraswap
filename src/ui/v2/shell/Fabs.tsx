@@ -10,7 +10,7 @@ const FAB =
   'fixed bottom-3 sm:bottom-[calc(var(--photo-footer-band)+12px)] z-50 flex h-11 w-11 items-center justify-center rounded-full border border-[color:var(--hairline-ring)] bg-transparent text-v2-cream ' +
   'hover:border-v2-cream focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-v2-teal'
 
-/** ♫ bottom-left (speaker ↔ muted speaker). Toggles ONLY the background music — the same `toggleBackgroundMusic()` v1 calls. */
+/** ♫ bottom-left (speaker ↔ muted speaker). The SOUND switch: off silences the music and every UI sound — the same `toggleBackgroundMusic()` v1 calls. */
 export function MusicToggle() {
   const { on, toggle } = useBackgroundMusic()
   // stopPropagation only helps when React's root is an element below `document`. In production Next hydrates INTO
@@ -27,9 +27,9 @@ export function MusicToggle() {
       onClick={onClick}
       data-ts-fab=""
       className={`${FAB} left-5`}
-      aria-label={on ? 'Turn music off' : 'Turn music on'}
+      aria-label={on ? 'Mute sound' : 'Unmute sound'}
       aria-pressed={on}
-      title={on ? 'Turn music off' : 'Turn music on'}
+      title={on ? 'Mute sound' : 'Unmute sound'}
     >
       <MusicSpeaker on={on} />
     </button>

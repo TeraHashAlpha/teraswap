@@ -146,7 +146,7 @@ describe('arg equality: v1 DCAPanel and the v2 card on one engine', () => {
     ['standard (on-chain feed)', onchainInfo(), false],
     ['offchain-price + consent', offchainInfo(), true],
     ['unpriced + consent', unpricedInfo(), true],
-  ] as const)('%s: createOrder(config) once, then confirmOrder() once — same config, same order, same sounds, one POST', async (_n, info, consent) => {
+  ] as const)('%s: createOrder(config) once, then confirmOrder() once. Same config, same order, same sounds, one POST', async (_n, info, consent) => {
     h.floor = info
     await v1ToModal(consent)
     const v1Approval = h.approvalArgs.at(-1) // what v1's modal asked while it was up
@@ -181,7 +181,7 @@ describe('arg equality: v1 DCAPanel and the v2 card on one engine', () => {
     expect(h.approvalArgs.at(-1)).toEqual([undefined, 500000000000000000n, BASE, true])
   })
 
-  it('approval first: Approve {sym} (v1 OrderReviewModal) is the one press, then Confirm & Sign Order — both trees, same calls', async () => {
+  it('approval first: Approve {sym} (v1 OrderReviewModal) is the one press, then Confirm & Sign Order, both trees, same calls', async () => {
     h.approval = { ...h.approval, needsApproval: true, isApproved: false }
     const ready = () => { h.approval = { ...h.approval, needsApproval: false, isApproved: true, status: 'ready' } }
 
@@ -209,7 +209,7 @@ describe('arg equality: v1 DCAPanel and the v2 card on one engine', () => {
     v2.rerender(<DcaCard chainId={BASE} />)
     const confirm = await screen.findByTestId('dca-sign-confirm')
     expect(confirm.textContent).toBe('Confirm & Sign Order')
-    expect(screen.getByTestId('dca-sign-note').textContent).toMatch(/^Approved on-chain — now sign the order/)
+    expect(screen.getByTestId('dca-sign-note').textContent).toMatch(/^Approved on-chain: now sign the order/)
     fireEvent.click(confirm)
     await screen.findByTestId('dca-sign-view-positions')
     expect(norm(fake.seq)).toEqual(v1Seq)
@@ -254,7 +254,7 @@ describe('signing → created', () => {
     await act(async () => { d.resolve({ event: { type: 'order_created', orderId: 'o1', orderHash: '0xhash' }, posted: true }) })
     expect(screen.getByRole('dialog')).toBe(dlg)
     expect(within(dlg).getByRole('heading', { level: 2 }).textContent).toBe('DCA order placed')
-    expect(dlg.textContent).toContain('Your DCA is live — it will execute automatically on schedule.')
+    expect(dlg.textContent).toContain('Your DCA is live: it will execute automatically on schedule.')
     expect(within(dlg).getByTestId('dca-sign-amountin').textContent).toBe('Total to spend0.5 WETH')
     expect(within(dlg).getByTestId('dca-sign-perbuy').textContent).toBe('Per buy0.05 WETH')
     expect(within(dlg).getByTestId('dca-sign-dca').textContent).toBe('Schedule86400s × 10 buys')
@@ -285,7 +285,7 @@ describe('signing → created', () => {
 })
 
 describe('failure', () => {
-  it('the wallet rejects: no POST, v1\'s text verbatim, v1\'s sounds (stop + cancel), Retry re-runs the create step and sends a FRESH config (equal in value, never the same object — A70 M-1)', async () => {
+  it('the wallet rejects: no POST, v1\'s text verbatim, v1\'s sounds (stop + cancel), Retry re-runs the create step and sends a FRESH config (equal in value, never the same object. A70 M-1)', async () => {
     fake.sign = async () => REJECTED
     await v2ToSheet(false)
     const dlg = dialog()
@@ -300,7 +300,7 @@ describe('failure', () => {
     expect(h.toast.mock.calls.map((c) => c[0])).toEqual([{ type: 'error', title: 'DCA order failed', description: 'Signature rejected in wallet.' }])
     expect(dlg.querySelector('[data-step="failed"]')?.textContent).toContain('Signing order...')
     expect(document.activeElement).toBe(retry)
-    expect(retry.textContent).toBe('Start DCA — 10 buys over 10.0 days') // owner 2026-10-30: v1's form CTA wording, from the frozen struct
+    expect(retry.textContent).toBe('Start DCA: 10 buys over 10.0 days') // owner 2026-10-30: v1's form CTA wording, from the frozen struct
 
     fake.sign = async () => ({ event: { type: 'order_created', orderId: 'o2', orderHash: '0xhash2' }, posted: true })
     fireEvent.click(retry)
@@ -337,7 +337,7 @@ describe('failure', () => {
   })
 
   it('the freeze-403 reads as v1\'s pause, not a failure', () => {
-    expect(failureCopy('New DCA orders are temporarily paused while…')).toEqual({ title: 'DCA temporarily paused', description: 'Only new DCA orders are paused — your existing ones keep running.' })
+    expect(failureCopy('New DCA orders are temporarily paused while…')).toEqual({ title: 'DCA temporarily paused', description: 'Only new DCA orders are paused. Your existing ones keep running.' })
     expect(failureCopy('boom')).toEqual({ title: 'DCA order failed', description: 'boom' })
     expect(failureCopy(null)).toEqual({ title: 'DCA order failed', description: 'Order could not be submitted.' })
   })
@@ -354,7 +354,7 @@ const v1Floor = (priceIn: number) =>
   }).minAmountOut
 
 describe('A70 M-1 · Retry and Create build the draft afresh', () => {
-  it('Retry, a gate closed since the failure (depeg): v1 would stop before the wallet — no second createOrder, the sheets give way to the form and its banner', async () => {
+  it('Retry, a gate closed since the failure (depeg): v1 would stop before the wallet. No second createOrder, the sheets give way to the form and its banner', async () => {
     fake.sign = async () => REJECTED
     const view = await v2ToSheet(false)
     fireEvent.click(screen.getByTestId('dca-sign-confirm'))
@@ -364,7 +364,7 @@ describe('A70 M-1 · Retry and Create build the draft afresh', () => {
     fireEvent.click(retry)
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(fake.seq.map((c) => c[0])).toEqual(['createOrder', 'confirmOrder']) // no #2
-    expect(screen.getByTestId('dca-depeg-block').textContent).toContain('DCA blocked — WETH depeg.')
+    expect(screen.getByTestId('dca-depeg-block').textContent).toContain('DCA blocked: WETH depeg.')
     expect(h.soundLog.at(-1)).not.toBe('startWaitingSound') // nothing left running
   })
 
@@ -382,7 +382,7 @@ describe('A70 M-1 · Retry and Create build the draft afresh', () => {
 
   // [A70b S-1] The oracle test above never presses Create: the price-feed STATUS is inside the draft key, so the review closes first and the
   // `if (create)` branch is skipped. A gate that is in NO key (the depeg mode) leaves the review up, so the press itself is what is proven.
-  it('Create, a gate that is in no key closed since the review opened (depeg block): the review is still up, the press reaches the gate and stops — createOrder never called', async () => {
+  it('Create, a gate that is in no key closed since the review opened (depeg block): the review is still up, the press reaches the gate and stops. CreateOrder never called', async () => {
     const view = await v2ToReview()
     h.depeg = { mode: 'block', divergence: 12, symbol: 'WETH', message: 'WETH trades 12% off its exchange rate.' }
     view.rerender(<DcaCard chainId={BASE} />)
@@ -391,7 +391,7 @@ describe('A70 M-1 · Retry and Create build the draft afresh', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(fake.seq.filter((c) => c[0] === 'createOrder')).toEqual([])
     expect(fake.seq).toEqual([])
-    expect(screen.getByTestId('dca-depeg-block').textContent).toContain('DCA blocked — WETH depeg.')
+    expect(screen.getByTestId('dca-depeg-block').textContent).toContain('DCA blocked: WETH depeg.')
   })
 
   it('Create, the pair\'s tier moved since the review opened (on-chain → unpriced): no createOrder; the review asks for the consent, box unticked', async () => {
@@ -429,7 +429,7 @@ describe('A70 M-1 · Retry and Create build the draft afresh', () => {
   // [A70b S-3] v1 never consults a cached tier once the user acknowledged one (`tier = ack`, DCAPanel.tsx:890). v2's Create used the tier cached when
   // the pair was selected: a failed lookup there classifies as 'unpriced', so a user who ticked the (milder) tier the review showed was sent back
   // to a stricter consent they were never shown.
-  it('with an acknowledgement, Create judges the draft by the tier the review showed and the user ticked — not the tier cached when the pair was selected', async () => {
+  it('with an acknowledgement, Create judges the draft by the tier the review showed and the user ticked, not the tier cached when the pair was selected', async () => {
     h.floor = unpricedInfo() // the lookup at selection failed: cached tier 'unpriced'
     const view = render(<DcaCard chainId={BASE} />)
     await act(async () => {})
@@ -462,7 +462,7 @@ describe('A70 M-1 · Retry and Create build the draft afresh', () => {
     expect(fake.seq.map((c) => c[0])).toEqual(['createOrder'])
   })
 
-  it('Retry, the price moved: signs the NEW floor — bigint-equal to what v1\'s handleCreate derives for the same inputs (and to v1\'s own createOrder config)', async () => {
+  it('Retry, the price moved: signs the NEW floor. Bigint-equal to what v1\'s handleCreate derives for the same inputs (and to v1\'s own createOrder config)', async () => {
     fake.sign = async () => REJECTED
     const view = await v2ToSheet(false)
     const oldFloor = BigInt(config(0).minAmountOut)
@@ -563,7 +563,7 @@ describe('A70 L-1 · a 409 that asks for an acknowledgement but does not parse r
     expect(requiredTierFromError(UNPARSED)).toBeNull() // the strict parser is unchanged
   })
 
-  it('offchain-price ack refused with an unparsed sentence: consent reopens at UNPRICED (unticked, focused), no failure sheet, no Retry; the next call carries a fresh unpriced ack — the refused one is never resent', async () => {
+  it('offchain-price ack refused with an unparsed sentence: consent reopens at UNPRICED (unticked, focused), no failure sheet, no Retry; the next call carries a fresh unpriced ack. The refused one is never resent', async () => {
     h.floor = offchainInfo()
     let signs = 0
     fake.sign = async () => (++signs === 1 ? errorOutcome(UNPARSED) : { event: { type: 'order_created', orderId: 'o1', orderHash: '0xhash' }, posted: true })
@@ -585,7 +585,7 @@ describe('A70 L-1 · a 409 that asks for an acknowledgement but does not parse r
     expect(config(2).floorAck).not.toBe(config(0).floorAck)
   })
 
-  it('a random 409 (not an acknowledgement) stays a plain failure with Retry; Retry then re-asks consent on a weaker tier — never resends the old ack', async () => {
+  it('a random 409 (not an acknowledgement) stays a plain failure with Retry; Retry then re-asks consent on a weaker tier, never resends the old ack', async () => {
     h.floor = offchainInfo()
     fake.sign = async () => errorOutcome('Order already exists (409)')
     await v2ToSheet(true)
@@ -635,7 +635,7 @@ describe('the sign sheet is v1\'s OrderReviewModal, word for word', () => {
     resetFake()
     await v2ToSheet(false)
     const v2Text = (screen.getByRole('dialog').textContent ?? '').replace(/\s+/g, ' ')
-    for (const s of ['DCA (recurring buy)', 'sign an autonomous order', 'Pair', 'WETH → USDC', 'Total to spend', '0.5 WETH', 'Per buy', '0.05 WETH', 'Minimum received', 'Schedule', '86400s × 10 buys', 'Expires', 'Router (constraint)', 'Nonce', '7', 'Price feed (oracle)', 'Route constraint hash', 'Approved on-chain — now sign the order.', 'Confirm & Sign Order', 'Cancel']) {
+    for (const s of ['DCA (recurring buy)', 'sign an autonomous order', 'Pair', 'WETH → USDC', 'Total to spend', '0.5 WETH', 'Per buy', '0.05 WETH', 'Minimum received', 'Schedule', '86400s × 10 buys', 'Expires', 'Router (constraint)', 'Nonce', '7', 'Price feed (oracle)', 'Route constraint hash', 'Approved on-chain: now sign the order.', 'Confirm & Sign Order', 'Cancel']) {
       expect(v1Text, `v1 lacks "${s}"`).toContain(s)
       expect(v2Text, `v2 lacks "${s}"`).toContain(s)
     }

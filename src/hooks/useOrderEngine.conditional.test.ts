@@ -197,7 +197,7 @@ afterEach(() => {
 // The existing suite ONLY ever uses ABOVE — these pin BOTH directions and the
 // derived string, which is the field the executor reads to decide trigger side.
 // ─────────────────────────────────────────────────────────────
-describe('useOrderEngine — price-condition mapping (ABOVE/BELOW)', () => {
+describe('useOrderEngine: price-condition mapping (ABOVE/BELOW)', () => {
   it('encodes ABOVE as condition uint8 0 in the FROZEN struct, signed message, and Supabase "above"', async () => {
     const { result } = renderHook(() => useOrderEngine())
     await act(async () => { await result.current.createOrder(makeConfig({ condition: PriceCondition.ABOVE })) })
@@ -246,7 +246,7 @@ describe('useOrderEngine — price-condition mapping (ABOVE/BELOW)', () => {
 // Expiry handling: expiry = floor(Date.now()/1000) + expirySeconds.
 // Pinned to a fixed clock so the exact bigint is asserted deterministically.
 // ─────────────────────────────────────────────────────────────
-describe('useOrderEngine — expiry math (preset seconds -> absolute unix expiry)', () => {
+describe('useOrderEngine: expiry math (preset seconds -> absolute unix expiry)', () => {
   it('computes expiry as floor(now/1000) + expirySeconds (24h preset)', async () => {
     const { result } = renderHook(() => useOrderEngine())
     await act(async () => { await result.current.createOrder(makeConfig({ expirySeconds: 86_400 })) })
@@ -302,7 +302,7 @@ describe('useOrderEngine — expiry math (preset seconds -> absolute unix expiry
 // ZeroHash default, custom values, and the struct(bigint) vs Supabase-arg(null)
 // asymmetry for OMITTED params. The existing suite covers ONLY dcaTotal=1.
 // ─────────────────────────────────────────────────────────────
-describe('useOrderEngine — DCA param building', () => {
+describe('useOrderEngine: DCA param building', () => {
   it('defaults dcaInterval to 0n in the frozen struct when omitted', async () => {
     const { result } = renderHook(() => useOrderEngine())
     await act(async () => { await result.current.createOrder(makeConfig()) }) // no dcaInterval
@@ -396,7 +396,7 @@ describe('useOrderEngine — DCA param building', () => {
 // (DCAChunkTooSmall / OrderTooSmall). MIN_ORDER_AMOUNT is the single shared
 // constant from order-engine/config.ts, mirroring the on-chain 10_000.
 // ─────────────────────────────────────────────────────────────
-describe('useOrderEngine — MIN_ORDER_AMOUNT pre-sign floor guard [Fix 1]', () => {
+describe('useOrderEngine: MIN_ORDER_AMOUNT pre-sign floor guard [Fix 1]', () => {
   it('builds amountIn/minAmountOut as exact bigints from the wei strings', async () => {
     const { result } = renderHook(() => useOrderEngine())
     await act(async () => {
@@ -421,7 +421,7 @@ describe('useOrderEngine — MIN_ORDER_AMOUNT pre-sign floor guard [Fix 1]', () 
     expect(mockCreateOrderInSupabase).not.toHaveBeenCalled()
   })
 
-  it('ALLOWS a just-at-floor amount (10000) — frozen for review, no error', async () => {
+  it('ALLOWS a just-at-floor amount (10000): frozen for review, no error', async () => {
     const { result } = renderHook(() => useOrderEngine())
     await act(async () => {
       await result.current.createOrder(makeConfig({ amountIn: '10000', minAmountOut: '1' }))

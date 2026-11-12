@@ -26,7 +26,7 @@ beforeEach(() => {
 })
 afterEach(() => useDisconnectedChainSelection.setState({ chainId: null }))
 
-describe('TokenAddressBadge — chain comes from the quote path, not the wallet fallback', () => {
+describe('TokenAddressBadge: chain comes from the quote path, not the wallet fallback', () => {
   it('Base USDC, NO wallet, Base picked in ChainSelector → verified shield, no amber ⚠', () => {
     useDisconnectedChainSelection.setState({ chainId: 8453 })
     const { container } = render(<TokenAddressBadge address={BASE_USDC} />)

@@ -183,7 +183,7 @@ describe('same transitions → same sounds and same toasts', () => {
 })
 
 describe('the press → waiting loop (the one place the click path differs by design: two clicks in v2, one in v1)', () => {
-  it('Swap/Approve pressed: v1 = touch + start; v2 = touch (Review swap) then touch + start (Confirm) — the loop starts exactly once', () => {
+  it('Swap/Approve pressed: v1 = touch + start; v2 = touch (Review swap) then touch + start (Confirm). The loop starts exactly once', () => {
     const v1 = render(<SwapBox />)
     typeAmount(v1.container)
     h.log = []
@@ -218,7 +218,7 @@ describe('the press → waiting loop (the one place the click path differs by de
   })
 })
 
-describe('DEVIATIONS — v2 stops a loop that v1 leaves running (feedback finding)', () => {
+describe('DEVIATIONS: v2 stops a loop that v1 leaves running (feedback finding)', () => {
   it('approval error: v1 toasts and plays nothing; v2 toasts the same and stops the loop', () => {
     const steps = [{ approval: { isReady: false, status: 'error', error: 'User rejected the request.' } }]
     const one = play('v1', steps)

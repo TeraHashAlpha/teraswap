@@ -100,7 +100,7 @@ beforeEach(() => {
   isLimitLiveMock.mockReturnValue(false)
 })
 
-describe('Home — DCA tab gating', () => {
+describe('Home: DCA tab gating', () => {
   it('not live ⇒ DCA tab is the "Soon" teaser (disabled + "Soon" pill), byte-identical to today', () => {
     isDcaLiveMock.mockReturnValue(false)
     renderSwapView()
@@ -171,7 +171,7 @@ describe('Home — DCA tab gating', () => {
     expect(await screen.findByTestId('sltp-panel')).toBeInTheDocument()
   })
 
-  it('limit gate consults the CONNECTED chain — mainnet stays gated even with the flag on', () => {
+  it('limit gate consults the CONNECTED chain: mainnet stays gated even with the flag on', () => {
     useChainIdMock.mockReturnValue(1)
     isLimitLiveMock.mockImplementation((id) => id === 8453)
     renderSwapView()

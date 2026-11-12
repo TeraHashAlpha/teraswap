@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest'
 import { renderWithProviders, screen } from '@/test-utils/render'
 import ChainIcon from './ChainIcon'
 
-describe('[9Y] ChainIcon — bundled static chain logos (no external fetch)', () => {
+describe('[9Y] ChainIcon: bundled static chain logos (no external fetch)', () => {
   it('renders an inline SVG (not an <img>) for Ethereum (chainId 1)', () => {
     const { container } = renderWithProviders(<ChainIcon chainId={1} />)
     expect(screen.getByTestId('chain-icon-1')).toBeInTheDocument()

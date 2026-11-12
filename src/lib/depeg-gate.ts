@@ -63,8 +63,8 @@ export const UNVERIFIED = (symbol: string): DepegCheck => ({
   divergence: 0,
   symbol,
   message: symbol
-    ? `We couldn't verify ${symbol}'s price right now — try again in a moment.`
-    : `We couldn't verify this price right now — try again in a moment.`,
+    ? `We couldn't verify ${symbol}'s price right now: try again in a moment.`
+    : `We couldn't verify this price right now: try again in a moment.`,
 })
 
 /**
@@ -130,7 +130,7 @@ export function evaluateDepeg(
       mode: 'block',
       divergence,
       symbol,
-      message: `${symbol} is trading ${pct} off its exchange rate — likely a depeg or oracle manipulation. Swap blocked for your safety.`,
+      message: `${symbol} is trading ${pct} off its exchange rate, likely a depeg or oracle manipulation. Swap blocked for your safety.`,
     }
   }
 
@@ -139,7 +139,7 @@ export function evaluateDepeg(
       mode: 'consent',
       divergence,
       symbol,
-      message: `${symbol} is trading ${pct} off its exchange rate — possible depeg. Verify before swapping.`,
+      message: `${symbol} is trading ${pct} off its exchange rate: possible depeg. Verify before swapping.`,
     }
   }
 

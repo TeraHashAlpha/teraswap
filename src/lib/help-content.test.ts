@@ -19,7 +19,7 @@ afterEach(() => {
   vi.resetModules()
 })
 
-describe('help-content — "What is TeraSwap?"', () => {
+describe('help-content: "What is TeraSwap?"', () => {
   it('states the registry-derived source count and chain list', () => {
     expect(whatIs()).toContain(`compares quotes across ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources`)
     expect(whatIs()).toContain(`on ${SWAP_CHAIN_LIST_LABEL}`)
@@ -56,7 +56,7 @@ describe('help-content — "What is TeraSwap?"', () => {
   })
 })
 
-describe('help-content — [chore/copy-leftovers] networks and sources are not typed as prose', () => {
+describe('help-content: [chore/copy-leftovers] networks and sources are not typed as prose', () => {
   it('"Which networks are supported?" lists the registry chains, not just Ethereum Mainnet', () => {
     expect(answer('Which networks are supported?')).toContain(`supports ${SWAP_CHAIN_LIST_LABEL}.`)
     expect(answer('Which networks are supported?')).not.toMatch(/supports Ethereum Mainnet/)
@@ -78,7 +78,7 @@ describe('help-content — [chore/copy-leftovers] networks and sources are not t
 })
 
 // [fix/user-ip-privacy] Help said "Your IP address is never exposed" and "We do not track wallets" — neither was true.
-describe('help-content — privacy answers say what is relayed and what the wallet does on its own', () => {
+describe('help-content: privacy answers say what is relayed and what the wallet does on its own', () => {
   const privacy = () => answer('How does TeraSwap protect my privacy?')
   const collect = () => answer('What data does TeraSwap collect?')
 

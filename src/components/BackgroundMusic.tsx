@@ -5,7 +5,8 @@ import { startBackgroundMusic, stopBackgroundMusic, toggleBackgroundMusic } from
 
 /**
  * Background music controller — starts ambient music on first user interaction.
- * Shows a small toggle button fixed at the bottom-left corner.
+ * Shows a small toggle button fixed at the bottom-left corner. The button is the SOUND switch: off silences the
+ * music AND every UI sound (the one flag lives in `src/lib/sounds.ts`).
  */
 export default function BackgroundMusic() {
   const [enabled, setEnabled] = useState(true)
@@ -51,9 +52,10 @@ export default function BackgroundMusic() {
   return (
     <button
       onClick={handleToggle}
+      data-v1-sound-toggle=""
       className="fixed bottom-4 left-4 z-50 flex h-8 w-8 items-center justify-center rounded-full border border-cream-08 bg-surface-secondary/80 backdrop-blur-sm text-cream-50 hover:text-cream-90 hover:border-cream-gold/40 transition-all text-sm"
-      title={enabled ? 'Mute background music' : 'Unmute background music'}
-      aria-label={enabled ? 'Mute background music' : 'Unmute background music'}
+      title={enabled ? 'Mute sound' : 'Unmute sound'}
+      aria-label={enabled ? 'Mute sound' : 'Unmute sound'}
     >
       {enabled ? '♫' : '✕'}
     </button>

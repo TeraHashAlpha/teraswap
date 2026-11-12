@@ -47,7 +47,7 @@ export default function CountdownCenter({ targetMs, terminalLabel, label = 'Next
   if (targetMs == null) {
     return (
       <span className="font-display text-lg font-semibold text-cream-50" data-testid="countdown-terminal">
-        {terminalLabel ?? '—'}
+        {terminalLabel ?? 'n/a'}
       </span>
     )
   }

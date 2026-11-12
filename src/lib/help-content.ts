@@ -31,7 +31,7 @@ export const helpSections: HelpSection[] = [
       },
       {
         q: 'How do I connect my wallet?',
-        a: 'Click "Connect Wallet" in the top-right corner. We support MetaMask, WalletConnect, Coinbase Wallet, and other popular wallets. Your funds always stay in your wallet — TeraSwap never takes custody.',
+        a: 'Click "Connect Wallet" in the top-right corner. We support MetaMask, WalletConnect, Coinbase Wallet, and other popular wallets. Your funds always stay in your wallet. TeraSwap never takes custody.',
       },
       {
         q: 'Is TeraSwap free to use?',
@@ -91,7 +91,7 @@ export const helpSections: HelpSection[] = [
     items: [
       {
         q: 'How do limit orders work?',
-        a: 'Set a target price at which you want to buy or sell. When the market reaches your price, the order executes automatically at the best rate. Orders are gasless to place — you only pay gas on execution.',
+        a: 'Set a target price at which you want to buy or sell. When the market reaches your price, the order executes automatically at the best rate. Orders are gasless to place. You only pay gas on execution.',
       },
       {
         q: 'How long do limit orders last?',
@@ -117,11 +117,11 @@ export const helpSections: HelpSection[] = [
     items: [
       {
         q: 'Is TeraSwap safe?',
-        a: 'TeraSwap is a non-custodial frontend — your tokens never leave your wallet until you sign a transaction. We use Permit2 for gasless approvals and all swap routes go through audited DEX contracts. Multi-layer price protection (Chainlink + DefiLlama + cross-quote consensus) guards against manipulation.',
+        a: 'TeraSwap is a non-custodial frontend. Your tokens never leave your wallet until you sign a transaction. We use Permit2 for gasless approvals and all swap routes go through audited DEX contracts. Multi-layer price protection (Chainlink + DefiLlama + cross-quote consensus) guards against manipulation.',
       },
       {
         q: 'Has TeraSwap been audited?',
-        a: 'TeraSwap itself is a routing layer — it does not hold funds or run smart contracts. All swaps execute through the audited contracts of the underlying DEXs (Uniswap, Curve, etc.). Our FeeCollector smart contract is deployed and verified on Etherscan.',
+        a: 'TeraSwap itself is a routing layer. It does not hold funds or run smart contracts. All swaps execute through the audited contracts of the underlying DEXs (Uniswap, Curve, etc.). Our FeeCollector smart contract is deployed and verified on Etherscan.',
       },
       {
         q: 'How does TeraSwap protect my privacy?',
