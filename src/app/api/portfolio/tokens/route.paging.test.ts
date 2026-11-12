@@ -77,9 +77,9 @@ afterEach(() => {
 })
 
 describe('GET /api/portfolio/tokens: paging and the catalog guarantee', () => {
-  it('follows pageKey: 300 junk tokens, then UNI on page 3 -> UNI is returned as a catalog token', async () => {
+  it('follows pageKey: 300 junk tokens (three full pages), then UNI on the next page -> UNI is returned as a catalog token', async () => {
     const { mock, calls } = pagedMock({
-      pages: [junk(0, 100), junk(100, 100), [...junk(200, 100), { contractAddress: BASE_UNI, tokenBalance: ONE }]],
+      pages: [junk(0, 100), junk(100, 100), junk(200, 100), [{ contractAddress: BASE_UNI, tokenBalance: ONE }]],
     })
     vi.stubGlobal('fetch', mock)
     const { res, body } = await ask()
@@ -93,10 +93,31 @@ describe('GET /api/portfolio/tokens: paging and the catalog guarantee', () => {
     // 301 holdings > MAX_TOKENS (200): trimmed, and the response says so
     expect(body.tokens).toHaveLength(200)
     expect(body.truncated).toBe(true)
-    // the scan reached the end, so no catalog check; calls 2 and 3 carried the pageKey; maxCount is the documented 100
+    // the scan reached a short last page, so no catalog check; calls 2.. carried the pageKey; maxCount is the documented 100
     expect(catalogCalls(calls)).toHaveLength(0)
-    expect(erc20Calls(calls).map((c) => (c.params[2] as { pageKey?: string }).pageKey)).toEqual([undefined, 'p1', 'p2'])
+    expect(erc20Calls(calls).map((c) => (c.params[2] as { pageKey?: string }).pageKey)).toEqual([undefined, 'p1', 'p2', 'p3'])
     expect((erc20Calls(calls)[0].params[2] as { maxCount: number }).maxCount).toBe(100)
+  })
+
+  it('UNI on page 3 of a 298-junk wallet (short last page): found, no catalog check needed', async () => {
+    const { mock, calls } = pagedMock({
+      pages: [junk(0, 100), junk(100, 100), [...junk(200, 98), { contractAddress: BASE_UNI, tokenBalance: ONE }]],
+    })
+    vi.stubGlobal('fetch', mock)
+    const { body } = await ask()
+    expect(body.tokens[0].address).toBe(BASE_UNI.toLowerCase())
+    expect(body.tokens[0].isDefault).toBe(true)
+    expect(catalogCalls(calls)).toHaveLength(0)
+  })
+
+  it('a FULL last page with no pageKey proves nothing (the docs show no pageKey in the response): catalog check runs, truncated', async () => {
+    const { mock, calls } = pagedMock({ pages: [junk(0, 100)], held: { [BASE_UNI.toLowerCase()]: ONE } })
+    vi.stubGlobal('fetch', mock)
+    const { body } = await ask()
+    expect(erc20Calls(calls)).toHaveLength(1)
+    expect(catalogCalls(calls).length).toBeGreaterThan(0)
+    expect(body.truncated).toBe(true)
+    expect(body.tokens.some((t) => t.address === BASE_UNI.toLowerCase() && t.isDefault)).toBe(true)
   })
 
   it('page cap reached: truncated, and the catalog check still returns a UNI that sits beyond the cap', async () => {

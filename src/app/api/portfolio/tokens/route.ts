@@ -202,9 +202,13 @@ async function fetchBalancePages(
       console.warn('[portfolio-tokens] Alchemy getTokenBalances page', page + 1, 'failed:', err instanceof Error ? err.message : err)
       return { balances, complete: false }
     }
-    for (const b of result.tokenBalances ?? []) balances.push(b)
+    const rows = result.tokenBalances ?? []
+    for (const b of rows) balances.push(b)
     pageKey = result.pageKey
-    if (!pageKey) return { balances, complete: true }
+    // The docs describe `pageKey` only as a request option ("used for pagination if more results are available") and show
+    // no `pageKey` in the response. A last page with no key AND fewer than a full page proves the end; a FULL page with no key
+    // does not (the API might simply not hand the key back), so it is treated as incomplete and the catalog check covers it.
+    if (!pageKey) return { balances, complete: rows.length < BALANCES_PAGE_SIZE }
   }
   return { balances, complete: false }
 }
