@@ -5,27 +5,37 @@ import { useRouter } from 'next/navigation'
 import { useAccount } from 'wagmi'
 import { useActiveApprovals, type ApprovalRecord } from '@/hooks/useActiveApprovals'
 import { useActiveChainId } from '@/hooks/useChainId'
-import { usePortfolio, type PortfolioData, type PortfolioToken } from '@/hooks/usePortfolio'
+import { usePortfolio, type PortfolioData } from '@/hooks/usePortfolio'
 import { useTokenImport } from '@/hooks/useTokenImport'
 import { getChainConfig } from '@/lib/chains/registry'
 import { fmtUsd } from '@/lib/format'
+import {
+  ALL_HIDDEN_NOTE,
+  HIDE_SMALL_LABEL,
+  PORTFOLIO_TRUNCATED_NOTE,
+  THIRD_PARTY_NOTE,
+  UNVERIFIED_TOKEN_NAME,
+  buildPortfolioView,
+  showAllLabel,
+  type RowView,
+} from '@/lib/portfolio-view'
 import type { Token } from '@/lib/tokens'
 import { Button, Skeleton } from '../primitives'
 import { rowNavKeyDown } from '../orders/keyboard'
 import { ApprovalsPanel } from './ApprovalsPanel'
-import { approvalRows, formatLastUpdated, groupPortfolio, shortenAddress } from './portfolio-model'
+import { approvalRows, formatLastUpdated, shortenAddress } from './portfolio-model'
 import './portfolio.css'
 
 const CAPS = 'font-v2-mono text-[10px] font-semibold uppercase tracking-[1.5px]'
 const DASH = 'n/a' // v1's literal for an unpriced total / row
 
 /** v1 `TokenAvatar`: the token logo, or its first letter on a disc when there is none / it fails to load. Decorative. */
-function TokenAvatar({ token }: { token: Token }) {
+function TokenAvatar({ token, masked = false }: { token: Token; masked?: boolean }) {
   const [errored, setErrored] = useState(false)
-  if (errored || !token.logoURI) {
+  if (masked || errored || !token.logoURI) {
     return (
       <span className="ts-pf-avatar" aria-hidden="true">
-        {token.symbol.charAt(0).toUpperCase()}
+        {masked ? '?' : token.symbol.charAt(0).toUpperCase()}
       </span>
     )
   }
@@ -39,19 +49,22 @@ function TokenAvatar({ token }: { token: Token }) {
  * One holding as a hairline row (round7 44 / m06): avatar · symbol / name (/ the shortened address while still un-imported) · balance / USD ·
  * Swap (curated, or imported) or Add (discovered, not yet imported). Balance text is the hook's `fmtToken`; USD is `fmtUsd(valueUsd)` — v1's.
  */
-function HoldingRow({ entry, discovered, imported, onAdd, onSwap }: { entry: PortfolioToken; discovered: boolean; imported: boolean; onAdd: (t: Token) => void; onSwap: (t: Token) => void }) {
-  const { token, balanceFormatted, valueUsd } = entry
+function HoldingRow({ row, discovered, imported, onAdd, onSwap }: { row: RowView; discovered: boolean; imported: boolean; onAdd: (t: Token) => void; onSwap: (t: Token) => void }) {
+  const { token, balanceFormatted, valueUsd } = row.entry
   const showAdd = discovered && !imported
   return (
     <li className="ts-pf-row" data-testid="holding-row" data-token={token.address.toLowerCase()} data-discovered={showAdd ? 'true' : undefined}>
-      <TokenAvatar token={token} />
+      <TokenAvatar token={token} masked={row.masked} />
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[16px] font-semibold text-v2-text">{token.symbol}</div>
-        <div className="truncate text-[13px] text-v2-muted">{token.name}</div>
-        {showAdd && (
+        <div className="truncate text-[16px] font-semibold text-v2-text">{row.masked ? UNVERIFIED_TOKEN_NAME : token.symbol}</div>
+        <div className={`truncate text-[13px] ${row.masked ? 'font-v2-mono text-v2-dim' : 'text-v2-muted'}`} title={row.masked ? token.address : undefined}>{row.subtitle}</div>
+        {showAdd && !row.masked && (
           <div className="mt-0.5 font-v2-mono text-[12px] text-v2-dim" title={token.address}>
             {shortenAddress(token.address)}
           </div>
+        )}
+        {row.nonCatalog && (
+          <div className="mt-0.5 text-[12px] leading-snug text-v2-dim" data-testid="portfolio-third-party">{THIRD_PARTY_NOTE}</div>
         )}
       </div>
       <div className="ts-pf-amount text-right">
@@ -59,9 +72,9 @@ function HoldingRow({ entry, discovered, imported, onAdd, onSwap }: { entry: Por
         <div className="font-v2-mono text-[13px] tabular-nums text-v2-muted">{valueUsd !== null ? fmtUsd(valueUsd) : DASH}</div>
       </div>
       {showAdd ? (
-        <Button variant="text" onClick={() => onAdd(token)} aria-label={`Add ${token.symbol} to tokens`} data-pf-action="" data-testid="holding-add">Add</Button>
+        <Button variant="text" onClick={() => onAdd(token)} aria-label={`Add ${row.label} to tokens`} data-pf-action="" data-testid="holding-add">Add</Button>
       ) : (
-        <Button variant="text" onClick={() => onSwap(token)} aria-label={`Swap ${token.symbol}`} data-pf-action="" data-testid="holding-swap">Swap</Button>
+        <Button variant="text" onClick={() => onSwap(token)} aria-label={`Swap ${row.label}`} data-pf-action="" data-testid="holding-swap">Swap</Button>
       )}
     </li>
   )
@@ -100,7 +113,7 @@ export interface PortfolioViewProps {
  * USD figures, the total, loading / error / availability. v1 is ONE chain at a time (the header's chain), so is this view. Every word is v1's.
  */
 export function PortfolioView({ isConnected, address, chainName, portfolio, importedKeys, importKey, onAdd, onSwap, approvalRows: approvalList, approvalCount, onRevoked }: PortfolioViewProps) {
-  const { tokens, totalValueUsd, isLoading, isError, lastUpdated, refresh, isChainSupported } = portfolio
+  const { tokens, totalValueUsd, isLoading, isError, lastUpdated, refresh, isChainSupported, truncated } = portfolio
   const activeChainId = useActiveChainId() // the curated/Discovered split follows the ACTIVE chain's list, as v1
 
   // v1's once-a-second clock for "Last updated …"; idle without a timestamp.
@@ -111,7 +124,14 @@ export function PortfolioView({ isConnected, address, chainName, portfolio, impo
     return () => clearInterval(id)
   }, [lastUpdated])
 
-  const { grouped, discovered } = useMemo(() => groupPortfolio(tokens, activeChainId), [tokens, activeChainId])
+  // [fix/portfolio-tokens-view] The same view v1 renders (@/lib/portfolio-view): < $1.00 / unpriced hidden until the control is pressed
+  // (closed on every page load), rows by USD value, junk metadata masked. The header total is the hook's, whatever is hidden.
+  const [showAll, setShowAll] = useState(false)
+  const { grouped, discovered, smallCount, visibleCount } = useMemo(
+    () => buildPortfolioView(tokens, activeChainId, showAll),
+    [tokens, activeChainId, showAll],
+  )
+  const awaitingPrices = !isError && isLoading && lastUpdated === null && tokens.length > 0
 
   if (!isConnected) {
     return (
@@ -134,7 +154,7 @@ export function PortfolioView({ isConnected, address, chainName, portfolio, impo
     )
   }
 
-  const initialLoad = isLoading && tokens.length === 0 && !isError
+  const initialLoad = (isLoading && tokens.length === 0 && !isError) || awaitingPrices
 
   return (
     <section className={`ts-pf${approvalsPanel ? ' ts-pf--aside' : ''}`} aria-label="Portfolio" data-testid="portfolio" onKeyDown={rowNavKeyDown('[data-pf-action]')}>
@@ -180,26 +200,39 @@ export function PortfolioView({ isConnected, address, chainName, portfolio, impo
           <p className="ts-pf-empty text-[15px] text-v2-muted" data-testid="portfolio-empty">No tokens found in this wallet on {chainName}.</p>
         )}
 
-        {grouped.map(([category, entries]) => (
+        {!awaitingPrices && smallCount > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-x-3" data-testid="portfolio-small-toggle">
+            <Button variant="text" onClick={() => setShowAll((v) => !v)} aria-expanded={showAll} data-testid="portfolio-show-all">
+              {showAll ? HIDE_SMALL_LABEL : showAllLabel(smallCount)}
+            </Button>
+            {!showAll && visibleCount === 0 && <span className="text-[13px] text-v2-dim">{ALL_HIDDEN_NOTE}</span>}
+          </div>
+        )}
+
+        {!awaitingPrices && grouped.map(([category, rows]) => (
           <section key={category} className="ts-pf-group" aria-label={category} data-testid="holdings-group" data-category={category}>
             <h3 className={`${CAPS} ts-pf-label text-v2-muted`}>{category}</h3>
             <ul role="list">
-              {entries.map((entry) => (
-                <HoldingRow key={entry.token.address} entry={entry} discovered={false} imported={false} onAdd={onAdd} onSwap={onSwap} />
+              {rows.map((row) => (
+                <HoldingRow key={row.entry.token.address} row={row} discovered={false} imported={false} onAdd={onAdd} onSwap={onSwap} />
               ))}
             </ul>
           </section>
         ))}
 
-        {discovered.length > 0 && (
+        {!awaitingPrices && discovered.length > 0 && (
           <section className="ts-pf-group" aria-label="Discovered in Wallet" data-testid="holdings-discovered">
             <h3 className={`${CAPS} ts-pf-label text-v2-muted`}>Discovered in Wallet</h3>
             <ul role="list">
-              {discovered.map((entry) => (
-                <HoldingRow key={entry.token.address} entry={entry} discovered imported={importedKeys.has(importKey(entry.token))} onAdd={onAdd} onSwap={onSwap} />
+              {discovered.map((row) => (
+                <HoldingRow key={row.entry.token.address} row={row} discovered imported={importedKeys.has(importKey(row.entry.token))} onAdd={onAdd} onSwap={onSwap} />
               ))}
             </ul>
           </section>
+        )}
+
+        {truncated && (
+          <p className="mt-3 text-[13px] text-v2-dim" data-testid="portfolio-truncated">{PORTFOLIO_TRUNCATED_NOTE}</p>
         )}
       </div>
       {approvalsPanel}

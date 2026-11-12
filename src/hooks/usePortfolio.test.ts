@@ -867,3 +867,35 @@ describe('usePortfolio: hidden-tab polling [fix/v1-maintenance C3]', () => {
     expect(prices()).toBe(p0)
   })
 })
+
+describe('usePortfolio: truncated discovery [fix/portfolio-tokens-view]', () => {
+  const discoveryAnswering = (body: Record<string, unknown>) =>
+    fetchMock.mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.startsWith('/api/portfolio/tokens')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => body })
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ prices: { [NATIVE_ETH]: 3000, [USDC]: 1 } }) })
+    })
+  const usdcRow = { address: USDC, symbol: 'USDC', name: 'USD Coin', decimals: 6, logoURI: null, balance: '1000000', isDefault: true }
+
+  it('passes the route\'s truncated flag through', async () => {
+    discoveryAnswering({ tokens: [usdcRow], truncated: true })
+    const { result } = renderHook(() => usePortfolio())
+    await waitFor(() => expect(result.current.truncated).toBe(true))
+    expect(result.current.tokens.some((t) => t.token.symbol === 'USDC')).toBe(true)
+  })
+
+  it('is false when the route does not say so, and on the multicall fallback', async () => {
+    discoveryAnswering({ tokens: [usdcRow] })
+    const a = renderHook(() => usePortfolio())
+    await waitFor(() => expect(a.result.current.tokens.some((t) => t.token.symbol === 'USDC')).toBe(true))
+    expect(a.result.current.truncated).toBe(false)
+    a.unmount()
+
+    discoveryAnswering({ tokens: [usdcRow], truncated: true })
+    fetchMock.mockImplementationOnce(() => Promise.resolve({ ok: false, status: 503, json: async () => ({}) }))
+    const b = renderHook(() => usePortfolio())
+    await waitFor(() => expect(b.result.current.lastUpdated).not.toBeNull())
+    expect(b.result.current.truncated).toBe(false)
+  })
+})

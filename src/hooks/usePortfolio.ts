@@ -33,6 +33,9 @@ export interface PortfolioData {
    *  endpoint (see isPortfolioSupportedChain) — the caller should show an availability state
    *  instead of the generic loading/error/empty ones, which all assume the fetch below can run. */
   isChainSupported: boolean
+  /** [fix/portfolio-tokens-view] The discovery route said the list may be missing holdings (page cap, error on a later page or
+   *  the MAX_TOKENS trim). Catalog tokens are still complete; the long tail may not be. Absent/false: the list is complete. */
+  truncated?: boolean
 }
 
 const PRICES_REFRESH_MS = 60_000
@@ -106,10 +109,12 @@ function useDiscoveredTokens(address: string | undefined, chainId: number): {
   isLoading: boolean
   isError: boolean
   isAvailable: boolean
+  truncated: boolean
   refreshCounter: number
   bump: () => void
 } {
   const [tokens, setTokens] = useState<DiscoveredToken[]>([])
+  const [truncated, setTruncated] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [isError, setIsError] = useState(false)
   const [isAvailable, setIsAvailable] = useState(true)
@@ -122,6 +127,7 @@ function useDiscoveredTokens(address: string | undefined, chainId: number): {
   useEffect(() => {
     if (!address) {
       setTokens([])
+      setTruncated(false)
       setIsAvailable(true)
       setIsLoading(false)
       setIsError(false)
@@ -133,6 +139,7 @@ function useDiscoveredTokens(address: string | undefined, chainId: number): {
     // an availability state instead; this effect just goes quiet rather than surfacing it as isError.
     if (!isPortfolioSupportedChain(chainId)) {
       setTokens([])
+      setTruncated(false)
       setIsAvailable(true)
       setIsLoading(false)
       setIsError(false)
@@ -153,6 +160,7 @@ function useDiscoveredTokens(address: string | undefined, chainId: number): {
           failCountRef.current = 0
           setIsAvailable(false)
           setTokens([])
+          setTruncated(false)
           setIsError(false)
           return
         }
@@ -171,9 +179,10 @@ function useDiscoveredTokens(address: string | undefined, chainId: number): {
           }
           return
         }
-        const data = (await res.json()) as { tokens?: DiscoveredToken[] }
+        const data = (await res.json()) as { tokens?: DiscoveredToken[]; truncated?: boolean }
         failCountRef.current = 0
         setTokens(data.tokens ?? [])
+        setTruncated(data.truncated === true)
         setIsAvailable(true)
         setIsError(false)
       } catch {
@@ -214,6 +223,7 @@ function useDiscoveredTokens(address: string | undefined, chainId: number): {
   useEffect(() => {
     if (prevChainRef.current !== chainId) {
       setTokens([])
+      setTruncated(false)
       setIsError(false)
       failCountRef.current = 0
       setIsAvailable(true)
@@ -221,7 +231,7 @@ function useDiscoveredTokens(address: string | undefined, chainId: number): {
     prevChainRef.current = chainId
   }, [chainId])
 
-  return { tokens, isLoading, isError, isAvailable, refreshCounter, bump }
+  return { tokens, isLoading, isError, isAvailable, truncated, refreshCounter, bump }
 }
 
 // Build a price-fetch URL from an arbitrary slice of token addresses.
@@ -475,5 +485,7 @@ export function usePortfolio(): PortfolioData {
     lastUpdated,
     refresh,
     isChainSupported: isPortfolioSupportedChain(activeChainId),
+    // The multicall fallback walks the catalog only: its list is complete by construction.
+    truncated: useAlchemyPath && discovery.truncated,
   }
 }

@@ -231,8 +231,8 @@ describe('PortfolioTab', () => {
 
   it('groups tokens by category with a section header for each', () => {
     portfolioState = makePortfolio({
-      tokens: [ETH, USDC, UNI],
-      totalValueUsd: 7500,
+      tokens: [ETH, USDC, { ...UNI, priceUsd: 8, valueUsd: 800 }], // priced: an unpriced row is hidden by default
+      totalValueUsd: 8300,
     })
     render(<PortfolioTab />)
     expect(screen.getByText(/^NATIVE$/i)).toBeTruthy()
@@ -256,8 +256,9 @@ describe('PortfolioTab', () => {
     category: 'Other',
     balance: 1n * 10n ** 18n,
     balanceFormatted: '1',
-    priceUsd: 0.5,
-    valueUsd: 0.5,
+    // [fix/portfolio-tokens-view] worth >= $1.00: rows under that are hidden by default (portfolio-view.test.tsx)
+    priceUsd: 5,
+    valueUsd: 5,
   })
 
   it('renders the "Discovered in Wallet" section header when a non-default token is present', () => {

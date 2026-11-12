@@ -3,7 +3,8 @@ import { isValidAddress } from '@/lib/validation'
 import { checkRateLimit } from '@/lib/kv-rate-limiter'
 import { DEFAULT_TOKENS, type Token } from '@/lib/tokens'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains/registry'
-import { getChainTokenList } from '@/lib/chains/tokens'
+import { getChainTokenList, getFullCatalog } from '@/lib/chains/tokens'
+import { NATIVE_ETH } from '@/lib/constants'
 import { ALCHEMY_BASE_BY_CHAIN, isPortfolioSupportedChain } from '@/lib/portfolio-chains'
 import { clientIpKey } from '@/lib/client-ip-key'
 
@@ -14,6 +15,10 @@ import { clientIpKey } from '@/lib/client-ip-key'
  * Enhanced API (`alchemy_getTokenBalances` + `alchemy_getTokenMetadata`).
  * Replaces the DEFAULT_TOKENS-only multicall path that was the original
  * Sprint 31 implementation.
+ *
+ * [fix/portfolio-tokens-view] Follows `pageKey` (<= MAX_BALANCE_PAGES pages of 100). When the scan cannot reach the end of the
+ * wallet it adds one batched balance check of the chain's catalog addresses, ranks catalog holdings ahead of unknown ones when
+ * trimming to MAX_TOKENS, and answers `truncated: true` so the UI can say the list may be incomplete.
  *
  * The endpoint is server-side so the Alchemy key never reaches the
  * browser. When the key is unset we return 503 — the consuming hook
@@ -30,6 +35,13 @@ const TOKENS_RATE_LIMIT = { limit: 5, windowMs: 60_000 } as const
 const MAX_TOKENS = 200
 const METADATA_CONCURRENCY = 20
 const ALCHEMY_TIMEOUT_MS = 5_000
+// [fix/portfolio-tokens-view] alchemy_getTokenBalances('erc20') returns at most 100 entries per call (docs: `maxCount`
+// "capped at 100") plus a `pageKey` for the rest. A wallet flooded with airdropped junk can hold thousands of entries, so the
+// scan is bounded in pages AND in wall-clock; whatever it cannot reach is covered for CATALOG tokens by one batched check.
+const BALANCES_PAGE_SIZE = 100
+const MAX_BALANCE_PAGES = 5
+const PAGING_BUDGET_MS = 8_000
+const CATALOG_CHECK_CHUNK = 100
 
 export interface DiscoveredToken {
   address: string
@@ -58,10 +70,34 @@ function curatedFor(chainId: number): Map<string, Token> {
   return m
 }
 
+// The chain's FULL verified catalog (curated + long tail), lowercase address to token. `curatedFor` is only the "suggested" subset
+// on Base / Arbitrum; a verified long-tail holding must still outrank an unknown one when the list is trimmed. The native-ETH
+// sentinel is not a contract and is never part of an ERC-20 balance query.
+const catalogByChain = new Map<number, Map<string, Token>>()
+function catalogFor(chainId: number): Map<string, Token> {
+  let m = catalogByChain.get(chainId)
+  if (!m) {
+    m = new Map<string, Token>()
+    const native = NATIVE_ETH.toLowerCase()
+    for (const t of getFullCatalog(chainId)) {
+      const a = t.address.toLowerCase()
+      if (a !== native) m.set(a, t)
+    }
+    catalogByChain.set(chainId, m)
+  }
+  return m
+}
+
 interface AlchemyBalance {
   contractAddress: string
   tokenBalance: string | null
   error?: string | null
+}
+
+interface AlchemyBalancesResult {
+  address: string
+  tokenBalances: AlchemyBalance[]
+  pageKey?: string | null
 }
 
 interface AlchemyMetadata {
@@ -143,6 +179,67 @@ function fallbackMetadataFor(address: string): AlchemyMetadata {
   }
 }
 
+/**
+ * Follow `pageKey` from `alchemy_getTokenBalances(address, 'erc20')`. Page 1 failing throws (the route answers 502, as before).
+ * A later page failing, the page cap or the time budget stops the scan and marks it `complete: false`; what was read is kept.
+ */
+async function fetchBalancePages(
+  url: string,
+  address: string,
+): Promise<{ balances: AlchemyBalance[]; complete: boolean }> {
+  const started = Date.now()
+  const balances: AlchemyBalance[] = []
+  let pageKey: string | null | undefined
+  for (let page = 0; page < MAX_BALANCE_PAGES; page++) {
+    if (page > 0 && Date.now() - started > PAGING_BUDGET_MS) return { balances, complete: false }
+    const options: { maxCount: number; pageKey?: string } = { maxCount: BALANCES_PAGE_SIZE }
+    if (pageKey) options.pageKey = pageKey
+    let result: AlchemyBalancesResult
+    try {
+      result = await alchemyCall<AlchemyBalancesResult>(url, 'alchemy_getTokenBalances', [address, 'erc20', options])
+    } catch (err) {
+      if (page === 0) throw err
+      console.warn('[portfolio-tokens] Alchemy getTokenBalances page', page + 1, 'failed:', err instanceof Error ? err.message : err)
+      return { balances, complete: false }
+    }
+    const rows = result.tokenBalances ?? []
+    for (const b of rows) balances.push(b)
+    pageKey = result.pageKey
+    // The docs describe `pageKey` only as a request option ("used for pagination if more results are available") and show
+    // no `pageKey` in the response. A last page with no key AND fewer than a full page proves the end; a FULL page with no key
+    // does not (the API might simply not hand the key back), so it is treated as incomplete and the catalog check covers it.
+    if (!pageKey) return { balances, complete: rows.length < BALANCES_PAGE_SIZE }
+  }
+  return { balances, complete: false }
+}
+
+/**
+ * ONE explicit balance check for the chain's catalog tokens, batched in chunks (the address-array form of the same method). Used
+ * only when the page scan could not reach the end of the wallet, so a token we list in the catalog can never be missing because
+ * of junk ahead of it. A failing chunk is skipped: the response is then still `truncated`.
+ */
+async function fetchCatalogBalances(url: string, address: string, chainId: number): Promise<AlchemyBalance[]> {
+  const addresses = [...catalogFor(chainId).keys()]
+  const chunks: string[][] = []
+  for (let i = 0; i < addresses.length; i += CATALOG_CHECK_CHUNK) chunks.push(addresses.slice(i, i + CATALOG_CHECK_CHUNK))
+  const settled = await Promise.allSettled(
+    chunks.map((chunk) => alchemyCall<AlchemyBalancesResult>(url, 'alchemy_getTokenBalances', [address, chunk])),
+  )
+  const out: AlchemyBalance[] = []
+  for (const s of settled) {
+    if (s.status === 'fulfilled') {
+      for (const b of s.value.tokenBalances ?? []) out.push(b)
+    } else {
+      console.warn('[portfolio-tokens] catalog balance check chunk failed:', s.reason instanceof Error ? s.reason.message : s.reason)
+    }
+  }
+  return out
+}
+
+function isNonZero(b: AlchemyBalance): boolean {
+  return !!b.tokenBalance && hexToDecimalString(b.tokenBalance) !== '0'
+}
+
 // ── Route handler ──────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
@@ -205,9 +302,11 @@ export async function GET(req: NextRequest) {
   const url = `${alchemyBase}/${apiKey}`
   const curated = curatedFor(chainId)
 
-  let balancesResult: { address: string; tokenBalances: AlchemyBalance[] }
+  const catalog = catalogFor(chainId)
+
+  let scan: { balances: AlchemyBalance[]; complete: boolean }
   try {
-    balancesResult = await alchemyCall(url, 'alchemy_getTokenBalances', [address, 'erc20'])
+    scan = await fetchBalancePages(url, address)
   } catch (err) {
     console.warn('[portfolio-tokens] Alchemy getTokenBalances failed:', err instanceof Error ? err.message : err)
     return NextResponse.json(
@@ -216,13 +315,28 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  const nonZero = (balancesResult.tokenBalances ?? [])
-    .filter((b) => b.tokenBalance && b.tokenBalance !== '0x0' && b.tokenBalance !== '0x')
-    .slice(0, MAX_TOKENS)
+  // `truncated` = the list may be missing holdings (scan cut short, or trimmed to MAX_TOKENS).
+  let truncated = !scan.complete
+  const merged = new Map<string, AlchemyBalance>()
+  for (const b of scan.balances) merged.set(b.contractAddress.toLowerCase(), b)
+  if (!scan.complete) {
+    for (const b of await fetchCatalogBalances(url, address, chainId)) merged.set(b.contractAddress.toLowerCase(), b)
+  }
+
+  // Catalog tokens first (curated, then the rest of the verified catalog), unknown ones after; the sort is stable.
+  const rank = (b: AlchemyBalance): number => {
+    const a = b.contractAddress.toLowerCase()
+    return curated.has(a) ? 0 : catalog.has(a) ? 1 : 2
+  }
+  let nonZero = [...merged.values()].filter(isNonZero).sort((x, y) => rank(x) - rank(y))
+  if (nonZero.length > MAX_TOKENS) {
+    nonZero = nonZero.slice(0, MAX_TOKENS)
+    truncated = true
+  }
 
   if (nonZero.length === 0) {
     return NextResponse.json(
-      { tokens: [] },
+      { tokens: [], truncated },
       {
         headers: {
           'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
@@ -232,12 +346,12 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  // Split into KNOWN (in DEFAULT_TOKENS) and UNKNOWN — only the unknown
+  // Split into KNOWN (curated or in the verified catalog) and UNKNOWN — only the unknown
   // set needs the metadata round trip. This keeps Alchemy compute units
   // proportional to wallets that hold long-tail tokens.
   const unknownAddrs: string[] = []
   for (const b of nonZero) {
-    if (!curated.has(b.contractAddress.toLowerCase())) {
+    if (rank(b) === 2) {
       unknownAddrs.push(b.contractAddress)
     }
   }
@@ -256,7 +370,7 @@ export async function GET(req: NextRequest) {
 
   const tokens: DiscoveredToken[] = nonZero.map((b) => {
     const addr = b.contractAddress.toLowerCase()
-    const known = curated.get(addr)
+    const known = curated.get(addr) ?? catalog.get(addr)
     if (known) {
       return {
         address: addr,
@@ -265,7 +379,7 @@ export async function GET(req: NextRequest) {
         decimals: known.decimals,
         logoURI: known.logoURI,
         balance: hexToDecimalString(b.tokenBalance),
-        isDefault: true,
+        isDefault: curated.has(addr),
       }
     }
     const meta = metadataByAddr.get(b.contractAddress) ?? fallbackMetadataFor(addr)
@@ -281,7 +395,7 @@ export async function GET(req: NextRequest) {
   })
 
   return NextResponse.json(
-    { tokens },
+    { tokens, truncated },
     {
       headers: {
         'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',

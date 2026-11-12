@@ -33,7 +33,7 @@ import { PortfolioTab as V2PortfolioTab } from './PortfolioTab'
 
 const eth = DEFAULT_TOKENS.find((t) => t.symbol === 'ETH')!
 const usdc = DEFAULT_TOKENS.find((t) => t.symbol === 'USDC')!
-const unknown = { address: '0x6c240dda6b5c336df09a4d011139beaaa1ea2aa2' as `0x${string}`, symbol: 'ETHFI', name: 'ether.fi governance token', decimals: 18, logoURI: '', category: 'Other' as const }
+const unknown = { address: '0x6c240dda6b5c336df09a4d011139beaaa1ea2aa2' as `0x${string}`, symbol: 'ETHFI', name: 'EtherFi governance token', decimals: 18, logoURI: '', category: 'Other' as const }
 const entry = (token: PortfolioToken['token'], balance: bigint, valueUsd: number | null): PortfolioToken => ({
   token, balance, balanceFormatted: fmtToken(balance, token.decimals), priceUsd: valueUsd === null ? null : 1, valueUsd,
 })
@@ -98,7 +98,7 @@ describe('Portfolio states: v2 text equals v1\'s', () => {
     h.data = state({ isLoading: true })
     const { v2 } = expectParity('refreshing')
     expect(v2.querySelector('[data-testid="portfolio-loading"]')).toBeNull()
-    expect(within(v2).getAllByTestId('holding-row').length).toBe(3)
+    expect(within(v2).getAllByTestId('holding-row').length).toBe(2) // the unpriced USDC row is hidden by default (portfolio-view.test.tsx)
     expect((within(v2).getByLabelText('Refresh portfolio') as HTMLButtonElement).disabled).toBe(true)
   })
   it('error without rows: "Failed to load portfolio." + "Try again" calls refresh', () => {
@@ -113,7 +113,7 @@ describe('Portfolio states: v2 text equals v1\'s', () => {
   it('error with rows keeps the rows and the error', () => {
     h.data = state({ isError: true })
     const { v2 } = expectParity('error + rows')
-    expect(within(v2).getAllByTestId('holding-row').length).toBe(3)
+    expect(within(v2).getAllByTestId('holding-row').length).toBe(2) // the unpriced USDC row is hidden by default
     expect(within(v2).getByText('Failed to load portfolio.')).toBeTruthy()
   })
   it.each([[1, 'Ethereum'], [8453, 'Base'], [42161, 'Arbitrum']])('empty wallet on chain %i: "No tokens found in this wallet on {chain}."', (chainId, name) => {
