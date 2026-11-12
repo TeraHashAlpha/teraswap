@@ -50,7 +50,7 @@ beforeEach(() => {
   h.stored.clear()
 })
 
-describe('saveOrders — serialised per storage key [fix/v1-maintenance C4]', () => {
+describe('saveOrders: serialised per storage key [fix/v1-maintenance C4]', () => {
   it('two overlapping saves → the stored state is the LATER call\'s, even if the newest write is settled first', async () => {
     const p1 = saveOrders([order('A')])
     const p2 = saveOrders([order('A'), order('B')])

@@ -84,7 +84,7 @@ function makeReceipt(overrides: Partial<SettlementReceipt> = {}): SettlementRece
       totalAggregationValueRaw: null,
     },
     estimate: { maxSlippageBps: 300, realizedFeeBps: 20 },
-    networkCostLabel: 'Network cost — covered by TeraSwap',
+    networkCostLabel: 'Network cost: covered by TeraSwap',
     ...overrides,
   }
 }
@@ -117,7 +117,7 @@ describe('SettlementReceiptModal', () => {
     const totals = screen.getByTestId('settlement-totals')
     expect(totals.textContent).toContain('1.0000 USDC')
     expect(totals.textContent).toMatch(/0[.,]5 WETH/)
-    expect(totals.textContent).toContain('Network cost — covered by TeraSwap')
+    expect(totals.textContent).toContain('Network cost: covered by TeraSwap')
   })
 
   it('renders the per-fill table with a tx link', async () => {
@@ -167,7 +167,7 @@ describe('SettlementReceiptModal', () => {
     expect(buildSettlementReceiptMock).not.toHaveBeenCalled()
   })
 
-  it('ACCURACY INVARIANT: forwards only txHash/executionNumber/createdAt to the resolver — never the Supabase amount_in/amount_out/fee_amount columns, even when the API response includes them', async () => {
+  it('ACCURACY INVARIANT: forwards only txHash/executionNumber/createdAt to the resolver, never the Supabase amount_in/amount_out/fee_amount columns, even when the API response includes them', async () => {
     // The REAL /api/orders/:id/executions endpoint returns amount_in/amount_out/fee_amount
     // alongside tx_hash — this fixture deliberately sets a WRONG fee_amount to prove the modal
     // never reads it: only txHash/executionNumber/createdAt may reach buildSettlementReceipt.
@@ -209,7 +209,7 @@ describe('SettlementReceiptModal', () => {
 })
 
 // ── [CHORE-DCA-AGGREGATION-VALUE] "Aggregation value" line — per-fill + total ──────────────
-describe('SettlementReceiptModal [CHORE-DCA-AGGREGATION-VALUE] — aggregation value', () => {
+describe('SettlementReceiptModal [CHORE-DCA-AGGREGATION-VALUE]: aggregation value', () => {
   it('renders the per-fill line with exact delta math when a runner-up was recorded', async () => {
     buildSettlementReceiptMock.mockResolvedValue(
       makeReceipt({
@@ -248,20 +248,20 @@ describe('SettlementReceiptModal [CHORE-DCA-AGGREGATION-VALUE] — aggregation v
     expect(line.textContent).not.toMatch(/Fee/)
   })
 
-  it('shows "—" for a fill with no runner-up recorded (no claim, never fabricated)', async () => {
+  it('shows ": " for a fill with no runner-up recorded (no claim, never fabricated)', async () => {
     buildSettlementReceiptMock.mockResolvedValue(makeReceipt()) // default fixture: nextBestOutRaw null
     render(<SettlementReceiptModal order={makeOrder()} onClose={vi.fn()} />)
 
     const line = await screen.findByTestId('fill-aggregation-value')
-    expect(line.textContent?.trim()).toBe('Aggregation value: —')
+    expect(line.textContent?.trim()).toBe('Aggregation value: n/a')
   })
 
-  it('total "Aggregation value" line shows "—" when no fill in the position has comparison data', async () => {
+  it('total "Aggregation value" line shows ": " when no fill in the position has comparison data', async () => {
     buildSettlementReceiptMock.mockResolvedValue(makeReceipt()) // totalAggregationValueRaw: null
     render(<SettlementReceiptModal order={makeOrder()} onClose={vi.fn()} />)
 
     const total = await screen.findByTestId('settlement-aggregation-value-total')
-    expect(total.textContent).toMatch(/—/)
+    expect(total.textContent).toMatch(/n\/a/)
   })
 
   it('total "Aggregation value" line renders the summed delta when present', async () => {
@@ -313,7 +313,7 @@ describe('SettlementReceiptModal [CHORE-DCA-AGGREGATION-VALUE] — aggregation v
 // not in THIS chain's set must degrade to the generic label, not borrow mainnet's name for it.
 // Before the fail-closed map, an order on a chain config.ts does not know resolved its label
 // against MAINNET_ROUTERS, so a mainnet address printed a confident, wrong "1inch v6".
-describe('SettlementReceiptModal [ADR-020] — route label never borrows another chain map', () => {
+describe('SettlementReceiptModal [ADR-020]: route label never borrows another chain map', () => {
   const ARBITRUM_CHAIN_ID = 42161
 
   function receiptWithRunnerUp() {

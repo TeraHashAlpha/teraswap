@@ -15,18 +15,18 @@ import type { FillRow } from '@/hooks/useOrderExecutions'
 import { fmtToken, fmtUsd as fmtUsdValue } from '@/lib/format'
 
 function fmtAmount(raw: string | null | undefined, decimals: number, symbol: string): string {
-  if (raw == null || raw === '') return '—'
+  if (raw == null || raw === '') return 'n/a'
   try {
     const n = Number(formatUnits(BigInt(String(raw).split('.')[0]), decimals))
-    return Number.isFinite(n) ? `${fmtToken(n)} ${symbol}` : '—'
+    return Number.isFinite(n) ? `${fmtToken(n)} ${symbol}` : 'n/a'
   } catch {
-    return '—'
+    return 'n/a'
   }
 }
 
 function fmtUsd(raw: string | null | undefined, decimals: number, symbol: string): string {
   const v = fillUsd(raw, decimals, symbol)
-  if (v == null) return '—'
+  if (v == null) return 'n/a'
   if (v > 0 && v < 0.01) return '<$0.01'
   return `~${fmtUsdValue(v)}`
 }

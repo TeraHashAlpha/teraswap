@@ -104,7 +104,7 @@ describe('v2 font loader', () => {
   })
 })
 
-describe('Round 7 D1 guard — Inter is out of v2, and nothing in v2 reaches a CDN (#565)', () => {
+describe('Round 7 D1 guard: Inter is out of v2, and nothing in v2 reaches a CDN (#565)', () => {
   const SOURCES = v2Sources()
 
   it('finds the v2 tree (guard is not vacuous)', () => {

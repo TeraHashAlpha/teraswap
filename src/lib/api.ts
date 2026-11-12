@@ -135,7 +135,7 @@ export async function fetchMetaQuote(
 
   // Rate limit: max 120 global requests/min (P187)
   if (!globalLimiter.allow('meta_quote')) {
-    throw new Error('Rate limited — too many requests. Please wait a moment.')
+    throw new Error('Rate limited: too many requests. Please wait a moment.')
   }
 
   // All available sources from adapter registry
@@ -405,7 +405,7 @@ async function probeSource(adapter: DEXAdapter, params: QuoteParams): Promise<So
     return {
       source,
       status: 'error',
-      error: `circuit breaker OPEN — skipped in production (cooldown ${cb.cooldownRemaining}ms)`,
+      error: `circuit breaker OPEN: skipped in production (cooldown ${cb.cooldownRemaining}ms)`,
       latencyMs: 0,
     }
   }
@@ -538,7 +538,7 @@ export function validateFeeIntegrity(
 // fetchMetaQuote's fan-out); only 0x specifically is skipped for this request.
 export class ZeroXQuoteCapExceededError extends Error {
   constructor() {
-    super('0x quote-build cap exceeded for this identity — choose a different source and retry.')
+    super('0x quote-build cap exceeded for this identity: choose a different source and retry.')
     this.name = 'ZeroXQuoteCapExceededError'
   }
 }

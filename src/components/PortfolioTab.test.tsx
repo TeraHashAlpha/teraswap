@@ -226,7 +226,7 @@ describe('PortfolioTab', () => {
     })
     render(<PortfolioTab />)
     // The row's value column shows "—" and the header total likewise.
-    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('n/a').length).toBeGreaterThanOrEqual(1)
   })
 
   it('groups tokens by category with a section header for each', () => {

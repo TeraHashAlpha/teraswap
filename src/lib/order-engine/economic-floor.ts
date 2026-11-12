@@ -74,7 +74,7 @@ export function checkMinOutEconomicFloor(p: MinOutFloorParams): MinOutFloorResul
       floorUsd,
       reason:
         `Order too small: the guaranteed minimum output is about ${fmtUsd(minOutUsd)}, ` +
-        `below the $${floorUsd} minimum. Increase the amount — a floor this small is dust and ` +
+        `below the $${floorUsd} minimum. Increase the amount. A floor this small is dust and ` +
         `would not be economically meaningful protection.`,
     }
   }

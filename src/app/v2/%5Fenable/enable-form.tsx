@@ -41,7 +41,7 @@ export default function EnableForm({ redirect = (to: string) => window.location.
       }
       setError(enableErrorMessage(res.status))
     } catch {
-      setError('Network error — nothing was changed.')
+      setError('Network error: nothing was changed.')
     } finally {
       setSecret('')
       setBusy(false)

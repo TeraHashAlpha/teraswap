@@ -108,7 +108,7 @@ describe('tab strip (D3 item 8)', () => {
 describe('floating buttons (D3 item 12)', () => {
   it('♫ and ? are a 1 px hairline ring with no fill', () => {
     render(<AppShell />)
-    for (const fab of [screen.getByRole('button', { name: /music/i }), screen.getByRole('button', { name: 'Open help' })]) {
+    for (const fab of [screen.getByRole('button', { name: /sound/i }), screen.getByRole('button', { name: 'Open help' })]) {
       expect(fab.className).toMatch(/border-\[color:var\(--hairline-ring\)\]/)
       expect(fab.className).toMatch(/bg-transparent/)
       expect(fab.className).not.toMatch(/bg-v2-surface|border-v2-border/)
@@ -137,7 +137,7 @@ describe('banner, toasts, drawer (D3 items 14, 16)', () => {
     ['warning', 'ts-v2-accent-stroke'],
     ['info', 'ts-v2-accent-stroke'],
     ['loading', 'ts-v2-accent-stroke'],
-  ] as const)('a %s toast is a solid strip with a 2 px %s accent — same surface for all', (type: ToastType, accent) => {
+  ] as const)('a %s toast is a solid strip with a 2 px %s accent: same surface for all', (type: ToastType, accent) => {
     function Fire() {
       const { toast } = useV2Toast()
       return <button onClick={() => toast({ type, title: `t-${type}` })}>fire</button>

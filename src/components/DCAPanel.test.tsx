@@ -207,14 +207,14 @@ beforeEach(() => {
   mockSubscribeToOrders.mockReturnValue(vi.fn())
 })
 
-describe('DCAPanel — create form', () => {
+describe('DCAPanel: create form', () => {
   it('renders the DCA create form when connected', () => {
     renderWithProviders(<DCAPanel />)
     expect(screen.getByText(/Dollar Cost Averaging/i)).toBeInTheDocument()
   })
 })
 
-describe('DCAPanel — valid order build → sign → submit', () => {
+describe('DCAPanel: valid order build → sign → submit', () => {
   it('builds, EIP-712 signs against the Base executor domain, and submits a DCA order', async () => {
     renderWithProviders(<DCAPanel />)
     // [CHORE-DCA-WETH-INPUT] The DCA INPUT now defaults to the chain's WETH (18 dec), not USDC.
@@ -237,8 +237,8 @@ describe('DCAPanel — valid order build → sign → submit', () => {
   })
 })
 
-describe('DCAPanel — #200 client-side MIN_ORDER_AMOUNT floor', () => {
-  it('blocks a sub-floor per-execution amount client-side — never reaches review or signing', async () => {
+describe('DCAPanel: #200 client-side MIN_ORDER_AMOUNT floor', () => {
+  it('blocks a sub-floor per-execution amount client-side, never reaches review or signing', async () => {
     renderWithProviders(<DCAPanel />)
     // [CHORE-DCA-WETH-INPUT] INPUT defaults to WETH (18 dec) now: 5e-14 WETH = 50,000 base units
     // over the default 10 buys ⇒ 5,000 base units/buy < 10,000 floor (still a sub-floor case).
@@ -253,7 +253,7 @@ describe('DCAPanel — #200 client-side MIN_ORDER_AMOUNT floor', () => {
   })
 })
 
-describe('DCAPanel — freeze (403) handling', () => {
+describe('DCAPanel: freeze (403) handling', () => {
   it('surfaces a calm "DCA temporarily paused" state and disables submit on the freeze-403', async () => {
     mockCreateOrderInSupabase.mockRejectedValueOnce(new Error(FREEZE_MSG))
     renderWithProviders(<DCAPanel />)
@@ -269,7 +269,7 @@ describe('DCAPanel — freeze (403) handling', () => {
   })
 })
 
-describe('DCAPanel — buys/interval presets [chore/dca-ux-tweaks]', () => {
+describe('DCAPanel: buys/interval presets [chore/dca-ux-tweaks]', () => {
   it('renders the updated Number of Buys presets (3/5/10/15/20/30); 7 and 14 are gone', () => {
     renderWithProviders(<DCAPanel />)
     for (const n of ['3', '5', '10', '15', '20', '30']) {
@@ -308,7 +308,7 @@ describe('DCAPanel — buys/interval presets [chore/dca-ux-tweaks]', () => {
 // validation only (no contract/keeper/gate change). Pure clamp/guard math is unit-tested in
 // lib/order-engine/dca-custom.test.ts; these integration tests pin the UI wiring + the
 // signed-params invariant end-to-end (real useOrderEngine, only Supabase I/O mocked).
-describe('DCAPanel — Custom mode [CHORE-DCA-CUSTOM-PERIODS]', () => {
+describe('DCAPanel: Custom mode [CHORE-DCA-CUSTOM-PERIODS]', () => {
   it('the Custom toggle swaps the buys/interval presets for numeric inputs, and back', () => {
     renderWithProviders(<DCAPanel />)
     expect(screen.getByRole('button', { name: '10' })).toBeInTheDocument() // preset default visible
@@ -410,7 +410,7 @@ describe('DCAPanel — Custom mode [CHORE-DCA-CUSTOM-PERIODS]', () => {
 // signal. useDepegCheck is mocked (as SwapBox.test.tsx does), so the hook's own internals are not
 // re-tested here — only that the panel wires block/unverified/consent/no-pair correctly into
 // canCreate, and that submit never reaches the sign step while blocked.
-describe('DCAPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on order creation', () => {
+describe('DCAPanel: [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on order creation', () => {
   it('a token with NO registered exchange-rate pair (the default WETH/ETH) never blocks creation', async () => {
     // useDepegCheckMock already defaults to DEPEG_OK in beforeEach — this pins that the default,
     // un-configured pair is genuinely frictionless, matching the app-wide "no pair ⇒ ok" invariant.
@@ -424,7 +424,7 @@ describe('DCAPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on order crea
   it('a HARD depeg (mode: block) disables submit, shows depeg copy, and blocks even a forced click', async () => {
     useDepegCheckMock.mockReturnValue({
       mode: 'block', divergence: 0.12, symbol: 'cbETH',
-      message: 'cbETH is trading 12.0% off its exchange rate — likely a depeg or oracle manipulation. Swap blocked for your safety.',
+      message: 'cbETH is trading 12.0% off its exchange rate, likely a depeg or oracle manipulation. Swap blocked for your safety.',
     })
     renderWithProviders(<DCAPanel />)
     enterAmount('100')
@@ -442,10 +442,10 @@ describe('DCAPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on order crea
   // (fireEvent.click on a disabled button never reaches onClick — see clickBypassingDisabled's
   // doc comment). This one genuinely runs the production onClick handler with depegBlocking=true,
   // proving the handler itself — not merely the button state — is what stops an order.
-  it('[L-1] the production handler itself refuses to create an order while blocked — not merely the disabled attribute', async () => {
+  it('[L-1] the production handler itself refuses to create an order while blocked, not merely the disabled attribute', async () => {
     useDepegCheckMock.mockReturnValue({
       mode: 'block', divergence: 0.12, symbol: 'cbETH',
-      message: 'cbETH is trading 12.0% off its exchange rate — likely a depeg or oracle manipulation. Swap blocked for your safety.',
+      message: 'cbETH is trading 12.0% off its exchange rate, likely a depeg or oracle manipulation. Swap blocked for your safety.',
     })
     renderWithProviders(<DCAPanel />)
     enterAmount('100')
@@ -460,10 +460,10 @@ describe('DCAPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on order crea
     expect(screen.queryByTestId('confirm-review')).toBeNull()
   })
 
-  it('UNVERIFIED (oracle unreadable) disables submit with "not verified" copy — never claims a depeg', async () => {
+  it('UNVERIFIED (oracle unreadable) disables submit with "not verified" copy, never claims a depeg', async () => {
     useDepegCheckMock.mockReturnValue({
       mode: 'unverified', divergence: 0, symbol: 'cbETH',
-      message: "We couldn't verify cbETH's price right now — try again in a moment.",
+      message: "We couldn't verify cbETH's price right now: try again in a moment.",
     })
     renderWithProviders(<DCAPanel />)
     enterAmount('100')
@@ -478,7 +478,7 @@ describe('DCAPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on order crea
     expect(screen.queryByTestId('confirm-review')).toBeNull()
   })
 
-  it('a healthy read (mode: ok, real pair) does NOT block — creation proceeds to review/sign', async () => {
+  it('a healthy read (mode: ok, real pair) does NOT block. Creation proceeds to review/sign', async () => {
     useDepegCheckMock.mockReturnValue({ mode: 'ok', divergence: 0.003, symbol: 'cbETH', message: null })
     renderWithProviders(<DCAPanel />)
     enterAmount('100')
@@ -489,10 +489,10 @@ describe('DCAPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on order crea
     await waitFor(() => expect(mockSignTypedDataAsync).toHaveBeenCalledTimes(1))
   })
 
-  it('informed consent (mode: consent) blocks until accepted, then unblocks — mirrors SwapBox exactly', async () => {
+  it('informed consent (mode: consent) blocks until accepted, then unblocks. Mirrors SwapBox exactly', async () => {
     useDepegCheckMock.mockReturnValue({
       mode: 'consent', divergence: 0.05, symbol: 'cbETH',
-      message: 'cbETH is trading 5.0% off its exchange rate — possible depeg. Verify before swapping.',
+      message: 'cbETH is trading 5.0% off its exchange rate: possible depeg. Verify before swapping.',
     })
     renderWithProviders(<DCAPanel />)
     enterAmount('100')

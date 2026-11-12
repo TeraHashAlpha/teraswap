@@ -103,7 +103,7 @@ const lastQuotePair = () => {
 }
 const card = () => document.querySelector('[data-swap-card]') as HTMLElement
 
-describe('v2 SwapCard — chain switch with a token that has no home on the target chain [fix/chain-switch-token-fallback]', () => {
+describe('v2 SwapCard: chain switch with a token that has no home on the target chain [fix/chain-switch-token-fallback]', () => {
   it('switch 1 → 42161 with SNX/USDC selected → Arbitrum default pair, no ⚠ badge, a quote is requested for the default pair', () => {
     const { rerender } = render(<SwapCard />)
     pickFor('Sell', SNX)
@@ -140,7 +140,7 @@ describe('v2 SwapCard — chain switch with a token that has no home on the targ
   })
 })
 
-describe('v2 SwapCard — chain-switch GUARD: every walk × every pair of the 6-token fixture [fix/chain-switch-token-fallback]', () => {
+describe('v2 SwapCard: chain-switch GUARD: every walk × every pair of the 6-token fixture [fix/chain-switch-token-fallback]', () => {
   beforeAll(importFixtureToken)
   afterAll(removeFixtureToken)
 

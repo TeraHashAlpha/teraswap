@@ -236,7 +236,7 @@ beforeEach(() => {
   mockGetTokenPriceUSD.mockResolvedValue(20)
 })
 
-describe('ConditionalOrderPanel — a native-ETH output is SIGNED as the chain\'s wrapped native', () => {
+describe('ConditionalOrderPanel: a native-ETH output is SIGNED as the chain\'s wrapped native', () => {
   // Base (8453) = the v3 signing path; mainnet (1) = the v2 signing path. Same expectation.
   for (const chainId of [8453, 1]) {
     it(`chain ${chainId}: order.tokenOut === getWrappedNative(${chainId}), never the sentinel`, async () => {
@@ -278,7 +278,7 @@ describe('ConditionalOrderPanel — a native-ETH output is SIGNED as the chain\'
     })
   }
 
-  it('NEGATIVE CONTROL — a non-native tokenOut is passed through completely untouched', async () => {
+  it('NEGATIVE CONTROL: a non-native tokenOut is passed through completely untouched', async () => {
     await renderOn(8453)
     // Sells WETH, not the chain's SELL_LEG default: this test BUYS USDC, so USDC cannot also be
     // the sell leg. WETH is the other Base token with a genuine Base feed.
@@ -293,7 +293,7 @@ describe('ConditionalOrderPanel — a native-ETH output is SIGNED as the chain\'
   })
 })
 
-describe('ConditionalOrderPanel — the screen matches the signature', () => {
+describe('ConditionalOrderPanel: the screen matches the signature', () => {
   it('the BUY selector reads WETH (not ETH) once native output is chosen', async () => {
     await renderOn(8453)
     fireEvent.click(sell('pick-link'))
@@ -305,7 +305,7 @@ describe('ConditionalOrderPanel — the screen matches the signature', () => {
     expect(screen.getAllByTestId('symbol')[0].textContent).toBe('LINK')
   })
 
-  it('the review modal names the pair the user is about to SIGN — LINK → WETH', async () => {
+  it('the review modal names the pair the user is about to SIGN. LINK → WETH', async () => {
     // Driven on the v2 path (chain 1) deliberately: there the modal mounts even with the OLD
     // behaviour, so this fails on the COPY ("LINK → ETH") rather than on the modal being absent.
     await renderOn(1)

@@ -84,7 +84,7 @@ export function AccountPanel({ open, onClose }: { open: boolean; onClose: () => 
           </span>
         </button>
         <div className="flex items-baseline gap-1.5 font-v2-mono text-v2-text">
-          <span className="text-xl">{balance ? fmtToken(balance.formatted) : '—'}</span>
+          <span className="text-xl">{balance ? fmtToken(balance.formatted) : 'n/a'}</span>
           <span className="text-sm text-v2-muted">{balance?.symbol ?? chain.nativeCurrency.symbol}</span>
         </div>
         <span className="inline-flex items-center gap-1.5 font-v2-mono text-[10px] uppercase tracking-wider text-v2-muted">

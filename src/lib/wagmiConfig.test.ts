@@ -34,7 +34,7 @@ afterAll(() => {
   vi.unstubAllEnvs()
 })
 
-describe('wagmiConfig — WalletConnect metadata [SPRINT-9K]', () => {
+describe('wagmiConfig: WalletConnect metadata [SPRINT-9K]', () => {
   it('sets an explicit metadata url matching a Reown-verified domain', () => {
     expect(WALLETCONNECT_METADATA.appName).toBe('TeraSwap')
     expect(WALLETCONNECT_METADATA.appUrl).toBe('https://www.teraswap.app')
@@ -60,7 +60,7 @@ describe('wagmiConfig — WalletConnect metadata [SPRINT-9K]', () => {
   })
 })
 
-describe('wagmiConfig — WalletConnect modal connector is lazy [fix/user-ip-privacy]', () => {
+describe('wagmiConfig: WalletConnect modal connector is lazy [fix/user-ip-privacy]', () => {
   // The `showQrModal: true` connector is the one whose provider creates Reown AppKit, and AppKit's creation is what
   // called api.web3modal.org and pulse.walletconnect.org for every visitor on page load. It must still be registered
   // (RainbowKit offers "open the official WalletConnect modal" through it) but must not build its provider until chosen.
@@ -86,7 +86,7 @@ describe('wagmiConfig — WalletConnect modal connector is lazy [fix/user-ip-pri
   })
 })
 
-describe('wagmiConfig — explicit mobile-friendly wallet list [SPRINT-9Z]', () => {
+describe('wagmiConfig: explicit mobile-friendly wallet list [SPRINT-9Z]', () => {
   // RainbowKit's DEFAULT getDefaultConfig list curates a subset that HIDES
   // several wallets on mobile (Rabby/Ledger/D'CENT not findable). We pass an
   // EXPLICIT wallet list instead. Wallet creator fns need projectId/appName to
@@ -113,7 +113,7 @@ describe('wagmiConfig — explicit mobile-friendly wallet list [SPRINT-9Z]', () 
     expect(listedWalletIds()).toContain('walletConnect')
   })
 
-  it('exposes the same wallet list under a mobile user-agent (UA-independent — fixes the mobile-hiding regression)', () => {
+  it('exposes the same wallet list under a mobile user-agent (UA-independent: fixes the mobile-hiding regression)', () => {
     vi.stubGlobal('navigator', {
       userAgent:
         'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
@@ -137,7 +137,7 @@ describe('wagmiConfig — explicit mobile-friendly wallet list [SPRINT-9Z]', () 
   })
 })
 
-describe('wagmiConfig — chain/registry parity guard [CHORE-WAGMI-ARBITRUM]', () => {
+describe('wagmiConfig: chain/registry parity guard [CHORE-WAGMI-ARBITRUM]', () => {
   // The bug: wagmiConfig.ts hardcoded `chains: [mainnet, base]` while the chain
   // registry (getSupportedChainIds) already listed 42161 (Arbitrum) — the
   // ChainSelector let users PICK Arbitrum, but switchChain(42161) silently
@@ -152,7 +152,7 @@ describe('wagmiConfig — chain/registry parity guard [CHORE-WAGMI-ARBITRUM]', (
   })
 })
 
-describe('wagmiConfig — RPC chain-identity guard [FIX-RPC-CHAIN-IDENTITY-GUARD]', () => {
+describe('wagmiConfig: RPC chain-identity guard [FIX-RPC-CHAIN-IDENTITY-GUARD]', () => {
   // The incident: NEXT_PUBLIC_ARBITRUM_RPC_URL held a BASE endpoint for three weeks. Every
   // browser read for chain 42161 was answered by chain 8453 with a clean HTTP 200, and nothing
   // logged, because nothing was an error. wagmi transports are the browser-side place an upstream

@@ -37,7 +37,7 @@ describe('fetchJson [SPRINT-9X X3]', () => {
     expect(fn).toHaveBeenCalledTimes(2)
   })
 
-  it('a real JSON error envelope (429) passes through unchanged — NO retry', async () => {
+  it('a real JSON error envelope (429) passes through unchanged. NO retry', async () => {
     const fn = mockFetchSeq(json({ error: 'rate limited' }, 429))
     const { res, data } = await fetchJson<{ error: string }>('/api/quote')
     expect(res.status).toBe(429)

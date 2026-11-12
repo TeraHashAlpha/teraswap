@@ -16,11 +16,11 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import sharp from 'sharp'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { composite, contrastRatio, hexToRgb, luminance, type RGB } from '../photos/contrast'
 import { PHOTO_TOKENS } from '../photos/photo-tokens'
 import { V2_COLORS } from '../tokens'
-import { NARRATIVE_SECTIONS, SECTION_PHOTO, STILL_PHOTO, photosFor, type NarrativeSectionId } from './narrative'
+import { NARRATIVE_SECTIONS, SECTION_PHOTO, photosFor, type NarrativeSectionId } from './narrative'
 import type { NarrativePhotoId } from '../photos/narrative'
 
 const CSS = readFileSync(join(__dirname, 'narrative.css'), 'utf8')
@@ -36,20 +36,25 @@ function weakestStop(token: string): number {
   if (!m) throw new Error(`${token} not in tokens.css`)
   return Math.min(...[...m[1].matchAll(/rgba\(11,13,15,([\d.]+)\)/g)].map((x) => Number(x[1])))
 }
-/** Which scrim a section paints at a viewport (landing.css: `.ts-v2-scrim`, `--features`; ≤ 600 px → the vertical pair). */
-function scrimFor(section: NarrativeSectionId, vp: 'desktop' | 'mobile'): { token: string; alpha: number } {
-  const token = vp === 'mobile' ? (section === 'features' ? '--scrim-down-features' : '--scrim-down') : section === 'features' ? '--scrim-left-features' : '--scrim-left'
-  return { token, alpha: weakestStop(token) }
-}
-
 /**
- * The scrim each baked-still section paints (Sections.tsx / Hero.tsx class names → landing.css). Design review 1 added the hero
- * (`ts-v2-scrim`: the left gradient) and "Why" (`--center`: the vertical pair) — both used to be solid `--bg` bands / a near-black
- * CSS-graded raster, so they are checked here like Performance (`--race`) and the CTA (`--center`). ≤ 600 px every one is `--scrim-down`.
+ * Which scrim a section paints at a viewport (Sections.tsx / Hero.tsx class names -> landing.css). Design review 1 gave the hero
+ * (`ts-v2-scrim`: the left gradient) and "Why" (`--center`: the vertical pair) their photo; Performance is `--race`, the CTA
+ * `--center`, Features `--features`. <= 600 px every section is `--scrim-down` (Features: `--scrim-down-features`).
+ * [fix/ui-v2-walkthrough-polish C2] All nine sections are stack layers now, so one table covers them all.
  */
-const STILL_SCRIM_DESKTOP: Record<keyof typeof STILL_PHOTO, string> = { hero: '--scrim-left', performance: '--scrim-left-race', why: '--scrim-down', cta: '--scrim-down' }
-function stillScrim(section: keyof typeof STILL_PHOTO, vp: 'desktop' | 'mobile'): { token: string; alpha: number } {
-  const token = vp === 'mobile' ? '--scrim-down' : STILL_SCRIM_DESKTOP[section]
+const SCRIM_DESKTOP: Record<NarrativeSectionId, string> = {
+  hero: '--scrim-left',
+  performance: '--scrim-left-race',
+  'why-teraswap': '--scrim-down',
+  security: '--scrim-left',
+  experience: '--scrim-left',
+  features: '--scrim-left-features',
+  roadmap: '--scrim-left',
+  cta: '--scrim-down',
+  docs: '--scrim-left',
+}
+function scrimFor(section: NarrativeSectionId, vp: 'desktop' | 'mobile'): { token: string; alpha: number } {
+  const token = vp === 'mobile' ? (section === 'features' ? '--scrim-down-features' : '--scrim-down') : SCRIM_DESKTOP[section]
   return { token, alpha: weakestStop(token) }
 }
 
@@ -76,15 +81,29 @@ function veiledLuminances(px: Float32Array): number[] {
   return out.sort((a, b) => a - b)
 }
 /** Veil, then the section's scrim at `alpha`, over a backdrop: the sorted luminance list the text actually sits on. */
-function scrimmedLuminances(px: Float32Array, alpha: number): number[] {
-  const out: number[] = []
+function scrimmedLuminances(px: Float32Array, alpha: number): Float64Array {
+  // A Float64Array sorts numerically with the engine's native sort (no comparator callback): the same ascending list of the same doubles.
+  const out = new Float64Array(px.length / 3)
   for (let i = 0; i < px.length; i += 3) {
     const veiled = composite(VEIL, VEIL_A, [Math.round(px[i]), Math.round(px[i + 1]), Math.round(px[i + 2])])
-    out.push(luminance(composite(BG, alpha, veiled)))
+    out[i / 3] = luminance(composite(BG, alpha, veiled))
   }
-  return out.sort((a, b) => a - b)
+  return out.sort()
 }
-const p95 = (sorted: number[]) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))]
+const p95 = (sorted: ArrayLike<number>) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))]
+/**
+ * p95 of `scrimmedLuminances(s.px, alpha)`, computed ONCE per (state, alpha) for the whole file. Seven tests below ask for the
+ * same pairs (every text token × every state × every section); recomputing each one (a 20 k-pixel composite + sort) took ~1 s per
+ * test and timed out at 5 s on a loaded CI runner. Same pixels, same percentile: only the repetition is gone.
+ */
+const scrimP95Memo = new WeakMap<State, Map<number, number>>()
+function scrimmedP95(s: State, alpha: number): number {
+  let byAlpha = scrimP95Memo.get(s)
+  if (!byAlpha) scrimP95Memo.set(s, (byAlpha = new Map()))
+  let v = byAlpha.get(alpha)
+  if (v === undefined) byAlpha.set(alpha, (v = p95(scrimmedLuminances(s.px, alpha))))
+  return v
+}
 const lum = (c: RGB) => luminance(c)
 const ratioOnLuminance = (fg: RGB, bgLum: number) => {
   const [hi, lo] = [lum(fg), bgLum].sort((a, b) => b - a)
@@ -111,6 +130,19 @@ interface State {
 
 const sectionsOf = (photo: NarrativePhotoId, vp: Viewport) => NARRATIVE_SECTIONS.filter((s) => SECTION_PHOTO[s][vp] === photo)
 
+/**
+ * The real section boundaries where the photo changes, in page order (a boundary between two sections that share a photo does not
+ * fade). The distinct-photo list is NOT the page order any more (a photo can come back: tunnel, highway), so the neighbours are
+ * read off the sections themselves.
+ */
+type Edge = { section: NarrativeSectionId; photo: NarrativePhotoId }
+function boundaries(vp: Viewport): { from: Edge; to: Edge }[] {
+  const seq: Edge[] = NARRATIVE_SECTIONS.map((section) => ({ section, photo: SECTION_PHOTO[section][vp] }))
+  const out: { from: Edge; to: Edge }[] = []
+  for (let i = 0; i < seq.length - 1; i++) if (seq[i].photo !== seq[i + 1].photo) out.push({ from: seq[i], to: seq[i + 1] })
+  return out
+}
+
 const states: State[] = []
 async function buildStates() {
   for (const vp of ['desktop', 'mobile'] as const) {
@@ -121,12 +153,11 @@ async function buildStates() {
         const l = veiledLuminances(px[id])
         states.push({ name: `${vp} ${ext} ${id} (also: reduced motion)`, sections: sectionsOf(id, vp), p95: p95(l), max: l[l.length - 1], vp, px: px[id] })
       }
-      for (let i = 0; i < ids.length - 1; i++) {
-        const [a, b] = [px[ids[i]], px[ids[i + 1]]]
+      for (const { from, to } of boundaries(vp)) {
+        const [a, b] = [px[from.photo], px[to.photo]]
         let worst: State = { name: '', sections: [], p95: 0, max: 0, vp, px: a }
-        // the fade runs where one group ends and the next begins: the last section of A and the first of B are the ones on screen
-        const outgoing = sectionsOf(ids[i], vp)
-        const both = [outgoing[outgoing.length - 1], sectionsOf(ids[i + 1], vp)[0]]
+        // the fade runs at a section boundary: the section above it and the one below are the ones on screen
+        const both = [from.section, to.section]
         for (let step = 1; step <= 9; step++) {
           const t = step / 10
           const base = flat(a.length / 3)
@@ -135,7 +166,7 @@ async function buildStates() {
           const bOverA = over(b, t, over(a, 1 - t, base)) // DOM order: A below B
           for (const mixed of [aOverB, bOverA]) {
             const l = veiledLuminances(mixed)
-            if (p95(l) > worst.p95) worst = { name: `${vp} ${ext} cross-fade ${ids[i]}→${ids[i + 1]} (worst of t=0.1…0.9, both layer orders)`, sections: both, p95: p95(l), max: l[l.length - 1], vp, px: mixed }
+            if (p95(l) > worst.p95) worst = { name: `${vp} ${ext} cross-fade ${from.section} ${from.photo}→${to.photo} (worst of t=0.1…0.9, both layer orders)`, sections: both, p95: p95(l), max: l[l.length - 1], vp, px: mixed }
           }
         }
         states.push(worst)
@@ -145,7 +176,7 @@ async function buildStates() {
           ['A below B', over(b, 0.5, over(a, 0.5, flat(a.length / 3)))],
         ] as const) {
           const l = veiledLuminances(mixed)
-          states.push({ name: `${vp} ${ext} mid-fade 50 % ${ids[i]}→${ids[i + 1]} (${order})`, sections: both, p95: p95(l), max: l[l.length - 1], vp, px: mixed })
+          states.push({ name: `${vp} ${ext} mid-fade 50 % ${from.section} ${from.photo}→${to.photo} (${order})`, sections: both, p95: p95(l), max: l[l.length - 1], vp, px: mixed })
         }
       }
     }
@@ -184,11 +215,19 @@ const report: string[] = []
 describe('scroll-narrative contrast (WCAG AA, 95th-percentile backdrop)', async () => {
   await buildStates()
 
-  it('covers every state: 5 desktop + 3 mobile photos, every neighbouring cross-fade (worst of 0.1…0.9) and its two 50 % mid-fade orders, in AVIF and WebP', () => {
-    // per ext: desktop 5 photos + 4 fades + 4×2 mid-fades, mobile 3 photos + 2 fades + 2×2 mid-fades
-    expect(states).toHaveLength(2 * (5 + 4 + 8 + 3 + 2 + 4))
-    expect(states.filter((st) => st.name.includes('mid-fade 50 %'))).toHaveLength(2 * (8 + 4))
-    expect(NARRATIVE_SECTIONS).toHaveLength(5)
+  // Fill the memo once, here, for exactly the (state, section) pairs the tests read, instead of inside whichever test asks first.
+  beforeAll(() => {
+    for (const s of states) for (const sec of s.sections) scrimmedP95(s, scrimFor(sec, s.vp).alpha)
+  })
+
+  it('covers every state: 7 desktop + 5 mobile photos, every section boundary that fades (worst of 0.1…0.9) and its two 50 % mid-fade orders, in AVIF and WebP', () => {
+    // per ext: desktop 7 photos + 8 fades + 8×2 mid-fades, mobile 5 photos + 6 fades + 6×2 mid-fades
+    // (desktop: 9 sections, 8 boundaries, all change photo; mobile: 9 sections, 8 boundaries, 2 keep the photo and do not fade)
+    expect(boundaries('desktop')).toHaveLength(8)
+    expect(boundaries('mobile')).toHaveLength(6)
+    expect(states).toHaveLength(2 * (7 + 8 + 16 + 5 + 6 + 12))
+    expect(states.filter((st) => st.name.includes('mid-fade 50 %'))).toHaveLength(2 * (16 + 12))
+    expect(NARRATIVE_SECTIONS).toHaveLength(9)
     expect(VEIL_A).toBeCloseTo(45 / 255, 3)
   })
 
@@ -199,7 +238,7 @@ describe('scroll-narrative contrast (WCAG AA, 95th-percentile backdrop)', async 
     for (const s of states) {
       for (const sec of s.sections.filter((id) => sections.includes(id))) {
         const { alpha, token: scrim } = scrimFor(sec, s.vp)
-        const r = ratioOnLuminance(fg, p95(scrimmedLuminances(s.px, alpha)))
+        const r = ratioOnLuminance(fg, scrimmedP95(s, alpha))
         if (r < worst) [worst, where] = [r, `${s.name} · ${sec} · ${scrim} α${alpha}`]
       }
     }
@@ -213,7 +252,7 @@ describe('scroll-narrative contrast (WCAG AA, 95th-percentile backdrop)', async 
     let scrimmed = Infinity
     for (const s of states) {
       veilOnly = Math.min(veilOnly, ratioOnLuminance(fg, s.p95))
-      for (const sec of s.sections) scrimmed = Math.min(scrimmed, ratioOnLuminance(fg, p95(scrimmedLuminances(s.px, scrimFor(sec, s.vp).alpha))))
+      for (const sec of s.sections) scrimmed = Math.min(scrimmed, ratioOnLuminance(fg, scrimmedP95(s, scrimFor(sec, s.vp).alpha)))
     }
     report.push(`muted worst: veil only ${veilOnly.toFixed(2)} → with scrim ${scrimmed.toFixed(2)}`)
     expect(scrimmed).toBeGreaterThanOrEqual(veilOnly)
@@ -229,34 +268,15 @@ describe('scroll-narrative contrast (WCAG AA, 95th-percentile backdrop)', async 
     expect(bez(0, 1, (lo + hi) / 2)).toBeCloseTo(0.5, 6)
   })
 
-  it.each(Object.entries(STILL_PHOTO))('still section "%s" (baked %s photo, static): h2 text ≥ 3 and cream second line ≥ 3 on the veiled photo, both sizes', async (_section, photo) => {
-    // A still is not a stack layer (the hero's overpass and "Why"'s zakim are in no `states` entry), so its own files are decoded here.
-    const own: number[] = []
-    for (const vp of ['desktop', 'mobile'] as const) for (const ext of ['avif', 'webp'] as const) own.push(p95(veiledLuminances(await pixels(photo as NarrativePhotoId, vp, ext))))
-    expect(own).toHaveLength(4)
-    for (const token of ['text', 'cream'] as const) {
-      const worst = Math.min(...own.map((l) => ratioOnLuminance(tok(token), l)))
-      report.push(`still ${_section.padEnd(11)} ${token.padEnd(5)} need 3  worst ${worst.toFixed(2)}  (large, on ${photo})`)
-      expect(worst).toBeGreaterThanOrEqual(3)
-    }
-  })
-
-  // Round 7 × the 26 Oct transition: Performance and the CTA are baked stills (veil only, no stack) AND carry a local scrim.
-  // Every text kind a section shows is checked under the scrim the section really paints, on the still's own photo at both
-  // viewports (the mobile file is decoded here directly: a still shows it even when the stack's mobile map does not).
-  it.each(Object.entries(STILL_PHOTO))('still section "%s": every on-photo text kind clears its AA need under the section scrim, desktop + mobile, AVIF + WebP', async (section, photo) => {
-    for (const row of ON_PHOTO) {
-      let worst = Infinity
-      let where = ''
-      for (const vp of ['desktop', 'mobile'] as const) {
-        const { token, alpha } = stillScrim(section as keyof typeof STILL_PHOTO, vp)
-        for (const ext of ['avif', 'webp'] as const) {
-          const r = ratioOnLuminance(tok(row.token), p95(scrimmedLuminances(await pixels(photo as NarrativePhotoId, vp, ext), alpha)))
-          if (r < worst) [worst, where] = [r, `${vp} ${ext} ${photo} · ${token} α${alpha}`]
-        }
+  // [fix/ui-v2-walkthrough-polish C2] The hero, Performance, "Why" and the CTA used to be static stills with their own tests here.
+  // They are stack layers now (overpass, tunnel, zakim, highway are in `states`), so the generic tests above check every text kind
+  // for those four sections under their own scrim, desktop + mobile, AVIF + WebP, and across every cross-fade into and out of them.
+  it('the four former stills are covered by the generic states (their photos and sections are in some state)', () => {
+    for (const vp of ['desktop', 'mobile'] as const) {
+      for (const section of ['hero', 'performance', 'why-teraswap', 'cta'] as const) {
+        expect(states.some((st) => st.vp === vp && st.sections.includes(section) && !st.name.includes('fade')), `${vp} ${section}`).toBe(true)
+        expect(states.some((st) => st.vp === vp && st.sections.includes(section) && st.name.includes('fade')), `${vp} ${section} fade`).toBe(true)
       }
-      report.push(`still+scrim ${section.padEnd(11)} ${row.token.padEnd(5)} need ${row.need}  worst ${worst.toFixed(2)}  @ ${where}`)
-      expect(worst, `${section} ${row.token}: ${where}`).toBeGreaterThanOrEqual(row.need)
     }
   })
 

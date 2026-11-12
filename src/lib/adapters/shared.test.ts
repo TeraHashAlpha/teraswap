@@ -11,7 +11,7 @@ import { NATIVE_ETH, WETH_ADDRESS } from '@/lib/constants'
 
 const BASE_WETH = '0x4200000000000000000000000000000000000006'
 
-describe('toWeth — chain-aware wrapped-native [SPRINT-9E]', () => {
+describe('toWeth: chain-aware wrapped-native [SPRINT-9E]', () => {
   it('mainnet (default / chainId 1) maps native ETH → mainnet WETH (byte-identical)', () => {
     expect(toWeth(NATIVE_ETH).toLowerCase()).toBe(WETH_ADDRESS.toLowerCase())
     expect(toWeth(NATIVE_ETH, 1).toLowerCase()).toBe(WETH_ADDRESS.toLowerCase())
@@ -43,7 +43,7 @@ describe('getRpcUrlForChain [SPRINT-9C]', () => {
     for (const k of ENV) { if (saved[k] !== undefined) process.env[k] = saved[k]; else delete process.env[k] }
   })
 
-  it('mainnet (chainId 1) returns getRpcUrl() exactly — byte-identical', async () => {
+  it('mainnet (chainId 1) returns getRpcUrl() exactly: byte-identical', async () => {
     process.env.RPC_URL = 'https://eth.mainnet.test'
     const { getRpcUrlForChain, getRpcUrl } = await loadShared()
     expect(getRpcUrlForChain(1)).toBe(getRpcUrl())
@@ -73,7 +73,7 @@ describe('getRpcUrlForChain [SPRINT-9C]', () => {
 // [SPRINT-9G G8] The Uniswap V3 fee-tier cache key must be scoped by chainId so
 // the same pair on different chains can't collide. Mainnet (chainId 1) keeps the
 // `1:` prefix it always had (byte-identical).
-describe('fee-tier cache — chain-scoped key [SPRINT-9G G8]', () => {
+describe('fee-tier cache: chain-scoped key [SPRINT-9G G8]', () => {
   const A = '0xAAaAAaAaAAaaAAaaAAaAAAAaaAAaaAAAaAaAaAAa'
   const B = '0xBbBbbBBbBbBBbbBbBbbbBBBBBBbBBbBbBBBbBbBb'
 
@@ -102,7 +102,7 @@ describe('fee-tier cache — chain-scoped key [SPRINT-9G G8]', () => {
 // [ADR-026 / A73 S-1] /api/swap answers NO_ROUTE (a 4xx with a code) when the adapter's words match
 // the SAME liquidity / no-route rules friendlyError maps — one predicate, so the keeper's "order, not
 // outage" verdict and the user's copy can never drift apart.
-describe('isNoRouteError — the adapter said the PAIR cannot be routed', () => {
+describe('isNoRouteError: the adapter said the PAIR cannot be routed', () => {
   it('matches exactly the inputs friendlyError maps to its liquidity / no-route copy', () => {
     const noRoute = ['No route found', 'NO ROUTE for WETH/XYZ', 'no pool exists', 'Insufficient liquidity for amount', 'insufficient LIQUIDITY']
     for (const m of noRoute) {
@@ -120,10 +120,10 @@ describe('isNoRouteError — the adapter said the PAIR cannot be routed', () => 
   // liquidity / no-route rules. isNoRouteError mirrors that precedence: a message an earlier rule claims
   // (an outage, a limit, an auth error) is never a NO_ROUTE, even when it also contains the no-route words.
   const OUTAGE_WITH_ROUTE_WORDS = [
-    'Uniswap V3: failed to fetch — no route computed',
+    'Uniswap V3: failed to fetch. No route computed',
     'NetworkError: no pool query aborted',
     'timeout while searching for a route: no route found',
-    'HTTP 429 rate limit — no route returned',
+    'HTTP 429 rate limit: no route returned',
     'rate limit hit before the insufficient liquidity check',
     '403 Forbidden: no pool access for this key',
     'insufficient liquidity (upstream timeout)',

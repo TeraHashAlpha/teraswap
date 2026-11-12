@@ -113,7 +113,7 @@ afterEach(cleanup)
 // ── (5a) the chain gate ───────────────────────────────────────────────────────
 
 describe('(5a) chain gate', () => {
-  it('Ethereum: v2 says what v1 says ("DCA runs on Base and Arbitrum One") and offers the same two switches — never "Soon"', () => {
+  it('Ethereum: v2 says what v1 says ("DCA runs on Base and Arbitrum One") and offers the same two switches, never "Soon"', () => {
     h.account = { ...h.account, isConnected: false, chain: undefined }
     const v1 = render(<ComingSoonPanel mode="dca" chainId={1} onSwap={() => {}} />)
     const v1Sentence = v1.getByTestId('coming-soon-runs-on').textContent

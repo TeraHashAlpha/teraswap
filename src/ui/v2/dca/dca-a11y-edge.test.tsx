@@ -221,7 +221,7 @@ describe('Esc / Cancel / backdrop: dead while a step is in flight, live everywhe
   it.each([
     ['created', CREATED, 'dca-sign-view-positions'],
     ['failed', { event: { type: 'order_error', orderId: 'o1', error: 'Signature rejected in wallet.' } as OrderEngineEvent, posted: false }, 'dca-sign-retry'],
-  ] as const)('%s: Esc dismisses the sheet (back to the form) — the engine is not asked anything more', async (_n, outcome, primary) => {
+  ] as const)('%s: Esc dismisses the sheet (back to the form). The engine is not asked anything more', async (_n, outcome, primary) => {
     fake.sign = async () => outcome
     await freeze()
     fireEvent.click(screen.getByTestId('dca-sign-confirm'))
@@ -242,7 +242,7 @@ describe('the draft changes under an open sheet (B5 rule, owner: auto-close)', (
     expect(amountInput().value).toBe('0.7') // the typed value stays; only the stale review went
   })
 
-  it('review open, a different number of buys / interval: same — the key covers the whole schedule', async () => {
+  it('review open, a different number of buys / interval: same. The key covers the whole schedule', async () => {
     await openReview()
     fireEvent.click(screen.getByRole('button', { name: '5' }))
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -253,7 +253,7 @@ describe('the draft changes under an open sheet (B5 rule, owner: auto-close)', (
     expect(fake.seq).toEqual([])
   })
 
-  it('frozen (the engine holds a review), a new amount: the frozen order is dropped (clearPendingOrder — the engine\'s own reset) and the sheet closes, nothing signed', async () => {
+  it('frozen (the engine holds a review), a new amount: the frozen order is dropped (clearPendingOrder. The engine\'s own reset) and the sheet closes, nothing signed', async () => {
     await freeze()
     h.soundLog.length = 0
     typeAmount('0.7')
@@ -314,7 +314,7 @@ describe('use-dca-lifecycle: guards', () => {
     expect(engine.confirmOrder).toHaveBeenCalledTimes(1)
   })
 
-  it('the engine abandons the attempt silently (its chain / account reset, a guard in confirmOrder): back to the review, disarmed — a later unrelated event is NOT this attempt\'s', () => {
+  it('the engine abandons the attempt silently (its chain / account reset, a guard in confirmOrder): back to the review, disarmed. A later unrelated event is NOT this attempt\'s', () => {
     let engine = engineStub({ pendingOrder: FROZEN })
     const { result, rerender } = renderHook(() => useDcaLifecycle(engine))
     act(() => { result.current.open(REVIEW) })

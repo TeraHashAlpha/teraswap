@@ -56,7 +56,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('wagmiConfig (server) — mainnet transport identity guard', () => {
+describe('wagmiConfig (server): mainnet transport identity guard', () => {
   it('refuses the read when NEXT_PUBLIC_RPC_URL is served by another chain', async () => {
     vi.stubGlobal(
       'fetch',
@@ -87,7 +87,7 @@ describe('wagmiConfig (server) — mainnet transport identity guard', () => {
     expect(fetchMock.mock.calls.map(([, init]) => methodOf(init))).toEqual(['eth_chainId'])
   })
 
-  it('still serves the read when the probe is UNREACHABLE — an outage is not a lie', async () => {
+  it('still serves the read when the probe is UNREACHABLE. An outage is not a lie', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (_url: string, init?: RequestInit) => {

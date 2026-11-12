@@ -134,19 +134,19 @@ afterEach(() => {
   vi.unstubAllEnvs()
 })
 
-describe('Home — real Arbitrum gate (no mocked dca-launch / order-engine / registry)', () => {
+describe('Home: real Arbitrum gate (no mocked dca-launch / order-engine / registry)', () => {
   it('flag UNSET, FeeCollector UNSET, v3 address UNSET ⇒ DCA tab is the Soon teaser and <DCAPanel> never mounts', async () => {
     await renderSwapView()
     expectDcaTabIsTheTeaser()
   })
 
-  it('flag SET, FeeCollector UNSET, v3 address UNSET ⇒ still the teaser (holds both Arbitrum vars unset — NOT the Production shape)', async () => {
+  it('flag SET, FeeCollector UNSET, v3 address UNSET ⇒ still the teaser (holds both Arbitrum vars unset. NOT the Production shape)', async () => {
     vi.stubEnv('NEXT_PUBLIC_DCA_ENABLED', 'true')
     await renderSwapView()
     expectDcaTabIsTheTeaser()
   })
 
-  it('[feat/arbitrum-dca-gates] flag SET, FeeCollector SET, v3 address SET — the Production shape 2026-08-04 → 2026-08-26 ⇒ the DCA tab now OPENS and <DCAPanel> mounts: 42161 is on the code allowlist', async () => {
+  it('[feat/arbitrum-dca-gates] flag SET, FeeCollector SET, v3 address SET. The Production shape 2026-08-04 → 2026-08-26 ⇒ the DCA tab now OPENS and <DCAPanel> mounts: 42161 is on the code allowlist', async () => {
     vi.stubEnv('NEXT_PUBLIC_DCA_ENABLED', 'true')
     vi.stubEnv('NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR', FEE_COLLECTOR_STUB)
     vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM', V3_EXECUTOR_STUB)
@@ -172,7 +172,7 @@ describe('Home — real Arbitrum gate (no mocked dca-launch / order-engine / reg
     expect(await screen.findByTestId('dca-panel')).toBeInTheDocument()
   })
 
-  it('[feat/arbitrum-dca-gates] flag SET, FeeCollector SET, v3 address UNSET — the INC-2026-08-26-001 §2 containment shape ⇒ STILL the teaser: env keeps the power to disable an eligible chain', async () => {
+  it('[feat/arbitrum-dca-gates] flag SET, FeeCollector SET, v3 address UNSET. The INC-2026-08-26-001 §2 containment shape ⇒ STILL the teaser: env keeps the power to disable an eligible chain', async () => {
     vi.stubEnv('NEXT_PUBLIC_DCA_ENABLED', 'true')
     vi.stubEnv('NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR', FEE_COLLECTOR_STUB)
     // NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_ARBITRUM deliberately unset (deleted in beforeEach).
@@ -188,7 +188,7 @@ describe('Home — real Arbitrum gate (no mocked dca-launch / order-engine / reg
     expectDcaTabIsTheTeaser()
   })
 
-  it('positive control — the same three vars SET for Base (the eligible chain) ⇒ the DCA tab opens and <DCAPanel> mounts', async () => {
+  it('positive control: the same three vars SET for Base (the eligible chain) ⇒ the DCA tab opens and <DCAPanel> mounts', async () => {
     // Without this case every assertion above could pass vacuously (e.g. if the DCA tab were never
     // enableable at all). The gate CAN open — on the chain the code allows.
     useChainIdMock.mockReturnValue(8453)

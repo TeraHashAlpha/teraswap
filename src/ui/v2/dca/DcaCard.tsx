@@ -47,16 +47,16 @@ const LABEL = 'font-v2-mono text-[11px] font-semibold uppercase tracking-[1.5px]
 
 // v1's DCAPanel copy, verbatim.
 export const AUTONOMOUS_LEAD = 'Autonomous execution'
-export const AUTONOMOUS_BODY = ' — DCA orders run 24/7 via Chainlink oracles. No browser required. Approve once, then sign — no infinite approvals, and the executor runs every buy automatically.'
-export const WRAP_HINT = 'DCA spends an ERC-20 token. You hold native ETH — wrap it to WETH first to start a DCA.'
-export const IMPORTED_NOTICE = 'Imported token — limited liquidity. We’ll verify a swap route before placing the order.'
+export const AUTONOMOUS_BODY = ': DCA orders run 24/7 via Chainlink oracles. No browser required. Approve once, then sign: no infinite approvals, and the executor runs every buy automatically.'
+export const WRAP_HINT = 'DCA spends an ERC-20 token. You hold native ETH: wrap it to WETH first to start a DCA.'
+export const IMPORTED_NOTICE = 'Imported token: limited liquidity. We’ll verify a swap route before placing the order.'
 export const PAUSED_LEAD = 'DCA temporarily paused.'
-export const PAUSED_BODY = ' New DCA orders are paused right now — existing orders are unaffected and you can still cancel them.'
-export const DEPEG_BLOCK_TAIL = 'The market price has diverged sharply from the protocol exchange rate — likely a depeg or oracle manipulation. This cannot be overridden. Try again once the prices reconverge.'
-export const DEPEG_UNVERIFIED_TAIL = 'We could not get usable price-feed data to check this asset against its exchange rate, so we are not letting the order be created on a price we have not verified. This is not itself a depeg finding — we have not been able to make one either way. It clears once the feeds return good data.'
-export const ORACLE_DEVIATION_TAIL = 'The quoted rate and the Chainlink reference price disagree by more than we allow. This is about the price, not about the feed — it clears when they reconverge.'
+export const PAUSED_BODY = ' New DCA orders are paused right now. Existing orders are unaffected and you can still cancel them.'
+export const DEPEG_BLOCK_TAIL = 'The market price has diverged sharply from the protocol exchange rate, likely a depeg or oracle manipulation. This cannot be overridden. Try again once the prices reconverge.'
+export const DEPEG_UNVERIFIED_TAIL = 'We could not get usable price-feed data to check this asset against its exchange rate, so we are not letting the order be created on a price we have not verified. This is not itself a depeg finding. We have not been able to make one either way. It clears once the feeds return good data.'
+export const ORACLE_DEVIATION_TAIL = 'The quoted rate and the Chainlink reference price disagree by more than we allow. This is about the price, not about the feed. It clears when they reconverge.'
 export const oracleIntegrityTail = (symbol: string) =>
-  `This is a problem on our side with the Chainlink price feed for this pair — not a finding about ${symbol}, and not a sign the price moved. Every buy is signed against a minimum-output floor derived from that reference price, so we will not create an order on a price we could not verify. It clears once the feed returns good data.`
+  `This is a problem on our side with the Chainlink price feed for this pair, not a finding about ${symbol}, and not a sign the price moved. Every buy is signed against a minimum-output floor derived from that reference price, so we will not create an order on a price we could not verify. It clears once the feed returns good data.`
 
 function Field({ label, htmlFor, children }: { label: string; htmlFor?: string; children: ReactNode }) {
   return (
@@ -168,13 +168,13 @@ export function DcaCreate({ form, onReviewReady }: { form: DcaForm; onReviewRead
         <div className="mt-3 flex flex-col gap-2">
           {form.depegHardBlocked && (
             <Notice tone="red" testId="dca-depeg-block">
-              <span className="font-semibold">DCA blocked — {form.depegCheck.symbol} depeg.</span> {form.depegCheck.message}
+              <span className="font-semibold">DCA blocked: {form.depegCheck.symbol} depeg.</span> {form.depegCheck.message}
               <span className="mt-1 block text-v2-red/80">{DEPEG_BLOCK_TAIL}</span>
             </Notice>
           )}
           {form.depegUnverified && tokenIn && tokenOut && hasAmount && (
             <Notice tone="red" testId="dca-depeg-unverified">
-              <span className="font-semibold">DCA paused — price not verified.</span> {form.depegCheck.message}
+              <span className="font-semibold">DCA paused: price not verified.</span> {form.depegCheck.message}
               <span className="mt-1 block text-v2-red/80">{DEPEG_UNVERIFIED_TAIL}</span>
             </Notice>
           )}
@@ -201,12 +201,12 @@ export function DcaCreate({ form, onReviewReady }: { form: DcaForm; onReviewRead
             <Notice tone="red" testId="dca-oracle-block">
               {oracleReason === 'extreme-deviation' ? (
                 <>
-                  <span className="font-semibold">DCA blocked — price moved too far from the oracle.</span> {form.oracleGate.detail}
+                  <span className="font-semibold">DCA blocked: price moved too far from the oracle.</span> {form.oracleGate.detail}
                   <span className="mt-1 block text-v2-red/80">{ORACLE_DEVIATION_TAIL}</span>
                 </>
               ) : (
                 <>
-                  <span className="font-semibold">DCA blocked — price could not be verified.</span> {form.oracleGate.detail}
+                  <span className="font-semibold">DCA blocked: price could not be verified.</span> {form.oracleGate.detail}
                   <span className="mt-1 block text-v2-red/80">{oracleIntegrityTail(buySymbol)}</span>
                 </>
               )}
@@ -257,7 +257,7 @@ export function DcaCreate({ form, onReviewReady }: { form: DcaForm; onReviewRead
         )}
         {form.minChunkUncheckable && (
           <p className="mt-1 text-[12px] text-v2-amber" data-testid="dca-minchunk-uncheckable">
-            The per-chunk minimum could not be checked — {tokenIn?.symbol ?? 'this token'} has no live price right now. The ${form.dcaMinChunkUsd} minimum wasn&apos;t verified, but the base-unit minimum order amount still applies to every buy.
+            The per-chunk minimum could not be checked. {tokenIn?.symbol ?? 'this token'} has no live price right now. The ${form.dcaMinChunkUsd} minimum wasn&apos;t verified, but the base-unit minimum order amount still applies to every buy.
           </p>
         )}
 
@@ -317,10 +317,10 @@ export function DcaCreate({ form, onReviewReady }: { form: DcaForm; onReviewRead
         <Surface edge="top" aria-busy={loadingTier || undefined}>
           <h3 className={`${LABEL} pt-4`}>Summary</h3>
           <div className="mt-2 flex flex-col">
-            <Row label="Per buy" testId="dca-sum-per-buy">{hasAmount && tokenIn ? `${thin(form.perPart)} ${tokenIn.symbol}` : '—'}</Row>
-            <Row label="Total duration" testId="dca-sum-duration">{hasAmount ? form.totalDuration : '—'}</Row>
-            <Row label="Execution" testId="dca-sum-exec">{hasAmount ? `Every ${form.interval.label}` : '—'}</Row>
-            <Row label="Expires" testId="dca-sum-expires">{hasAmount ? form.expiry.label : '—'}</Row>
+            <Row label="Per buy" testId="dca-sum-per-buy">{hasAmount && tokenIn ? `${thin(form.perPart)} ${tokenIn.symbol}` : 'n/a'}</Row>
+            <Row label="Total duration" testId="dca-sum-duration">{hasAmount ? form.totalDuration : 'n/a'}</Row>
+            <Row label="Execution" testId="dca-sum-exec">{hasAmount ? `Every ${form.interval.label}` : 'n/a'}</Row>
+            <Row label="Expires" testId="dca-sum-expires">{hasAmount ? form.expiry.label : 'n/a'}</Row>
             {(loadingTier || protection) && (
               <Row label="Protection" testId="dca-sum-protection" tone="amber">
                 {loadingTier ? <Skeleton height={14} width={96} /> : <span title={protection?.title}>{protection?.text}</span>}
@@ -328,7 +328,7 @@ export function DcaCreate({ form, onReviewReady }: { form: DcaForm; onReviewRead
             )}
           </div>
           <p className="mt-3 text-[12px] text-v2-muted">
-            Each buy routes through {INTEGRATED_DEX_SOURCE_COUNT} DEX sources via 1inch aggregation. Orders execute autonomously — no browser needed.
+            Each buy routes through {INTEGRATED_DEX_SOURCE_COUNT} DEX sources via 1inch aggregation. Orders execute autonomously: no browser needed.
           </p>
 
           <Button variant="text" className="mt-2" aria-expanded={form.showAdvanced} onClick={() => form.setShowAdvanced(!form.showAdvanced)}>
@@ -356,11 +356,10 @@ export function DcaCreate({ form, onReviewReady }: { form: DcaForm; onReviewRead
                   </div>
                   {form.signingMin != null && tokenOut && form.parts > 0 && (
                     <p className="mt-2 text-[12px] text-v2-muted">
-                      Signed floor per order (total): ≥ {formatUnits(form.signingMin.minAmountOut, tokenOut.decimals)} {tokenOut.symbol} across {form.parts} buys
-                      {' '}— ≥ {formatUnits(perChunkRaw(form.signingMin.minAmountOut, form.parts), tokenOut.decimals)} {tokenOut.symbol} enforced per buy
+                      Signed floor per order (total): ≥ {formatUnits(form.signingMin.minAmountOut, tokenOut.decimals)} {tokenOut.symbol} across {form.parts} buys, ≥ {formatUnits(perChunkRaw(form.signingMin.minAmountOut, form.parts), tokenOut.decimals)} {tokenOut.symbol} enforced per buy
                       {!form.signingMin.hasFeed && (
                         <span className="ml-1 text-v2-amber">
-                          (no price reference for this pair — fixed floor, not price-derived; it may strand the order if price rises, or offer weak protection if it falls)
+                          (no price reference for this pair: fixed floor, not price-derived; it may strand the order if price rises, or offer weak protection if it falls)
                         </span>
                       )}
                     </p>
@@ -486,7 +485,7 @@ export function DcaCard({ chainId }: { chainId: number }) {
     if (latestEvent.type === 'order_created') {
       stopWaitingSound()
       playSwapConfirmMP3()
-      toast({ type: 'success', title: 'DCA order placed', description: 'Your DCA is live — it will execute automatically on schedule.' })
+      toast({ type: 'success', title: 'DCA order placed', description: 'Your DCA is live: it will execute automatically on schedule.' })
     }
     if (latestEvent.type === 'dca_execution') {
       playSwapConfirmMP3()
@@ -511,7 +510,7 @@ export function DcaCard({ chainId }: { chainId: number }) {
       stopWaitingSound()
       playCancelOrderMP3()
       if (DCA_PAUSED_RE.test(latestEvent.error || '')) {
-        toast({ type: 'error', title: 'DCA temporarily paused', description: 'Only new DCA orders are paused — your existing ones keep running.' })
+        toast({ type: 'error', title: 'DCA temporarily paused', description: 'Only new DCA orders are paused. Your existing ones keep running.' })
       } else {
         toast({ type: 'error', title: 'DCA order failed', description: latestEvent.error || 'Order could not be submitted.' })
       }

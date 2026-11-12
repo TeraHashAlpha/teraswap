@@ -17,7 +17,7 @@ import { failedOrderReason, DEFAULT_FAILED_REASON, FAILURE_REASON_LABELS } from 
 // import beyond reading process.env for its caps) so this suite fails the moment the two diverge.
 import { FAILURE_REASON } from '../../../contracts/order-engine/executor/retry-policy.js'
 
-describe('FAILURE_REASON (keeper) ↔ FAILURE_REASON_LABELS (UI) — the docblock says "keep in sync"; this enforces it', () => {
+describe('FAILURE_REASON (keeper) ↔ FAILURE_REASON_LABELS (UI). The docblock says "keep in sync"; this enforces it', () => {
   const keeperCodes = Object.values(FAILURE_REASON).sort()
   const uiKeys = Object.keys(FAILURE_REASON_LABELS).sort()
 
@@ -46,7 +46,7 @@ describe('FAILURE_REASON (keeper) ↔ FAILURE_REASON_LABELS (UI) — the docbloc
   })
 })
 
-describe('failedOrderReason — backward compatibility', () => {
+describe('failedOrderReason: backward compatibility', () => {
   it('returns a legacy free-text error verbatim', () => {
     expect(failedOrderReason('Signature rejected in wallet.')).toBe('Signature rejected in wallet.')
   })
@@ -62,7 +62,7 @@ describe('failedOrderReason — backward compatibility', () => {
   })
 })
 
-describe('failedOrderReason — specific terminal reason codes', () => {
+describe('failedOrderReason: specific terminal reason codes', () => {
   // A friendly message is a human sentence — it contains whitespace and is NOT
   // just the raw snake_case code echoed back.
   const expectFriendly = (code: string, msg: string) => {

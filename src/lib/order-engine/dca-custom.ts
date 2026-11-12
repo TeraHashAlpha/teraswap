@@ -120,13 +120,13 @@ export function applyDcaMinChunkGuard(opts: {
   if (maxBuys < 1) {
     return {
       buys: requestedBuys,
-      warning: `Total is below the $${minChunkUsd} minimum per buy — increase the amount.`,
+      warning: `Total is below the $${minChunkUsd} minimum per buy: increase the amount.`,
       blocked: true,
     }
   }
   return {
     buys: maxBuys,
-    warning: `${requestedBuys} buys at ${fmtUsd(perChunkUsd)} each is below the $${minChunkUsd} minimum — capped to ${maxBuys} buys.`,
+    warning: `${requestedBuys} buys at ${fmtUsd(perChunkUsd)} each is below the $${minChunkUsd} minimum: capped to ${maxBuys} buys.`,
     blocked: false,
   }
 }

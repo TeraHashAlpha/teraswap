@@ -200,7 +200,7 @@ beforeEach(() => {
   mockFetchDefiLlamaPrice.mockImplementation((addr: string) => defillamaByAddress(addr))
 })
 
-describe('DCAPanel — dca-minchunk-uncheckable [FIX-USD-SCOPE-GUARD-AND-UNCHECKABLE-DUST-GUARD]', () => {
+describe('DCAPanel: dca-minchunk-uncheckable [FIX-USD-SCOPE-GUARD-AND-UNCHECKABLE-DUST-GUARD]', () => {
   it('an unpriced spend leg (no Chainlink feed, DefiLlama also empty) renders the notice', async () => {
     renderWithProviders(<DCAPanel />)
     toggleCustomMode()

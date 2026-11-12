@@ -106,8 +106,8 @@ afterEach(() => {
   useDisconnectedChainSelection.getState().setChainId(null)
 })
 
-describe('LandingPage — SwapPreview identity loop [fix/quote-identity-loop, acceptance 1]', () => {
-  it('renders N times on chainId 8453 and fires EXACTLY ONE /api/quote fetch — fails against #441\'s unmemoised code', async () => {
+describe('LandingPage: SwapPreview identity loop [fix/quote-identity-loop, acceptance 1]', () => {
+  it('renders N times on chainId 8453 and fires EXACTLY ONE /api/quote fetch: fails against #441\'s unmemoised code', async () => {
     useDisconnectedChainSelection.getState().setChainId(8453)
     const fetchSpy = mockFetchSuccess()
 

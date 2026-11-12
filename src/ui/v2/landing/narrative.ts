@@ -2,30 +2,40 @@ import type { CSSProperties } from 'react'
 import type { NarrativePhotoId } from '../photos/narrative'
 
 /**
- * [ADR-025] Scroll narrative (round-6 MOTION-SPEC §2–§3): which photo sits behind which long-text section, and which
+ * [ADR-025] Scroll narrative (round-6 MOTION-SPEC §2–§3): which photo sits behind which landing section, and which
  * section is "active". Pure — NarrativeStack feeds it the measured rects, the tests feed it mocked ones.
+ *
+ * [fix/ui-v2-walkthrough-polish C2] EVERY landing section is in this list, in page order. Before, the hero, Performance,
+ * "Why" and the bottom CTA were opaque bands with a static photo of their own and no `data-ts-narrative`: they covered
+ * the fixed stack, so the boundaries around them were hard cuts (no photo cross-fade, no reveal) while the five long-text
+ * sections between and after them cross-faded. Same motion at every boundary now: the section id is also the DOM id.
  */
-export const NARRATIVE_SECTIONS = ['security', 'experience', 'features', 'roadmap', 'docs'] as const
+export const NARRATIVE_SECTIONS = ['hero', 'performance', 'why-teraswap', 'security', 'experience', 'features', 'roadmap', 'cta', 'docs'] as const
 export type NarrativeSectionId = (typeof NARRATIVE_SECTIONS)[number]
 
-/** MOTION-SPEC §2. Mobile (≤ 600 px) uses three photos: a section that shares its neighbour's photo does not fade. */
+/**
+ * The photos the first four sections used to paint as stills. Design review 1 (owner, 5 Nov): no section is a dark band;
+ * the hero is the pack's overpass (MAG Photography, Pexels 37644721: round-6 MOTION-SPEC §2 "the overpass (hero and §8)"),
+ * "Why" is the pack's P4 proposal, Zakim (round-7 `p4-why-zakim`). Neither neighbour shares its photo (hero overpass ·
+ * §2 tunnel · §3 zakim · §4 highway). The footer still names these authors (it is the only credit at ≤ 600 px).
+ */
+export const STILL_PHOTO = { hero: 'overpass', performance: 'tunnel', why: 'zakim', cta: 'highway' } as const satisfies Record<string, NarrativePhotoId>
+
+/** MOTION-SPEC §2. Mobile (≤ 600 px) uses fewer photos: a section that shares its neighbour's photo does not fade. */
 export const SECTION_PHOTO: Record<NarrativeSectionId, { desktop: NarrativePhotoId; mobile: NarrativePhotoId }> = {
+  hero: { desktop: STILL_PHOTO.hero, mobile: STILL_PHOTO.hero },
+  performance: { desktop: STILL_PHOTO.performance, mobile: STILL_PHOTO.performance },
+  'why-teraswap': { desktop: STILL_PHOTO.why, mobile: STILL_PHOTO.why },
   security: { desktop: 'highway', mobile: 'highway' },
   experience: { desktop: 'footbridge', mobile: 'highway' },
   features: { desktop: 'tunnel', mobile: 'tunnel' },
   roadmap: { desktop: 'archlight', mobile: 'tunnel' },
+  cta: { desktop: STILL_PHOTO.cta, mobile: STILL_PHOTO.cta },
   docs: { desktop: 'underpass', mobile: 'underpass' },
 }
 
-/**
- * The opaque sections that paint their own photo (they hide the fixed stack). Owner review 26 Oct: one grade, so these use
- * the baked `bg-*` set too — the round-4/5 `arch-night` / `trails` files carried a halftone the narrative photos do not.
- * Design review 1 (owner, 5 Nov): no section is a dark band. The hero now paints the pack's own hero photo — the overpass (MAG
- * Photography, Pexels 37644721: round-6 MOTION-SPEC §2 "the overpass (hero and §8)", and the credit on the round-8 hero render)
- * instead of the owner-rejected light-trails; "Why" paints the pack's P4 proposal, Zakim (round-7 `p4-why-zakim`). Neither
- * neighbour shares its photo (hero overpass · §2 tunnel · §3 zakim · §4 highway).
- */
-export const STILL_PHOTO = { hero: 'overpass', performance: 'tunnel', why: 'zakim', cta: 'highway' } as const satisfies Record<string, NarrativePhotoId>
+/** The photo behind the first section: the stack starts on it (and server-renders it), so the hero never paints on a bare background. */
+export const FIRST_PHOTO: NarrativePhotoId = SECTION_PHOTO.hero.desktop
 
 /** The viewport width at and below which the mobile map, the portrait files and the footer-only credit apply. */
 export const MOBILE_MAX_WIDTH = 600
@@ -65,15 +75,23 @@ export interface Pick {
   photo: NarrativePhotoId | null
 }
 
+/** A section that is entirely inside the viewport. */
+export const isWhollyInView = (r: { top: number; bottom: number }, viewportHeight: number): boolean => r.top >= 0 && r.bottom <= viewportHeight
+
 /**
  * The active section is the one that crosses the 40 % line. A narrative section still below the line is pre-selected
  * so no flat gap shows while it enters; nothing is active when no narrative section is in the viewport at all.
+ *
+ * The LAST section is active as soon as it is entirely in view: the docs row is short and the footer follows it, so on a tall
+ * viewport the page ends before the docs row ever reaches the line, and without this rule the last boundary would never fade.
  */
 export function pickActive(rects: readonly SectionRect[], viewportHeight: number, mobile: boolean): Pick {
   const line = viewportHeight * ACTIVE_LINE
   const anyVisible = rects.some((r) => r.bottom > 0 && r.top < viewportHeight)
   let hit = rects.find((r) => r.top <= line && r.bottom > line)
   if (!hit) hit = rects.find((r) => r.top > line && r.top < viewportHeight)
+  const last = rects[rects.length - 1]
+  if (last && isWhollyInView(last, viewportHeight)) hit = last
   return { photo: anyVisible && hit ? photoFor(hit.id, mobile) : null }
 }
 

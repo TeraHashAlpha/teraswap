@@ -22,7 +22,7 @@ import {
 } from './dca-custom'
 import { MAX_EXPIRY_DAYS } from './config'
 
-describe('clampCustomBuys / clampCustomIntervalNumber — input clamps', () => {
+describe('clampCustomBuys / clampCustomIntervalNumber: input clamps', () => {
   it('clamps buys below the minimum up to 1', () => {
     expect(clampCustomBuys(0)).toBe(1)
     expect(clampCustomBuys(-5)).toBe(1)
@@ -41,7 +41,7 @@ describe('clampCustomBuys / clampCustomIntervalNumber — input clamps', () => {
     expect(clampCustomBuys(7.6)).toBe(8)
   })
 
-  it('falls back to the minimum for any non-finite input (NaN, ±Infinity) — never signs a garbage buys count', () => {
+  it('falls back to the minimum for any non-finite input (NaN, ±Infinity), never signs a garbage buys count', () => {
     expect(clampCustomBuys(NaN)).toBe(DCA_CUSTOM_BUYS_MIN)
     expect(clampCustomBuys(Infinity)).toBe(DCA_CUSTOM_BUYS_MIN)
     expect(clampCustomBuys(-Infinity)).toBe(DCA_CUSTOM_BUYS_MIN)
@@ -54,7 +54,7 @@ describe('clampCustomBuys / clampCustomIntervalNumber — input clamps', () => {
   })
 })
 
-describe('customIntervalSeconds — unit conversion, clamped', () => {
+describe('customIntervalSeconds: unit conversion, clamped', () => {
   it('converts hours', () => {
     expect(customIntervalSeconds(1, 'hours')).toBe(3600)
     expect(customIntervalSeconds(10, 'hours')).toBe(36_000)
@@ -70,7 +70,7 @@ describe('customIntervalSeconds — unit conversion, clamped', () => {
     expect(customIntervalSeconds(0, 'hours')).toBe(1 * 3600)
   })
 
-  it('always returns a positive value — mirrors the contract InvalidDCAInterval guard (dcaInterval must be > 0)', () => {
+  it('always returns a positive value: mirrors the contract InvalidDCAInterval guard (dcaInterval must be > 0)', () => {
     for (const n of [-5, 0, 1, 10, 99]) {
       for (const unit of ['hours', 'days'] as const) {
         expect(customIntervalSeconds(n, unit)).toBeGreaterThan(0)
@@ -79,7 +79,7 @@ describe('customIntervalSeconds — unit conversion, clamped', () => {
   })
 })
 
-describe('deriveCustomExpirySeconds — auto-derived expiry, capped at MAX_EXPIRY_DAYS', () => {
+describe('deriveCustomExpirySeconds: auto-derived expiry, capped at MAX_EXPIRY_DAYS', () => {
   it('derives interval*buys + a buffer when the schedule fits well within the cap', () => {
     // 1h interval × 5 buys = 18,000s needed. Buffer = max(3600, 10% of 3600) = 3600.
     const seconds = deriveCustomExpirySeconds({ intervalSeconds: 3600, buys: 5 })
@@ -92,7 +92,7 @@ describe('deriveCustomExpirySeconds — auto-derived expiry, capped at MAX_EXPIR
     expect(seconds).toBe(864_000 * 2 + 86_400)
   })
 
-  it('hard-caps at MAX_EXPIRY_DAYS when interval*buys already exceeds it — the derived value is LESS than the schedule needs', () => {
+  it('hard-caps at MAX_EXPIRY_DAYS when interval*buys already exceeds it. The derived value is LESS than the schedule needs', () => {
     // 10 days × 100 buys = 1000 days — far past the 90-day ceiling.
     const intervalSeconds = 10 * 86_400
     const buys = 100
@@ -117,14 +117,14 @@ describe('deriveCustomExpirySeconds — auto-derived expiry, capped at MAX_EXPIR
   })
 })
 
-describe('getDcaMinChunkUsd — env override with a sane default', () => {
+describe('getDcaMinChunkUsd: env override with a sane default', () => {
   it('returns the default when unset', () => {
     expect(getDcaMinChunkUsd()).toBe(DCA_MIN_CHUNK_USD_DEFAULT)
   })
 })
 
-describe('applyDcaMinChunkGuard — SC-02 dust guard', () => {
-  it('passes through unchanged when the total is unpriced (fails OPEN on pricing — the base-unit floor is the backstop)', () => {
+describe('applyDcaMinChunkGuard: SC-02 dust guard', () => {
+  it('passes through unchanged when the total is unpriced (fails OPEN on pricing. The base-unit floor is the backstop)', () => {
     const r = applyDcaMinChunkGuard({ totalUsd: null, requestedBuys: 50, minChunkUsd: 5 })
     expect(r).toEqual({ buys: 50, warning: null, blocked: false })
   })
@@ -169,7 +169,7 @@ describe('applyDcaMinChunkGuard — SC-02 dust guard', () => {
   })
 })
 
-describe('customDcaSummary — live non-alarmist summary line', () => {
+describe('customDcaSummary: live non-alarmist summary line', () => {
   it('renders buys, per-buy amount, interval, and a rounded expiry', () => {
     const s = customDcaSummary({ buys: 12, perBuyLabel: '0.05 WETH', intervalLabel: '3h', expirySeconds: 18_000 })
     expect(s).toBe('12 buys of 0.05 WETH every 3h, ends ~5h.')

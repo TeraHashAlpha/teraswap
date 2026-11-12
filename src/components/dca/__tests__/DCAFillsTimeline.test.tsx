@@ -46,10 +46,10 @@ describe('DCAFillsTimeline', () => {
     expect(screen.getByTestId('fill-usd')).toHaveTextContent('~$1')
   })
 
-  it('shows "—" (never $0) when the token has no known price', () => {
+  it('shows ": " (never $0) when the token has no known price', () => {
     renderTimeline([fill(1)], { tokenInSymbol: 'ETHFI' })
     const usd = screen.getByTestId('fill-usd')
-    expect(usd).toHaveTextContent('—')
+    expect(usd).toHaveTextContent('n/a')
     expect(usd).not.toHaveTextContent('$0')
   })
 

@@ -158,15 +158,15 @@ describe('DCAPanel BUY hint per tier [P3]', () => {
     expect(document.body.textContent).not.toMatch(/no price oracle|best available DEX route/i)
   })
 
-  it('unpriced (no feed, no price) → "No market price source right now — buys capped at $<max> and flagged"', async () => {
+  it('unpriced (no feed, no price) → "No market price source right now: buys capped at $<max> and flagged"', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-nofeed-output'))
     const hint = await screen.findByTestId(HINT)
-    expect(hint.textContent).toBe(`No market price source right now — buys capped at $${MAX} and flagged`)
+    expect(hint.textContent).toBe(`No market price source right now: buys capped at $${MAX} and flagged`)
     expect(hint.getAttribute('data-tier')).toBe('unpriced')
   })
 
-  it('is informational — never blocks submit (the consent dialog still owns the decision)', async () => {
+  it('is informational: never blocks submit (the consent dialog still owns the decision)', async () => {
     renderWithProviders(<DCAPanel />)
     fireEvent.click(screen.getByTestId('pick-nofeed-output'))
     await screen.findByTestId(HINT)
@@ -183,7 +183,7 @@ describe('floorTierHint', () => {
     expect(floorTierHint(info('onchain-feed', null))).toBeNull()
   })
   it('the cap follows the server value but never exceeds the ceiling; junk falls back to the ceiling', () => {
-    expect(floorTierHint(info('unpriced', 75))).toBe('No market price source right now — buys capped at $75 and flagged')
+    expect(floorTierHint(info('unpriced', 75))).toBe('No market price source right now: buys capped at $75 and flagged')
     expect(floorTierHint(info('unpriced', MAX * 10))).toContain(`$${MAX} `)
     expect(floorTierHint(info('unpriced', null))).toContain(`$${MAX} `)
     expect(floorTierHint(info('unpriced', -5))).toContain(`$${MAX} `)

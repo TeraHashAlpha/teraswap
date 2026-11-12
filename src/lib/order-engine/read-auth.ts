@@ -104,7 +104,7 @@ export async function verifyOrdersReadAccess(
   }
 
   const ageMs = nowMs - issuedAtSec * 1000
-  if (ageMs > ORDERS_READ_TTL_MS) return { ok: false, error: 'Read signature expired — sign again' }
+  if (ageMs > ORDERS_READ_TTL_MS) return { ok: false, error: 'Read signature expired: sign again' }
   if (ageMs < -ORDERS_READ_MAX_SKEW_MS) return { ok: false, error: 'issuedAt is in the future' }
 
   try {

@@ -125,7 +125,7 @@ export function HistoryView({ address, isConnected, swaps, total, loading, error
       {!loading && empty && !error && (
         <div className="ts-orders-empty" data-testid="history-empty">
           <span aria-hidden="true" className="text-[22px] text-v2-muted">⇄</span>
-          <p className="text-[14px] text-v2-muted">No activity yet — your swaps and DCA fills will appear here</p>
+          <p className="text-[14px] text-v2-muted">No activity yet: your swaps and DCA fills will appear here</p>
         </div>
       )}
 

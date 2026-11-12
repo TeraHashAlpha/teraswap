@@ -50,7 +50,7 @@ export async function fetchJson<T = unknown>(
     const body = await res.text()
 
     if (looksLikeHtmlOrNonJson(body, res.headers.get('content-type'))) {
-      lastErr = new ServiceUnavailableError('Service busy — please retry in a moment.', res.status || 503)
+      lastErr = new ServiceUnavailableError('Service busy: please retry in a moment.', res.status || 503)
       if (attempt < retries) { await new Promise(r => setTimeout(r, RETRY_DELAY_MS)); continue }
       throw lastErr
     }
@@ -59,12 +59,12 @@ export async function fetchJson<T = unknown>(
       return { res, data: JSON.parse(body) as T }
     } catch {
       // Content-type lied or body was truncated → treat as a platform glitch, not a parse crash.
-      lastErr = new ServiceUnavailableError('Service busy — please retry in a moment.', res.status || 503)
+      lastErr = new ServiceUnavailableError('Service busy: please retry in a moment.', res.status || 503)
       if (attempt < retries) { await new Promise(r => setTimeout(r, RETRY_DELAY_MS)); continue }
       throw lastErr
     }
   }
 
   // Unreachable (the loop always returns or throws), but satisfies the type checker.
-  throw lastErr ?? new ServiceUnavailableError('Service busy — please retry in a moment.', 503)
+  throw lastErr ?? new ServiceUnavailableError('Service busy: please retry in a moment.', 503)
 }

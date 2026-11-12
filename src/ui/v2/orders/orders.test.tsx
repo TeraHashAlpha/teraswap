@@ -149,7 +149,7 @@ describe('B7 · Orders: content parity v1 OrderDashboard ⊆ v2 (0 missing)', ()
 })
 
 describe('B7 · Orders: the same fields per order, every type and status v1 lists', () => {
-  it('type, chain, status, target, fills, time left — v1 OrderCard\'s values', () => {
+  it('type, chain, status, target, fills, time left: v1 OrderCard\'s values', () => {
     render(<OrdersTab />)
     const expectRow = (o: AutonomousOrder, type: string, status: string) => {
       const row = screen.getAllByTestId('order-row').find((r) => r.getAttribute('data-order-id') === o.id) as HTMLElement
@@ -256,7 +256,7 @@ describe('B7 · Orders: cancel args = v1\'s, per type v1 can cancel (via the reu
     fireEvent.click(screen.getByText(o.chainId === BASE ? 'Cancel Order' : `Switch to ${o.chainId === 1 ? 'Ethereum' : 'Arbitrum One'}`))
     const dialog = await screen.findByRole(tree === 'v1' ? 'dialog' : 'dialog')
     const body = dialog.cloneNode(true) as HTMLElement
-    fireEvent.click(within(dialog).getByText(answer === 'confirm' ? 'Confirm — Cancel Order' : 'Keep this order'))
+    fireEvent.click(within(dialog).getByText(answer === 'confirm' ? 'Confirm: Cancel Order' : 'Keep this order'))
     await act(async () => {})
     const out = { seq: [...fake.seq], body, rows: v2Rows(r.container).length }
     cleanup()
@@ -288,7 +288,7 @@ describe('B7 · Orders: cancel args = v1\'s, per type v1 can cancel (via the reu
       render(tree === 'v1' ? <OrderDashboard /> : <OrdersTab />)
       fireEvent.click(screen.getByText(/^Cancel All \(6\)$/))
       const dialog = await screen.findByRole('dialog')
-      fireEvent.click(within(dialog).getByText('Confirm — Cancel All'))
+      fireEvent.click(within(dialog).getByText('Confirm: Cancel All'))
       await act(async () => {})
       calls.push([...fake.seq])
       cleanup()
@@ -304,7 +304,7 @@ describe('B7 · Orders: cancel args = v1\'s, per type v1 can cancel (via the reu
     await screen.findByRole('dialog')
     expect(fake.seq).toEqual([['cancelOrder', 'l1']])
     expect(screen.getByRole('tab', { name: /^Active/ }).textContent).toBe('Active (6)')
-    fireEvent.click(screen.getByText('Confirm — Cancel Order'))
+    fireEvent.click(screen.getByText('Confirm: Cancel Order'))
     await waitFor(() => expect(screen.getByRole('tab', { name: /^Active/ }).textContent).toBe('Active (5)'))
     expect(screen.getByRole('tab', { name: /^Cancelled/ }).textContent).toBe('Cancelled (4)')
   })

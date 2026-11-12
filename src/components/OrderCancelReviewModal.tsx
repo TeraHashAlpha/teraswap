@@ -97,7 +97,7 @@ export default function OrderCancelReviewModal({ review, onConfirm, onCancel }: 
               </div>
 
               <div className="mt-1 rounded-lg border border-cream-gold/20 bg-cream-gold/5 px-3 py-2 text-[11px] text-cream-gold">
-                After the on-chain cancel confirms, this order can never execute — the contract marks
+                After the on-chain cancel confirms, this order can never execute. The contract marks
                 its hash cancelled. No funds move.
               </div>
             </>
@@ -114,7 +114,7 @@ export default function OrderCancelReviewModal({ review, onConfirm, onCancel }: 
                 <span className="font-medium text-cream" data-testid="invalidate-tx-summary">
                   {totalTxCount} total
                   {nonceTxCount > 0 ? ` (${nonceTxCount} nonce invalidation${nonceTxCount > 1 ? 's' : ''})` : ''}
-                  {cancelTxCount > 0 ? ` (${cancelTxCount} cancelOrder call${cancelTxCount > 1 ? 's' : ''} — DCA orders)` : ''}
+                  {cancelTxCount > 0 ? ` (${cancelTxCount} cancelOrder call${cancelTxCount > 1 ? 's' : ''} for DCA orders)` : ''}
                 </span>
               </div>
               {/* [SPRINT-V3-P3] newNonce is null when there are no v2 orders to invalidate
@@ -130,7 +130,7 @@ export default function OrderCancelReviewModal({ review, onConfirm, onCancel }: 
                 {review.affectedOrders.map((o) => (
                   <div key={o.id} data-testid="invalidate-row" className="flex items-center justify-between rounded-lg border border-cream-08 bg-surface-tertiary px-3 py-2 text-xs">
                     <span className="font-medium text-cream">{o.tokenInSymbol || '?'} &#8594; {o.tokenOutSymbol || '?'}</span>
-                    <span className="text-cream-50">{orderTypeLabel(o)} · nonce {String(o.order?.nonce ?? '—')}</span>
+                    <span className="text-cream-50">{orderTypeLabel(o)} · nonce {String(o.order?.nonce ?? 'n/a')}</span>
                   </div>
                 ))}
               </div>
@@ -141,17 +141,17 @@ export default function OrderCancelReviewModal({ review, onConfirm, onCancel }: 
                 <div data-testid="invalidate-skipped" className="rounded-lg border border-amber-400/20 bg-amber-400/5 px-3 py-2 text-[11px] text-amber-300">
                   {review.skippedOrders.length} order{review.skippedOrders.length > 1 ? 's' : ''} on other
                   chains ({[...new Set(review.skippedOrders.map(o => getChainName(o.chainId ?? DEFAULT_CHAIN_ID)))].join(', ')}) were
-                  NOT included — switch your wallet to that chain and run Cancel All again to cancel them.
+                  NOT included: switch your wallet to that chain and run Cancel All again to cancel them.
                 </div>
               )}
 
               <div className="mt-1 rounded-lg border border-cream-gold/20 bg-cream-gold/5 px-3 py-2 text-[11px] text-cream-gold">
                 {cancelTxCount > 0 ? (
                   <>Non-DCA orders above are cancelled by the nonce invalidation; each DCA order needs its
-                  own on-chain cancelOrder call (the contract never checks the nonce for DCA) — expect{' '}
+                  own on-chain cancelOrder call (the contract never checks the nonce for DCA): expect{' '}
                   {totalTxCount} wallet prompts. No funds move.</>
                 ) : (
-                  <>Invalidating the nonce on-chain cancels every order above at once — orders signed with a
+                  <>Invalidating the nonce on-chain cancels every order above at once: orders signed with a
                   lower nonce can never execute afterwards. No funds move.</>
                 )}
               </div>
@@ -165,7 +165,7 @@ export default function OrderCancelReviewModal({ review, onConfirm, onCancel }: 
             data-testid="cancel-confirm"
             className="flex h-12 w-full items-center justify-center rounded-full border-2 border-red-400/80 bg-transparent text-[14px] font-bold uppercase tracking-[1.5px] text-red-300 transition-all hover:bg-red-400 hover:text-black sm:h-auto sm:py-3"
           >
-            {isInvalidate ? 'Confirm — Cancel All' : 'Confirm — Cancel Order'}
+            {isInvalidate ? 'Confirm: Cancel All' : 'Confirm: Cancel Order'}
           </button>
           <button
             onClick={onCancel}

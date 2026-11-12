@@ -92,7 +92,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('useSplitRoute — disabled / below-threshold paths', () => {
+describe('useSplitRoute: disabled / below-threshold paths', () => {
   it('returns null result when enabled=false', async () => {
     const meta = makeMeta('10000000000') // 10k USDC out, but disabled.
     const { result } = renderHook(() =>
@@ -129,7 +129,7 @@ describe('useSplitRoute — disabled / below-threshold paths', () => {
   })
 })
 
-describe('useSplitRoute — recommendation gating', () => {
+describe('useSplitRoute: recommendation gating', () => {
   it('recommends a split when findBestSplit returns isSplit=true and improvement >= threshold', async () => {
     // 10k USDC out → above SPLIT_MIN_USD threshold.
     const meta = makeMeta('10000000000')
@@ -164,7 +164,7 @@ describe('useSplitRoute — recommendation gating', () => {
   })
 })
 
-describe('useSplitRoute — USD estimation paths', () => {
+describe('useSplitRoute: USD estimation paths', () => {
   it('uses output amount when output token is a stablecoin (USDC)', async () => {
     const meta = makeMeta('10000000000') // 10k USDC out
     mockFindBestSplit.mockReturnValue(makeBestSplit(true, 30))
@@ -181,7 +181,7 @@ describe('useSplitRoute — USD estimation paths', () => {
   })
 })
 
-describe('useSplitRoute — toggleSplit', () => {
+describe('useSplitRoute: toggleSplit', () => {
   it('flips the useSplit state when called', async () => {
     const meta = makeMeta('100000000') // small trade — won't auto-enable
     const { result } = renderHook(() =>
@@ -199,7 +199,7 @@ describe('useSplitRoute — toggleSplit', () => {
   })
 })
 
-describe('useSplitRoute — robustness', () => {
+describe('useSplitRoute: robustness', () => {
   it('does not crash when amountIn is invalid (parseUnits throws)', async () => {
     const meta = makeMeta('10000000000')
     const { result } = renderHook(() =>
@@ -253,7 +253,7 @@ describe('useSplitRoute — robustness', () => {
 //     fetchMetaQuoteViaApi): mainnet requests stay byte-identical to the
 //     pre-multi-chain shape, and /api/quote's P217 default IS chain 1.
 // ─────────────────────────────────────────────────────────────
-describe('useSplitRoute — sub-quote fetch URL chain awareness [CHORE-SPLITROUTE-CHAINID]', () => {
+describe('useSplitRoute: sub-quote fetch URL chain awareness [CHORE-SPLITROUTE-CHAINID]', () => {
   async function captureSubQuoteUrl(chainId?: number): Promise<URL> {
     const meta = makeMeta('10000000000') // 10k USDC out → above threshold
     mockFindBestSplit.mockReturnValue(makeBestSplit(false))
@@ -333,7 +333,7 @@ describe('chain-keyed stable membership for the USD estimate', () => {
     await waitFor(() => expect(mockFetchSplitQuotes).toHaveBeenCalled())
   })
 
-  it('does NOT count BOLD as ~USD on Base — BOLD is a mainnet-only stable', async () => {
+  it('does NOT count BOLD as ~USD on Base. BOLD is a mainnet-only stable', async () => {
     const meta = makeMeta('10000000000000000000000') // 10k BOLD (18 dp) out.
     renderHook(() => useSplitRoute(meta, ETH, BOLD, '5', true, 8453))
     await act(async () => { await Promise.resolve() })

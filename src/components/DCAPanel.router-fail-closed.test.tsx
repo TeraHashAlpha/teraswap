@@ -117,7 +117,7 @@ beforeEach(() => {
 const enterAmount = (v: string) => fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: v } })
 const startDca = () => fireEvent.click(screen.getByRole('button', { name: /Start DCA/i }))
 
-describe('DCAPanel — [ADR-020] refuses to sign on a chain with no router set', () => {
+describe('DCAPanel: [ADR-020] refuses to sign on a chain with no router set', () => {
   it('sanity: the fixture chains really do differ in the router map', () => {
     // If this ever stops holding, every assertion below is vacuous — fail here instead.
     expect(getDefaultRouter(UNKNOWN_CHAIN_ID)).toBeNull()
@@ -135,7 +135,7 @@ describe('DCAPanel — [ADR-020] refuses to sign on a chain with no router set',
     expect(createOrderMock).not.toHaveBeenCalled()
   })
 
-  it('refuses BEFORE the routability probe — nothing is quoted, approved or signed', async () => {
+  it('refuses BEFORE the routability probe, nothing is quoted, approved or signed', async () => {
     renderWithProviders(<DCAPanel />)
     enterAmount('100')
     startDca()
@@ -145,7 +145,7 @@ describe('DCAPanel — [ADR-020] refuses to sign on a chain with no router set',
     expect(createOrderMock).not.toHaveBeenCalled()
   })
 
-  it('the SAME panel on Base (8453) still signs — the guard is chain-specific, not a blanket block', async () => {
+  it('the SAME panel on Base (8453) still signs. The guard is chain-specific, not a blanket block', async () => {
     useChainIdMock.mockReturnValue(BASE_CHAIN_ID)
     renderWithProviders(<DCAPanel />)
     enterAmount('100')
@@ -158,7 +158,7 @@ describe('DCAPanel — [ADR-020] refuses to sign on a chain with no router set',
     expect(config.router.toLowerCase()).toBe(getDefaultRouter(BASE_CHAIN_ID)!.address.toLowerCase())
   })
 
-  it('[feat/arbitrum-dca-gates] the SAME panel on Arbitrum One (42161) now commits Arbitrum\'s OWN default router — never mainnet\'s 1inch coincidence', async () => {
+  it('[feat/arbitrum-dca-gates] the SAME panel on Arbitrum One (42161) now commits Arbitrum\'s OWN default router, never mainnet\'s 1inch coincidence', async () => {
     useChainIdMock.mockReturnValue(ARBITRUM_CHAIN_ID)
     renderWithProviders(<DCAPanel />)
     enterAmount('100')

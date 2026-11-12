@@ -30,7 +30,7 @@ afterEach(() => {
   reducedMotionState.value = false
 })
 
-describe('DigitRoller — rendering', () => {
+describe('DigitRoller: rendering', () => {
   it('renders every digit of the formatted value', () => {
     const { container } = render(<DigitRoller value="1 975.6553" />)
     for (const d of ['1', '9', '7', '5', '6', '3']) {
@@ -56,9 +56,9 @@ describe('DigitRoller — rendering', () => {
     }
   })
 
-  it('renders the "—" fallback as static text with no roller columns', () => {
-    const { container } = render(<DigitRoller value="—" />)
-    expect(container.textContent).toContain('—')
+  it('renders the ": " fallback as static text with no roller columns', () => {
+    const { container } = render(<DigitRoller value="n/a" />)
+    expect(container.textContent).toContain('n/a')
     expect(screen.queryAllByTestId('digit-column')).toHaveLength(0)
   })
 
@@ -77,7 +77,7 @@ describe('DigitRoller — rendering', () => {
   })
 })
 
-describe('DigitRoller — accessibility [34-L-01]', () => {
+describe('DigitRoller: accessibility [34-L-01]', () => {
   it('exposes the formatted value via aria-label so screen readers announce the number, not all 10 digits per column', () => {
     const { container } = render(<DigitRoller value="1 975.6553" prefix="~" />)
     const wrapper = container.querySelector('.tabular-nums')
@@ -97,7 +97,7 @@ describe('DigitRoller — accessibility [34-L-01]', () => {
   })
 })
 
-describe('DigitRoller — value transitions', () => {
+describe('DigitRoller: value transitions', () => {
   it('shrinks the column count when the value gets shorter', () => {
     // Reduced motion makes AnimatePresence removals synchronous.
     reducedMotionState.value = true
@@ -129,7 +129,7 @@ describe('DigitRoller — value transitions', () => {
   })
 })
 
-describe('DigitRoller — reduced motion', () => {
+describe('DigitRoller: reduced motion', () => {
   it('still renders all digits when prefers-reduced-motion is set', () => {
     reducedMotionState.value = true
     render(<DigitRoller value="1.23" />)
@@ -139,7 +139,7 @@ describe('DigitRoller — reduced motion', () => {
   })
 })
 
-describe('DigitRoller — constants & snapshot', () => {
+describe('DigitRoller: constants & snapshot', () => {
   it('exports LINE_HEIGHT_PX = 32', () => {
     expect(LINE_HEIGHT_PX).toBe(32)
   })
@@ -261,7 +261,7 @@ function setSwapHookDefaults() {
 import { renderWithProviders, fireEvent, act } from '@/test-utils/render'
 import SwapBox from '@/components/SwapBox'
 
-describe('SwapBox integration — DigitRoller wiring', () => {
+describe('SwapBox integration: DigitRoller wiring', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()

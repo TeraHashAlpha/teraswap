@@ -12,7 +12,7 @@ describe('tier notice (24)', () => {
   it('priced → nothing', () => {
     expect(text(pair('priced', leg('priced', ['chainlink', 'defillama'], 1), leg('priced', ['chainlink', 'defillama'], 1)))).toBe('')
   })
-  it('unknown (null / undefined: not asked, in flight, failed) → nothing — the client never guesses', () => {
+  it('unknown (null / undefined: not asked, in flight, failed) → nothing. The client never guesses', () => {
     expect(text(null)).toBe('')
     expect(text(undefined)).toBe('')
   })
@@ -25,8 +25,8 @@ describe('tier notice (24)', () => {
   })
   it('unpriced → ONE line, verbatim; the consent dialog is B4', () => {
     const c = render(<TierNotice tier={pair('unpriced', leg('unpriced'), leg('unpriced'))} />).container
-    expect(c.textContent).toBe('No reference price — consent required before swapping')
-    expect(UNPRICED_LINE).toBe('No reference price — consent required before swapping')
+    expect(c.textContent).toBe('No reference price: consent required before swapping')
+    expect(UNPRICED_LINE).toBe('No reference price: consent required before swapping')
     expect(c.querySelectorAll('button, input, [role="dialog"]').length).toBe(0)
   })
   it('each notice keeps its amber tone (data-tone), its platform-green bar and the testid v1 uses', () => {

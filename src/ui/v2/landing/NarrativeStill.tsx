@@ -2,6 +2,10 @@ import type { NarrativePhotoId } from '../photos/narrative'
 import { NARRATIVE_PHOTOS } from '../photos/narrative'
 
 /**
+ * [fix/ui-v2-walkthrough-polish C2] NOT USED BY THE LANDING ANY MORE. The hero, Performance, "Why" and the bottom CTA are
+ * narrative sections now (their photo is a layer of the cross-fading stack), so no landing section paints a static still
+ * and every section boundary moves the same way. Kept in place (CLAUDE.md "Do NOT" 4) for a surface that wants one photo.
+ *
  * [ADR-025] A baked `bg-*` photo painted inside one opaque landing section (Performance, bottom CTA). Same files and the
  * same constant veil (`--nar-veil`) as the scroll-narrative stack, so every landing background has one texture: none of
  * the round-4/5 CSS grade, duotone or halftone. Native lazy loading (an `<img>` in a `<picture>`), AVIF first, portrait

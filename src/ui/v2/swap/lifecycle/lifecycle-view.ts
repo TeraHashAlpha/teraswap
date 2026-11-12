@@ -54,14 +54,14 @@ export function confirmButtonState(i: { approvalStatus: ApprovalStatus; approval
   const busy = (label: string): ConfirmButtonState => ({ label, disabled: true, tone: 'loading', action: 'swap' })
   if (i.approvalStatus === 'approving_permit2') return { ...busy('Approving...'), action: 'approve' }
   if (i.approvalStatus === 'signing') return { ...busy('Signing...'), action: 'approve' }
-  if (i.approvalStatus === 'error') return { label: 'Approval error — retry', disabled: false, tone: 'error', action: 'approve' }
+  if (i.approvalStatus === 'error') return { label: 'Approval error: retry', disabled: false, tone: 'error', action: 'approve' }
   if (!i.approvalReady) return { label: 'Approve & Swap', disabled: false, tone: 'primary', action: 'approve' }
   if (i.swapStatus === 'fetching_swap') return busy('Preparing swap...')
   if (i.swapStatus === 'simulating') return busy('Simulating transaction...')
   if (i.swapStatus === 'cow_signing') return busy('Sign order in wallet...')
   if (i.swapStatus === 'cow_pending') return busy('Waiting for solver...')
   if (i.swapStatus === 'swapping') return busy('Executing swap...')
-  if (i.swapStatus === 'error') return { label: 'Error — retry', disabled: false, tone: 'error', action: 'swap' }
+  if (i.swapStatus === 'error') return { label: 'Error: retry', disabled: false, tone: 'error', action: 'swap' }
   return { label: 'Confirm & Sign', disabled: false, tone: 'primary', action: 'swap' }
 }
 
@@ -94,7 +94,7 @@ export function buildSuccessSummary(i: { meta: MetaQuoteResult; tokenOut: Token;
   }
   const outBig = safeBigInt(i.meta.best.toAmount)
   const outNumber = outBig !== null ? Number(formatUnits(outBig, i.tokenOut.decimals)) : null
-  return { outDisplay: outNumber !== null ? fmtToken(outNumber) : '—', outNumber, savingsLine, realisedSurplusWei }
+  return { outDisplay: outNumber !== null ? fmtToken(outNumber) : 'n/a', outNumber, savingsLine, realisedSurplusWei }
 }
 
 // ── The execution timeline (round7 28a / 28b / 28c) ──────────────────────────────────────────────────────────────────────────

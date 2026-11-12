@@ -57,7 +57,7 @@ export default function DCAOrderCard({
 
   const amountIn = order.order?.amountIn
     ? formatUnits(BigInt(order.order.amountIn.toString()), order.tokenInDecimals)
-    : '—'
+    : 'n/a'
 
   // Time remaining
   const timeLeft = order.expiresAt - Date.now()

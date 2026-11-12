@@ -79,7 +79,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('21a — idle', () => {
+describe('21a: idle', () => {
   it('chain label, SELL / RECEIVE, token buttons, the one cream CTA says Connect wallet', () => {
     render(<SwapCard />)
     expect(screen.getByText('Ethereum')).toBeTruthy()
@@ -100,9 +100,9 @@ describe('21a — idle', () => {
     expect(document.querySelector('[data-swap-card]')?.getAttribute('data-quoting')).toBeNull()
   })
 
-  it('balance is — and the native asset is named; quoting is enabled before a wallet (feat/quote-before-wallet)', () => {
+  it('balance is: and the native asset is named; quoting is enabled before a wallet (feat/quote-before-wallet)', () => {
     render(<SwapCard />)
-    expect(screen.getByText('Balance: —')).toBeTruthy()
+    expect(screen.getByText('Balance: n/a')).toBeTruthy()
     expect(screen.getByText('Native asset')).toBeTruthy()
     expect(h.useQuoteArgs[3]).toBe(true) // isChainOkForQuote: disconnected → true
   })
@@ -137,7 +137,7 @@ describe('21a — idle', () => {
   })
 })
 
-describe('21b — quoting', () => {
+describe('21b: quoting', () => {
   it('skeleton in the output and in the right column; the CTA is disabled and says so', () => {
     h.account = { address: '0xd44d00000000000000000000000000000000962d', isConnected: true, chain: { id: 1 } }
     h.quote = { ...h.quote, loading: true }
@@ -153,7 +153,7 @@ describe('21b — quoting', () => {
   })
 })
 
-describe('20 — quote', () => {
+describe('20: quote', () => {
   function withQuote(amount = '1') {
     h.account = { address: '0xd44d00000000000000000000000000000000962d', isConnected: true, chain: { id: 1 } }
     h.quote = { ...h.quote, meta: taggedFixture(fixtureMeta(), amount) }
@@ -256,7 +256,7 @@ describe('20 — quote', () => {
     expect(screen.getByRole('button', { name: /Receive token: USDT/ })).toBeTruthy()
   })
 
-  it('MEV (retired, owner 2026-11-06): no Force MEV switch and no "CoW Protocol available… Enable" hint — see retire-force-mev.swap.test', () => {
+  it('MEV (retired, owner 2026-11-06): no Force MEV switch and no "CoW Protocol available… Enable" hint. See retire-force-mev.swap.test', () => {
     withQuote()
     expect(screen.queryByRole('switch')).toBeNull()
     expect(screen.queryByText(/Force MEV Protection/)).toBeNull()
@@ -272,7 +272,7 @@ const TIER = {
   unpriced: { tier: 'unpriced', legs: { in: { tier: 'unpriced', sources: [] }, out: { tier: 'unpriced', sources: [] } } },
 }
 
-describe('24 — tier notices (the quote panel, as v1 QuoteBreakdown)', () => {
+describe('24: tier notices (the quote panel, as v1 QuoteBreakdown)', () => {
   function quoteWithTier(data: unknown) {
     h.account = CONNECTED
     h.tier = { data, loading: false }
@@ -293,9 +293,9 @@ describe('24 — tier notices (the quote panel, as v1 QuoteBreakdown)', () => {
       'Price from one source only (DefiLlama). Value-based limits use that price; double-check the rate before swapping.',
     )
   })
-  it('unpriced → the one-line notice, and the CTA still reads Review swap (its click opens the consent in the review sheet — see 26)', () => {
+  it('unpriced → the one-line notice, and the CTA still reads Review swap (its click opens the consent in the review sheet: see 26)', () => {
     quoteWithTier(TIER.unpriced)
-    expect(document.querySelector('[data-testid="price-tier-unpriced"]')?.textContent).toBe('No reference price — consent required before swapping')
+    expect(document.querySelector('[data-testid="price-tier-unpriced"]')?.textContent).toBe('No reference price: consent required before swapping')
     expect((document.querySelector('[data-cta]') as HTMLElement).textContent).toBe('Review swap')
   })
   it('no notice without a quote: the panel owns it, as in v1', () => {
@@ -352,7 +352,7 @@ describe('CTA states in the card (21a / 20 / 29)', () => {
   })
 })
 
-describe('#604 — a stale quote never feeds the display', () => {
+describe('#604: a stale quote never feeds the display', () => {
   it('a quote for the OTHER pair is treated as no quote', () => {
     h.account = { address: '0xd44d00000000000000000000000000000000962d', isConnected: true, chain: { id: 1 } }
     h.quote = { ...h.quote, meta: taggedFixture(fixtureMeta(), '1', 1, USDC, ETH) } // identity says USDC → ETH
@@ -362,7 +362,7 @@ describe('#604 — a stale quote never feeds the display', () => {
     expect((document.querySelector('[data-cta]') as HTMLElement).textContent).toBe('No quotes available')
   })
 
-  it('a quote for ANOTHER AMOUNT is "quoting": skeleton, CTA disabled — receive/rate/min never describe a different sell amount', () => {
+  it('a quote for ANOTHER AMOUNT is "quoting": skeleton, CTA disabled. Receive/rate/min never describe a different sell amount', () => {
     h.account = { address: '0xd44d00000000000000000000000000000000962d', isConnected: true, chain: { id: 1 } }
     h.quote = { ...h.quote, meta: taggedFixture(fixtureMeta(), '1') }
     render(<SwapCard />)
@@ -394,7 +394,7 @@ describe('tokens used in the fixtures resolve', () => {
   })
 })
 
-describe('26 / 25 — the review and Permit2 sheets opened from the card (B4 sheets; Confirm is B5)', () => {
+describe('26 / 25: the review and Permit2 sheets opened from the card (B4 sheets; Confirm is B5)', () => {
   const quote = (tier: unknown = null) => {
     h.account = CONNECTED
     h.tier = { data: tier, loading: false }

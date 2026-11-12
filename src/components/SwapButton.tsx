@@ -76,13 +76,13 @@ export default function SwapButton({
       const msg =
         blockReason === 'price-impact' ? 'Confirm price impact to swap'
         : blockReason === 'depeg-consent' ? 'Confirm depeg risk to swap'
-        : blockReason === 'depeg-block' ? 'Asset depegged — swap blocked'
+        : blockReason === 'depeg-block' ? 'Asset depegged: swap blocked'
         // [FIX-ORACLE-FAIL-CLOSED] Transient and self-clearing, so the copy points at a retry —
         // and pointedly does NOT say "depegged", which would be a claim we have not verified.
-        : blockReason === 'depeg-unverified' ? 'Verifying price — try again shortly'
-        : blockReason === 'oracle' ? 'No oracle — swap blocked'
-        : blockReason === 'extreme' ? 'Price deviation too high — blocked'
-        : 'Oracle data unsafe — swap blocked'
+        : blockReason === 'depeg-unverified' ? 'Verifying price: try again shortly'
+        : blockReason === 'oracle' ? 'No oracle: swap blocked'
+        : blockReason === 'extreme' ? 'Price deviation too high: blocked'
+        : 'Oracle data unsafe: swap blocked'
       // 'price-impact' & 'depeg-consent' are recoverable (checkbox) → warning; the rest are hard.
       // 'depeg-unverified' is NOT click-through-able (nothing for the user to accept — the feeds
       // simply have to answer), so it stays a hard block despite being temporary.
@@ -94,7 +94,7 @@ export default function SwapButton({
     if (approvalStatus === 'signing')
       return { text: 'Signing...', disabled: true, onClick: () => {}, variant: 'loading' }
     if (approvalStatus === 'error')
-      return { text: 'Approval error — retry', disabled: false, onClick: onApprove, variant: 'error' }
+      return { text: 'Approval error: retry', disabled: false, onClick: onApprove, variant: 'error' }
     if (!approvalReady)
       return { text: 'Approve & Swap', disabled: false, onClick: onApprove, variant: 'primary' }
     if (swapStatus === 'fetching_swap')
@@ -112,7 +112,7 @@ export default function SwapButton({
     if (swapStatus === 'success')
       return { text: 'Swap complete', disabled: true, onClick: () => {}, variant: 'success' }
     if (swapStatus === 'error')
-      return { text: 'Error — retry', disabled: false, onClick: onSwap, variant: 'error' }
+      return { text: 'Error: retry', disabled: false, onClick: onSwap, variant: 'error' }
     return { text: 'Swap', disabled: false, onClick: onSwap, variant: 'primary' }
   }
 
@@ -181,7 +181,7 @@ export default function SwapButton({
 
       {!approvalReady && hasAmount && hasQuote && !quoteLoading && (
         <p className="mt-2 text-center text-[10px] text-cream-35">
-          Exact approval only — we never request unlimited access to your tokens.
+          Exact approval only: we never request unlimited access to your tokens.
         </p>
       )}
     </div>

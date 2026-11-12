@@ -248,8 +248,8 @@ async function pickExoticPair(container: HTMLElement, amount: string) {
 }
 const swapBtn = () => screen.getByTestId('swap-button')
 
-describe('SwapBox — [feat/swap-price-tiers] the local "value cannot be verified" block is gone (D1)', () => {
-  it('an exotic pair with NO Chainlink feed and an UNKNOWN tier is not blocked at any size — the server decides', async () => {
+describe('SwapBox: [feat/swap-price-tiers] the local "value cannot be verified" block is gone (D1)', () => {
+  it('an exotic pair with NO Chainlink feed and an UNKNOWN tier is not blocked at any size. The server decides', async () => {
     useChainlinkPriceMock.mockReturnValue(NO_FEED)
     useQuoteMock.mockReturnValue(exoticQuote('5'))
     const { container } = renderWithProviders(<SwapBox />)
@@ -260,7 +260,7 @@ describe('SwapBox — [feat/swap-price-tiers] the local "value cannot be verifie
   })
 })
 
-describe('SwapBox — [feat/swap-price-tiers] tier matrix', () => {
+describe('SwapBox: [feat/swap-price-tiers] tier matrix', () => {
   it('priced → no notice, no dialog; Swap executes without any ack; QuoteBreakdown receives the tier', async () => {
     useChainlinkPriceMock.mockReturnValue(NO_FEED)
     useSwapPriceTierMock.mockReturnValue({ data: TIER.priced, loading: false })
@@ -384,7 +384,7 @@ describe('SwapBox — [feat/swap-price-tiers] tier matrix', () => {
 // split route Continue hands it to useSplitSwap (every leg posts it), and the split hook's own 409 flag
 // opens the same dialog; Cancel resets THAT hook.
 // ─────────────────────────────────────────────────────────────
-describe('SwapBox — [fix/unpriced-ack-paths] split route: the ack reaches useSplitSwap; a split 409 opens the dialog', () => {
+describe('SwapBox: [fix/unpriced-ack-paths] split route: the ack reaches useSplitSwap; a split 409 opens the dialog', () => {
   const bestSplit = {
     isSplit: true, totalOutput: '1000000000000000000000', totalGasUsd: 10, improvementBps: 25,
     legs: [
@@ -447,12 +447,12 @@ function priceNotices() {
   }
 }
 
-describe('SwapBox — [chore/copy-leftovers] one price notice, from the tier', () => {
+describe('SwapBox: [chore/copy-leftovers] one price notice, from the tier', () => {
   const cases: Array<[string, typeof TIER[keyof typeof TIER] | null, { singleSource: boolean; unpriced: boolean }]> = [
     ['priced → none', TIER.priced, { singleSource: false, unpriced: false }],
     ['single-source → the amber notice only', TIER.single, { singleSource: true, unpriced: false }],
     ['unpriced → the "No reference price" notice only', TIER.unpriced, { singleSource: false, unpriced: true }],
-    ['unknown (null) → none — the client never guesses', null, { singleSource: false, unpriced: false }],
+    ['unknown (null) → none: the client never guesses', null, { singleSource: false, unpriced: false }],
   ]
   it.each(cases)('%s (pair with no Chainlink feed, small swap)', async (_name, tier, expected) => {
     useRealQuoteBreakdown = true
@@ -466,7 +466,7 @@ describe('SwapBox — [chore/copy-leftovers] one price notice, from the tier', (
   })
 })
 
-describe('SwapBox — [chore/copy-leftovers] source counts', () => {
+describe('SwapBox: [chore/copy-leftovers] source counts', () => {
   it('"N sources queried" counts the quotes that came back (the toggle says "enabled", not "x/y")', async () => {
     useQuoteMock.mockReturnValue(exoticQuote('5', ['1000000000000000000000', '996000000000000000000', '1004000000000000000000']))
     const { container } = renderWithProviders(<SwapBox />)

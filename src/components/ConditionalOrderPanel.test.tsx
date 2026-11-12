@@ -61,9 +61,9 @@ vi.mock('@/lib/analytics-tracker', () => ({
 const useDepegCheckMock = vi.fn()
 vi.mock('@/hooks/useDepegCheck', () => ({ useDepegCheck: (...a: unknown[]) => useDepegCheckMock(...a) }))
 const DEPEG_OK = { mode: 'ok' as const, divergence: 0, symbol: '', message: null }
-const DEPEG_CONSENT = { mode: 'consent' as const, divergence: 0.05, symbol: 'cbETH', message: 'cbETH is trading 5.0% off its exchange rate — possible depeg. Verify before swapping.' }
-const DEPEG_BLOCK = { mode: 'block' as const, divergence: 0.12, symbol: 'cbETH', message: 'cbETH is trading 12.0% off its exchange rate — likely a depeg or oracle manipulation. Swap blocked for your safety.' }
-const DEPEG_UNVERIFIED = { mode: 'unverified' as const, divergence: 0, symbol: 'cbETH', message: "We couldn't verify cbETH's price right now — try again in a moment." }
+const DEPEG_CONSENT = { mode: 'consent' as const, divergence: 0.05, symbol: 'cbETH', message: 'cbETH is trading 5.0% off its exchange rate: possible depeg. Verify before swapping.' }
+const DEPEG_BLOCK = { mode: 'block' as const, divergence: 0.12, symbol: 'cbETH', message: 'cbETH is trading 12.0% off its exchange rate, likely a depeg or oracle manipulation. Swap blocked for your safety.' }
+const DEPEG_UNVERIFIED = { mode: 'unverified' as const, divergence: 0, symbol: 'cbETH', message: "We couldn't verify cbETH's price right now: try again in a moment." }
 
 import { renderWithProviders, fireEvent, screen, act } from '@/test-utils/render'
 import ConditionalOrderPanel from './ConditionalOrderPanel'
@@ -121,14 +121,14 @@ beforeEach(() => {
   useDepegCheckMock.mockReturnValue(DEPEG_OK)
 })
 
-describe('ConditionalOrderPanel — tabs', () => {
+describe('ConditionalOrderPanel: tabs', () => {
   it('renders the "New SL / TP" tab as default', () => {
     renderWithProviders(<ConditionalOrderPanel />)
     expect(screen.getByText(/New SL \/ TP/i)).toBeInTheDocument()
   })
 })
 
-describe('ConditionalOrderPanel — connect prompt', () => {
+describe('ConditionalOrderPanel: connect prompt', () => {
   it('still mounts when the wallet is disconnected', () => {
     useAccountMock.mockReturnValue({ address: undefined, isConnected: false })
     expect(() => renderWithProviders(<ConditionalOrderPanel />)).not.toThrow()
@@ -138,7 +138,7 @@ describe('ConditionalOrderPanel — connect prompt', () => {
 // [FEAT-DEPEG-GATE-ORDER-CREATION] Extends the twice-audited cbETH depeg circuit-breaker to
 // Take-Profit order creation (the only creatable conditional type — Stop-Loss stays disabled in
 // the UI pending the v4 executor, unrelated to this change).
-describe('ConditionalOrderPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on order creation', () => {
+describe('ConditionalOrderPanel: [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate on order creation', () => {
   function submitButton(): HTMLButtonElement {
     return screen.getByRole('button', { name: /set take profit/i }) as HTMLButtonElement
   }
@@ -168,7 +168,7 @@ describe('ConditionalOrderPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate 
     expect(submitButton()).toBeDisabled()
   })
 
-  it('UNVERIFIED (oracle unreadable) disables submit with "not verified" copy — never claims a depeg', () => {
+  it('UNVERIFIED (oracle unreadable) disables submit with "not verified" copy, never claims a depeg', () => {
     useDepegCheckMock.mockReturnValue(DEPEG_UNVERIFIED)
     renderWithProviders(<ConditionalOrderPanel />)
     enterAmountAndTrigger()
@@ -186,7 +186,7 @@ describe('ConditionalOrderPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate 
     expect(submitButton()).not.toBeDisabled()
   })
 
-  it('informed consent (mode: consent) blocks until accepted, then unblocks — mirrors SwapBox exactly', () => {
+  it('informed consent (mode: consent) blocks until accepted, then unblocks. Mirrors SwapBox exactly', () => {
     useDepegCheckMock.mockReturnValue(DEPEG_CONSENT)
     renderWithProviders(<ConditionalOrderPanel />)
     enterAmountAndTrigger()
@@ -196,7 +196,7 @@ describe('ConditionalOrderPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate 
     expect(submitButton()).not.toBeDisabled()
   })
 
-  it('a blocked submit never calls createOrder — defense-in-depth guard fires even on a forced click', async () => {
+  it('a blocked submit never calls createOrder: defense-in-depth guard fires even on a forced click', async () => {
     useDepegCheckMock.mockReturnValue(DEPEG_BLOCK)
     const createOrder = vi.fn()
     useOrderEngineMock.mockReturnValue({ ...defaultEngine(), createOrder })
@@ -213,7 +213,7 @@ describe('ConditionalOrderPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate 
   // doc comment). This one genuinely runs the production onClick handler with depegBlocking=true,
   // proving handleSubmit's own `if (depegBlocking) { setSubmitError(...); return }` guard — not
   // merely the button state — is what stops an order.
-  it('[L-1] the production handler itself refuses to submit while blocked — not merely the disabled attribute', async () => {
+  it('[L-1] the production handler itself refuses to submit while blocked, not merely the disabled attribute', async () => {
     useDepegCheckMock.mockReturnValue(DEPEG_BLOCK)
     const createOrder = vi.fn()
     useOrderEngineMock.mockReturnValue({ ...defaultEngine(), createOrder })
@@ -234,7 +234,7 @@ describe('ConditionalOrderPanel — [FEAT-DEPEG-GATE-ORDER-CREATION] depeg gate 
 // Take-Profit created on Arbitrum One would have committed a mainnet router into the signed
 // order — unexecutable by that chain's executor, cancel-only for the user. config.ts is NOT
 // mocked here; the real chain lookup is the thing under test.
-describe('ConditionalOrderPanel — [ADR-020] refuses to sign on a chain with no router set', () => {
+describe('ConditionalOrderPanel: [ADR-020] refuses to sign on a chain with no router set', () => {
   const UNKNOWN_CHAIN_ID = 10 // [feat/arbitrum-dca-gates] was 42161, which now has a derived router set
 
   function submitButton(): HTMLButtonElement {
@@ -269,7 +269,7 @@ describe('ConditionalOrderPanel — [ADR-020] refuses to sign on a chain with no
     expect(createOrder).not.toHaveBeenCalled()
   })
 
-  it('reports the chain gap as itself — not as a missing price feed or a dust floor', async () => {
+  it('reports the chain gap as itself, not as a missing price feed or a dust floor', async () => {
     useOrderEngineMock.mockReturnValue({ ...defaultEngine(), createOrder: vi.fn() })
     renderWithProviders(<ConditionalOrderPanel />)
     enterAmountAndTrigger()

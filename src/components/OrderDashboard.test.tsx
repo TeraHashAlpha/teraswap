@@ -75,7 +75,7 @@ beforeEach(() => {
   useChainIdMock.mockReturnValue(1)
 })
 
-describe('OrderDashboard — wallet states', () => {
+describe('OrderDashboard: wallet states', () => {
   it('shows a connect-wallet prompt when address is undefined', () => {
     useAccountMock.mockReturnValue({ address: undefined })
     useOrderEngineMock.mockReturnValue({
@@ -108,7 +108,7 @@ describe('OrderDashboard — wallet states', () => {
   })
 })
 
-describe('OrderDashboard — filter tabs', () => {
+describe('OrderDashboard: filter tabs', () => {
   it('renders Active / Completed / Cancelled tabs with counts', () => {
     const active = [makeOrder({ status: 'active' }), makeOrder({ status: 'active' })]
     const filled = [makeOrder({ status: 'filled' })]
@@ -148,7 +148,7 @@ describe('OrderDashboard — filter tabs', () => {
   })
 })
 
-describe('OrderDashboard — empty states', () => {
+describe('OrderDashboard: empty states', () => {
   it('shows the "No active orders" placeholder when active list is empty', () => {
     useOrderEngineMock.mockReturnValue({
       orders: [],
@@ -164,7 +164,7 @@ describe('OrderDashboard — empty states', () => {
   })
 })
 
-describe('OrderDashboard — explorer link [RQ-2026-06-11]', () => {
+describe('OrderDashboard: explorer link [RQ-2026-06-11]', () => {
   it('tx-hash link is the mainnet explorer URL (orders are mainnet-only; byte-identical pin)', () => {
     const txHash = '0x' + 'ab'.repeat(32)
     const order = makeOrder({ status: 'filled', txHash })
@@ -189,7 +189,7 @@ describe('OrderDashboard — explorer link [RQ-2026-06-11]', () => {
   })
 })
 
-describe('OrderDashboard — per-chain explorer link [fix/v1-maintenance C1]', () => {
+describe('OrderDashboard: per-chain explorer link [fix/v1-maintenance C1]', () => {
   // The link follows the ORDER's chainId, never the connected wallet's (useChainId stays 1 here).
   it.each([
     [1, 'etherscan.io'],
@@ -219,7 +219,7 @@ describe('OrderDashboard — per-chain explorer link [fix/v1-maintenance C1]', (
   })
 })
 
-describe('OrderDashboard — [CHORE-DCA-UX-FIXES] failed order reason', () => {
+describe('OrderDashboard: [CHORE-DCA-UX-FIXES] failed order reason', () => {
   it('shows a default reason for a failed order when the keeper persisted no error', () => {
     const failed = makeOrder({ status: 'error', error: null })
     useOrderEngineMock.mockReturnValue({
@@ -241,7 +241,7 @@ describe('OrderDashboard — [CHORE-DCA-UX-FIXES] failed order reason', () => {
   })
 })
 
-describe('OrderDashboard — cancel all', () => {
+describe('OrderDashboard: cancel all', () => {
   it('renders Cancel All button when more than one active order exists', () => {
     const active = [makeOrder({ status: 'active' }), makeOrder({ status: 'active' })]
     useOrderEngineMock.mockReturnValue({
@@ -275,7 +275,7 @@ describe('OrderDashboard — cancel all', () => {
   })
 })
 
-describe('OrderDashboard — [fix/cross-chain-order-cancel] chain badge + mismatch', () => {
+describe('OrderDashboard: [fix/cross-chain-order-cancel] chain badge + mismatch', () => {
   it('shows the order\'s chain name; no mismatch styling when it matches the connected wallet', () => {
     const order = makeOrder({ status: 'active', chainId: 1 })
     useChainIdMock.mockReturnValue(1)
@@ -318,7 +318,7 @@ describe('OrderDashboard — [fix/cross-chain-order-cancel] chain badge + mismat
   })
 })
 
-describe('OrderDashboard — [CANCEL-REVIEW] review modal wiring', () => {
+describe('OrderDashboard: [CANCEL-REVIEW] review modal wiring', () => {
   it('renders the cancel review modal from the hook pendingCancel; confirm/keep wire to the hook', () => {
     const confirmCancel = vi.fn()
     const clearPendingCancel = vi.fn()

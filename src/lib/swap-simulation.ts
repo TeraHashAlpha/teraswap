@@ -95,7 +95,7 @@ export function buildSimulationTx(params: SimulationParams): SimulationTx {
   // [P225] Resolve the FeeCollector per chain (mainnet === FEE_COLLECTOR_ADDRESS).
   const feeCollectorAddress = getChainConfig(chainId ?? DEFAULT_CHAIN_ID).contracts.feeCollector
   if (routeViaFeeCollector && !feeCollectorAddress) {
-    throw new Error(`No FeeCollector deployed on chain ${chainId ?? DEFAULT_CHAIN_ID} — cannot simulate a fee-routed swap.`)
+    throw new Error(`No FeeCollector deployed on chain ${chainId ?? DEFAULT_CHAIN_ID}: cannot simulate a fee-routed swap.`)
   }
 
   const router = tx.to

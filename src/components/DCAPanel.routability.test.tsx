@@ -106,7 +106,7 @@ beforeEach(() => {
 const enterAmount = (v: string) => fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: v } })
 const startDca = () => fireEvent.click(screen.getByRole('button', { name: /Start DCA/i }))
 
-describe('DCAPanel — routability gate (imported tokens)', () => {
+describe('DCAPanel: routability gate (imported tokens)', () => {
   it('BLOCKS creation and warns when an imported token has no route (never calls createOrder)', async () => {
     checkRouteMock.mockResolvedValue({ routable: false, reason: 'No swap route found for this pair on this network.' })
     renderWithProviders(<DCAPanel />)
@@ -172,7 +172,7 @@ describe('DCAPanel — routability gate (imported tokens)', () => {
   })
 })
 
-describe('DCAPanel — creation guard (schedule cannot finish before expiry)', () => {
+describe('DCAPanel: creation guard (schedule cannot finish before expiry)', () => {
   it('BLOCKS when interval × buys > expiry: shows the block, disables submit, never signs', () => {
     renderWithProviders(<DCAPanel />) // defaults: curated WETH→ETH, 10 buys × 1d, 30d expiry (fits)
     enterAmount('100')

@@ -134,7 +134,7 @@ describe('tokens (photo-tokens.ts ⇄ photo.css)', () => {
 })
 
 describe('<PhotoBackground>', () => {
-  it('a tab: one <picture> of the BAKED photo — AVIF portrait (≤ 600 px) + AVIF landscape + WebP portrait sources, WebP <img>, decorative; no CSS grade, tone or halftone layers', () => {
+  it('a tab: one <picture> of the BAKED photo. AVIF portrait (≤ 600 px) + AVIF landscape + WebP portrait sources, WebP <img>, decorative; no CSS grade, tone or halftone layers', () => {
     const { container } = render(<PhotoBackground tab="swap" />)
     const sources = container.querySelectorAll('picture source')
     expect(Array.from(sources).map((s) => [s.getAttribute('type'), s.getAttribute('media')])).toEqual([

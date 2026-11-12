@@ -15,7 +15,7 @@ import {
   FEE_COLLECTOR_ERROR_SELECTORS,
 } from './simulation'
 
-describe('parseSimulationError — FeeCollector custom errors', () => {
+describe('parseSimulationError: FeeCollector custom errors', () => {
   describe('RouterNotWhitelisted', () => {
     it('matches the decoded human-readable name', () => {
       const result = parseSimulationError(new Error('reverted: RouterNotWhitelisted()'))
@@ -77,7 +77,7 @@ describe('parseSimulationError — FeeCollector custom errors', () => {
   })
 })
 
-describe('parseSimulationError — Generic reverts', () => {
+describe('parseSimulationError: Generic reverts', () => {
   it("'insufficient funds' → ETH balance message", () => {
     const result = parseSimulationError(new Error('insufficient funds for gas * price + value'))
     expect(result.success).toBe(false)
@@ -116,7 +116,7 @@ describe('parseSimulationError — Generic reverts', () => {
   })
 })
 
-describe('parseSimulationError — Unrecognised input', () => {
+describe('parseSimulationError: Unrecognised input', () => {
   it('returns { success: true } for an unrecognised Error message', () => {
     const result = parseSimulationError(new Error('something random went wrong'))
     expect(result.success).toBe(true)
@@ -139,7 +139,7 @@ describe('parseSimulationError — Unrecognised input', () => {
   })
 })
 
-describe('parseSimulationError — Priority ordering', () => {
+describe('parseSimulationError: Priority ordering', () => {
   it('FeeCollector custom error wins over a co-occurring generic "execution reverted"', () => {
     // Both substrings present — the parser must surface the more specific
     // FeeCollector message first.
