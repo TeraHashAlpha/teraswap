@@ -64,6 +64,9 @@ for (const { ui, baseURL } of UIS) {
       const offenders = result.thirdParty.filter((h) => !NO_WALLET_ALLOWED_HOSTS.includes(h.host))
       expect(offenders, 'third-party hosts contacted by a wallet-less visitor').toEqual([])
       expect(result.cspBlocked, 'requests the CSP had to refuse').toEqual({})
+      // [fix/privacy-no-usage-tracking] The site does not record how visitors use it: a real page load, chain switch,
+      // token list and idle period never call the retired /api/log-event (the old tracker posted page views and clicks).
+      expect(result.sameOriginApi['/api/log-event'] ?? 0, 'the retired usage-tracking route must never be called').toBe(0)
       expect(result.rpcRefusals, '/api/rpc refused a method the app itself sent').toEqual([])
     })
   }

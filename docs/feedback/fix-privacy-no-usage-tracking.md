@@ -31,6 +31,7 @@ wallet-keyed product events stay and Privacy §3.2 must disclose them.
 Nothing a visitor sees read it. **Database untouched:** table `usage_events` (rows from before this change, plus its TTL/index SQL in `supabase/improvements.sql`, comment in `supabase/schema.sql:125`) stays; retention is the owner's decision. `wallet_activity` stays too.
 
 ### Findings / extra reads
+- Allow-listed reads I first skipped and then did (late, after the Stop hook flagged it): `docs/Runbooks/agent-harness.md` (layer 0 refuses the bare word `security` in command text, so a grep pattern containing it was blocked; rewrite the pattern), and `e2e/third-party-hosts/{allow-list,capture.pw}.ts` plus a grep of the whole directory. Finding: the rig already records same-origin `/api/*` calls per path (`rig.ts`, `sameOriginApi`), so `capture.pw.ts` now also asserts `/api/log-event` is never called in a real v1/v2 page load on all 3 chains (6 passed, 2026-11-12). That assertion was not mutation-checked (a rebuild with the old tracker was not run); the Providers unit test was.
 - Extra read beyond the allow-list: `src/lib/wallet-activity-tracker.ts`, `src/app/api/log-activity/route.ts`, `src/components/AdminMonitor.tsx`, `src/app/admin/page.tsx`, rpc-budget tests (they mocked `@/components/UsageTracker`; mocks removed).
 - Test gap noted: no test existed for `/api/monitor`; only the usage section is covered now.
 
