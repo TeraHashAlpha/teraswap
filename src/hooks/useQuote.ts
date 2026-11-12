@@ -107,13 +107,24 @@ interface UseQuoteResult {
   refresh: () => void
 }
 
+export interface UseQuoteOptions {
+  /**
+   * [fix/privacy-no-usage-tracking A78 S-1/S-4] Record this quote in the `quotes` log (token pair, amount, the sources'
+   * answers; the wallet only when one is connected). Opt-in: the swap screen passes true, the landing page's preview
+   * quote does not, so a visitor who never opens the app leaves no row.
+   */
+  logQuote?: boolean
+}
+
 export function useQuote(
   tokenIn: Token | null,
   tokenOut: Token | null,
   amountIn: string,
   enabled: boolean,
   excludeSources?: string[],
+  options?: UseQuoteOptions,
 ): UseQuoteResult {
+  const logQuote = options?.logQuote === true
   const { address } = useAccount()
   // [P219] Active chain — switching chains supersedes the current quote (the
   // AbortController in doFetch cancels the stale in-flight request). On mainnet
@@ -342,15 +353,18 @@ export function useQuote(
       }
       setCountdown(QUOTE_REFRESH_MS / 1000)
 
-      // Log quote analytics (fire-and-forget)
-      logQuoteToSupabase({
-        tokenIn,
-        tokenOut,
-        amountIn: rawAmount,
-        meta: result,
-        responseTimeMs: Date.now() - startTime,
-        wallet: address,
-      })
+      // Swap-screen quotes only (see UseQuoteOptions.logQuote). Fire-and-forget; `wallet` is undefined when no wallet is
+      // connected, so JSON.stringify drops the field and the row carries no identifier.
+      if (logQuote) {
+        logQuoteToSupabase({
+          tokenIn,
+          tokenOut,
+          amountIn: rawAmount,
+          meta: result,
+          responseTimeMs: Date.now() - startTime,
+          wallet: address,
+        })
+      }
     } catch (err) {
       // [P208] A superseded request — do nothing. A newer fetch is already
       // in flight and owns the error/meta/loading state. Crucially this must
@@ -409,6 +423,7 @@ export function useQuote(
     excludeKey,
     rearmPollTimer,
     activeChainId,
+    logQuote,
   ])
 
   // [hotfix] doFetchRef anchors the latest doFetch for the

@@ -149,7 +149,7 @@ export function SwapCard() {
   })
 
   const excludeArray = useMemo(() => (excludedSources.size > 0 ? Array.from(excludedSources) : undefined), [excludedSources])
-  const { meta: rawMeta, loading: quoteLoading, error: quoteError, countdown, refresh: refreshQuote } = useQuote(tokenIn, tokenOut, amountIn, isChainOkForQuote, excludeArray)
+  const { meta: rawMeta, loading: quoteLoading, error: quoteError, countdown, refresh: refreshQuote } = useQuote(tokenIn, tokenOut, amountIn, isChainOkForQuote, excludeArray, { logQuote: true })
 
   // [fix/stale-quote-pair-flip #604] Only a quote whose identity matches the CURRENT chain/pair/decimals feeds the display.
   const matchedRawMeta = useMemo(
