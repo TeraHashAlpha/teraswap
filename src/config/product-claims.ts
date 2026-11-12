@@ -129,7 +129,9 @@ export const SWAP_CHAIN_LIST_LABEL = formatChainList(SWAP_CHAIN_NAMES)
 //     touch our origin; the WalletConnect relay is the first wallet host in the CSP.
 //   IP (PRIVACY_IP_STORAGE_NOTE): no IP column in the database; rate-limit keys and log lines carry
 //     HMAC(IP, daily salt) only (client-ip-key.ts, client-ip-key.routes.test.ts).
-//   WALLET ADDRESSES (PRIVACY_WALLET_STORAGE_NOTE): orders, swaps and wallet_activity rows hold them.
+//   WALLET ADDRESSES (PRIVACY_WALLET_STORAGE_NOTE): orders, swaps, quotes and wallet_activity rows hold them (orders: api/orders/route.ts,
+//     swaps: api/log-swap, quotes: api/log-quote/route.ts:59-71, wallet_activity: api/log-activity). No usage tracking since
+//     fix/privacy-no-usage-tracking: no page views, clicks, session ids, referrers, screen widths or user agents are recorded.
 // No surface claims "never exposed" / "zero leaks": the wallet's side is said out loud instead.
 // The chain names in the first sentence are typed (owner wording); product-claims.test.ts fails if
 // the chain registry and that sentence ever disagree.
@@ -140,13 +142,14 @@ export const PRIVACY_DIRECT_NOTE =
 export const PRIVACY_WALLET_ADVICE = 'Use a privacy RPC in your wallet settings if that matters to you.'
 export const PRIVACY_IP_STORAGE_NOTE =
   'We do not store IP addresses in our database; our hosting and rate-limiting layers process them transiently, and our rate limiter only ever sees a one-way hash.'
-export const PRIVACY_WALLET_STORAGE_NOTE = 'We do store wallet addresses for orders, swap history and activity.'
+export const PRIVACY_WALLET_STORAGE_NOTE =
+  'We store your wallet address with your orders, swap history and quotes, because the Orders, History and Analytics tabs are built from them, and with a log of the steps of each swap, approval, quote and order (including errors), which we use for debugging and support.'
 // [fix/user-ip-privacy A76 S-2] Privacy §3.3 (v1 == v2), the Auditor's wording. It replaces "This data remains
 // exclusively on your device and is never transmitted to our servers", which was true of the localStorage COPY of the
 // swap history but read as "your swaps never reach our server" — while every swap is POSTed to /api/log-swap and every
 // order to /api/orders, stored with the wallet address, and read back by /api/history for the History tab.
 export const PRIVACY_LOCAL_COPIES_NOTE =
-  'These copies stay in your browser and are never uploaded as such; separately, every swap and order you make is sent to our server and stored with your wallet address (see 3.2) — that server record is what the History tab shows.'
+  'These copies stay in your browser and are never uploaded as such. Separately, every swap and order you make is sent to our server and stored with your wallet address (see 3.2); that server record is what the History tab shows.'
 export const PRIVACY_BADGE = 'Proxied RPC & quotes'
 
 export const SITE_META_DESCRIPTION =

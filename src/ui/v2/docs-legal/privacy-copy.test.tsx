@@ -98,7 +98,7 @@ describe.each(LEGAL)('Privacy Policy §3.3 — %s', (_ui, mount) => {
   it("says the local copies stay local AND that every swap and order is stored server-side (the Auditor's wording)", () => {
     const collect = section(mount(), 'pp-collect')
     expect(collect).toContain(
-      'These copies stay in your browser and are never uploaded as such; separately, every swap and order you make is sent to our server and stored with your wallet address (see 3.2) — that server record is what the History tab shows.',
+      'These copies stay in your browser and are never uploaded as such. Separately, every swap and order you make is sent to our server and stored with your wallet address (see 3.2); that server record is what the History tab shows.',
     )
     expect(collect).not.toMatch(/never transmitted to our servers|remains exclusively on your device/i)
   })
@@ -124,6 +124,52 @@ describe.each(LEGAL)('Privacy Policy §6 — %s', (_ui, mount) => {
     expect(sharing).toContain(
       'When you request a swap quote, or submit a CoW Protocol order you have signed, the Interface sends your wallet address and transaction parameters (for a CoW Protocol order, the signed order itself) to the APIs of third-party aggregator and DEX protocols via our server-side proxy. Your IP address is not exposed to these services.',
     )
+  })
+})
+
+// [fix/privacy-no-usage-tracking] The site stops recording how visitors use it; §3 says only what the code does.
+describe.each(LEGAL)('Privacy Policy §3 and no usage tracking — %s', (_ui, mount) => {
+  it('§3.1 says we read public on-chain data for the connected address, and no longer claims wallet screening', () => {
+    const collect = section(mount(), 'pp-collect')
+    expect(collect).toContain('we read publicly-available blockchain data for the connected address, such as balances, orders, and swap history, to show them to you.')
+    expect(collect).not.toMatch(/screen wallet|blockchain analytics provider/i)
+  })
+
+  it('§3.2 says we do not collect device, OS, browser, clicks or usage patterns, sets no tracking cookies, and counts page views in aggregate', () => {
+    const collect = section(mount(), 'pp-collect')
+    expect(collect).toContain('We do not collect your device type, operating system, browser, clicks, or usage patterns, and the Interface sets no tracking cookies.')
+    expect(collect).toContain('Page views are counted in aggregate by Vercel Web Analytics (see section 8).')
+    expect(collect).toContain('We do not collect or store your name, email address, home address, or date of birth.')
+    expect(collect).toContain(PRIVACY_IP_STORAGE_NOTE)
+    expect(collect).toContain(PRIVACY_WALLET_STORAGE_NOTE)
+    expect(PRIVACY_WALLET_STORAGE_NOTE).toMatch(/orders, swap history and quotes/)
+    expect(collect).not.toMatch(/may automatically collect|general usage patterns\./i)
+  })
+
+  it('no other section promises screening, usage analysis or analytics-provider sharing', () => {
+    const c = mount()
+    const all = textOf(c)
+    expect(all).not.toMatch(/Screen wallets|Analyze usage patterns|blockchain analytics providers|automatically collected technical data/i)
+  })
+})
+
+// The owner's typography rule for Privacy, Terms and every privacy claim: no em dash, no spaced en dash.
+const BAD_DASH = /\u2014|\s\u2013\s/
+describe('Privacy, Terms and the privacy claims carry no em dash and no spaced en dash', () => {
+  it.each([
+    ['v1 privacy', () => render(<LegalPage type="privacy" />).container],
+    ['v1 terms', () => render(<LegalPage type="terms" />).container],
+    ['v2 privacy', () => render(<LegalPageV2 type="privacy" />).container],
+    ['v2 terms', () => render(<LegalPageV2 type="terms" />).container],
+  ] as const)('%s', (_name, mount) => {
+    expect(textOf(mount())).not.toMatch(BAD_DASH)
+  })
+
+  it('every PRIVACY_* claim constant', async () => {
+    const claims = (await import('@/config/product-claims')) as Record<string, unknown>
+    const privacy = Object.entries(claims).filter(([k, v]) => k.startsWith('PRIVACY_') && typeof v === 'string')
+    expect(privacy.length).toBeGreaterThanOrEqual(6)
+    for (const [k, v] of privacy) expect(v as string, k).not.toMatch(BAD_DASH)
   })
 })
 

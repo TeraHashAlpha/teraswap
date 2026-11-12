@@ -94,7 +94,7 @@ describe('help-content — privacy answers say what is relayed and what the wall
     expect(collect()).toBe(
       'We do not store private keys. ' +
         'We do not store IP addresses in our database; our hosting and rate-limiting layers process them transiently, and our rate limiter only ever sees a one-way hash. ' +
-        'We do store wallet addresses for orders, swap history and activity. ' +
+        'We store your wallet address with your orders, swap history and quotes, because the Orders, History and Analytics tabs are built from them, and with a log of the steps of each swap, approval, quote and order (including errors), which we use for debugging and support. ' +
         'See our Privacy Policy for full details.',
     )
   })

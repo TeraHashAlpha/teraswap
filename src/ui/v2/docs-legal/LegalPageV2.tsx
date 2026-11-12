@@ -20,7 +20,7 @@ import './docs-legal.css'
 export type LegalType = 'privacy' | 'terms'
 
 /** v1's LegalPage.tsx — byte-identical copy, this is just the wrapper restyle; a parity test pins the two together. */
-const LAST_UPDATED = 'March 16, 2026'
+const LAST_UPDATED = 'November 12, 2026'
 
 interface TocSection {
   id: string
@@ -165,18 +165,16 @@ function PrivacyPolicy() {
       <SectionTitle id="pp-collect">3. Information We Collect</SectionTitle>
       <SubTitle>3.1 On-Chain Data</SubTitle>
       <P>
-        When you connect your non-custodial wallet and interact with the Interface, we access
-        publicly-available blockchain data, including your wallet address and transaction history.
+        When you connect your non-custodial wallet and interact with the Interface, we read publicly-available
+        blockchain data for the connected address, such as balances, orders, and swap history, to show them to you.
         Blockchain addresses are publicly-available data that are not, by themselves, personally
-        identifiable. We may screen wallet addresses using third-party blockchain analytics
-        providers to detect and prevent illicit activity.
+        identifiable.
       </P>
 
-      <SubTitle>3.2 Automatically Collected Data</SubTitle>
+      <SubTitle>3.2 Data We Collect and Store</SubTitle>
       <P>
-        When you access the Interface, we may automatically collect certain technical information,
-        including device type, operating system, browser type and version, and general usage patterns.
-        We use this data solely to improve Interface performance, debug errors, and enhance user experience.
+        We do not collect your device type, operating system, browser, clicks, or usage patterns, and the
+        Interface sets no tracking cookies. Page views are counted in aggregate by Vercel Web Analytics (see section 8).
         We do not collect or store your name, email address, home address, or date of birth. {PRIVACY_IP_STORAGE_NOTE} {PRIVACY_WALLET_STORAGE_NOTE}
       </P>
 
@@ -193,8 +191,7 @@ function PrivacyPolicy() {
         <li>Provide, maintain, and improve the Interface</li>
         <li>Fetch and compare swap quotes from multiple decentralized exchange protocols</li>
         <li>Validate transaction pricing against Chainlink oracle feeds for your protection</li>
-        <li>Screen wallets for compliance with applicable sanctions and anti-money laundering regulations</li>
-        <li>Analyze usage patterns to improve Interface design and performance</li>
+        <li>Show you the orders, swap history, and analytics for your connected wallet</li>
         <li>Detect and prevent fraud, security breaches, and other harmful activities</li>
       </UL>
 
@@ -221,8 +218,7 @@ function PrivacyPolicy() {
         policy. We encourage you to review them.
       </P>
       <P>
-        We may share wallet addresses with blockchain analytics providers to comply with applicable
-        laws and regulations. We do not sell, rent, or trade your personal information to any
+        We do not sell, rent, or trade your personal information to any
         third party for marketing purposes.
       </P>
 
@@ -253,7 +249,7 @@ function PrivacyPolicy() {
 
       <SectionTitle id="pp-retention">10. Data Retention</SectionTitle>
       <P>
-        We retain automatically collected technical data only for as long as necessary to fulfill
+        We retain the records described in section 3.2 only for as long as necessary to fulfill
         the purposes outlined in this Privacy Policy. On-chain data exists permanently on public
         blockchains, which we cannot modify or delete.
       </P>
@@ -261,9 +257,9 @@ function PrivacyPolicy() {
       <SectionTitle id="pp-rights">11. Your Rights</SectionTitle>
       <P>
         Depending on your jurisdiction, you may have the right to access, correct, or delete your
-        personal data. Because the Interface collects minimal personal data and most data is stored
-        locally on your device, you can exercise most of these rights by clearing your browser&rsquo;s
-        local storage. For any data-related requests, please contact us at the address below.
+        personal data. Because the Interface collects minimal personal data, you can exercise some of these
+        rights by clearing your browser&rsquo;s local storage. For the records we store with your wallet address
+        (see section 3.2), or any other data-related request, please contact us at the address below.
       </P>
       <P>
         We cannot edit or delete information stored on a public blockchain, including transaction

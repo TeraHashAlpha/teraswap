@@ -4,7 +4,7 @@ Owner decision: the site stops recording how visitors use it; keeps orders, swap
 
 ### Checklist
 - [x] C1 remove our own usage tracking (commit recorded below)
-- [ ] C2 Privacy §3 says what is true (v1 == v2) + aligned statements
+- [x] C2 Privacy §3 says what is true (v1 == v2) + aligned statements
 - [ ] C3 hand-off: `fix/ui-v2-walkthrough-polish` guard test (not on origin/main at the time of writing, see C3 below)
 - [ ] Verify (`scripts/agent-verify.sh --codeql`), compare link
 
@@ -33,3 +33,22 @@ Nothing a visitor sees read it. **Database untouched:** table `usage_events` (ro
 ### Findings / extra reads
 - Extra read beyond the allow-list: `src/lib/wallet-activity-tracker.ts`, `src/app/api/log-activity/route.ts`, `src/components/AdminMonitor.tsx`, `src/app/admin/page.tsx`, rpc-budget tests (they mocked `@/components/UsageTracker`; mocks removed).
 - Test gap noted: no test existed for `/api/monitor`; only the usage section is covered now.
+
+### Evidence 3 — content-map delta (Privacy v1 `LegalPage.tsx` == v2 `LegalPageV2.tsx`; Help, Docs and Terms inherit the constants)
+Grep for any wallet-screening call (`chainalysis|trm|elliptic|scorechain|ofac|sanctions list|blockchain analytics` over src, workers, scripts, supabase, .github): **no hit in code**, only in the Privacy/Terms copy itself. So the screening and analytics-sharing sentences were false.
+| where | before | after | proof |
+|---|---|---|---|
+| §3.1 | "we access publicly-available blockchain data, including your wallet address and transaction history … We may screen wallet addresses using third-party blockchain analytics providers" | "we read publicly-available blockchain data for the connected address, such as balances, orders, and swap history, to show them to you." (screening sentence removed) | balances `usePortfolio.ts:304` (`useBalance`, via /api/rpc), orders `order-engine/supabase.ts:99`, history `WalletHistory.tsx:131`, `use-wallet-history.ts:28`; screening: grep above |
+| §3.2 (heading now "Data We Collect and Store") | "we may automatically collect … device type, operating system, browser type and version, and general usage patterns" | "We do not collect your device type, operating system, browser, clicks, or usage patterns, and the Interface sets no tracking cookies. Page views are counted in aggregate by Vercel Web Analytics (see section 8)." | Evidence 1; only cookie is `ts_ui`, set by the owner-only `api/admin/ui-version/route.ts:61`; `<Analytics />` `layout.tsx:106` |
+| §3.2 IP sentence | unchanged (`PRIVACY_IP_STORAGE_NOTE`) | unchanged | `client-ip-key.ts:8` |
+| §3.2 / Help / Docs note (`PRIVACY_WALLET_STORAGE_NOTE`) | "We do store wallet addresses for orders, swap history and activity." | "We store your wallet address with your orders, swap history and quotes, because the Orders, History and Analytics tabs are built from them, and with a log of the steps of each swap, approval, quote and order (including errors), which we use for debugging and support." | orders `api/orders/route.ts`, swaps `log-swap/route.ts:134`, quotes `log-quote/route.ts:59-71` (read by `/api/stats` `stats/route.ts:24,40`, fetched by the Analytics tab `use-public-stats.ts:22`), log = `wallet_activity` `log-activity/route.ts:106`, `wallet-activity-server.ts:41` |
+| §3.3 (`PRIVACY_LOCAL_COPIES_NOTE`) | same meaning; "…; separately, … (see 3.2) — that server record…" | same meaning, em dash and semicolon replaced by two sentences and a semicolon | `privacy-copy.test.tsx` §3.3 |
+| §4 | list had "Screen wallets for compliance …" and "Analyze usage patterns …" | both removed; added "Show you the orders, swap history, and analytics for your connected wallet" | screening: grep above; usage: Evidence 1 |
+| §6 | "We may share wallet addresses with blockchain analytics providers to comply with applicable laws and regulations." | sentence removed ("We do not sell, rent, or trade …" kept) | grep above. Judgement call: if the owner wants a legal-compliance reservation back, it must be worded as a reservation, not a practice |
+| §10 | "We retain automatically collected technical data only for as long as necessary …" | "We retain the records described in section 3.2 only for as long as necessary …" | no technical data collected any more |
+| §11 | "…minimal personal data and most data is stored locally on your device, you can exercise most of these rights by clearing …local storage." | "…minimal personal data, you can exercise some of these rights by clearing …local storage. For the records we store with your wallet address (see section 3.2), or any other data-related request, please contact us…" | server records exist (§3.2) |
+| Last updated | March 16, 2026 | November 12, 2026 | |
+| Terms | no sentence about collected data (only "not set or collected by TeraSwap", validator fees) | unchanged | grep |
+Dashes: the only U+2014 in rendered Privacy/Terms/`PRIVACY_*` was `PRIVACY_LOCAL_COPIES_NOTE`; a test now covers v1+v2 Privacy and Terms and every `PRIVACY_*` constant. Help/Docs read the same constants (`help-content.ts:133`, `DocsPage.tsx:549`, `DocsTabV2.tsx:474`); `check-product-claims.mjs` green.
+Concern for the owner: Vercel's own Web Analytics dashboard breaks page views down by country, OS, browser and device in aggregate. "We do not collect your device type, operating system, browser" is true of TeraSwap's own code; if the owner wants the sentence to cover Vercel's aggregate counter too, §8 needs one more clause.
+CLAUDE.md/AGENTS.md: the generated "Test files: vitest" count moved 468 to 473 (five new test files); regenerated with `gen-claude-state.mjs --write` + `check-agents-parity.mjs --write`.
