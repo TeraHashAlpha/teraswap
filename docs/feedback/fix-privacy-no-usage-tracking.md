@@ -6,7 +6,7 @@ Owner decision: the site stops recording how visitors use it; keeps orders, swap
 - [x] C1 remove our own usage tracking (commit recorded below)
 - [x] C2 Privacy §3 says what is true (v1 == v2) + aligned statements
 - [x] C3 hand-off: not done, by design. `fix/ui-v2-walkthrough-polish` is pushed but its guard test is NOT on origin/main (checked 2026-11-12 after `git fetch`), so nothing was merged and no exemption exists to delete here. Follow-up when that PR lands: merge origin/main into this branch, delete the Privacy/Terms exemption, run `privacy-copy.test.tsx` (it already asserts no U+2014 and no spaced U+2013 in Privacy, Terms and every `PRIVACY_*` constant, v1 and v2).
-- [ ] Verify (`scripts/agent-verify.sh --codeql`), compare link
+- [x] Verify (`scripts/agent-verify.sh --codeql`), hosts capture, compare link
 
 ### Owner answer (premise)
 `src/lib/wallet-activity-tracker.ts` (not named in the goal) also stored the same `teraswap_session_id` and posts wallet-keyed
@@ -52,3 +52,10 @@ Grep for any wallet-screening call (`chainalysis|trm|elliptic|scorechain|ofac|sa
 Dashes: the only U+2014 in rendered Privacy/Terms/`PRIVACY_*` was `PRIVACY_LOCAL_COPIES_NOTE`; a test now covers v1+v2 Privacy and Terms and every `PRIVACY_*` constant. Help/Docs read the same constants (`help-content.ts:133`, `DocsPage.tsx:549`, `DocsTabV2.tsx:474`); `check-product-claims.mjs` green.
 Concern for the owner: Vercel's own Web Analytics dashboard breaks page views down by country, OS, browser and device in aggregate. "We do not collect your device type, operating system, browser" is true of TeraSwap's own code; if the owner wants the sentence to cover Vercel's aggregate counter too, §8 needs one more clause.
 CLAUDE.md/AGENTS.md: the generated "Test files: vitest" count moved 468 to 473 (five new test files); regenerated with `gen-claude-state.mjs --write` + `check-agents-parity.mjs --write`.
+
+### Evidence 4 — verify (`scripts/agent-verify.sh --codeql`, head 632324d, base origin/main 0062400)
+suite PASS 10348 tests, 0 failed, 473 files · lint-delta PASS +0 err +0 warn · tsc PASS 0 · build PASS · v1v2-parity PASS 111 · rpc-budget PASS 33 · CodeQL security-extended PASS head 13 / base 13 / new 0
+Also: `check-product-claims.mjs` PASS; `gen-claude-state.mjs --check` PASS; `check-agents-parity.mjs` PASS; third-party-hosts capture (marker build, `e2e/third-party-hosts`, v1+v2, 3 chains, wallets, bundle) 13 passed.
+First verify run (0dbf387) failed 3: my Providers test imported `ui/v2` (isolation + parity), and the archived tracker raised one `react-hooks/purity` warning at its new path; both fixed in the last commit.
+Diff: 23 files, +432 -266 (`git diff --stat origin/main...HEAD`). Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/privacy-no-usage-tracking
+Auditor required: yes, Privacy copy and a retired telemetry route; no fund-flow change. Owner decisions left: retention of table `usage_events` (and `wallet_activity`), the §6 legal reservation, and whether §3.2 should also mention Vercel's aggregate device/browser breakdown.
