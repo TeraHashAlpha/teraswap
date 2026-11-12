@@ -14,7 +14,7 @@ vi.mock('@/lib/supabase', () => ({
 const mockCheckRateLimit = vi.fn(async (..._args: unknown[]) => ({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 }))
 vi.mock('@/lib/kv-rate-limiter', async () => {
   const actual = await vi.importActual<typeof import('@/lib/kv-rate-limiter')>('@/lib/kv-rate-limiter')
-  return { ...actual, checkRateLimit: (...args: unknown[]) => mockCheckRateLimit(...args) }
+  return { ...actual, checkRateLimitWithin: (...args: unknown[]) => mockCheckRateLimit(...args) }
 })
 
 import { POST, OPTIONS } from './route'

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getAllowedOrigin } from '@/lib/cors'
-import { checkRateLimit, LOG_RATE_LIMIT } from '@/lib/kv-rate-limiter'
+import { checkRateLimitWithin, LOG_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { bodySizeGuard, clientIp } from '@/lib/body-limit'
 
 // CORS — restricted to teraswap.app, Vercel previews, and localhost (EXT-L-01).
@@ -37,8 +37,10 @@ export async function POST(req: Request) {
   const tooLarge = bodySizeGuard(req, undefined, headers)
   if (tooLarge) return tooLarge
 
-  // [AUDIT-W6 / W6-M-02] Per-IP budget shared by all log-* routes.
-  const rate = await checkRateLimit(`log:${clientIp(req)}`, LOG_RATE_LIMIT.limit, LOG_RATE_LIMIT.windowMs)
+  // [AUDIT-W6 / W6-M-02] Per-IP budget shared by all log-* routes. [A78 S-7] A bounded wait (1 s), then the in-memory
+  // limiter at half rate, like /api/quote: a hung Redis used to hold every 204 for ~4.5 s of Upstash retries, and
+  // this route answers a no-op that old cached bundles post on every page.
+  const rate = await checkRateLimitWithin(`log:${clientIp(req)}`, LOG_RATE_LIMIT.limit, LOG_RATE_LIMIT.windowMs)
   if (!rate.allowed) {
     return NextResponse.json(
       { error: 'Rate limit exceeded' },
