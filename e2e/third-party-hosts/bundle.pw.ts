@@ -31,3 +31,18 @@ test('the client bundle carries none of the build-time secrets / deprecated prov
   }
   expect(hits).toEqual([])
 })
+
+/**
+ * [fix/privacy-no-usage-tracking] The site has no visit counter. `@vercel/analytics` injected `/_vercel/insights/script.js`
+ * (and, in development, `va.vercel-scripts.com`) from a client chunk; with the package and `<Analytics />` removed, no
+ * built client file may name either. Not env-gated: it needs only the build.
+ */
+test('the client bundle carries no Vercel Web Analytics script', () => {
+  const files = walk(join(APP_DIR, '.next', 'static')).filter((p) => /\.(js|css|json|html|txt)$/.test(p))
+  expect(files.length, 'a built client exists').toBeGreaterThan(20)
+  const found = files.flatMap((file) => {
+    const text = readFileSync(file, 'utf8')
+    return ['_vercel/insights', 'va.vercel-scripts'].filter((m) => text.includes(m)).map((m) => `${m} in ${file.slice(APP_DIR.length + 1)}`)
+  })
+  expect(found).toEqual([])
+})
