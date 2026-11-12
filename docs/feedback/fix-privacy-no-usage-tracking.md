@@ -66,3 +66,8 @@ Also: `check-product-claims.mjs` PASS; `gen-claude-state.mjs --check` PASS; `che
 First verify run (0dbf387) failed 3: my Providers test imported `ui/v2` (isolation + parity), and the archived tracker raised one `react-hooks/purity` warning at its new path; both fixed in the last commit.
 Diff: 23 files, +432 -266 (`git diff --stat origin/main...HEAD`). Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/privacy-no-usage-tracking
 Auditor required: yes, Privacy copy and a retired telemetry route; no fund-flow change. Owner decisions left: retention of table `usage_events` (and `wallet_activity`), the §6 legal reservation, and whether §3.2 should also mention Vercel's aggregate device/browser breakdown.
+
+### Evidence 5: verify after merging origin/main (round 2; `scripts/agent-verify.sh --codeql`, head a839029, base origin/main 84cf362)
+suite PASS 10394 tests, 0 failed, 476 files · lint-delta PASS +0 err +0 warn · tsc PASS 0 · build PASS · v1v2-parity PASS 111 · rpc-budget PASS 33 · CodeQL security-extended PASS head 13 / base 13 / new 0 · `check-product-claims.mjs` PASS · `gen-claude-state.mjs --check` and `check-agents-parity.mjs` PASS (regenerated, not hand-merged).
+Diff vs origin/main: 27 files, +485 -309. No database, orders, swap history, quote logging, Vercel Web Analytics, CSP, rate-limit, signing or dependency change. Hosts capture not re-run in round 2 (no network-path code changed since the 6 passed on 8476cc3).
+Owner decisions still open: retention of `usage_events` and `wallet_activity`; Auditor pass (Privacy copy plus a retired telemetry route).
