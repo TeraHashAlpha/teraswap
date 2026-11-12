@@ -5,7 +5,7 @@ import type { Metadata } from 'next'
 // to set the page <title> and <meta> tags.
 export const metadata: Metadata = {
   title: 'Terms of Service | TeraSwap',
-  description: 'TeraSwap Terms of Service — user agreement, disclaimers, and legal terms.',
+  description: 'TeraSwap Terms of Service: user agreement, disclaimers, and legal terms.',
 }
 
 export default function TermsLayout({ children }: { children: React.ReactNode }) {

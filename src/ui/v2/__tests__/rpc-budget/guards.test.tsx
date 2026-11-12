@@ -18,7 +18,6 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/rpc-guarded-transport', async () => (await import('@/test-utils/rpc-harness')).mockGuardedTransportModule())
 vi.mock('@/components/BackgroundMusic', () => ({ default: () => null }))
-vi.mock('@/components/UsageTracker', () => ({ default: () => null }))
 vi.mock('@/lib/sounds', async () => {
   const actual = await vi.importActual<Record<string, unknown>>('@/lib/sounds')
   return Object.fromEntries(Object.entries(actual).map(([k, v]) => [k, typeof v === 'function' ? vi.fn() : v]))

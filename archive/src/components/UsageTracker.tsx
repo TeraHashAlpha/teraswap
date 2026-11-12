@@ -1,3 +1,7 @@
+/* eslint-disable react-hooks/purity */
+// ARCHIVED (fix/privacy-no-usage-tracking): no longer mounted anywhere. TeraSwap does not record how visitors use the
+// site. Kept verbatim below (CLAUDE.md Do NOT 4: never delete). The lint-disable above only keeps the lint delta at
+// zero for a file that is no longer maintained.
 'use client'
 
 import { useEffect, useRef } from 'react'

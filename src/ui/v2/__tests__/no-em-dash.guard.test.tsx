@@ -10,12 +10,8 @@
  *      server routes, monitors and alert channels are not visitor copy and are outside the scope list below.
  *   2. VALUES: every string exported by `product-claims.ts` and `help-content.ts`, at any depth.
  *   3. RENDER: the routes that mount with small mocks (v1 Docs, v2 Docs, v2 landing), text content plus the accessible attributes.
- *      Privacy and Terms are exempt (below); the other routes (wallet-bound tabs, admin, status) are covered by net 1.
- *
- * ── THE ONE TEMPORARY EXEMPTION ────────────────────────────────────────────────────────────────────────────────────────────
- * The Privacy and Terms pages and their metadata (and the PRIVACY_* entries of product-claims.ts, which feed Privacy 3.3) are
- * owned by branch `fix/privacy-no-usage-tracking`, which rewrites that text. That branch REMOVES this exemption (the
- * `PRIVACY_TERMS_EXEMPT` constant and its three uses). Until then these, and only these, may keep a dash.
+ *      Privacy and Terms (v1 and v2) are rendered by `src/ui/v2/docs-legal/privacy-copy.test.tsx`, which asserts the same two rules on
+ *      them; the other routes (wallet-bound tabs, admin, status) are covered by net 1.
  */
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
@@ -26,26 +22,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const EM = '—'
 const SPACED_EN = ' – '
 const bad = (s: string) => s.includes(EM) || s.includes(SPACED_EN)
-
-/** TEMPORARY (see the header): removed by `fix/privacy-no-usage-tracking`. */
-const PRIVACY_TERMS_EXEMPT = {
-  files: [
-    'src/app/privacy/layout.tsx',
-    'src/app/terms/layout.tsx',
-    'src/app/v2/privacy/layout.tsx',
-    'src/app/v2/terms/layout.tsx',
-    'src/app/privacy/page.tsx',
-    'src/app/terms/page.tsx',
-    'src/app/v2/privacy/page.tsx',
-    'src/app/v2/terms/page.tsx',
-    'src/components/LegalPage.tsx',
-    'src/ui/v2/docs-legal/LegalPageV2.tsx',
-  ],
-  /** product-claims.ts exports that belong to the Privacy page */
-  claimKeyPrefix: 'PRIVACY_',
-  /** and the one node of product-claims.ts source that defines such an entry */
-  sourceNodePrefixes: ['These copies stay in your browser'],
-}
 
 const ROOT = join(__dirname, '..', '..', '..', '..')
 
@@ -114,7 +90,7 @@ function badNodes(file: string): { line: number; text: string }[] {
   const visit = (n: ts.Node) => {
     let text: string | null = null
     if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateHead(n) || ts.isTemplateMiddle(n) || ts.isTemplateTail(n) || ts.isJsxText(n)) text = n.text
-    if (text !== null && bad(text) && !inConsole(n) && !PRIVACY_TERMS_EXEMPT.sourceNodePrefixes.some((p) => text!.startsWith(p))) {
+    if (text !== null && bad(text) && !inConsole(n)) {
       hits.push({ line: sf.getLineAndCharacterOfPosition(n.getStart()).line + 1, text: text.replace(/\s+/g, ' ').trim().slice(0, 140) })
     }
     ts.forEachChild(n, visit)
@@ -134,19 +110,12 @@ describe('net 1: source scan of visitor-facing code', () => {
     expect(files.some((f) => f.startsWith('src/app/api/'))).toBe(false)
   })
 
-  it('no em dash and no spaced en dash in a string literal, template part or JSX text (Privacy and Terms exempt for now)', () => {
+  it('no em dash and no spaced en dash in a string literal, template part or JSX text (Privacy and Terms included)', () => {
     const offenders: string[] = []
     for (const f of files) {
-      if (PRIVACY_TERMS_EXEMPT.files.includes(f)) continue
       for (const h of badNodes(f)) offenders.push(`${f}:${h.line}  ${h.text}`)
     }
     expect(offenders).toEqual([])
-  })
-
-  it('the exemption is exactly the Privacy and Terms surfaces and nothing wider', () => {
-    // every exempt file is a privacy/terms/legal file; a new entry anywhere else must be argued in review
-    for (const f of PRIVACY_TERMS_EXEMPT.files) expect(f, f).toMatch(/privacy|terms|Legal/i)
-    expect(PRIVACY_TERMS_EXEMPT.claimKeyPrefix).toBe('PRIVACY_')
   })
 })
 
@@ -158,10 +127,10 @@ function strings(value: unknown, path: string, out: { path: string; text: string
 }
 
 describe('net 2: product-claims and help-content values', () => {
-  it('product-claims: no bad dash in any exported string, at any depth (PRIVACY_* exempt for now)', async () => {
+  it('product-claims: no bad dash in any exported string, at any depth (PRIVACY_* included)', async () => {
     const mod = (await import('@/config/product-claims')) as Record<string, unknown>
     const all: { path: string; text: string }[] = []
-    for (const [k, v] of Object.entries(mod)) if (!k.startsWith(PRIVACY_TERMS_EXEMPT.claimKeyPrefix)) strings(v, k, all)
+    for (const [k, v] of Object.entries(mod)) strings(v, k, all)
     expect(all.length).toBeGreaterThan(30)
     // the claims that take a chain id are values too: ask them for the three live chains
     for (const chainId of [1, 8453, 42161]) {

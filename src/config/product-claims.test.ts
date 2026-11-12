@@ -382,13 +382,14 @@ describe('[fix/functional-chain-ui C8] PRIVACY_DIRECT_NOTE matches what the brow
 })
 
 describe('[fix/user-ip-privacy] privacy claims: the owner wording, each sentence backed by the code', () => {
-  it('the five sentences are exactly the owner’s (2026-11-06)', () => {
+  it('the five sentences are exactly the owner’s (2026-11-06; the wallet-storage sentence replaced 2026-11-12, fix/privacy-no-usage-tracking)', () => {
     expect([PRIVACY_PROXY_CLAIM, PRIVACY_DIRECT_NOTE, PRIVACY_WALLET_ADVICE, PRIVACY_IP_STORAGE_NOTE, PRIVACY_WALLET_STORAGE_NOTE].join(' ')).toBe(
       "TeraSwap's server relays all RPC reads on Ethereum, Base and Arbitrum, every aggregator quote and swap request, every CoW Protocol order you sign and its status checks, and token logos, so those providers see our server's IP address, not yours. " +
         "Your wallet's own RPC connection and the transactions it broadcasts are outside our control; the WalletConnect relay sees your connection once you choose a WalletConnect wallet. " +
         'Use a privacy RPC in your wallet settings if that matters to you. ' +
         'We do not store IP addresses in our database; our hosting and rate-limiting layers process them transiently, and our rate limiter only ever sees a one-way hash. ' +
-        'We do store wallet addresses for orders, swap history and activity.',
+        'We store your wallet address with your orders, swap history and quotes, because the Orders, History and Analytics tabs are built from them, and with a log of the steps of each swap, approval, quote and order (including errors), which we use for debugging and support. ' +
+        "Each quote you request on the swap screen, including its automatic refresh, is logged with its token pair, amount, and the sources' answers; the log carries your wallet address when a wallet is connected and no identifier when none is.",
     )
   })
 

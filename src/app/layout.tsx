@@ -1,6 +1,5 @@
 import type { Metadata } from 'next'
 import localFont from 'next/font/local'
-import { Analytics } from '@vercel/analytics/next'
 import ClientProviders from './client-providers'
 import ServiceWorkerRegistration from '@/components/ServiceWorkerRegistration'
 import { SITE_META_DESCRIPTION } from '@/config/product-claims'
@@ -103,7 +102,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <ServiceWorkerRegistration />
         <ClientProviders>{children}</ClientProviders>
-        <Analytics />
       </body>
     </html>
   )

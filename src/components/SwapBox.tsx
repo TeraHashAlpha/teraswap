@@ -157,7 +157,7 @@ export default function SwapBox() {
 
   const excludeArray = useMemo(() => excludedSources.size > 0 ? Array.from(excludedSources) : undefined, [excludedSources])
   const { meta: rawMeta, loading: quoteLoading, error: quoteError, countdown, refresh: refreshQuote } =
-    useQuote(tokenIn, tokenOut, amountIn, isChainOkForQuote, excludeArray)
+    useQuote(tokenIn, tokenOut, amountIn, isChainOkForQuote, excludeArray, { logQuote: true })
 
   // [LP-04 / P140] Smart MEV routing — logic extracted to
   // src/lib/mev-preference.ts for direct unit testing.
