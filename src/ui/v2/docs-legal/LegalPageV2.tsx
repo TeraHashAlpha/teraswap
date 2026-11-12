@@ -166,16 +166,16 @@ function PrivacyPolicy() {
       <SubTitle>3.1 On-Chain Data</SubTitle>
       <P>
         When you connect your non-custodial wallet and interact with the Interface, we read publicly-available
-        blockchain data for the connected address, such as balances, orders, and swap history, to show them to you.
+        blockchain data for the connected address, such as token balances and allowances, and we look up the orders and
+        swap history our server holds for that address (see 3.2), to show them to you.
         Blockchain addresses are publicly-available data that are not, by themselves, personally
         identifiable.
       </P>
 
       <SubTitle>3.2 Data We Collect and Store</SubTitle>
       <P>
-        Our own code does not collect your device type, operating system, browser, clicks, or usage patterns, and the
-        Interface sets no tracking cookies. Page views are counted by Vercel Web Analytics, which uses no cookies and
-        reports them in aggregate by country, device type, operating system, and browser (see section 8).
+        Our own code does not record the pages you view or your clicks, and it does not collect your device type,
+        operating system, or browser. The Interface sets no tracking cookies and uses no analytics service.
         We do not collect or store your name, email address, home address, or date of birth. {PRIVACY_IP_STORAGE_NOTE} {PRIVACY_WALLET_STORAGE_NOTE}
       </P>
 
@@ -234,13 +234,10 @@ function PrivacyPolicy() {
 
       <SectionTitle id="pp-cookies">8. Cookies &amp; Tracking</SectionTitle>
       <P>
-        The Interface does not use cookies for tracking or advertising purposes, and it runs no
-        advertising scripts. Page views are counted by Vercel Web Analytics, our hosting
-        provider&rsquo;s analytics, which is loaded from our own domain. It uses no cookies, and it reports
-        page views in aggregate by country, device type, operating system, and browser. TeraSwap&rsquo;s own
-        code does not collect or store any of that. No third-party
-        error-reporting or session-replay service runs in your browser. Any data stored in your browser
-        (via localStorage) is used solely for your convenience and remains on your device.
+        The Interface sets no cookies for visitors, uses no analytics service, and runs no advertising scripts.
+        No third-party error-reporting or session-replay service runs in your browser. Any data stored in your
+        browser (local storage, session storage, and the wallet libraries&rsquo; own storage) is used solely for your
+        convenience and remains on your device.
       </P>
 
       <SectionTitle id="pp-security">9. Data Security</SectionTitle>
@@ -253,8 +250,8 @@ function PrivacyPolicy() {
 
       <SectionTitle id="pp-retention">10. Data Retention</SectionTitle>
       <P>
-        We retain the records described in section 3.2 only for as long as necessary to fulfill
-        the purposes outlined in this Privacy Policy. On-chain data exists permanently on public
+        We keep the records described in section 3.2 until you ask us to delete them (see section 11) or we no
+        longer need them; no fixed deletion period applies. On-chain data exists permanently on public
         blockchains, which we cannot modify or delete.
       </P>
 
