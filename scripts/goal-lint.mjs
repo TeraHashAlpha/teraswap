@@ -2,6 +2,7 @@
 // goal-lint — mechanical checks for a `/goal` paste (docs/Prompts/_PROMPT-TEMPLATE.md §1, §1b, §6).
 //
 //   node scripts/goal-lint.mjs FILE      exit 0 = clean, 1 = violations (listed), 2 = usage/IO error
+//   node scripts/goal-lint.mjs -         the goal on stdin; `/dev/stdin` means the same (file descriptor 0, never the path)
 //
 // Rules (each violation prints `FAIL <rule>: <detail>`):
 //   length          more than 4000 BYTES (UTF-8, counted exactly as `wc -c` does: "·", "→", "—" are 2-3 bytes)
@@ -98,15 +99,20 @@ export function lintGoal(input) {
   return out
 }
 
+// "The goal is on stdin". Read file descriptor 0 for these, never the path: on Linux /dev/stdin is a link to /proc/self/fd/0,
+// and opening that fails with ENXIO when stdin is a socket, which is what a Node parent (spawnSync, a hook runner) gives its
+// child. macOS duplicates the descriptor instead, so the path only ever worked there.
+const STDIN_ARGS = new Set(['-', '/dev/stdin'])
+
 function main(argv) {
   const file = argv[2]
   if (!file || argv.length > 3) {
-    console.error('usage: node scripts/goal-lint.mjs FILE')
+    console.error('usage: node scripts/goal-lint.mjs FILE   (- or /dev/stdin reads stdin)')
     return 2
   }
   let text // a Buffer: the length rule counts the file's bytes exactly as `wc -c` does
   try {
-    text = readFileSync(file)
+    text = readFileSync(STDIN_ARGS.has(file) ? 0 : file)
   } catch (e) {
     console.error(`goal-lint: cannot read ${file}: ${e.code ?? e.message}`)
     return 2

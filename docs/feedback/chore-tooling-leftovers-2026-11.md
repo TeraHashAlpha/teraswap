@@ -42,3 +42,30 @@ Base origin/main 649105f. No PR (owner opens it). C1–C3 and verify done; this 
   flake already noted in fix-stabilise-slow-tests); alone 3/3 green, rerun green. `gen-claude-state.mjs --check` current, parity OK.
 - diff --stat origin/main...d18b411: 9 files, +628 −22 (this feedback commit adds only this file). Keeper suite not run (no keeper code).
 - Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...chore/tooling-leftovers-2026-11
+
+## 5. goal-lint stdin on Linux (C4, after the PR's CI run)
+- CI `full-suite` (Linux, Node 22) failed 2 tests of `scripts/goal-lint.test.mjs`, "through the CLI (file and stdin)". Reproduced in a
+  `node:22-slim` container (Node 22.23.5, vitest 4.1.12): 53 passed, 2 failed, at `:248` (stdout `''` instead of `OK 140 bytes`, the
+  status line `:249` is never reached) and `:253` (status 2 instead of 1). stderr: `goal-lint: cannot read /dev/stdin: ENXIO`.
+- Cause: `readFileSync('/dev/stdin')` opens the PATH. On Linux that is a link to `/proc/self/fd/0`, and a Node parent hands its child
+  a socket as stdin (measured: `/proc/self/fd/0 -> socket:[...]`), which cannot be opened by path (ENXIO). macOS duplicates the
+  descriptor instead, so §2's "PASS already: /dev/stdin" was true on the Mac only. Assumption that turned out wrong.
+- Fix: for `-` and `/dev/stdin`, `readFileSync(0)`. Any other argument is still opened as a path; every read error is still rc 2.
+  Behaviour change asked by the owner: `-` now means stdin (§2 recorded it as rc 2).
+- Tests: the two failing tests are untouched. Two added: `-` gives the same status, stdout and stderr as `/dev/stdin` (0 and 1); a
+  directory as stdin is rc 2 `EISDIR` for both spellings, and a directory PATH is rc 2 too. Linux Node 22: old code + old tests 2
+  failed; new code + old tests 55/55; new code + new tests 57/57; old code + new tests 4 failed. macOS Node 25: 57/57.
+- Edge, not handled: a stdin left non-blocking by its opener with no data ready yet would read as `EAGAIN` and exit 2. Not reached by a
+  shell pipe, a redirect, a heredoc or a Node parent (all measured: large input, a writer pausing 400 ms, empty stdin).
+
+## 6. Verify (C4)
+- `agent-verify.sh` on this commit's code (§5 and §6 of this file were written after the run), 2026-11-13 22:05 UTC, base origin/main
+  130f2dd: lint +0/+0, tsc 0, build ok, v1v2-parity 111/0, rpc-budget 36/0, suite 10653 passed / 2 FAILED (494 files) → RESULT FAIL.
+  Both failures are in `src/ui/v2/fiat/fiat.test.tsx` (`:188`, `:285`), not in this branch's diff. After the feedback edit: the 7
+  test files that read `docs/feedback` or goal-lint 3098/0, `gen-claude-state.mjs --check` current, eslint 0 on the two changed files.
+- Concern, not fixed here (not this goal): those two tests read the real clock. They build a round 89 000 s old and judge it 2 000 s
+  later, expecting "unavailable"; inside the FX-closed window `isEurRateFresh` (`src/lib/eur-usd-feed.ts:97-103`) accepts the last
+  round before the close, so the answer is "ok". Measured with the clock pinned on this weekend: they fail on a run that starts between
+  Friday 21:43:20 UTC and Monday 00:26:40 UTC, and pass outside it. Same 2 failures on the untouched main checkout (7e566fd) at 22:09 UTC.
+  CI `full-suite` will be red on them for any run in that window, on any branch. Fix needs its own goal: pin a weekday with
+  `vi.setSystemTime` in those two tests, as `:261` and `:269` of the same file already do.

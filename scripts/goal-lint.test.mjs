@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, openSync, closeSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -252,6 +252,31 @@ describe('goal-lint pasted goals (CONTROL header behind paste decoration)', () =
       const r = run(['/dev/stdin'], '> NO CI polling. Exit = pushed.\n')
       expect(r.status).toBe(1)
       expect(r.stdout).toContain('FAIL control-line')
+    })
+    // Node hands a child its stdin as a socket; on Linux the PATH /dev/stdin cannot be opened then (ENXIO), so
+    // goal-lint reads file descriptor 0 for both spellings. `-` never names a file, on any platform.
+    it('"-" reads stdin too, with the same verdict and status as /dev/stdin', () => {
+      const good = '```\n' + BODY + '```\n'
+      const bad = '> NO CI polling. Exit = pushed.\n'
+      for (const text of [good, bad]) {
+        const [dash, dev] = [run(['-'], text), run(['/dev/stdin'], text)]
+        expect([dash.status, dash.stdout, dash.stderr]).toEqual([dev.status, dev.stdout, dev.stderr])
+      }
+      expect(run(['-'], good).status).toBe(0)
+      expect(run(['-'], bad).status).toBe(1)
+    })
+    it('a read error on stdin is exit 2, like any unreadable file', () => {
+      const fd = openSync(dir, 'r') // a directory as stdin: reading descriptor 0 fails with EISDIR
+      try {
+        for (const arg of ['-', '/dev/stdin']) {
+          const r = spawnSync('node', [SCRIPT, arg], { encoding: 'utf8', stdio: [fd, 'pipe', 'pipe'] })
+          expect([arg, r.status, r.stdout, r.stderr.trim()]).toEqual([arg, 2, '', `goal-lint: cannot read ${arg}: EISDIR`])
+        }
+      } finally {
+        closeSync(fd)
+      }
+      const asFile = run([dir]) // and a path that is not stdin is still opened as a path
+      expect([asFile.status, asFile.stdout, asFile.stderr.trim()]).toEqual([2, '', `goal-lint: cannot read ${dir}: EISDIR`])
     })
   })
 })
