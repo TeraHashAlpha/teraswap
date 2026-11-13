@@ -82,6 +82,10 @@ export class Capture {
       this.csp.set(key, (this.csp.get(key) ?? 0) + 1)
     })
     await context.addInitScript(() => {
+      // [round 10] The v2 landing plays a 3.3 s entry animation once per session; mark it played so this capture's clicks are not under it.
+      try {
+        sessionStorage.setItem('ts_v2_intro_seen', '1')
+      } catch {}
       document.addEventListener('securitypolicyviolation', (e) => {
         ;(window as unknown as { __cspReport?: (d: string, b: string) => void }).__cspReport?.(e.effectiveDirective, e.blockedURI)
       })

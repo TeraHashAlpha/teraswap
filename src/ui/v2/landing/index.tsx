@@ -7,6 +7,7 @@ import { HelpFab, MusicToggle } from '../shell/Fabs'
 import { Footer } from '../shell/Footer'
 import { V2ToastProvider } from '../shell/toasts'
 import { Hero } from './Hero'
+import { Intro } from './Intro'
 import { LandingHeader } from './LandingHeader'
 import { NarrativeStack } from './NarrativeStack'
 import { STILL_PHOTO, photosFor } from './narrative'
@@ -27,6 +28,7 @@ export function LandingV2({ onLaunchApp }: { onLaunchApp: () => void }) {
   return (
     <V2ToastProvider>
       <div data-ts-ui="v2" data-ts-landing="" className={`ts-v2 relative min-h-screen ${v2FontClassNames}`}>
+        <Intro />
         <NarrativeStack />
         <LandingHeader onLaunchApp={onLaunchApp} />
         <main>
