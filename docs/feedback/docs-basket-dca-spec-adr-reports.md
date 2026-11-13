@@ -4,8 +4,13 @@ Goal: ADR-027 + spec + analyst package + three dated notes. DOCS ONLY.
 
 - [x] C0 feedback file (this commit)
 - [x] C1 ADR-027 + SPEC-BASKET-DCA copied byte-for-byte
-- [ ] C2 analyst package → docs/Reports/basket-dca/ — HELD (40 MB stop, see below)
-- [x] C3 three dated notes (ADR-024, FILL-ECONOMICS-CALIBRATION, DEPLOYMENTS)
+- [ ] C2 analyst package → docs/Reports/basket-dca/ — HELD: 40 MB stop AND gitleaks hits (see below)
+- [x] C3 three dated notes (ADR-024, FILL-ECONOMICS-CALIBRATION, DEPLOYMENTS) + state block regen (CLAUDE.md, AGENTS.md pin)
+- Branch NOT pushed (partial; owner decides).
+
+## Gitleaks on the source package (not copied): 45 hits, rule `generic-api-key`
+- `_inputs/dca-feed-registrations.json` (31) · `data/series/v3/base_feeds.json` (2) · `data/series/v3/executor_registry_base.json` (2) · `data/series/v3/x_feeds.json` (3) · `data/series/v31/executor_registry_base_v31.json` (5) · `results/v3/t4_registry.json` (2)
+- Per the goal, a hit is a STOP. Owner to review these files before any copy.
 
 ## Premise check
 - All three sources exist (`~/Desktop/teraswap-architect-pack/basket/*`, `~/Desktop/Claude/dex-aggregator 2/Analista/basket-dca-v2/docs-Reports-basket-dca/`).
