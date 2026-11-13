@@ -5,7 +5,7 @@ M and L findings of audit A78b (S-8 to S-12) plus the WalletConnect description.
 ### Checklist
 - [x] C1 Privacy copy: S-8 (section 8), S-9 (section 3.3), S-10 (section 6), Help, Docs, product-claims
 - [x] C2 S-11 caller guard + landing-import guard, S-12 `checkRateLimitWithin` on log-quote, log-swap, log-activity
-- [ ] C3 WalletConnect `appDescription` + stale-claim guards
+- [x] C3 WalletConnect `appDescription` + stale-claim guards
 - [ ] Verify (`agent-verify.sh --codeql`, hosts capture, claims checker, `gen-claude-state.mjs --check`), push, compare link
 
 ### Premises that were not (fully) true, and what I wrote instead
@@ -58,3 +58,9 @@ Also pinned: the scan sees an alias (`useQuote as q`), a spread, a pass-through 
 
 **S-12** (`log-routes.limiter.test.ts`, `log-routes.hung-kv.test.ts`; `/api/log-quote`, `/api/log-swap` POST and PATCH, `/api/log-activity`, one `checkRateLimitWithin` each, same key `log:<hash>`, `LOG_RATE_LIMIT` 120 per 60 s unchanged and pinned). Hung Redis (every call never settles), real timers, answered 200: log-quote POST **1007 ms**, log-swap POST **1004 ms**, log-swap PATCH **1002 ms**, log-activity POST **1005 ms** (bound < 1500). Degraded limit with the hung KV (fake timers): 60 pass, the 61st is 429, for each of the four. Working KV (in-memory sorted set): request 120 passes and 121 is 429 per route; 40 + 40 + 40 over quote, swap and activity exhausts one shared budget and then every route, `log-event` included, answers 429; the args equal what `log-event` sends. Against the OLD routes (the three route edits reverted) 12 of 18 failed: the plain limiter was called, and the hung-KV requests never answered (10 s test timeout, 20 s for the degraded ones).
 Doc: `src/app/api/CLAUDE.md` said 18 plain-limiter call sites in `src/app/api` (22 in `src`); my grep of `checkRateLimit(` gave 17 / 22 on main and 14 / 19 now, so I subtracted the three routes (15 / 19) without chasing the 1 difference in method.
+
+### Evidence 3b: WalletConnect description (C3)
+| where | before | after | proof |
+|---|---|---|---|
+| `src/lib/wagmiConfig.ts:117` `appDescription` (shown by wallets at connection) | "Ethereum & Base meta-aggregator: best swap price across 11 liquidity sources." | `TeraSwap is an EVM meta-aggregator on ${SWAP_CHAIN_LIST_LABEL} that compares quotes across ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources.` (today: three chains, the quoting-adapter count) | same two constants and same wording as `SITE_META_DESCRIPTION` (`product-claims.ts:156`); no "best" (the claims file makes no such promise) |
+Guards: `wagmiConfig.test.ts` (value equals the derived sentence, names every registry chain, no retired phrasing, no "best", no MEV, no dash, <= 200 chars); `metadata.copy.guard.test.ts` now also scans the strings of `wagmiConfig.ts`; `scripts/check-product-claims.mjs` lists `src/lib/wagmiConfig.ts` as a user-facing file (9 files). Break-it: the old string put back fails 3 tests (`expected 'Ethereum & Base meta-aggregator: best…' to be 'TeraSwap is an EVM meta-aggregator on…'`, `/Ethereum & Base/i: expected … not to match`) and the checker (`src/lib/wagmiConfig.ts:119: hard-coded source count: "11 liquidity sources"`); file restored.

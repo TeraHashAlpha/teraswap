@@ -5,6 +5,8 @@
  *   - The manifest description is the page description (SITE_META_DESCRIPTION), so its source count and chain list come from
  *     the same derivation as the page, never from a number typed into JSON.
  *   - None of the retired phrasings of the old card.
+ * [fix/privacy-leftovers-a78b] The same retired phrasings and the MEV rule now also cover src/lib/wagmiConfig.ts: its appDescription is
+ * what a wallet shows when a visitor connects, and it had kept "Ethereum & Base ... best swap price across 11 liquidity sources".
  * The em-dash rule for both files is in no-em-dash.guard.test.tsx (net 1 for layout.tsx, net 4 for the manifest). This file lives
  * in src/app, so it must not name that test's v2 path (the v1-isolation test greps src/app for it).
  * layout.tsx is read as text: importing it pulls in next/font, which only exists inside the Next build.
@@ -17,12 +19,13 @@ import { SITE_META_DESCRIPTION } from '@/config/product-claims'
 
 const ROOT = path.resolve(__dirname, '..', '..')
 const layoutSrc = readFileSync(path.join(ROOT, 'src/app/layout.tsx'), 'utf8')
+const wagmiSrc = readFileSync(path.join(ROOT, 'src/lib/wagmiConfig.ts'), 'utf8')
 const manifestRaw = readFileSync(path.join(ROOT, 'public/manifest.json'), 'utf8')
 const manifest = JSON.parse(manifestRaw) as { description: string; screenshots: { src: string; label: string }[] }
 
-/** Every string literal and template part in layout.tsx (comments are not copy). */
-function layoutStrings(): string[] {
-  const sf = ts.createSourceFile('layout.tsx', layoutSrc, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+/** Every string literal and template part in a source file (comments are not copy). */
+function stringsOf(name: string, src: string): string[] {
+  const sf = ts.createSourceFile(name, src, ts.ScriptTarget.Latest, true, name.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
   const out: string[] = []
   const visit = (n: ts.Node) => {
     if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateHead(n) || ts.isTemplateMiddle(n) || ts.isTemplateTail(n)) out.push(n.text)
@@ -31,6 +34,7 @@ function layoutStrings(): string[] {
   visit(sf)
   return out
 }
+const layoutStrings = () => stringsOf('layout.tsx', layoutSrc)
 
 const MEV = /\bmev\b/i
 const RETIRED = [/privacy proxy/i, /Ethereum meta-aggregator/i, /\b11 liquidity sources\b/i, /\b7 sources\b/i]
@@ -52,6 +56,15 @@ describe('link-preview and manifest copy', () => {
     for (const re of RETIRED) {
       expect(strings.filter((s) => re.test(s)), String(re)).toEqual([])
       expect(re.test(manifestRaw), String(re)).toBe(false)
+    }
+  })
+
+  it('the WalletConnect description (wagmiConfig.ts) has none of the retired phrasings, no "best", no MEV', () => {
+    const wagmi = stringsOf('wagmiConfig.ts', wagmiSrc)
+    expect(wagmi.length).toBeGreaterThan(10)
+    expect(wagmi.some((s) => /meta-aggregator on /.test(s)), 'the appDescription template is in the scan').toBe(true)
+    for (const re of [...RETIRED, MEV, /Ethereum & Base/i, /\bbest swap\b/i]) {
+      expect(wagmi.filter((s) => re.test(s)), String(re)).toEqual([])
     }
   })
 

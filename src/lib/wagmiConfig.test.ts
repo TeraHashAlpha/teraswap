@@ -14,6 +14,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, vi } from 'vitest'
 import { getSupportedChainIds } from './chains/registry'
 import { __resetChainIdentityCache } from './rpc-chain-identity'
+import { INTEGRATED_DEX_SOURCE_COUNT, SWAP_CHAIN_LIST_LABEL, SWAP_CHAIN_NAMES, SITE_META_DESCRIPTION } from '@/config/product-claims'
 
 type WagmiConfigModule = typeof import('./wagmiConfig')
 let config: WagmiConfigModule['config']
@@ -40,6 +41,26 @@ describe('wagmiConfig: WalletConnect metadata [SPRINT-9K]', () => {
     expect(WALLETCONNECT_METADATA.appUrl).toBe('https://www.teraswap.app')
     // icon must be an absolute https URL on the verified domain (wallets reject relative)
     expect(WALLETCONNECT_METADATA.appIcon).toMatch(/^https:\/\/www\.teraswap\.app\/.+/)
+  })
+
+  // [fix/privacy-leftovers-a78b] Wallets show appDescription when a visitor connects. It used to say "Ethereum & Base ... best swap price
+  // across 11 liquidity sources" (two chains short, a stale count, a "best" promise). It now carries only what product-claims proves.
+  it('appDescription is built from the chain registry and the quoting-adapter count, the same two facts as the page description', () => {
+    expect(WALLETCONNECT_METADATA.appDescription).toBe(
+      `TeraSwap is an EVM meta-aggregator on ${SWAP_CHAIN_LIST_LABEL} that compares quotes across ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources.`,
+    )
+    // Three chains today (mainnet, Base, Arbitrum); the description names every one of them and no other.
+    expect(SWAP_CHAIN_NAMES).toHaveLength(3)
+    for (const name of SWAP_CHAIN_NAMES) expect(WALLETCONNECT_METADATA.appDescription).toContain(name)
+    expect(SITE_META_DESCRIPTION).toContain(`on ${SWAP_CHAIN_LIST_LABEL} that compares quotes across ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources`)
+  })
+
+  it('appDescription carries none of the retired phrasings, no "best", no MEV, no dash', () => {
+    const d = WALLETCONNECT_METADATA.appDescription
+    for (const re of [/Ethereum & Base/i, /\bbest\b/i, /\bmev\b/i, /\b11 liquidity sources\b/i, /\b7 sources\b/i, /privacy proxy/i, /\u2014/, / \u2013 /]) {
+      expect(d, String(re)).not.toMatch(re)
+    }
+    expect(d.length).toBeLessThanOrEqual(200)
   })
 
   it('exports a single config instance (module singleton → one WC Core)', async () => {
