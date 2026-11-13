@@ -6,7 +6,11 @@ Goal: ADR-027 + spec + analyst package + three dated notes. DOCS ONLY.
 - [x] C1 ADR-027 + SPEC-BASKET-DCA copied byte-for-byte
 - [ ] C2 analyst package → docs/Reports/basket-dca/ — HELD: 40 MB stop AND gitleaks hits (see below)
 - [x] C3 three dated notes (ADR-024, FILL-ECONOMICS-CALIBRATION, DEPLOYMENTS) + state block regen (CLAUDE.md, AGENTS.md pin)
-- Branch NOT pushed (partial; owner decides).
+- Owner decision (2026-11-13): push the partial branch now; commit 2 waits for a later goal.
+- Re-sync: source mtime is 20:47 (owner said 20:50). New sha256, source = copy:
+  - ADR-027 `50cb00b11c864bedb535901999c0bedbfddf810aa55d20d8709c955ddfcf0e8c`
+  - SPEC `8a3cbc010d81679680063f0bf761a4ee82dc8135c0adebaf26128535f5ffc37b`
+  - These replace the first-copy hashes (250930…, 14b6cb…).
 
 ## Gitleaks on the source package (not copied): 45 hits, rule `generic-api-key`
 - `_inputs/dca-feed-registrations.json` (31) · `data/series/v3/base_feeds.json` (2) · `data/series/v3/executor_registry_base.json` (2) · `data/series/v3/x_feeds.json` (3) · `data/series/v31/executor_registry_base_v31.json` (5) · `results/v3/t4_registry.json` (2)
