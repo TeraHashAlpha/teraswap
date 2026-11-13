@@ -8,6 +8,8 @@ const readContract = vi.fn()
 vi.mock('@/lib/chains/clients', () => ({ getPublicClientForChain: vi.fn(() => ({ readContract })) }))
 
 import { GET, _resetEurRateCache } from './route'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import config from '@/config/eur-usd-feed.json'
 
 const FEED = (config.chains as Record<string, { feed: string }>)['1'].feed
@@ -66,6 +68,46 @@ describe('GET /api/fiat/eur-usd', () => {
     const res = await GET(req())
     expect(res.status).toBe(503)
     expect(JSON.stringify(await res.json())).not.toContain('provider')
+  })
+  it('a hung chain read is cut at the deadline: 503, and the function is not held open', async () => {
+    vi.useFakeTimers()
+    try {
+      readContract.mockImplementation(() => new Promise(() => {}))
+      const pending = GET(req())
+      await vi.advanceTimersByTimeAsync(6_500)
+      const res = await pending
+      expect(res.status).toBe(503)
+      expect(await res.json()).toEqual({ error: 'EUR rate unavailable' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+  it('the limiter is checkRateLimitWithin (bounded), keyed by the client-ip hash, and nothing else waits on KV', async () => {
+    chain()
+    await GET(req())
+    expect(mockLimit).toHaveBeenCalledTimes(1)
+    expect(mockLimit.mock.calls[0][0]).toMatch(/^fiat-eur-usd:/)
+    const src = readFileSync(join(__dirname, 'route.ts'), 'utf8')
+    expect(src).toMatch(/checkRateLimitWithin/)
+    expect(src).not.toMatch(/\bcheckRateLimit\(/)
+    expect(src).not.toMatch(/trustedClientIp|x-forwarded-for/i)
+  })
+  it('an unsupported chain is a 400 with a fixed message, never a silent mainnet answer; a supported L2 reads the mainnet feed', async () => {
+    chain()
+    const bad = await GET(req('?chainId=999999'))
+    expect(bad.status).toBe(400)
+    expect(await bad.json()).toEqual({ error: 'Invalid chainId' })
+    expect(readContract).not.toHaveBeenCalled()
+    expect((await GET(req('?chainId=8453'))).status).toBe(200)
+  })
+  it('the upstream is fixed server-side: the request cannot name a host, and no error carries one', async () => {
+    readContract.mockRejectedValue(new Error('connect ECONNREFUSED https://eth-mainnet.g.alchemy.com/v2/SECRETKEY'))
+    const res = await GET(req('?chainId=1&rpc=https://evil.example&url=https://evil.example'))
+    const text = JSON.stringify(await res.json())
+    expect(res.status).toBe(503)
+    expect(text).not.toMatch(/alchemy|SECRETKEY|evil|https?:/)
+    const src = readFileSync(join(__dirname, 'route.ts'), 'utf8')
+    expect(src).not.toMatch(/searchParams\.get\('(rpc|url|host)'/)
   })
   it('rate limited → 429; bad chainId → 400', async () => {
     mockLimit.mockResolvedValue({ allowed: false, remaining: 0, resetAt: 1 })
