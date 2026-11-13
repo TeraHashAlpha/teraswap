@@ -81,3 +81,15 @@ channel is the one `INTRO-DIAG` stdout line. Reading how to read a result: touch
 control red = same; control green + touch specs red = the intro or its timing; scrollHeight small = the page was short in the rig.
 No cause fixed in this commit: nothing in the config shows a Linux difference (the project `use` sets Desktop Chrome, but these specs open their own
 contexts with `hasTouch` + `isMobile` explicitly; same headless-shell family locally and in CI). Not tried: a Linux container (Docker was not running here).
+
+### 5.4 CI on 5a7f6d7: the controls are red too, so `Input.synthesizeScrollGesture` does not scroll on the Linux runner (the intro is not the cause there)
+CI result on 5a7f6d7: 4 failed (both controls, `:246`, and both touch specs, `:264`, `:288`), 74 passed. The controls have the intro out of the picture, so
+the failure is the gesture method on that runner, not the component. This also means 5.2's mechanism (the overlay unmounted under the finger) is real and
+fixed but was never what failed in CI. Not weakened or skipped: same assertions, including `overlay mounted and already skipped at the first scroll event`.
+Change: all four specs (2 controls, tap-then-drag, not-swallowed) now send the drag with `touchDrag()`: CDP `Input.dispatchTouchEvent` touchStart, 50 ms
+rest, touchMove steps of 10 px (12 ms apart at 800 px/s, 25 ms at 400 px/s; 30 steps for 300 px), touchEnd, on a context with `hasTouch` + `isMobile`.
+The controls stay and prove the method on whichever runner; the intro specs mean something only when they are green. `INTRO-DIAG` kept.
+Local (Mac, Chromium 156 headless shell, `CI=true`): whole `intro.pw.ts` 14/14, ten separate invocations 10/10, no `INTRO-DIAG FAILED` line. The page saw
+touchstart 1, touchmove 28-29, touchend 1, scroll 30 and scrollY 289 in the controls. UNVERIFIED on Linux: no Linux Chromium without a container here
+(Docker not started). Whether `dispatchTouchEvent` scrolls on the runner is what the next CI paste decides. Evidence of the tap half: the tap part of the
+tap-then-drag spec runs through `touchscreen.tap` (also `dispatchTouchEvent`) before the drag and the failures were at the scroll poll, not at the tap.

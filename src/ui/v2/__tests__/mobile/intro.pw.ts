@@ -9,7 +9,7 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { expect, test, type Browser, type BrowserContext, type Page, type TestInfo } from '@playwright/test'
+import { expect, test, type Browser, type BrowserContext, type CDPSession, type Page, type TestInfo } from '@playwright/test'
 
 const KEY = 'ts_v2_intro_seen'
 const WORDS = ['Compare.', 'Verify.', 'Swap.', 'Repeat.']
@@ -45,8 +45,31 @@ async function sampleFromStart(context: BrowserContext) {
 const overlay = (page: Page) => page.locator('[data-ts-intro]')
 
 const PHONE = { viewport: { width: 375, height: 667 }, hasTouch: true, isMobile: true } as const
-/** The one synthesized touch scroll all three phone specs send (the control sends exactly this too, with the intro out of the picture). */
-const SCROLL_GESTURE = { x: 187, y: 400, yDistance: -300, gestureSourceType: 'touch', speed: 800 } as const
+/** The one touch drag all the phone specs send (the controls send exactly this too, with the intro out of the picture). Speed is in px/s. */
+const SCROLL_GESTURE = { x: 187, y: 400, yDistance: -300, speed: 800 } as const
+
+/** Spacing between two touchMove events. A finger on a phone reports every 8 to 16 ms; 10 px steps at 400 to 800 px/s are 12 to 25 ms apart. */
+const STEP_PX = 10
+const sleep = (ms: number) => new Promise<void>((done) => setTimeout(done, ms))
+
+/**
+ * A finger dragging up the page: CDP `Input.dispatchTouchEvent` (touchStart, a run of touchMove steps, touchEnd) on a context with
+ * hasTouch + isMobile. This goes through the same input path as a real touch, so the compositor turns it into a scroll. It replaces
+ * `Input.synthesizeScrollGesture`, which scrolled on a Mac but not at all on the Linux CI runner (the controls were red there).
+ */
+async function touchDrag(cdp: CDPSession, g: { x: number; y: number; yDistance: number; speed: number }) {
+  const point = (y: number) => [{ x: g.x, y, id: 0, radiusX: 1, radiusY: 1, force: 1 }]
+  const steps = Math.ceil(Math.abs(g.yDistance) / STEP_PX)
+  const gap = Math.max(1, Math.round((STEP_PX / g.speed) * 1000))
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: point(g.y) })
+  await sleep(50) // a finger rests a moment before it moves
+  for (let i = 1; i <= steps; i++) {
+    const travelled = Math.min(i * STEP_PX, Math.abs(g.yDistance))
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: point(g.y + Math.sign(g.yDistance) * travelled) })
+    await sleep(gap)
+  }
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+}
 
 type Probe = {
   counts: Record<string, number>
@@ -239,11 +262,12 @@ test.describe('v2 landing intro', () => {
   })
 
   // CONTROL for the two touch-scroll specs below: the intro is marked as already played, so it is never mounted, and the identical
-  // synthesized touch scroll is sent. If THIS fails in an environment, that environment cannot scroll by a synthesized touch gesture
-  // at all and the intro is not the cause; if it passes while the specs below fail, the intro (or its timing) is.
+  // touch drag (CDP touchStart / touchMove steps / touchEnd) is sent. If THIS fails in an environment, that environment cannot scroll
+  // by a dispatched touch drag at all and the intro is not the cause; if it passes while the specs below fail, the intro (or its
+  // timing) is. The intro specs mean something only when the controls are green.
   // One control per gesture the two specs send (they differ only in speed: 800 and 400 px/s).
   for (const speed of [800, 400]) {
-    test(`control: with the intro already played, the same synthesized touch scroll (${speed} px/s) moves the page`, async ({ browser }, testInfo) => {
+    test(`control: with the intro already played, the same touch drag (${speed} px/s) moves the page`, async ({ browser }, testInfo) => {
       const label = `control (no intro, ${speed} px/s)`
       const { context, page } = await fresh(browser, PHONE)
       await context.addInitScript((k) => sessionStorage.setItem(k, '1'), KEY)
@@ -253,7 +277,7 @@ test.describe('v2 landing intro', () => {
       await expect(overlay(page)).toHaveCount(0)
       await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))))
       const cdp = await context.newCDPSession(page)
-      await cdp.send('Input.synthesizeScrollGesture', { ...SCROLL_GESTURE, speed })
+      await touchDrag(cdp, { ...SCROLL_GESTURE, speed })
       await expectPageScrolled(page, testInfo, label)
       await report(page, testInfo, label, 'ok') // also logged when green, to compare with a red run next to it
       await context.close()
@@ -277,7 +301,7 @@ test.describe('v2 landing intro', () => {
       await drag.page.goto('/', { waitUntil: 'domcontentloaded' })
       await expect(overlay(drag.page)).toHaveCount(1, { timeout: 20_000 })
       const cdp = await drag.context.newCDPSession(drag.page)
-      await cdp.send('Input.synthesizeScrollGesture', SCROLL_GESTURE)
+      await touchDrag(cdp, SCROLL_GESTURE)
       await expect(overlay(drag.page)).toHaveCount(0)
       await expectPageScrolled(drag.page, testInfo, 'intro: tap-then-drag spec (a touch scroll skips it and scrolls)')
       await drag.context.close()
@@ -307,7 +331,7 @@ test.describe('v2 landing intro', () => {
       await expect(overlay(page)).toHaveCount(1, { timeout: 20_000 })
       const cdp = await context.newCDPSession(page)
       // 400 px/s: the whole drag (300 px) takes about 0.75 s, so it ends well before the overlay's own 3.3 s end could remove it
-      await cdp.send('Input.synthesizeScrollGesture', { ...SCROLL_GESTURE, speed: 400 })
+      await touchDrag(cdp, { ...SCROLL_GESTURE, speed: 400 })
       await expect(overlay(page)).toHaveCount(0)
       await expectPageScrolled(page, testInfo, 'intro: not-swallowed spec (overlay mounted when the scroll begins)')
       const seen = await page.evaluate(() => {
