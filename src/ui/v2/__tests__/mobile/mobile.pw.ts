@@ -60,6 +60,13 @@ async function open(page: Page, r: Route, viewport: { width: number; height: num
     page.on('pageerror', (e) => console.log(`[${r.id} pageerror] ${e.message.slice(0, 300)}`))
     page.on('console', (m) => m.type() === 'error' && console.log(`[${r.id} console.error] ${m.text().slice(0, 300)}`))
   }
+  // [round 10] The landing's entry animation (3.3 s, once per session) would cover every first visit: mark it played here.
+  // Its own proofs are in intro.pw.ts.
+  await page.context().addInitScript(() => {
+    try {
+      sessionStorage.setItem('ts_v2_intro_seen', '1')
+    } catch {}
+  })
   await installWallet(page.context(), r.s)
   await installNetwork(page, ORIGIN, r.s)
   await page.goto(r.path, { waitUntil: 'load' })
