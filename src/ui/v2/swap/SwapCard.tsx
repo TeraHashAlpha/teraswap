@@ -25,7 +25,7 @@ import { findToken, isNativeETH, type Token } from '@/lib/tokens'
 import { AGGREGATOR_META, DEFAULT_SLIPPAGE, MEV_PREFERENCE_THRESHOLD } from '@/lib/constants'
 import { fmtToken, formatWithSeparator, stripSeparator, fmtUsd } from '@/lib/format'
 import { playQuoteReceived, playTouchMP3 } from '@/lib/sounds'
-import { CHAIN_ID } from '@/lib/constants'
+import { CHAIN_ID, NATIVE_ETH } from '@/lib/constants'
 import { isVerifiedToken } from '@/lib/chains/tokens'
 import { safeBigInt } from '@/lib/utils'
 import { Button, Input, Skeleton, Surface } from '../primitives'
@@ -229,6 +229,7 @@ export function SwapCard() {
   // [feat/ui-v2-fiat-value] DISPLAY ONLY: approximate fiat under the Sell and Receive amounts, from the Portfolio's price route.
   const fiatDisplay = useFiatDisplay(activeChainId)
   const tokenInApproxUsd = useApproxUsdPrice(activeChainId, tokenIn?.address)
+  const nativeApproxUsd = useApproxUsdPrice(activeChainId, NATIVE_ETH)
   // [feat/swap-price-tiers D1] The SERVER's tier for the pair; null = unknown → no notice (the client never guesses).
   const { data: priceTier } = useSwapPriceTier(activeChainId, tokenIn?.address, tokenOut?.address)
 
@@ -334,7 +335,7 @@ export function SwapCard() {
   // (dollars) is what the review model is built from, so the euro conversion never reaches the review, consent or signing path.
   const panelView =
     view && meta && tokenIn && tokenOut
-      ? buildQuoteView({ meta, tokenIn, tokenOut, amountIn, slippage, chainId: activeChainId, tokenInUsdPrice: priceCheck.chainlinkPrice, tokenOutUsdPrice: tokenOutPriceCheck.chainlinkPrice, gasEstimate, ethUsdPrice, fiat: { currency: fiatDisplay.currency, usdPerEur: fiatDisplay.usdPerEur, tokenInApproxUsd } })
+      ? buildQuoteView({ meta, tokenIn, tokenOut, amountIn, slippage, chainId: activeChainId, tokenInUsdPrice: priceCheck.chainlinkPrice, tokenOutUsdPrice: tokenOutPriceCheck.chainlinkPrice, gasEstimate, ethUsdPrice, fiat: { currency: fiatDisplay.currency, usdPerEur: fiatDisplay.usdPerEur, tokenInApproxUsd, nativeApproxUsd } })
       : null
 
   const outputDisplay =

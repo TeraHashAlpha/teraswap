@@ -116,6 +116,8 @@ export interface QuoteFiat {
   usdPerEur: number | null
   /** The sell token's approximate USD price (the Portfolio's source): the fee line's fallback when no Chainlink price exists. */
   tokenInApproxUsd?: number | null
+  /** The chain's native token's approximate USD price: the gas line's fallback to derive its native amount when no oracle price exists. */
+  nativeApproxUsd?: number | null
 }
 
 export interface QuoteViewInput {
@@ -159,6 +161,7 @@ export function formatGas(best: Pick<NormalizedQuote, 'estimatedGas' | 'gasUsd'>
   const usd = positive(cost?.usd) ? cost.usd : positive(best.gasUsd) ? best.gasUsd : null
   let eth = positive(cost?.eth) ? cost.eth : null
   if (eth === null && usd !== null && positive(ethUsdPrice)) eth = usd / ethUsdPrice
+  if (eth === null && usd !== null && positive(fiat?.nativeApproxUsd)) eth = usd / fiat.nativeApproxUsd // display-only estimate, only when no oracle price exists
   if (usd !== null) return eth !== null ? `~${fmtGas(eth)} ETH (${money(usd, fiat)})` : money(usd, fiat)
   if (eth !== null) return `~${fmtGas(eth)} ETH`
   if (best.estimatedGas > 0) return `~${formatWithSeparator(best.estimatedGas.toString()).replace(/\s/g, '\u2009')} gas`

@@ -279,6 +279,13 @@ describe('[feat/ui-v2-fiat-value] gas and fee in the visitor\'s currency (displa
     expect(formatGas({ estimatedGas: 1, gasUsd: 0.5 }, false, est(0.0002, 0.5), 2490, { currency: 'EUR', usdPerEur: null })).toBe('~0.0002 ETH ($0.50)')
   })
 
+  it('gas: no oracle ETH price and no estimate → the native amount is derived from the approximate native price (display only); without that, fiat alone', () => {
+    const q = { estimatedGas: 0, gasUsd: 0.21 }
+    expect(formatGas(q, false, undefined, null, { currency: 'USD', usdPerEur: null, nativeApproxUsd: 2100 })).toBe('~0.0001 ETH ($0.21)')
+    expect(formatGas(q, false, undefined, null, { currency: 'EUR', usdPerEur: 1.1, nativeApproxUsd: 2100 })).toBe('~0.0001 ETH (€0.19)')
+    expect(formatGas(q, false, undefined, null, { currency: 'USD', usdPerEur: null })).toBe('$0.21')
+  })
+
   it('Free (solver-paid) is untouched by the currency', () => {
     expect(formatGas({ estimatedGas: 0, gasUsd: 0 }, true, undefined, null, eurFiat)).toBe('Free (solver-paid)')
   })
