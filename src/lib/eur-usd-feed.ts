@@ -1,7 +1,7 @@
 /**
  * [feat/ui-v2-fiat-value] The Chainlink EUR / USD feed used to show euro amounts. DISPLAY ONLY: a euro figure feeds no gate,
  * minimum output, tier, consent, calldata or signature, and nothing under those paths may import this module (pinned by
- * `src/ui/v2/fiat/fiat-scope-guard.test.ts`).
+ * `fiat-scope-guard.test.ts` in the fiat folder of the v2 tree).
  *
  * The address comes from `src/config/eur-usd-feed.json`, which `scripts/fiat/build-eur-usd-feed.mjs` generates from Chainlink's
  * reference-data directory and confirms on-chain; it is never typed here. The shared feed registry (`chains/chainlink-feeds.ts`)
