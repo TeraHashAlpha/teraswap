@@ -22,14 +22,16 @@ export interface FiatDisplay {
   preference: FiatCurrency
   /** The euro option can be used right now. */
   eurAvailable: boolean
+  /** 'loading' until the first answer; 'unavailable' when the rate failed, aged out, or no feed exists. */
+  eurStatus: 'loading' | 'ok' | 'unavailable'
 }
 
 /** The visitor's currency and, for euros, the rate: one place that decides what every fiat line shows. */
 export function useFiatDisplay(chainId: number, opts: { probeEur?: boolean } = {}): FiatDisplay {
   const preference = useFiatPreference()
   const eur = useEurRate(chainId, preference === 'EUR' || opts.probeEur === true)
-  if (preference === 'EUR' && eur.status === 'ok') return { currency: 'EUR', usdPerEur: eur.usdPerEur, preference, eurAvailable: true }
-  return { currency: 'USD', usdPerEur: null, preference, eurAvailable: eur.status === 'ok' }
+  if (preference === 'EUR' && eur.status === 'ok') return { currency: 'EUR', usdPerEur: eur.usdPerEur, preference, eurAvailable: true, eurStatus: 'ok' }
+  return { currency: 'USD', usdPerEur: null, preference, eurAvailable: eur.status === 'ok', eurStatus: eur.status }
 }
 
 /** Pure: an amount × a USD price in the chosen currency, as `fmtFiat` text. */

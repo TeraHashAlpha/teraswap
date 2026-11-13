@@ -64,7 +64,7 @@ describe('fields match the quote object', () => {
     expect(screen.queryByTestId('review-min')).toBeNull()
     expect(screen.queryByTestId('review-min-pending')).toBeNull()
     expect(cell('review-fee')).toBe('Platform fee (0.1%) 0.001 ETH ($2.49)')
-    expect(cell('review-gas')).toBe('Est. gas $0.03 (~0.000012 ETH)')
+    expect(cell('review-gas')).toBe('Est. gas ~0.000012 ETH ($0.03)')
     expect(screen.getByRole('dialog', { name: 'Review Transaction' })).toBeTruthy()
     expect(screen.getByText('Verify the details before signing')).toBeTruthy()
   })

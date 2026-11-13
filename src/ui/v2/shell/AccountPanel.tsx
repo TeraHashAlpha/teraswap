@@ -8,6 +8,7 @@ import { fmtToken } from '@/lib/format'
 import { useQuoteChainId } from '@/hooks/useChainId'
 import { Button, Surface } from '../primitives'
 import { shortAddress } from './format-address'
+import { CurrencySwitch } from '../fiat/CurrencySwitch'
 
 /**
  * [ADR-025] Connected-account popover. Mirrors every element of v1's WalletModal (ENS name/avatar, address + copy,
@@ -97,6 +98,8 @@ export function AccountPanel({ open, onClose }: { open: boolean; onClose: () => 
         <span className="text-v2-dim">Connected via</span>
         <span className="text-v2-muted">{connector?.name ?? 'Wallet'}</span>
       </div>
+
+      <CurrencySwitch />
 
       <div className="grid grid-cols-3 gap-2 py-3">
         <a href={`${chain.blockExplorer}/address/${address}`} target="_blank" rel="noopener noreferrer" className={action}>
