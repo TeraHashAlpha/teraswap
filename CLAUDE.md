@@ -173,7 +173,7 @@ always qualify by chain. Operational status and the checks behind each row are i
 
 **Workflows** (10, `.github/workflows/`): CI (`ci.yml`), CodeQL (`codeql.yml`), Daily health report (`daily-health-report.yml`), Dependabot auto-merge (`dependabot-auto-merge.yml`), E2E (real-render) (`e2e.yml`), Gitleaks (`gitleaks.yml`), Keeper Tests (`keeper-tests.yml`), Monitoring Watchdog (`monitoring-watchdog.yml`), Security Audit (`security-audit.yml`), Token catalog refresh (`token-catalog-refresh.yml`)
 
-**ADRs** (`docs/ADR/`): 26 files, ADR-001 to ADR-026; latest `ADR-026-infra-failures-dont-burn-orders`, Status: Proposed
+**ADRs** (`docs/ADR/`): 27 files, ADR-001 to ADR-027; latest `ADR-027-basket-dca-three-orders`, Status: Proposed
 
 **Test files:** vitest 493 (the `include` globs of `vitest.config.ts`) · keeper node:test 52 · Foundry 3
 <!-- state:end -->
