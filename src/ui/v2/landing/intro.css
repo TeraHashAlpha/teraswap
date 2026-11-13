@@ -1,0 +1,83 @@
+/* [round 10] Landing entry animation. Timeline (measured from the approved cut, 1600x900, 3.9 s):
+     words   0.0 / 0.6 / 1.2 / 1.8 s, each fades in over 250 ms, holds, then is replaced by a cut; the last stays
+     curtain holds to 2.95 s, then sweeps up until 3.30 s, when the page is fully visible
+   Colours, the display face and the ease-out curve are the tokens in tokens.css; only the arc easing is new (fitted to the video). */
+.ts-intro {
+  --ts-intro-h: 100vh;
+  --ts-intro-arc: calc(var(--ts-intro-h) * 0.128); /* depth of the curved edge at its middle: 115 px of 900 in the video */
+  position: fixed; left: 0; top: 0; width: 100%; height: var(--ts-intro-h); z-index: 90; overflow: hidden;
+  --ts-intro-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cpath d='M0 0H100V88.652Q50 111.348 0 88.652Z'/%3E%3C/svg%3E");
+  pointer-events: none; /* only the curtain takes events, so the revealed part of the page is clickable at once */
+}
+@supports (height: 100dvh) { .ts-intro { --ts-intro-h: 100dvh; } }
+
+.ts-intro__curtain {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  pointer-events: auto; user-select: none;
+  background-color: var(--bg);
+  /* the video's staggered dot grid: 16 px pitch, rows 16 px apart, every other row shifted 8 px (cream at the existing 5 % alpha) */
+  background-image:
+    radial-gradient(circle at 4px 12px, rgba(234, 223, 182, 0.05) 1.5px, transparent 2px),
+    radial-gradient(circle at 12px 28px, rgba(234, 223, 182, 0.05) 1.5px, transparent 2px);
+  background-size: 16px 32px;
+  /* The curtain stays put and a mask slides up: the words are cut by the moving curved edge, as in the video. The mask is the
+     curtain's rectangle plus the arc under it (a quadratic, 88.652 + 111.348 = 200), 12.8 % deeper than the viewport. */
+  -webkit-mask-image: var(--ts-intro-mask); mask-image: var(--ts-intro-mask);
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-size: 100% calc(var(--ts-intro-h) + var(--ts-intro-arc)); mask-size: 100% calc(var(--ts-intro-h) + var(--ts-intro-arc));
+  -webkit-mask-position: 0 0; mask-position: 0 0;
+  animation: ts-intro-curtain 3300ms linear both; /* ends by itself: mask out, visibility:hidden, held by fill-mode */
+}
+
+.ts-intro__word {
+  grid-area: 1 / 1; opacity: 0; white-space: nowrap;
+  font-family: var(--font-display); font-weight: 700; line-height: 1; letter-spacing: -0.01em;
+  font-size: min(20vw, 36vh);
+  color: var(--cream);
+  /* a word fades in over 250 ms (of its 600 ms slot), holds, and is cut at the end of the slot */
+  animation: ts-intro-word 600ms var(--ease-out) both;
+  animation-delay: calc(var(--i) * 600ms);
+}
+.ts-intro__word[data-last] { animation: ts-intro-word-last 250ms var(--ease-out) both; animation-delay: calc(var(--i) * 600ms); }
+
+/* The cream rim along the curved edge. Same box as the mask image (viewport + arc), same easing, so it rides the mask edge. */
+.ts-intro__rim { position: absolute; left: 0; top: 0; width: 100%; height: calc(var(--ts-intro-h) + var(--ts-intro-arc)); display: block; pointer-events: none;
+  animation: ts-intro-rim 3300ms linear both; }
+.ts-intro__rim path { fill: none; stroke: var(--cream); stroke-width: 1.5; stroke-opacity: 0.85; }
+
+@keyframes ts-intro-word {
+  0% { opacity: 0; }
+  41.667% { opacity: 1; }
+  99.9% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes ts-intro-word-last {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* 2950 / 3300 = 89.394 %. The easing is a cubic-bezier fitted to four measured positions of the edge in the video.
+   The edge ends 4 px past the top; `visibility: hidden` then holds (fill-mode both). Once the sweep starts the curtain stops
+   taking pointer events, so the revealed part of the page can be clicked at once. */
+@keyframes ts-intro-curtain {
+  0%, 89.394% { -webkit-mask-position: 0 0; mask-position: 0 0; visibility: visible; pointer-events: auto; animation-timing-function: cubic-bezier(0.55, 0.1, 0.7, 1); }
+  100% {
+    -webkit-mask-position: 0 calc(-1 * (var(--ts-intro-h) + var(--ts-intro-arc) + 4px));
+    mask-position: 0 calc(-1 * (var(--ts-intro-h) + var(--ts-intro-arc) + 4px));
+    visibility: hidden; pointer-events: none;
+  }
+}
+@keyframes ts-intro-rim {
+  0%, 89.394% { transform: none; visibility: visible; animation-timing-function: cubic-bezier(0.55, 0.1, 0.7, 1); }
+  100% { transform: translateY(calc(-100% - 4px)); visibility: hidden; }
+}
+
+/* Skipped while a finger is still down (see Intro.tsx): the element under the finger must stay mounted until the gesture ends, so
+   it is only made invisible and click-through here. !important because the curtain's keyframes animate pointer-events. */
+.ts-intro[data-skipped] { opacity: 0; }
+.ts-intro[data-skipped] .ts-intro__curtain { pointer-events: none !important; }
+
+/* Reduced motion: no intro at all. tokens.css sets `animation: none` for the whole tree, which would leave the curtain
+   frozen over the page, so it is removed outright. (Intro.tsx does not mount it either.) */
+@media (prefers-reduced-motion: reduce) {
+  .ts-intro { display: none !important; }
+}

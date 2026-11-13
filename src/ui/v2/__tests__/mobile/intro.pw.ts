@@ -1,0 +1,390 @@
+/**
+ * [round 10] The landing entry animation, in real Chromium against `next start` (UI_V2_ENABLED=true): the timeline as built,
+ * every skip gesture (a click does not reach the link under it, a scroll still scrolls), reduced motion, a script that no
+ * longer runs, and the second load of a session.
+ *
+ *   V2_SHOTS_DIR=<dir>   also writes the measured timing table (intro-timing.json) there (evidence for FEEDBACK)
+ *
+ * Every other v2 Playwright run marks the intro as already played (`ts_v2_intro_seen`), so its first visit is not under the curtain.
+ */
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { expect, test, type Browser, type BrowserContext, type CDPSession, type Page, type TestInfo } from '@playwright/test'
+
+const KEY = 'ts_v2_intro_seen'
+const WORDS = ['Compare.', 'Verify.', 'Swap.', 'Repeat.']
+
+async function fresh(browser: Browser, opts: Parameters<Browser['newContext']>[0] = {}) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, ...opts })
+  const page = await context.newPage()
+  return { context, page }
+}
+
+/** Start a requestAnimationFrame sampler at document start: word opacities and the mask offset, per frame, while the overlay exists. */
+async function sampleFromStart(context: BrowserContext) {
+  await context.addInitScript(() => {
+    const w = window as unknown as { __intro: Array<{ t: number; o: number[]; y: number }> }
+    w.__intro = []
+    let t0 = -1
+    const tick = () => {
+      const root = document.querySelector('[data-ts-intro]')
+      if (root) {
+        const now = performance.now()
+        if (t0 < 0) t0 = now
+        const cs = getComputedStyle(root.querySelector('[data-ts-intro-curtain]') as Element)
+        const y = parseFloat((cs.maskPosition || cs.webkitMaskPosition || '0 0').split(' ')[1] ?? '0') || 0
+        const o = Array.from(root.querySelectorAll('.ts-intro__word')).map((n) => Number(getComputedStyle(n).opacity))
+        w.__intro.push({ t: now - t0, o, y })
+      }
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  })
+}
+
+const overlay = (page: Page) => page.locator('[data-ts-intro]')
+
+const PHONE = { viewport: { width: 375, height: 667 }, hasTouch: true, isMobile: true } as const
+/** The one touch drag all the phone specs send (the controls send exactly this too, with the intro out of the picture). Speed is in px/s. */
+const SCROLL_GESTURE = { x: 187, y: 400, yDistance: -300, speed: 800 } as const
+
+/** Spacing between two touchMove events. A finger on a phone reports every 8 to 16 ms; 10 px steps at 400 to 800 px/s are 12 to 25 ms apart. */
+const STEP_PX = 10
+const sleep = (ms: number) => new Promise<void>((done) => setTimeout(done, ms))
+
+/**
+ * A finger dragging up the page: CDP `Input.dispatchTouchEvent` (touchStart, a run of touchMove steps, touchEnd) on a context with
+ * hasTouch + isMobile. This goes through the same input path as a real touch, so the compositor turns it into a scroll. It replaces
+ * `Input.synthesizeScrollGesture`, which scrolled on a Mac but not at all on the Linux CI runner (the controls were red there).
+ */
+async function touchDrag(cdp: CDPSession, g: { x: number; y: number; yDistance: number; speed: number }) {
+  const point = (y: number) => [{ x: g.x, y, id: 0, radiusX: 1, radiusY: 1, force: 1 }]
+  const steps = Math.ceil(Math.abs(g.yDistance) / STEP_PX)
+  const gap = Math.max(1, Math.round((STEP_PX / g.speed) * 1000))
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: point(g.y) })
+  await sleep(50) // a finger rests a moment before it moves
+  for (let i = 1; i <= steps; i++) {
+    const travelled = Math.min(i * STEP_PX, Math.abs(g.yDistance))
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: point(g.y + Math.sign(g.yDistance) * travelled) })
+    await sleep(gap)
+  }
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+}
+
+type Probe = {
+  counts: Record<string, number>
+  firstTouchmove?: { overlayMounted: boolean; overlaySkipped: boolean; scrollY: number }
+}
+
+/**
+ * Diagnostics for the phone specs: installed before any page script, it counts what the PAGE saw of the gesture (capture phase on
+ * window, so it is recorded before the intro's own listeners run) and notes whether the overlay was mounted at the first touchmove.
+ */
+async function installProbe(context: BrowserContext) {
+  await context.addInitScript(() => {
+    const probe: Probe = { counts: { touchstart: 0, touchmove: 0, touchend: 0, touchcancel: 0, pointercancel: 0, scroll: 0 } }
+    ;(window as unknown as { __probe: Probe }).__probe = probe
+    for (const type of Object.keys(probe.counts)) {
+      window.addEventListener(
+        type,
+        () => {
+          probe.counts[type] += 1
+          if (type === 'touchmove' && !probe.firstTouchmove) {
+            const el = document.querySelector('[data-ts-intro]')
+            probe.firstTouchmove = { overlayMounted: el !== null, overlaySkipped: el?.hasAttribute('data-skipped') ?? false, scrollY: window.scrollY }
+          }
+        },
+        { capture: true, passive: true },
+      )
+    }
+  })
+}
+
+/** Everything that can say why a synthesized touch scroll did not move the page. Never throws: a failed read is itself reported. */
+async function collectDiagnostics(page: Page, label: string) {
+  const browser = page.context().browser()
+  const fromPage = await page
+    .evaluate(() => {
+      const vv = window.visualViewport
+      const se = document.scrollingElement
+      const probe = (window as unknown as { __probe?: Probe }).__probe
+      return {
+        scrollY: window.scrollY,
+        scrollingElement: se ? se.tagName : null,
+        scrollHeight: se?.scrollHeight ?? null,
+        clientHeight: se?.clientHeight ?? null,
+        innerWidth: window.innerWidth,
+        innerHeight: window.innerHeight,
+        visualViewport: vv ? { width: vv.width, height: vv.height, scale: vv.scale, offsetTop: vv.offsetTop, pageTop: vv.pageTop } : null,
+        maxTouchPoints: navigator.maxTouchPoints,
+        ontouchstartInWindow: 'ontouchstart' in window,
+        pointerCoarse: window.matchMedia('(pointer: coarse)').matches,
+        readyState: document.readyState,
+        htmlOverflow: getComputedStyle(document.documentElement).overflow,
+        bodyOverflow: getComputedStyle(document.body).overflow,
+        overlayMountedNow: document.querySelector('[data-ts-intro]') !== null,
+        userAgent: navigator.userAgent,
+        eventsSeenByPage: probe?.counts ?? 'probe not installed',
+        atFirstTouchmove: probe?.firstTouchmove ?? 'no touchmove reached the page',
+      }
+    })
+    .catch((e: unknown) => ({ evaluateFailed: String(e) }))
+  return {
+    spec: label,
+    browser: browser ? `${browser.browserType().name()} ${browser.version()}` : 'unknown',
+    viewportSize: page.viewportSize(),
+    node: process.version,
+    platform: `${process.platform}/${process.arch}`,
+    ci: process.env.CI ?? null,
+    ...fromPage,
+  }
+}
+
+/** One line in the CI log (the list reporter prints stdout) and an attachment on the test, so a red run says what the page saw. */
+async function report(page: Page, testInfo: TestInfo, label: string, outcome: 'FAILED' | 'ok') {
+  const diag = await collectDiagnostics(page, label).catch((e: unknown) => ({ spec: label, collectFailed: String(e) }))
+  const body = JSON.stringify(diag, null, 2)
+  console.log(`INTRO-DIAG ${outcome} ${JSON.stringify(diag)}`)
+  await testInfo.attach(`intro-diagnostics-${outcome}`, { body, contentType: 'application/json' }).catch(() => {})
+}
+
+/**
+ * The assertion every phone spec ends on: the page moved. Same check as before (scrollY > 0 within 5 s); on failure it first reports
+ * the diagnostics above, then rethrows the original error, so it is no weaker and a red run explains itself.
+ */
+async function expectPageScrolled(page: Page, testInfo: TestInfo, label: string) {
+  try {
+    await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 5_000 }).toBeGreaterThan(0)
+  } catch (err) {
+    await report(page, testInfo, label, 'FAILED')
+    throw err
+  }
+}
+
+test.describe('v2 landing intro', () => {
+  test('timeline as built: words at 0.0 / 0.6 / 1.2 / 1.8 s, sweep 2.95 to 3.30 s, overlay gone after', async ({ browser }) => {
+    const { context, page } = await fresh(browser)
+    await sampleFromStart(context)
+    await page.goto('/', { waitUntil: 'domcontentloaded' })
+    await expect(overlay(page)).toHaveCount(1, { timeout: 20_000 })
+    await expect(overlay(page)).toHaveCount(0, { timeout: 8_000 })
+    const s = await page.evaluate(() => (window as unknown as { __intro: Array<{ t: number; o: number[]; y: number }> }).__intro)
+    expect(s.length).toBeGreaterThan(100)
+
+    const first = (i: number, pred: (v: number) => boolean) => s.find((f) => pred(f.o[i]))?.t ?? NaN
+    const rows = WORDS.map((word, i) => {
+      const appear = first(i, (v) => v > 0.02)
+      const full = first(i, (v) => v >= 0.95)
+      const afterFull = s.find((f) => f.t > full && f.o[i] < 0.02)?.t ?? NaN
+      return { word, appearMs: Math.round(appear), fullMs: Math.round(full), cutMs: Math.round(afterFull) }
+    })
+    const sweepStart = s.find((f) => f.y < -2)?.t ?? NaN
+    const last = s[s.length - 1]
+    const timing = { rows, sweepStartMs: Math.round(sweepStart), lastFrameMs: Math.round(last.t), frames: s.length }
+    console.log('INTRO TIMING ' + JSON.stringify(timing))
+    if (process.env.V2_SHOTS_DIR) {
+      mkdirSync(process.env.V2_SHOTS_DIR, { recursive: true })
+      writeFileSync(join(process.env.V2_SHOTS_DIR, 'intro-timing.json'), JSON.stringify(timing, null, 2))
+    }
+
+    const TOL = 120 // one or two dropped frames in a loaded headless run
+    rows.forEach((r, i) => {
+      expect(Math.abs(r.appearMs - i * 600)).toBeLessThan(TOL)
+      expect(r.fullMs - r.appearMs).toBeLessThan(400) // fade-in of about 250 ms
+      if (i < 3) expect(Math.abs(r.cutMs - (i + 1) * 600)).toBeLessThan(TOL) // replaced by a cut at the end of its 600 ms slot
+    })
+    expect(Math.abs(sweepStart - 2950)).toBeLessThan(TOL + 60) // the first measurable move of the edge
+    expect(Math.abs(last.t - 3300)).toBeLessThan(TOL + 60)
+    await context.close()
+  })
+
+  test('the landing is there under it from the start: the hero is in the DOM while the overlay plays', async ({ browser }) => {
+    const { context, page } = await fresh(browser)
+    await page.goto('/', { waitUntil: 'domcontentloaded' })
+    await expect(overlay(page)).toHaveCount(1, { timeout: 20_000 })
+    await expect(page.locator('#hero h1')).toHaveCount(1)
+    await expect(overlay(page)).toHaveAttribute('aria-hidden', 'true')
+    await context.close()
+  })
+
+  test('plays on the first load, not on the second load of the same session, and again in a new session', async ({ browser }) => {
+    const { context, page } = await fresh(browser)
+    await page.goto('/', { waitUntil: 'domcontentloaded' })
+    await expect(overlay(page)).toHaveCount(1, { timeout: 20_000 })
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), KEY)).toBe('1')
+    await expect(overlay(page)).toHaveCount(0, { timeout: 8_000 })
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await expect(page.locator('#hero h1')).toHaveCount(1, { timeout: 20_000 })
+    await page.waitForTimeout(600)
+    await expect(overlay(page)).toHaveCount(0)
+    await context.close()
+
+    const again = await fresh(browser)
+    await again.page.goto('/', { waitUntil: 'domcontentloaded' })
+    await expect(overlay(again.page)).toHaveCount(1, { timeout: 20_000 })
+    await again.context.close()
+  })
+
+  test('a click skips it and does not activate the link under it', async ({ browser }) => {
+    const { context, page } = await fresh(browser)
+    await page.goto('/', { waitUntil: 'domcontentloaded' })
+    await expect(overlay(page)).toHaveCount(1, { timeout: 20_000 })
+    const cta = await page.locator('#hero').getByRole('button', { name: /launch app/i }).first().boundingBox()
+    expect(cta).not.toBeNull()
+    const x = cta!.x + cta!.width / 2
+    const y = cta!.y + cta!.height / 2
+    // the curtain, not the button, is what is at that point
+    expect(await page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.closest('[data-ts-intro]') !== null, [x, y])).toBe(true)
+    await page.mouse.click(x, y)
+    await expect(overlay(page)).toHaveCount(0)
+    await expect(page.locator('#hero h1')).toHaveCount(1) // still the landing: "Launch app" was not pressed
+    await context.close()
+  })
+
+  test('a key press skips it', async ({ browser }) => {
+    const { context, page } = await fresh(browser)
+    await page.goto('/', { waitUntil: 'domcontentloaded' })
+    await expect(overlay(page)).toHaveCount(1, { timeout: 20_000 })
+    await page.keyboard.press('Tab')
+    await expect(overlay(page)).toHaveCount(0)
+    await context.close()
+  })
+
+  test('a wheel turn skips it and the page scrolls', async ({ browser }) => {
+    const { context, page } = await fresh(browser)
+    await page.goto('/', { waitUntil: 'domcontentloaded' })
+    await expect(overlay(page)).toHaveCount(1, { timeout: 20_000 })
+    await page.mouse.move(720, 450)
+    await page.mouse.wheel(0, 600)
+    await expect(overlay(page)).toHaveCount(0)
+    await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 5_000 }).toBeGreaterThan(0)
+    await context.close()
+  })
+
+  // CONTROL for the two touch-scroll specs below: the intro is marked as already played, so it is never mounted, and the identical
+  // touch drag (CDP touchStart / touchMove steps / touchEnd) is sent. If THIS fails in an environment, that environment cannot scroll
+  // by a dispatched touch drag at all and the intro is not the cause; if it passes while the specs below fail, the intro (or its
+  // timing) is. The intro specs mean something only when the controls are green.
+  // One control per gesture the two specs send (they differ only in speed: 800 and 400 px/s).
+  for (const speed of [800, 400]) {
+    test(`control: with the intro already played, the same touch drag (${speed} px/s) moves the page`, async ({ browser }, testInfo) => {
+      const label = `control (no intro, ${speed} px/s)`
+      const { context, page } = await fresh(browser, PHONE)
+      await context.addInitScript((k) => sessionStorage.setItem(k, '1'), KEY)
+      await installProbe(context)
+      await page.goto('/', { waitUntil: 'domcontentloaded' })
+      await expect(page.locator('#hero h1')).toHaveCount(1, { timeout: 20_000 }) // the landing is client-rendered: this means it is up
+      await expect(overlay(page)).toHaveCount(0)
+      await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))))
+      const cdp = await context.newCDPSession(page)
+      await touchDrag(cdp, { ...SCROLL_GESTURE, speed })
+      await expectPageScrolled(page, testInfo, label)
+      await report(page, testInfo, label, 'ok') // also logged when green, to compare with a red run next to it
+      await context.close()
+    })
+  }
+
+  test.describe('on a phone', () => {
+    test('a tap skips it and does not activate the link under it; a touch scroll skips it and scrolls', async ({ browser }, testInfo) => {
+      const tap = await fresh(browser, { viewport: { width: 375, height: 667 }, hasTouch: true, isMobile: true })
+      await tap.page.goto('/', { waitUntil: 'domcontentloaded' })
+      await expect(overlay(tap.page)).toHaveCount(1, { timeout: 20_000 })
+      const cta = await tap.page.locator('#hero').getByRole('button', { name: /launch app/i }).first().boundingBox()
+      expect(cta).not.toBeNull()
+      await tap.page.touchscreen.tap(Math.min(cta!.x + cta!.width / 2, 360), Math.min(cta!.y + cta!.height / 2, 650))
+      await expect(overlay(tap.page)).toHaveCount(0)
+      await expect(tap.page.locator('#hero h1')).toHaveCount(1)
+      await tap.context.close()
+
+      const drag = await fresh(browser, PHONE)
+      await installProbe(drag.context)
+      await drag.page.goto('/', { waitUntil: 'domcontentloaded' })
+      await expect(overlay(drag.page)).toHaveCount(1, { timeout: 20_000 })
+      const cdp = await drag.context.newCDPSession(drag.page)
+      await touchDrag(cdp, SCROLL_GESTURE)
+      await expect(overlay(drag.page)).toHaveCount(0)
+      await expectPageScrolled(drag.page, testInfo, 'intro: tap-then-drag spec (a touch scroll skips it and scrolls)')
+      await drag.context.close()
+    })
+  })
+
+  test.describe('the gesture that skips it is not swallowed', () => {
+    test('the touched overlay is still mounted when the scroll begins, and goes once the finger lifts', async ({ browser }, testInfo) => {
+      // Chromium starts a scroll on the element under the finger. Unmounting it on the first touchmove can lose the scroll when the
+      // removal beats the scroll begin (a slow Linux runner; a fast Mac wins the race), so the overlay may only go when the finger lifts.
+      const { context, page } = await fresh(browser, PHONE)
+      await installProbe(context)
+      await context.addInitScript(() => {
+        const w = window as unknown as { __mountedAtFirstScroll?: boolean; __skippedAtFirstScroll?: boolean }
+        window.addEventListener(
+          'scroll',
+          () => {
+            if (w.__mountedAtFirstScroll !== undefined) return
+            const el = document.querySelector('[data-ts-intro]')
+            w.__mountedAtFirstScroll = el !== null
+            w.__skippedAtFirstScroll = el?.hasAttribute('data-skipped') ?? false
+          },
+          { capture: true, passive: true },
+        )
+      })
+      await page.goto('/', { waitUntil: 'domcontentloaded' })
+      await expect(overlay(page)).toHaveCount(1, { timeout: 20_000 })
+      const cdp = await context.newCDPSession(page)
+      // 400 px/s: the whole drag (300 px) takes about 0.75 s, so it ends well before the overlay's own 3.3 s end could remove it
+      await touchDrag(cdp, { ...SCROLL_GESTURE, speed: 400 })
+      await expect(overlay(page)).toHaveCount(0)
+      await expectPageScrolled(page, testInfo, 'intro: not-swallowed spec (overlay mounted when the scroll begins)')
+      const seen = await page.evaluate(() => {
+        const w = window as unknown as { __mountedAtFirstScroll?: boolean; __skippedAtFirstScroll?: boolean }
+        return [w.__mountedAtFirstScroll, w.__skippedAtFirstScroll]
+      })
+      expect(seen).toEqual([true, true]) // mounted, and already marked skipped (invisible, click-through) when the page began to move
+      await context.close()
+    })
+  })
+
+  test('prefers-reduced-motion: reduce plays no intro at all', async ({ browser }) => {
+    const { context, page } = await fresh(browser, { reducedMotion: 'reduce' })
+    await page.goto('/', { waitUntil: 'domcontentloaded' })
+    await expect(page.locator('#hero h1')).toHaveCount(1, { timeout: 20_000 })
+    await expect(overlay(page)).toHaveCount(0)
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), KEY)).toBeNull()
+    await context.close()
+  })
+
+  test('with scripts off the page is not held: the server HTML has no overlay (and a <noscript> would hide it)', async ({ browser }) => {
+    const { context, page } = await fresh(browser, { javaScriptEnabled: false })
+    const res = await page.goto('/', { waitUntil: 'domcontentloaded' })
+    expect(res?.status()).toBe(200)
+    expect(await page.content()).not.toContain('ts-intro')
+    await context.close()
+  })
+
+  test('with its script gone it still ends by itself: CSS alone makes it invisible and click-through', async ({ browser }) => {
+    const { context, page } = await fresh(browser)
+    await page.goto('/', { waitUntil: 'domcontentloaded' })
+    await expect(overlay(page)).toHaveCount(1, { timeout: 20_000 })
+    // Replace the overlay with a copy React does not know: no handler, no state update can remove it. Only its CSS can.
+    await page.evaluate(() => {
+      const el = document.querySelector('[data-ts-intro]') as Element
+      el.replaceWith(el.cloneNode(true))
+    })
+    const cta = await page.locator('#hero').getByRole('button', { name: /launch app/i }).first().boundingBox()
+    await page.waitForTimeout(3_700)
+    expect(await page.locator('[data-ts-intro-curtain]').evaluate((n) => getComputedStyle(n).visibility)).toBe('hidden')
+    expect(await page.locator('.ts-intro__rim').evaluate((n) => getComputedStyle(n).visibility)).toBe('hidden')
+    expect(await page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.closest('[data-ts-intro]') === null, [cta!.x + 10, cta!.y + 10])).toBe(true)
+    await context.close()
+  })
+
+  test('is on the landing only: not on an app tab, Docs, Privacy or Terms, and not after returning to the landing', async ({ browser }) => {
+    const { context, page } = await fresh(browser)
+    for (const path of ['/swap', '/docs', '/privacy', '/terms']) {
+      await page.goto(path, { waitUntil: 'domcontentloaded' })
+      await page.waitForTimeout(1_500)
+      await expect(overlay(page), path).toHaveCount(0)
+    }
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), KEY)).toBeNull() // none of them used up the session's one play
+    await context.close()
+  })
+})
