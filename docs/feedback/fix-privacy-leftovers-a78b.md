@@ -36,35 +36,5 @@ other: Cache Storage `teraswap-v1`, static files only, API never cached (`public
 
 ### Evidence 4: verify, diff --stat, compare link
 `scripts/agent-verify.sh --codeql` at 9d23b75 (base origin/main 649105f): suite PASS 10650 / 0 failed / 497 files · lint-delta PASS +0/+0 · tsc PASS 0 · build PASS · v1v2-parity PASS 111 · rpc-budget PASS 36 · CodeQL PASS head 13 / base 13 / new 0. Hosts capture (production build, CI marker env): 16 passed. `check-product-claims.mjs`, `gen-claude-state.mjs --check`, `check-agents-parity.mjs`: PASS. No U+2014 or spaced U+2013 on added lines. Unchanged: logging, storage, orders, swap history, signing, CSP, rate-limit numbers, database, dependencies. Not run: `--keeper`, `goal-lint` (no `CONTROL:` line).
-`git diff --stat origin/main...HEAD` excluding `docs/feedback/` (taken at bee1b829):
-```
- AGENTS.md                                          |   2 +-
- CLAUDE.md                                          |   2 +-
- scripts/check-product-claims.mjs                   |   2 +
- src/app/api/CLAUDE.md                              |   4 +-
- .../api/log-activity/route.no-session-id.test.ts   |   3 +-
- src/app/api/log-activity/route.ts                  |   4 +-
- src/app/api/log-quote/route.ts                     |   4 +-
- src/app/api/log-routes.hardening.test.ts           |   2 +-
- src/app/api/log-routes.hung-kv.test.ts             |  83 +++++++++
- src/app/api/log-routes.limiter.test.ts             | 144 +++++++++++++++
- src/app/api/log-swap/route.test.ts                 |   1 +
- src/app/api/log-swap/route.ts                      |   4 +-
- src/app/metadata.copy.guard.test.ts                |  19 +-
- src/components/DocsPage.tsx                        |   4 +-
- src/components/LegalPage.tsx                       |  13 +-
- src/config/product-claims.ts                       |  21 ++-
- src/hooks/useQuote.log-quote.callers.test.ts       | 202 +++++++++++++++++++++
- src/hooks/useQuote.log-quote.test.ts               |  21 +--
- src/lib/client-ip-key.guard.test.ts                |   3 +-
- src/lib/help-content.test.ts                       |   7 +-
- src/lib/help-content.ts                            |   4 +-
- src/lib/wagmiConfig.test.ts                        |  21 +++
- src/lib/wagmiConfig.ts                             |   8 +-
- src/ui/v2/docs-legal/DocsTabV2.tsx                 |   4 +-
- src/ui/v2/docs-legal/LegalPageV2.tsx               |  13 +-
- src/ui/v2/docs-legal/browser-storage-list.test.ts  | 100 ++++++++++
- src/ui/v2/docs-legal/privacy-copy.test.tsx         |  51 +++++-
- 27 files changed, 686 insertions(+), 60 deletions(-)
-```
+`git diff --stat origin/main...HEAD` (excluding `docs/feedback/`, at bee1b829): **27 files changed, 686 insertions(+), 60 deletions(-)**; largest: `useQuote.log-quote.callers.test.ts` 202, `log-routes.limiter.test.ts` 144, `browser-storage-list.test.ts` 100, `log-routes.hung-kv.test.ts` 83, `privacy-copy.test.tsx` 51, `product-claims.ts` 21, `wagmiConfig.test.ts` 21; the three log routes 4 each. Per-file stat: `fix-privacy-leftovers-a78b.evidence.md`.
 Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/privacy-leftovers-a78b

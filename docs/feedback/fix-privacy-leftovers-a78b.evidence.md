@@ -70,3 +70,35 @@ git diff --stat origin/main...HEAD   (before this file's last edit; the feedback
  28 files changed, 763 insertions(+), 60 deletions(-)
 ```
 Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/privacy-leftovers-a78b
+
+### Full `git diff --stat origin/main...HEAD` (excluding `docs/feedback/`, at bee1b829)
+```
+ AGENTS.md                                          |   2 +-
+ CLAUDE.md                                          |   2 +-
+ scripts/check-product-claims.mjs                   |   2 +
+ src/app/api/CLAUDE.md                              |   4 +-
+ .../api/log-activity/route.no-session-id.test.ts   |   3 +-
+ src/app/api/log-activity/route.ts                  |   4 +-
+ src/app/api/log-quote/route.ts                     |   4 +-
+ src/app/api/log-routes.hardening.test.ts           |   2 +-
+ src/app/api/log-routes.hung-kv.test.ts             |  83 +++++++++
+ src/app/api/log-routes.limiter.test.ts             | 144 +++++++++++++++
+ src/app/api/log-swap/route.test.ts                 |   1 +
+ src/app/api/log-swap/route.ts                      |   4 +-
+ src/app/metadata.copy.guard.test.ts                |  19 +-
+ src/components/DocsPage.tsx                        |   4 +-
+ src/components/LegalPage.tsx                       |  13 +-
+ src/config/product-claims.ts                       |  21 ++-
+ src/hooks/useQuote.log-quote.callers.test.ts       | 202 +++++++++++++++++++++
+ src/hooks/useQuote.log-quote.test.ts               |  21 +--
+ src/lib/client-ip-key.guard.test.ts                |   3 +-
+ src/lib/help-content.test.ts                       |   7 +-
+ src/lib/help-content.ts                            |   4 +-
+ src/lib/wagmiConfig.test.ts                        |  21 +++
+ src/lib/wagmiConfig.ts                             |   8 +-
+ src/ui/v2/docs-legal/DocsTabV2.tsx                 |   4 +-
+ src/ui/v2/docs-legal/LegalPageV2.tsx               |  13 +-
+ src/ui/v2/docs-legal/browser-storage-list.test.ts  | 100 ++++++++++
+ src/ui/v2/docs-legal/privacy-copy.test.tsx         |  51 +++++-
+ 27 files changed, 686 insertions(+), 60 deletions(-)
+```
