@@ -1,11 +1,12 @@
 /**
  * GUARD: the words a link preview, an install prompt or a search result shows say what the site is today.
  *   - No "MEV" anywhere in layout.tsx's strings or in public/manifest.json: the owner retired every MEV promise on 2026-11-06
- *     (src/ui/v2/swap/retire-force-mev.swap.test.tsx), and a card that still says it contradicts the product.
+ *     (see the MEV_PROTECTION_CLAIM note in product-claims.ts), and a card that still says it contradicts the product.
  *   - The manifest description is the page description (SITE_META_DESCRIPTION), so its source count and chain list come from
  *     the same derivation as the page, never from a number typed into JSON.
  *   - None of the retired phrasings of the old card.
- * The em-dash rule for both files is in src/ui/v2/__tests__/no-em-dash.guard.test.tsx (net 1 for layout.tsx, net 4 for the manifest).
+ * The em-dash rule for both files is in no-em-dash.guard.test.tsx (net 1 for layout.tsx, net 4 for the manifest). This file lives
+ * in src/app, so it must not name that test's v2 path (the v1-isolation test greps src/app for it).
  * layout.tsx is read as text: importing it pulls in next/font, which only exists inside the Next build.
  */
 import { readFileSync } from 'node:fs'
