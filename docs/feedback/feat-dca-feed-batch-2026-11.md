@@ -1,43 +1,45 @@
-# feat/dca-feed-batch-2026-11 — FEEDBACK (no PR, NO tx, no key; Draft PR + **Auditor required**)
+# feat/dca-feed-batch-2026-11 — FEEDBACK (no PR, NO tx, no key; open as Draft, **Auditor required**)
+Commits `4392144` tool + batch-1 config · `185f022` mirror, pins, keeper data · `d3077a1` runbook §9 · `49843e8` merge of main (PR #686) · this file. Owner answer 2026-11-13 (asked once): "enabled: true" and "no keeper change" cannot both hold, the keeper drift guard (`price-sources.test.mjs`) needs the keeper Chainlink mirror to equal every enabled row (measured: "token key set drifted"). Answer: **allow the keeper mirror DATA**, add `--keeper`.
 
-Checklist: [x] premise · [x] commit 1 tool + config · [x] commit 2 mirror + pins + keeper data · [x] commit 3 runbook · [ ] verify · [ ] push
+## READ FIRST: IN EFFECT AT DEPLOY, BEFORE THE ON-CHAIN EXECUTE (seven tokens: MORPHO AAVE LINK USDS AERO ZRO YFI)
+1. **SWAP (v1 + v2): A SWAP TOUCHING ONE OF THE SEVEN IS HARD-BLOCKED AT ANY SIZE WHILE ITS FEED CANNOT BE READ OR VERIFIED** (RPC read failure, round older than 129 600 s, description/decimals mismatch; `price-gate.ts:62-64`, `useChainlinkPrice.ts:392, 416`). Today it passes with a warning below $10 000.
+2. **DCA CREATION (v1 + v2): THE SAME FEED FAILURE BLOCKS CREATING A DCA WITH THAT TOKEN, AND DEFILLAMA MAY NOT SUBSTITUTE** (`DCAPanel.tsx:533-549`, `ui/v2/dca/use-dca-form.ts:188-190`). Today the signed minimum falls back to DefiLlama.
+3. **LIMIT / TAKE-PROFIT (v1, only where `NEXT_PUBLIC_LIMIT_ENABLED=true`, not readable from the repo): THE SEVEN BECOME SIGNABLE, BUT THE CONTRACT JUDGES A TRIGGER FEED WITH 300 s STALENESS** (`TeraSwapOrderExecutorV3.sol:133, 1121-1125`) unless `oracleConfigs[feed]` is set, and it is set for NO Base feed (read on-chain, all 19). **ON A 24 h-HEARTBEAT FEED SUCH AN ORDER CAN FILL ONLY WITHIN 5 MIN OF A FEED ROUND.** Already true for COMP EURC USDT VIRTUAL; `setOracleConfig` is a separate, instant admin call (ADR-019), outside this runbook.
 
-Owner answer 2026-11-13 (asked once): "enabled: true" and "no keeper change" cannot both hold; the keeper drift guard
-(`contracts/order-engine/executor/price-sources.test.mjs`) requires the keeper Chainlink mirror to equal every enabled row.
-Answer: **allow the keeper mirror DATA** (eight Base entries copied from the config, drift guard untouched), add `--keeper` to verify.
+## 1 Premise (2026-11-13; mainnet.base.org + base-rpc.publicnode.com; directory https://reference-data-directory.vercel.app/feeds-ethereum-mainnet-base-1.json)
+Confirmed: MORPHO AERO cbETH ZRO YFI were rows (medium, phase 2, disabled); AAVE LINK USDS had no row, are in the Base catalog JSON, have live "X / USD" feeds; AAVE has two proxies (plain `aave-usd` taken; `aave-usd-svr` and its secondary never); the CSV is not in the repo; `tokenUsdFeeds` is unregistered for all eight on both RPCs. **wstETH:** the directory has `WSTETH / ETH` and five exchange-rate entries, no USD feed; the tool refuses it; no composite built. **DAI:** registered on-chain (`0x591e…C78F`, maxStaleness 90000) with no row; `verify.ts` walks config rows only, so it never reads DAI and prints nothing for it. Not fixed.
+Differences: (a) the keeper mirror, above. (b) Enabling cbETH made `chainlink-feeds.ts` throw at import (assert (b), FIX-CBETH-DIRECT-FEED): the mirror now keeps a preferred-direct token out of the terminal map and refuses to load if row and preferred feed differ; "mirrors every enabled row" is true minus cbETH. (c) `lib.ts` refused any enabled phase-2 row and `plan.ts`/`verify.ts` skipped phase 2: both now take a well-formed batch row. `plan.ts` reads ONE RPC; the two-RPC check is in `batch.ts`. (d) The directory has no token-address field, so created rows join by exact symbol. (e) AAVE LINK USDS are not in the curated 24-token Base list (search only).
 
-## 3 Behaviour changes (commit 2). Seven tokens gain a swap-side feed: MORPHO AAVE LINK USDS AERO ZRO YFI. cbETH app-side is unchanged.
-**IN EFFECT AT DEPLOY, BEFORE THE ON-CHAIN EXECUTE (the three that can block or mislabel):**
-1. **SWAP (v1 + v2): A SWAP TOUCHING ONE OF THE SEVEN IS HARD-BLOCKED AT ANY SIZE WHILE ITS FEED CANNOT BE READ OR VERIFIED** (RPC read
-   failure, round older than 129 600 s = 1.5 x heartbeat, description/decimals mismatch): `price-gate.ts:62-64`, `useChainlinkPrice.ts:392, 416`.
-   Today that swap passes with a warning below $10 000. Outage-only.
-2. **DCA CREATION (v1 + v2): THE SAME FEED FAILURE BLOCKS CREATING A DCA WITH THAT TOKEN, AND DEFILLAMA MAY NOT SUBSTITUTE**
-   (`DCAPanel.tsx:533-549`, `ui/v2/dca/use-dca-form.ts:188-190`). Today the signed minimum falls back to DefiLlama.
-3. **LIMIT / TAKE-PROFIT (v1, only where `NEXT_PUBLIC_LIMIT_ENABLED=true`; not readable from the repo): THE SEVEN BECOME SIGNABLE, BUT THE
-   CONTRACT JUDGES A TRIGGER FEED WITH 300 s STALENESS** (`TeraSwapOrderExecutorV3.sol:133, 1121-1125`) unless `oracleConfigs[feed]` is set, and
-   it is set for NO Base feed (read on-chain 2026-11-13, all 19). **ON A 24 h-HEARTBEAT FEED SUCH AN ORDER CAN FILL ONLY WITHIN 5 MIN OF A
-   FEED ROUND.** Already true for COMP, EURC, USDT, VIRTUAL. Registering `tokenUsdFeeds` does not change it.
+## 2 `plan.ts --chain base` (read-only, exit 0): `summary: 8 register, 0 replace, 0 BLOCKED, 6 unchanged (skipped)`
+Its eight `register` rows (current feed `(unregistered)`, status `plan`) joined with the `batch.ts` columns; feed decimals 8, token decimals 18, two RPCs equal; the eight calldata items decode back to their rows:
+```
+symbol  token                                       target feed                                 description   category heartbeat maxStaleness age
+AERO    0x940181a94A35A4569E4529A3CDfB74e38FD98631  0x4EC5970fC728C5f65ba413992CD5fF6FD70fcfF0  AERO / USD    medium   86400     90000        754 s
+MORPHO  0xBAa5CC21fd487B8Fcc2F632f3F4E8D37262a0842  0xe95e258bb6615d47515Fc849f8542dA651f12bF6  MORPHO / USD  medium   86400     90000        5455 s
+YFI     0x9EaF8C1E34F05a589EDa6BAfdF391Cf6Ad3CB239  0xD40e758b5eC80820B68DFC302fc5Ce1239083548  YFI / USD     medium   86400     90000        427 s
+ZRO     0x6985884C4392D348587B19cb9eAAf157F13271cd  0xdc31a4CCfCA039BeC6222e20BE7770E12581bfEB  ZRO / USD     medium   86400     90000        462 s
+cbETH   0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22  0xd7818272B9e248357d13057AAb0B417aF31E817d  CBETH / USD   medium   1200      4800         80 s
+AAVE    0x63706e401c06ac8513145b7687A14804d17f814b  0x3d6774EF702A10b20FCa8Ed40FC022f7E4938e07  AAVE / USD    low      86400     90000        2574 s
+LINK    0x88Fb150BDc53A65fe94Dea0c9BA0a6dAf8C6e196  0x17CAb8FE31E32f08326e5E27412894e49B0f9D65  LINK / USD    low      86400     90000        2943 s
+USDS    0x820C137fa70C8691f0e44Dc420a5e53c168921Dc  0x2330aaE3bca5F05169d5f4597964D44522F62930  USDS / USD    medium   86400     90000        19343 s
+```
+Phase-1 rows USDC (replace) COMP EURC USDT VIRTUAL cbBTC: current feed == target, `unchanged (skipped)`.
 
-Other changes at deploy:
-4. Swap, healthy feed: the "No Chainlink oracle" warning and the unverified tiers (warn > $1 000, block > $10 000, `constants.ts:501-503`) stop
-   applying to that leg; a leg quoted against USDC/USDbC/USDT/DAI is deviation-checked (2 % warn, 3 % consent, > 25 % block). USDS is not in the
-   Base USD-stable list (`isUsdStablecoin('USDS', 8453)` = false), so it is checked as a priced leg, never used as a $1 reference.
-5. `/api/swap` value estimate gains a Chainlink candidate for the seven (`route.ts:292-296`): fewer `unpriced_ack_required`; the > $10 000
-   guard can now engage on a swap whose only priced side is one of them (read from code, not exercised against DefiLlama).
-6. `/api/swap-price-tier` (advisory): Chainlink joins the quorum when its round is <= 600 s old. `/api/oracle-coverage`: `hasChainlink` true.
-7. Copy "N token price feeds on Base" (`chainlinkFeedCountFor(8453)`, landing + docs, v1 + v2): 9 -> 16 (measured).
-8. Limit/TP signable tokens of the curated Base list: 9 -> 13 (measured); AAVE, LINK, USDS are signable through search only. cbETH: never.
-9. Keeper, ONLY after the owner redeploys it: Chainlink is a third quorum source for the eight when its round is <= 600 s old
-   (`MAX_PRICE_AGE_SEC`); it can break a DefiLlama/CoinGecko tie that skips a cycle today. Round older than that: absent, as today.
+## 3 Behaviour changes (commit 2), besides the three above
+At deploy: (4) healthy feed: the "No Chainlink oracle" warning and the unverified tiers (warn > $1 000, block > $10 000) stop applying to that leg; a leg against USDC/USDbC/USDT/DAI is deviation-checked (2 % warn, 3 % consent, > 25 % block); USDS is not in the Base USD-stable list, so it is a priced leg, never a $1 reference. (5) `/api/swap` value estimate gains a Chainlink candidate (`route.ts:292-296`): fewer `unpriced_ack_required`; the > $10 000 guard can engage on a swap whose only priced side is one of the seven (read from code, not exercised). (6) `/api/swap-price-tier` (advisory): Chainlink joins when its round is <= 600 s old. (7) Copy "N token price feeds on Base": 9 -> 16 (measured). (8) Limit/TP signable tokens of the curated Base list: 9 -> 13 (measured); AAVE LINK USDS through search only; cbETH never. (9) Keeper, ONLY after the owner redeploys it: Chainlink is a third quorum source for the eight when its round is <= 600 s old.
+**DCA floor tier before the execute: unchanged** (read from the executor's `tokenUsdFeeds`, `dca-floor-tier.ts:105-117`, never from the mirror): `offchain-price` / `unpriced` with the consent dialog. **After the execute:** a pair with both legs registered is `onchain-feed` (no consent, max(oracleFloor, scaledMin) on-chain), no deploy needed; the consent copy's `registeredFeedCount` rises by 5, not 8 (it counts the curated list).
+Pinned tests, none deleted or loosened: `chainlink-feeds.test.ts` ("phase 2 rows are disabled" is now "enabled ONLY inside a batch", rows pinned by name; +2), `price-feed.test.ts` (re-pinned from the resolver; +1), Limit and SL/TP panel tests (the no-feed token is wstETH; +1 each).
 
-DCA floor tier. **Before the execute: unchanged.** The tier is read from the executor's `tokenUsdFeeds` (`dca-floor-tier.ts:105-117`), never
-from the mirror: pairs with the eight stay `offchain-price` / `unpriced` with the consent dialog. **After the execute:** a pair with both legs
-registered classifies `onchain-feed` (no consent, contract enforces max(oracleFloor, scaledMin)) with no deploy. `registeredFeedCount` in the
-consent copy counts the curated 24-token list, so it rises by 5, not 8: AAVE, LINK, USDS are search-only (finding, not fixed).
+## 4 Config diff: `git diff origin/main -- src/config/dca-feed-registrations.json` = +68 -15, Base only
+MORPHO AERO cbETH ZRO YFI: `enabled`, `action`, new `batch` (tier and maxStaleness already equal). AAVE LINK USDS appended. Every other row byte-identical (test "leaves every other row byte-identical"; the committed rows equal a replay of the recorded fixtures).
 
-cbETH: its enabled row made `chainlink-feeds.ts` throw at import (assert (b), FIX-CBETH-DIRECT-FEED). The mirror now keeps a preferred-direct
-token out of the terminal map and refuses to load if the row and the preferred feed differ. "Mirrors every enabled row" is true minus cbETH.
+## 5 Verify
+`scripts/agent-verify.sh --codeql --keeper` @ `49843e8` (base origin/main `649105f`): **RESULT: PASS**. suite 10632 passed / 0 failed, 494 files · lint-delta +0/+0 · tsc 0 errors · build ok · v1v2-parity 111/0 · rpc-budget 36/0 · codeql security-extended head 13, base 13, new 0 · keeper node20 1240-pass/0-fail/0-cancelled, node22 1240-pass/0-fail/0-cancelled. `node scripts/gen-claude-state.mjs --check`: "CLAUDE.md state block is current" (vitest 494). `batch-lib.test.ts`: 30 tests; six mutations of the rules each fail it.
+Keeper note: this Mac has no Node 20/22; the official 20.20.2 and 22.23.5 tarballs (sha256 checked) were unpacked in a scratch dir and found through `NVM_DIR`. A first run on them failed 1 of 1240, `chain-verify.test.mjs:765` (timing ratio 31.1x against a bound of 30, machine under load, file untouched by this branch); it passed 3 of 3 alone and in the full run above.
+`git diff --stat origin/main...HEAD`: 22 files, 2093 insertions, 59 deletions: four fixtures 1062, `batch-lib.ts` + its test + `batch.ts` 609, mirror + pins 273, config 83, `lib/plan/verify` 38, runbook 27, keeper data 9, `vitest.config.ts` 2, CLAUDE.md + AGENTS.md 4, this file the rest.
+Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...feat/dca-feed-batch-2026-11
 
-Pinned tests (none deleted, none loosened): `chainlink-feeds.test.ts` ("phase 2 rows are disabled" is now "enabled ONLY inside a batch",
-with the batch rows pinned by name; +2 tests), `price-feed.test.ts` (BASE_SIGNABLE re-pinned from the resolver, +1 test), Limit and SL/TP panel
-tests (the no-feed token is wstETH instead of Base LINK; +1 test each: Base LINK signs its own row feed). Commit 1 alone does not pass the suite.
+## Findings
+- Test gap: `batch.ts` (the I/O shell) has no test, only `batch-lib.ts`; the shell was run live twice (byte-identical output) and once on wstETH (refused). Edge: `api/swap/route.ts:287` comment is stale since phase 1.
+- Process: `4392144` alone does not pass the suite (config before mirror). `goal-lint` on the goal text: 2 FAIL (no `CONTROL:` line; `cast send` named outside a Do-NOT line); ran as given.
+- Further reads: keeper `price-sources.js` + test, `order-floor.js`; `TeraSwapOrderExecutorV3.sol`; `price-feed.ts`, `limit-launch.ts`, `price-gate.ts`, `price-quorum.ts`, `useChainlinkPrice.ts`, `DCAPanel.tsx`, `use-dca-form.ts`, `api/swap`, `api/dca-floor-cap`, `product-claims.ts`, `chains/tokens.ts`, the Limit + SL/TP panel tests, `vitest.config.ts`, `scripts/fiat/build-eur-usd-feed.mjs`, `contracts/order-engine/CLAUDE.md`; one read-only recon subagent.
