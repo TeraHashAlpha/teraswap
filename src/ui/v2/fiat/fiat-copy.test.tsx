@@ -14,7 +14,7 @@ import { fmtFiat } from './fiat-format'
 
 /** Every string this change adds to what a visitor sees (v2 only; v1 gains none). */
 export const NEW_COPY: Record<string, string> = {
-  'Account menu, group label': 'Currency',
+  'Account menu and swap card, group label': 'Currency',
   'Account menu, dollar choice': '$ USD',
   'Account menu, euro choice': '€ EUR',
   'Account menu, euro choice title when the rate cannot be used': 'EUR rate unavailable',
@@ -47,7 +47,7 @@ describe('new copy', () => {
     const html = container.innerHTML
     const text = container.textContent ?? ''
     expect(bad(html)).toBe(false)
-    expect(text).toContain(NEW_COPY['Account menu, group label'])
+    expect(text).toContain(NEW_COPY['Account menu and swap card, group label'])
     expect(text).toContain(NEW_COPY['Account menu, dollar choice'])
     expect(text).toContain(NEW_COPY['Account menu, euro choice'])
   })

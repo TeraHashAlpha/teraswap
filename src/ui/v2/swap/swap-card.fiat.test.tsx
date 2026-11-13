@@ -60,6 +60,7 @@ const flush = () =>
   act(async () => {
     await new Promise((r) => setTimeout(r, 0))
   })
+const eurButton = () => screen.getByRole('button', { name: '€ EUR' }) as HTMLButtonElement
 const fiat = (side: 'sell' | 'receive') => norm(document.querySelector(`[data-fiat="${side}"]`)?.textContent)
 
 let calls: string[]
@@ -115,7 +116,7 @@ describe('Sell and Receive fiat lines', () => {
     expect(ETH.symbol).toBe('ETH')
   })
 
-  it('one request serves Sell, Receive and the fee line: the Portfolio route only, never /api/rpc; the EUR route is not asked in dollars', async () => {
+  it('one request serves Sell, Receive and the fee line: the Portfolio route only, never /api/rpc; on dollars the EUR route is only the one probe of the switch', async () => {
     stubRoutes(PRICES, FRESH())
     render(<SwapCard />)
     type('1')
@@ -123,7 +124,7 @@ describe('Sell and Receive fiat lines', () => {
     const prices = calls.filter((c) => c.startsWith('/api/portfolio/prices'))
     expect(prices).toHaveLength(1)
     expect(prices[0]).toContain('chainId=1')
-    expect(calls.filter((c) => c.startsWith('/api/fiat/eur-usd'))).toHaveLength(0)
+    expect(calls.filter((c) => c.startsWith('/api/fiat/eur-usd'))).toEqual(['/api/fiat/eur-usd?chainId=1']) // the on-card switch probes the rate once
     expect(calls.some((c) => c.includes('/api/rpc'))).toBe(false)
   })
 
@@ -176,7 +177,47 @@ describe('Sell and Receive fiat lines', () => {
     expect(fiat('sell')).toBe('≈ $2 490.00')
     const panel = norm(document.querySelector('[data-quote-panel]')?.textContent)
     expect(panel).toContain('~0.000012 ETH ($0.03)')
-    expect(document.body.textContent).not.toContain('€')
+    expect(fiat('receive')).not.toContain('€')
+    expect(document.querySelector('[data-fiat="sell"]')?.textContent).not.toContain('€')
+    expect(eurButton().disabled).toBe(true) // the switch says so up front
+    expect(eurButton().title).toBe('EUR rate unavailable')
+  })
+})
+
+describe('the on-card $ / € switch: reachable WITHOUT a wallet', () => {
+  it('a wallet-less visitor sees the labelled switch and the four lines follow when they pick euros', async () => {
+    h.account = { address: undefined, isConnected: false, chain: undefined }
+    stubRoutes(PRICES, FRESH())
+    render(<SwapCard />)
+    const group = screen.getByRole('group', { name: 'Currency' })
+    expect(group.getAttribute('data-currency-switch')).toBe('card')
+    expect(screen.getByRole('button', { name: '$ USD' }).getAttribute('aria-pressed')).toBe('true') // dollars by default
+    type('1')
+    await flush()
+    expect(fiat('sell')).toMatch(/^≈ \$/)
+    expect(norm(document.querySelector('[data-quote-panel]')?.textContent)).toContain('~0.000012 ETH ($0.03)')
+
+    fireEvent.click(eurButton())
+    await flush()
+    expect(fiat('sell')).toBe('≈ €2 263.64') // 1) Sell
+    expect(fiat('receive')).toBe('≈ €2 261.53') // 2) Receive
+    const panel = norm(document.querySelector('[data-quote-panel]')?.textContent)
+    expect(panel).toContain('~0.000012 ETH (€0.03)') // 3) Est. gas
+    expect(panel).toContain('0.001 ETH (€2.26)') // 4) Platform fee
+    expect(localStorage.getItem('teraswap:v2:fiat-currency')).toBe('EUR') // the account menu's key
+    expect(screen.getByRole('button', { name: '€ EUR' }).getAttribute('aria-pressed')).toBe('true')
+
+    fireEvent.click(screen.getByRole('button', { name: '$ USD' }))
+    await flush()
+    expect(fiat('sell')).toBe('≈ $2 490.00')
+  })
+
+  it('no box language and a labelled group: text buttons, no border or fill of their own', async () => {
+    stubRoutes(PRICES, FRESH())
+    render(<SwapCard />)
+    await flush()
+    const group = screen.getByRole('group', { name: 'Currency' })
+    for (const b of Array.from(group.querySelectorAll('button'))) expect(b.className).not.toMatch(/\bborder\b|bg-v2-(?!transparent)/)
   })
 })
 
