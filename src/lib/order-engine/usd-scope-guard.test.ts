@@ -76,6 +76,12 @@ const ALLOWED = new Set([
   // "<$0.01", or "—" when unpriced). Labels a fill that already happened, exactly as DCAFillsTimeline does; gates and
   // signs nothing. [B7, owner-approved exception to the v2 "nothing in src/lib" rule, 2026-10-31]
   'ui/v2/dca/positions-model.ts',
+  // DISPLAY: the v2 fiat lines' price store (the approximate fiat value under Sell / Receive and in the gas and fee lines). It does NOT import the
+  // table today (its price is the Portfolio's /api/portfolio/prices route); it is listed because the owner asked for the module to sit on this
+  // list with its reason: a stale estimate there is a wrong label next to an amount ("≈ $2 105.40"), harmless because no fiat value feeds a gate,
+  // minimum output, tier, consent, calldata or signature. That boundary is enforced by `ui/v2/fiat/fiat-scope-guard.test.ts` (importer allow-list
+  // + import-closure walk from every gate / review / signing path). [feat/ui-v2-fiat-value, owner decision]
+  'ui/v2/fiat/approx-prices.ts',
   // This suite. It carries SYNTHETIC import strings as fixtures for the detector's own self-test
   // (below) — they are string literals, not imports, and excluding the guard from its own scan is
   // the only honest way to keep those fixtures.

@@ -39,13 +39,13 @@ describe('numbers go through @/lib/format (README §3)', () => {
     expect(v.rate).toBe(`2${THIN}487.6842`)
     expect(v.inverseRate).toBe('0.000402') // < 1 → 4 significant digits (0.0004020), trailing zero trimmed
   })
-  it('gas: USD first, ETH at 2 significant digits, never 0.0000', () => {
-    expect(v.gas).toBe('$0.03 (~0.000012 ETH)')
+  it('gas: native amount first, ETH at 2 significant digits, never 0.0000', () => {
+    expect(v.gas).toBe('~0.000012 ETH ($0.03)')
     const tiny = buildQuoteView({ ...base, meta: fixtureMeta(), gasEstimate: () => ({ eth: 0.0000081, usd: 0.004 }) })
-    expect(tiny.gas).toBe('<$0.01 (~0.0000081 ETH)')
+    expect(tiny.gas).toBe('~0.0000081 ETH (<$0.01)')
     expect(tiny.gas).not.toMatch(/0\.0000(?!\d)/)
   })
-  it('gas with no live estimate: the quote\'s own USD (v2: USD first whenever a price exists); units only when there is no price at all', () => {
+  it('gas with no live estimate: the quote\'s own USD (v2: native amount first, fiat second, whenever a price exists); units only when there is no price at all', () => {
     expect(buildQuoteView({ ...base, meta: fixtureMeta() }).gas).toBe('$0.03') // fixture quotes carry gasUsd 0.03
     const noPrice = fixtureMeta()
     noPrice.best = { ...noPrice.best, gasUsd: 0 }
@@ -188,16 +188,16 @@ describe('route: only known DEX names pass (table)', () => {
   })
 })
 
-describe('est. gas: USD first, ETH at 2 significant digits, never "~0"', () => {
+describe('est. gas: native amount first, ETH at 2 significant digits, never "~0"', () => {
   const est = (eth: number, usd: number) => () => ({ eth, usd })
   const zero = () => ({ eth: 0, usd: 0 }) // useEthGasCost.estimate(0): not null, but zero
   const rows: Array<[string, Parameters<typeof formatGas>, string]> = [
-    ['live estimate: USD (ETH)', [{ estimatedGas: 210_000, gasUsd: 0.03 }, false, est(0.000012, 0.03)], '$0.03 (~0.000012 ETH)'],
-    ['tiny USD keeps the < $0.01 floor, ETH stays 2 sf', [{ estimatedGas: 210_000, gasUsd: 0 }, false, est(0.0000081, 0.004)], '<$0.01 (~0.0000081 ETH)'],
-    ['KyberSwap on Ethereum: estimatedGas 0 + gasUsd, ETH from the oracle (the owner\'s ~0 ETH)', [{ estimatedGas: 0, gasUsd: 1.23 }, false, zero, 2490], '$1.23 (~0.00049 ETH)'],
-    ['same, estimate fn absent', [{ estimatedGas: 0, gasUsd: 1.23 }, false, undefined, 2490], '$1.23 (~0.00049 ETH)'],
+    ['live estimate: ETH (USD)', [{ estimatedGas: 210_000, gasUsd: 0.03 }, false, est(0.000012, 0.03)], '~0.000012 ETH ($0.03)'],
+    ['tiny USD keeps the < $0.01 floor, ETH stays 2 sf', [{ estimatedGas: 210_000, gasUsd: 0 }, false, est(0.0000081, 0.004)], '~0.0000081 ETH (<$0.01)'],
+    ['KyberSwap on Ethereum: estimatedGas 0 + gasUsd, ETH from the oracle (the owner\'s ~0 ETH)', [{ estimatedGas: 0, gasUsd: 1.23 }, false, zero, 2490], '~0.00049 ETH ($1.23)'],
+    ['same, estimate fn absent', [{ estimatedGas: 0, gasUsd: 1.23 }, false, undefined, 2490], '~0.00049 ETH ($1.23)'],
     ['same, no ETH price → USD alone, not a guess', [{ estimatedGas: 0, gasUsd: 1.23 }, false, zero], '$1.23'],
-    ['same, estimate returns null (no gas price yet)', [{ estimatedGas: 0, gasUsd: 1.23 }, false, () => null, 2490], '$1.23 (~0.00049 ETH)'],
+    ['same, estimate returns null (no gas price yet)', [{ estimatedGas: 0, gasUsd: 1.23 }, false, () => null, 2490], '~0.00049 ETH ($1.23)'],
     ['units known, no price anywhere → v1\'s unit fallback', [{ estimatedGas: 210_000, gasUsd: 0 }, false, undefined], `~210${THIN}000 gas`],
     ['ETH known but no USD (no oracle price) → ETH, 2 sf', [{ estimatedGas: 210_000, gasUsd: 0 }, false, est(0.0031, 0)], '~0.0031 ETH'],
     ['nothing known (0 units, no USD) → a dash, never ~0', [{ estimatedGas: 0, gasUsd: 0 }, false, zero], 'n/a'],
@@ -216,7 +216,7 @@ describe('est. gas: USD first, ETH at 2 significant digits, never "~0"', () => {
     m.best = { ...m.best, source: 'kyberswap', estimatedGas: 0, gasUsd: 1.23 }
     m.all = [m.best, ...m.all.slice(1)]
     const v = buildQuoteView({ ...base, meta: m, tokenInUsdPrice: 2490, gasEstimate: () => ({ eth: 0, usd: 0 }), ethUsdPrice: 2490 })
-    expect(v.gas).toBe('$1.23 (~0.00049 ETH)')
+    expect(v.gas).toBe('~0.00049 ETH ($1.23)')
     expect(v.gasFree).toBe(false)
   })
 })
@@ -254,5 +254,56 @@ describe('buildShareText (v1 SwapBox.tsx\'s Share button text, verbatim)', () =>
   it('a malformed toAmount hides the claim rather than crash ([11-L-01], v1\'s safeBigInt guard)', () => {
     const m = fixtureMeta()
     expect(buildShareText({ ...m, best: { ...m.best, toAmount: 'not-a-number' } }, ETH, USDC)).toBeNull()
+  })
+})
+
+
+describe('[feat/ui-v2-fiat-value] gas and fee in the visitor\'s currency (display only)', () => {
+  const eurFiat = { currency: 'EUR' as const, usdPerEur: 1.1 }
+  const est = (eth: number, usd: number) => () => ({ eth, usd })
+
+  it('gas: native amount first, fiat second, in the chosen currency; dollars when no fiat context is given', () => {
+    const q = { estimatedGas: 210_000, gasUsd: 0.21 }
+    expect(formatGas(q, false, est(0.00011, 0.21), 2490).replace(/\u2009/g, ' ')).toBe('~0.00011 ETH ($0.21)')
+    expect(formatGas(q, false, est(0.00011, 0.22), 2490, eurFiat)).toBe('~0.00011 ETH (€0.20)')
+    expect(formatGas(q, false, est(0.00011, 0.22), 2490, { currency: 'USD', usdPerEur: null })).toBe('~0.00011 ETH ($0.22)')
+  })
+
+  it('gas: no price → the native amount alone (no $0, no dash); units only → v1\'s fallback; nothing → n/a', () => {
+    expect(formatGas({ estimatedGas: 210_000, gasUsd: 0 }, false, est(0.00011, 0), null)).toBe('~0.00011 ETH')
+    expect(formatGas({ estimatedGas: 210_000, gasUsd: 0 }, false, undefined, null).replace(/\u2009/g, ' ')).toBe('~210 000 gas')
+    expect(formatGas({ estimatedGas: 0, gasUsd: 0 }, false, undefined, null)).toBe('n/a')
+  })
+
+  it('gas: a euro request with no rate falls back to the dollar figure, never an invented euro one', () => {
+    expect(formatGas({ estimatedGas: 1, gasUsd: 0.5 }, false, est(0.0002, 0.5), 2490, { currency: 'EUR', usdPerEur: null })).toBe('~0.0002 ETH ($0.50)')
+  })
+
+  it('gas: no oracle ETH price and no estimate → the native amount is derived from the approximate native price (display only); without that, fiat alone', () => {
+    const q = { estimatedGas: 0, gasUsd: 0.21 }
+    expect(formatGas(q, false, undefined, null, { currency: 'USD', usdPerEur: null, nativeApproxUsd: 2100 })).toBe('~0.0001 ETH ($0.21)')
+    expect(formatGas(q, false, undefined, null, { currency: 'EUR', usdPerEur: 1.1, nativeApproxUsd: 2100 })).toBe('~0.0001 ETH (€0.19)')
+    expect(formatGas(q, false, undefined, null, { currency: 'USD', usdPerEur: null })).toBe('$0.21')
+  })
+
+  it('Free (solver-paid) is untouched by the currency', () => {
+    expect(formatGas({ estimatedGas: 0, gasUsd: 0 }, true, undefined, null, eurFiat)).toBe('Free (solver-paid)')
+  })
+
+  it('ETH → AAVE, no stablecoin and no Chainlink price: the fee line takes its fiat part from the approximate price of the SELL token', () => {
+    const meta = fixtureMeta()
+    const base = { meta, tokenIn: ETH, tokenOut: USDC, amountIn: '1', slippage: 0.3, chainId: 1 }
+    const priced = buildQuoteView({ ...base, fiat: { currency: 'USD', usdPerEur: null, tokenInApproxUsd: 2000 } })
+    expect(priced.feeValue).toBe('0.001 ETH ($2.00)')
+    const inEur = buildQuoteView({ ...base, fiat: { currency: 'EUR', usdPerEur: 1.25, tokenInApproxUsd: 2000 } })
+    expect(inEur.feeValue).toBe('0.001 ETH (€1.60)')
+    const none = buildQuoteView({ ...base, fiat: { currency: 'USD', usdPerEur: null, tokenInApproxUsd: null } })
+    expect(none.feeValue).toBe('0.001 ETH') // no price anywhere: no fiat part at all
+    expect(none.feeValue).not.toMatch(/\$0|—|n\/a/)
+  })
+
+  it('a Chainlink-based fee value wins over the approximate one', () => {
+    const v = buildQuoteView({ meta: fixtureMeta(), tokenIn: ETH, tokenOut: USDC, amountIn: '1', slippage: 0.3, chainId: 1, tokenInUsdPrice: 2490, fiat: { currency: 'USD', usdPerEur: null, tokenInApproxUsd: 1 } })
+    expect(v.feeValue).toBe('0.001 ETH ($2.49)')
   })
 })

@@ -25,7 +25,7 @@ import { findToken, isNativeETH, type Token } from '@/lib/tokens'
 import { AGGREGATOR_META, DEFAULT_SLIPPAGE, MEV_PREFERENCE_THRESHOLD } from '@/lib/constants'
 import { fmtToken, formatWithSeparator, stripSeparator, fmtUsd } from '@/lib/format'
 import { playQuoteReceived, playTouchMP3 } from '@/lib/sounds'
-import { CHAIN_ID } from '@/lib/constants'
+import { CHAIN_ID, NATIVE_ETH } from '@/lib/constants'
 import { isVerifiedToken } from '@/lib/chains/tokens'
 import { safeBigInt } from '@/lib/utils'
 import { Button, Input, Skeleton, Surface } from '../primitives'
@@ -34,6 +34,9 @@ import { shortAddress } from '../shell/format-address'
 import './swap.css'
 import { ctaFor } from './cta'
 import { buildQuoteView, buildShareText, quoteIsForAmount } from './quote-model'
+import { useApproxUsdPrice } from '../fiat/approx-prices'
+import { useFiatDisplay, useFiatValue } from '../fiat/use-fiat-value'
+import { CurrencySwitch } from '../fiat/CurrencySwitch'
 import { QuotePanel, Notice } from './QuotePanel'
 import { TierNotice } from './TierNotice'
 import { SourcesMenu } from './SourcesMenu'
@@ -224,6 +227,10 @@ export function SwapCard() {
   const tokenOutPriceCheck = useChainlinkPrice(tokenOut?.address, execOut)
   const pairCheck = evaluatePairOracle(priceCheck, tokenOutPriceCheck, tokenIn?.symbol ?? '', tokenOut?.symbol ?? '')
   const { estimate: gasEstimate, ethPrice: ethUsdPrice } = useEthGasCost()
+  // [feat/ui-v2-fiat-value] DISPLAY ONLY: approximate fiat under the Sell and Receive amounts, from the Portfolio's price route.
+  const fiatDisplay = useFiatDisplay(activeChainId)
+  const tokenInApproxUsd = useApproxUsdPrice(activeChainId, tokenIn?.address)
+  const nativeApproxUsd = useApproxUsdPrice(activeChainId, NATIVE_ETH)
   // [feat/swap-price-tiers D1] The SERVER's tier for the pair; null = unknown → no notice (the client never guesses).
   const { data: priceTier } = useSwapPriceTier(activeChainId, tokenIn?.address, tokenOut?.address)
 
@@ -325,6 +332,12 @@ export function SwapCard() {
     meta && tokenIn && tokenOut && hasAmount
       ? buildQuoteView({ meta, tokenIn, tokenOut, amountIn, slippage, chainId: activeChainId, tokenInUsdPrice: priceCheck.chainlinkPrice, tokenOutUsdPrice: tokenOutPriceCheck.chainlinkPrice, gasEstimate, ethUsdPrice })
       : null
+  // [feat/ui-v2-fiat-value] The panel's own view: the same numbers, with the gas and fee fiat part in the visitor's currency. `view` above
+  // (dollars) is what the review model is built from, so the euro conversion never reaches the review, consent or signing path.
+  const panelView =
+    view && meta && tokenIn && tokenOut
+      ? buildQuoteView({ meta, tokenIn, tokenOut, amountIn, slippage, chainId: activeChainId, tokenInUsdPrice: priceCheck.chainlinkPrice, tokenOutUsdPrice: tokenOutPriceCheck.chainlinkPrice, gasEstimate, ethUsdPrice, fiat: { currency: fiatDisplay.currency, usdPerEur: fiatDisplay.usdPerEur, tokenInApproxUsd, nativeApproxUsd } })
+      : null
 
   const outputDisplay =
     meta?.best && quoteDecimalsOut !== null
@@ -334,6 +347,13 @@ export function SwapCard() {
         })()
       : '0.0'
   const balanceDisplay = balanceIn ? fmtToken(balanceIn.value, balanceIn.decimals) : null
+  const receiveAmount = (() => {
+    if (!meta?.best || quoteDecimalsOut === null) return null
+    const v = safeBigInt(meta.best.toAmount)
+    return v !== null ? formatUnits(v, quoteDecimalsOut) : null
+  })()
+  const sellFiat = useFiatValue(hasAmount ? amountIn : null, tokenIn, activeChainId).text
+  const receiveFiat = useFiatValue(receiveAmount, tokenOut, activeChainId).text
 
   // A changed trade resets both swap hooks (see `tradeKey`) — without it a stale `success` from a smaller amount survives into the
   // next cycle (v1: BUG-SWAP-APPROVE-STALE-SUCCESS).
@@ -451,6 +471,10 @@ export function SwapCard() {
         <div className="mb-3 flex items-center gap-2 pt-4">
           <ChainIcon chainId={activeChainId} className="h-4 w-4 shrink-0" />
           <span className="font-v2-mono text-[11px] font-semibold uppercase tracking-[1.5px] text-v2-muted">{chainName}</span>
+          {/* [feat/ui-v2-fiat-value] Reachable without a wallet: the same $ / € preference as the account menu's. */}
+          <span className="-my-3 ml-auto">
+            <CurrencySwitch variant="card" />
+          </span>
         </div>
 
         <div>
@@ -471,6 +495,11 @@ export function SwapCard() {
             />
             <TokenButton token={tokenIn} side="sell" onOpen={() => setTokenPicker('sell')} />
           </div>
+          {sellFiat && (
+            <p data-fiat="sell" className="mt-1 font-v2-mono text-[13px] tabular-nums text-v2-muted">
+              {sellFiat}
+            </p>
+          )}
           {tokenIn && (
             <div className="mt-1 flex items-center justify-between gap-3 text-[13px] text-v2-muted">
               <span className="flex flex-col">
@@ -505,6 +534,11 @@ export function SwapCard() {
             </span>
             <TokenButton token={tokenOut} side="receive" onOpen={() => setTokenPicker('receive')} />
           </div>
+          {receiveFiat && (
+            <p data-fiat="receive" className="mt-1 font-v2-mono text-[13px] tabular-nums text-v2-muted">
+              {receiveFiat}
+            </p>
+          )}
           {showSources && (
             <div className="mt-1 flex items-center justify-between gap-3">
               <SourcesMenu excluded={excludedSources} onToggle={toggleSource} />
@@ -542,9 +576,9 @@ export function SwapCard() {
             sheetOpen={anySheetOpen}
             onNewSwap={onNewSwap}
           />
-        ) : view && meta && tokenIn && tokenOut ? (
+        ) : view && panelView && meta && tokenIn && tokenOut ? (
           <QuotePanel
-            view={view}
+            view={panelView}
             symbolIn={tokenIn.symbol}
             symbolOut={tokenOut.symbol}
             countdown={countdown}

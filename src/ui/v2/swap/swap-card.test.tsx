@@ -171,7 +171,7 @@ describe('20: quote', () => {
     expect(text).toContain('Max slippage')
     expect(text).toContain('0.3%')
     expect(text).toContain('Est. gas')
-    expect(text).toContain('$0.03 (~0.000012 ETH)')
+    expect(text).toContain('~0.000012 ETH ($0.03)')
     expect(text).toContain('Platform fee (0.1%)')
     expect(text).toContain('0.001 ETH ($2.49)')
     expect(text).toContain('No approval needed')
@@ -412,7 +412,7 @@ describe('26 / 25: the review and Permit2 sheets opened from the card (B4 sheets
     const dlg = screen.getByRole('dialog', { name: 'Review Transaction' })
     const panel = document.querySelector('[data-quote-panel]')!.textContent!.replace(/[\u00a0\u2009\u202f]/g, ' ')
     const sheet = dlg.textContent!.replace(/[\u00a0\u2009\u202f]/g, ' ')
-    for (const s of ['2 480.2211 USDC', '0.001 ETH ($2.49)', '$0.03 (~0.000012 ETH)', '0.3%']) {
+    for (const s of ['2 480.2211 USDC', '0.001 ETH ($2.49)', '~0.000012 ETH ($0.03)', '0.3%']) {
       expect(panel).toContain(s)
       if (s !== '2 480.2211 USDC') expect(sheet).toContain(s)
     }

@@ -8,8 +8,9 @@
  *    same derivation useSwap uses for the FeeCollector floor and SwapBox uses for the unpriced dialog's {minOut}.
  *  - Route: a hop is a NAME from an allow-list of venues (route-names.ts), else the source's own label. v1 prints whatever string
  *    the adapter forwards — KyberSwap's `fermi` / `metric-v1`, a hash, a pool id ("Pool 0xabc…" passed v1's address check).
- *  - Est. gas: USD first from either the live estimate or the quote's own `gasUsd`, ETH at 2 significant digits, never "~0"
- *    (see formatGas — KyberSwap quotes arrive with `estimatedGas: 0` and the cost in `gasUsd`).
+ *  - Est. gas: the native amount FIRST (ETH at 2 significant digits, never "~0"), the fiat value second, `~0.00011 ETH ($0.21)`
+ *    [feat/ui-v2-fiat-value, owner decision C]; the fiat figure comes from either the live estimate or the quote's own `gasUsd`
+ *    (see formatGas: KyberSwap quotes arrive with `estimatedGas: 0` and the cost in `gasUsd`). It follows the visitor's currency.
  */
 import { formatUnits, parseUnits } from 'viem'
 import type { MetaQuoteResult, NormalizedQuote } from '@/lib/adapters/types'
@@ -25,6 +26,7 @@ import { estimateMevSavings } from '@/lib/mev-savings'
 import { fmtGas, fmtPct, fmtToken, fmtUsd, formatWithSeparator } from '@/lib/format'
 import { safeBigInt } from '@/lib/utils'
 import { knownDexName } from './route-names'
+import { convertUsd, fmtFiat, type FiatCurrency } from '../fiat/fiat-format'
 
 export function sourceLabel(source: AggregatorName): string {
   return AGGREGATOR_META[source]?.label || source
@@ -89,19 +91,33 @@ export interface QuoteView {
   } | null
   mevSavings: string | null
   slippage: string
-  /** `Free (solver-paid)` | `$0.03 (~0.000012 ETH)` | `~0.000012 ETH` | `~210 000 gas` (v1's fallback). USD first. */
+  /** `Free (solver-paid)` | `~0.000012 ETH ($0.03)` | `$0.03` | `~0.000012 ETH` | `~210 000 gas` (v1's fallback). Native amount first. */
   gas: string
   gasFree: boolean
   feeMode: FeeMode
   feeCollected: boolean
   /** `Platform fee (0.1%)` | `Platform fee`. */
   feeLabel: string
-  /** `0.001 ETH ($2.49)` | null when no fee is collected (the row then reads Free). */
+  /** `0.001 ETH ($2.49)` | `0.001 ETH` when no price exists | null when no fee is collected (the row then reads Free). */
   feeValue: string | null
   minOutput: string
   /** `+0.6547 USDC vs KyberSwap`, only when the runner-up is strictly worse. */
   delta: string | null
   compare: CompareRow[]
+}
+
+/**
+ * [feat/ui-v2-fiat-value] How the fiat part of the gas and fee lines reads. DISPLAY ONLY: plain data, no hook, no price source here.
+ * `currency` is the EFFECTIVE one (a euro choice without a usable rate arrives as 'USD'); omitted → dollars.
+ */
+export interface QuoteFiat {
+  currency: FiatCurrency
+  /** USD per 1 EUR; read only for EUR. */
+  usdPerEur: number | null
+  /** The sell token's approximate USD price (the Portfolio's source): the fee line's fallback when no Chainlink price exists. */
+  tokenInApproxUsd?: number | null
+  /** The chain's native token's approximate USD price: the gas line's fallback to derive its native amount when no oracle price exists. */
+  nativeApproxUsd?: number | null
 }
 
 export interface QuoteViewInput {
@@ -118,26 +134,35 @@ export interface QuoteViewInput {
   gasEstimate?: (gasUnits: number) => { eth: number; usd: number } | null
   /** ETH/USD (Chainlink, useEthGasCost.ethPrice): lets a USD-only gas cost (KyberSwap's `gasUsd`) also show its ETH amount. */
   ethUsdPrice?: number | null
+  fiat?: QuoteFiat
 }
 
 const positive = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0
 
+/** USD → the visitor's currency as text; a euro request without a rate falls back to the dollar figure rather than inventing one. */
+function money(usd: number, fiat?: QuoteFiat): string {
+  const cur = fiat?.currency ?? 'USD'
+  const v = convertUsd(usd, cur, fiat?.usdPerEur ?? null)
+  return (v !== null ? fmtFiat(v, cur) : null) ?? fmtUsd(usd)
+}
+
 /**
- * The Est. gas line. USD first whenever a price exists — the live estimate's, else the quote's own `gasUsd` — with the ETH amount
- * at 2 significant digits beside it; ETH alone when only that is known; v1's `~N gas` when only units are known; `—` when nothing
- * is: never "~0 ETH".
+ * The Est. gas line. The native amount FIRST (ETH at 2 significant digits), the fiat value second: `~0.00011 ETH ($0.21)`. The fiat part
+ * comes from the live estimate, else the quote's own `gasUsd`, and follows the visitor's currency. Fiat alone when the ETH amount cannot be
+ * derived; ETH alone when no price exists (no fiat part, never `$0`); v1's `~N gas` when only units are known; `n/a` when nothing is: never "~0 ETH".
  *
  * Why v1 (and the first v2 build) showed "~0 ETH" on Ethereum: the KyberSwap adapter reports `estimatedGas: route.gasUsd ? 0 : route.gas`
  * and the cost in `gasUsd`, so the units are 0, `useEthGasCost.estimate(0)` is { eth: 0, usd: 0 } (not null), the USD branch fails
  * its `> 0` test and `fmtGas(0)` prints "0". The USD was never absent — it was in `gasUsd`, which nothing read.
  */
-export function formatGas(best: Pick<NormalizedQuote, 'estimatedGas' | 'gasUsd'>, intentBased: boolean, gasEstimate: QuoteViewInput['gasEstimate'], ethUsdPrice?: number | null): string {
+export function formatGas(best: Pick<NormalizedQuote, 'estimatedGas' | 'gasUsd'>, intentBased: boolean, gasEstimate: QuoteViewInput['gasEstimate'], ethUsdPrice?: number | null, fiat?: QuoteFiat): string {
   if (best.estimatedGas === 0 && intentBased) return 'Free (solver-paid)'
   const cost = gasEstimate?.(best.estimatedGas) ?? null
   const usd = positive(cost?.usd) ? cost.usd : positive(best.gasUsd) ? best.gasUsd : null
   let eth = positive(cost?.eth) ? cost.eth : null
   if (eth === null && usd !== null && positive(ethUsdPrice)) eth = usd / ethUsdPrice
-  if (usd !== null) return eth !== null ? `${fmtUsd(usd)} (~${fmtGas(eth)} ETH)` : fmtUsd(usd)
+  if (eth === null && usd !== null && positive(fiat?.nativeApproxUsd)) eth = usd / fiat.nativeApproxUsd // display-only estimate, only when no oracle price exists
+  if (usd !== null) return eth !== null ? `~${fmtGas(eth)} ETH (${money(usd, fiat)})` : money(usd, fiat)
   if (eth !== null) return `~${fmtGas(eth)} ETH`
   if (best.estimatedGas > 0) return `~${formatWithSeparator(best.estimatedGas.toString()).replace(/\s/g, '\u2009')} gas`
   return 'n/a'
@@ -166,10 +191,12 @@ export function buildQuoteView(i: QuoteViewInput): QuoteView {
   const notional = collected
     ? swapNotionalUsd({ inputAmount: inAmt, inputPrice: i.tokenInUsdPrice ?? null, outputAmount: out ?? 0, outputPrice: i.tokenOutUsdPrice ?? null })
     : null
-  const feeUsdValue = collected ? feeUsd(notional, FEE_PERCENT) : null
+  // The fiat part of the fee: the Chainlink-based notional when there is one, else the sell token's approximate price (display only).
+  const approxIn = i.fiat?.tokenInApproxUsd
+  const feeUsdValue = collected ? (feeUsd(notional, FEE_PERCENT) ?? (positive(approxIn) && feeAbsolute > 0 ? feeAbsolute * approxIn : null)) : null
 
   const gasFree = best.estimatedGas === 0 && intentBased
-  const gas = formatGas(best, intentBased, i.gasEstimate, i.ethUsdPrice)
+  const gas = formatGas(best, intentBased, i.gasEstimate, i.ethUsdPrice, i.fiat)
 
   let minOutput = 'n/a'
   try {
@@ -219,7 +246,7 @@ export function buildQuoteView(i: QuoteViewInput): QuoteView {
     feeMode: mode,
     feeCollected: collected,
     feeLabel: collected ? `Platform fee (${fmtPct(FEE_PERCENT)})` : 'Platform fee',
-    feeValue: collected ? `${fmtToken(feeAbsolute)} ${tokenIn.symbol}${feeUsdValue != null ? ` (${fmtUsd(feeUsdValue)})` : ''}` : null,
+    feeValue: collected ? `${fmtToken(feeAbsolute)} ${tokenIn.symbol}${feeUsdValue != null ? ` (${money(feeUsdValue, i.fiat)})` : ''}` : null,
     minOutput,
     delta,
     compare: meta.all.map((q, idx) => {
