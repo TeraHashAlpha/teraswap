@@ -67,8 +67,37 @@ export function parseEurRatePayload(x: unknown): EurRatePayload | null {
   return { rate, updatedAt, maxStaleness }
 }
 
-/** Fresh = the round is no older than the feed's ceiling AT THE MOMENT OF READING (a cached payload ages out). */
+const HOUR_MS = 3_600_000
+const DAY_MS = 24 * HOUR_MS
+/** The FX market closes Friday 22:00 UTC and reopens Sunday 22:00 UTC; the grace runs to Monday 01:00 UTC (51 h after the close). [owner decision] */
+const FX_CLOSED_WINDOW_MS = 51 * HOUR_MS
+
+/** The most recent Friday 22:00 UTC at or before `nowMs`. */
+export function lastFxCloseMs(nowMs: number): number {
+  const d = new Date(nowMs)
+  const today2200 = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 22)
+  const daysSinceFriday = (d.getUTCDay() - 5 + 7) % 7
+  const close = today2200 - daysSinceFriday * DAY_MS
+  return close > nowMs ? close - 7 * DAY_MS : close
+}
+
+/** True from Friday 22:00 UTC until Monday 01:00 UTC: the market is closed (or has only just reopened) and no new round is expected. */
+export function isFxClosedWindow(nowMs: number): boolean {
+  return nowMs - lastFxCloseMs(nowMs) < FX_CLOSED_WINDOW_MS
+}
+
+/**
+ * Fresh = usable for display AT THE MOMENT OF READING (a cached payload ages out).
+ *  - Any time: a round no older than the feed's ceiling (`maxStaleness`, the 25 h = heartbeat + 1 h of a weekday).
+ *  - While the FX market is closed (Friday 22:00 UTC to Sunday 22:00 UTC, with grace until Monday 01:00 UTC): also the last round published
+ *    before the close, provided it was itself within the ceiling AT the close. A feed that was already stale when the market closed stays stale.
+ *  - Outside that window an older round is stale: dollars are shown and the euro option is disabled. A round from the future (beyond a
+ *    minute of clock skew) is never trusted.
+ */
 export function isEurRateFresh(p: EurRatePayload, nowMs: number): boolean {
   const ageSec = nowMs / 1000 - p.updatedAt
-  return ageSec >= -60 && ageSec <= p.maxStaleness // a minute of clock skew is tolerated; a future round beyond that is not trusted
+  if (ageSec < -60) return false
+  if (ageSec <= p.maxStaleness) return true
+  if (!isFxClosedWindow(nowMs)) return false
+  return p.updatedAt * 1000 >= lastFxCloseMs(nowMs) - p.maxStaleness * 1000
 }

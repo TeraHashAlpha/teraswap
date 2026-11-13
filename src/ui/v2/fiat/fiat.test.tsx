@@ -53,6 +53,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.useRealTimers() // also restores the real clock after a vi.setSystemTime
 })
 
 describe('fmtFiat', () => {
@@ -185,6 +186,26 @@ describe('the EUR rate', () => {
     const payload = { rate: 1.1, updatedAt: nowSec() - 89_000, maxStaleness: 90000 }
     expect(judgeEurRate({ phase: 'ready', payload, at: Date.now() }, Date.now()).status).toBe('ok')
     expect(judgeEurRate({ phase: 'ready', payload, at: Date.now() }, Date.now() + 2_000_000).status).toBe('unavailable')
+  })
+})
+
+describe('EUR staleness by market hours (owner decision)', () => {
+  const sec = (iso: string) => Date.parse(iso) / 1000
+  it('SATURDAY with Friday\'s round: euros are shown and the option is available', async () => {
+    vi.setSystemTime(new Date('2026-11-14T12:00:00Z'))
+    stubFetch({ prices: PRICES, eur: { rate: 1.1, updatedAt: sec('2026-11-13T20:00:00Z'), maxStaleness: 90000 } })
+    setFiatCurrency('EUR')
+    const { result } = renderHook(() => ({ d: useFiatDisplay(1), v: useFiatValue('1', ETH, 1) }))
+    await waitFor(() => expect(result.current.v.text).toMatch(/^≈ €/))
+    expect(result.current.d).toMatchObject({ currency: 'EUR', eurAvailable: true, usdPerEur: 1.1 })
+  })
+  it('WEDNESDAY with a 30 h old round: dollars, and the option is disabled', async () => {
+    vi.setSystemTime(new Date('2026-11-11T12:00:00Z'))
+    stubFetch({ prices: PRICES, eur: { rate: 1.1, updatedAt: sec('2026-11-10T06:00:00Z'), maxStaleness: 90000 } })
+    setFiatCurrency('EUR')
+    const { result } = renderHook(() => ({ d: useFiatDisplay(1), v: useFiatValue('1', ETH, 1) }))
+    await waitFor(() => expect(result.current.v.text).toMatch(/^≈ \$/))
+    expect(result.current.d).toMatchObject({ currency: 'USD', eurAvailable: false, eurStatus: 'unavailable' })
   })
 })
 

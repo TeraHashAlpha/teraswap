@@ -5,7 +5,7 @@ import { resolveProxyChainId } from '@/lib/rpc-proxy-chain'
 import { withTimeout } from '@/lib/adapters/shared'
 import { getPublicClientForChain } from '@/lib/chains/clients'
 import { chainlinkAggregatorAbi, validateRoundData } from '@/lib/chainlink'
-import { resolveEurUsdFeed, type EurRatePayload } from '@/lib/eur-usd-feed'
+import { isEurRateFresh, resolveEurUsdFeed, type EurRatePayload } from '@/lib/eur-usd-feed'
 
 /**
  * GET /api/fiat/eur-usd[?chainId=<n>]
@@ -13,7 +13,7 @@ import { resolveEurUsdFeed, type EurRatePayload } from '@/lib/eur-usd-feed'
  * The Chainlink EUR / USD rate for the euro display (DISPLAY ONLY). One feed read per server instance per hour:
  * 3 eth_calls (description, decimals, latestRoundData, bounded to 6 s) on the feed's own chain, the active chain's feed when the table has one,
  * otherwise mainnet's (src/lib/eur-usd-feed.ts). The identity (description + decimals) and the round (answer > 0, answeredInRound,
- * startedAt, staleness) are checked fail-closed: anything wrong answers 503 and the browser shows dollars.
+ * startedAt, staleness by market hours) are checked fail-closed: anything wrong answers 503 and the browser shows dollars.
  *
  * Response: { rate, updatedAt, maxStaleness }. Edge-cached for an hour; the browser re-checks the age at the moment of use.
  */
@@ -62,10 +62,11 @@ export async function GET(req: NextRequest) {
     )
     if (description !== feed.description || Number(decimals) !== feed.decimals) return unavailable() // not the feed the table says it is
     const [roundId, answer, startedAt, updatedAt, answeredInRound] = round
-    if (!validateRoundData(roundId, answer, startedAt, updatedAt, answeredInRound, feed.maxStaleness)) return unavailable()
+    // Integrity here; staleness by market hours below (isEurRateFresh: 25 h on weekdays, the last pre-close round while the FX market is closed).
+    if (!validateRoundData(roundId, answer, startedAt, updatedAt, answeredInRound)) return unavailable()
 
     const value: EurRatePayload = { rate: Number(answer) / 10 ** feed.decimals, updatedAt: Number(updatedAt), maxStaleness: feed.maxStaleness }
-    if (!Number.isFinite(value.rate) || value.rate <= 0) return unavailable()
+    if (!Number.isFinite(value.rate) || value.rate <= 0 || !isEurRateFresh(value, Date.now())) return unavailable()
     cached = { chainId: feed.chainId, at: Date.now(), value }
     return NextResponse.json(value, { headers })
   } catch {

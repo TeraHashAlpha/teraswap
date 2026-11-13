@@ -31,6 +31,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
 describe('CurrencySwitch', () => {
@@ -77,6 +78,22 @@ describe('CurrencySwitch', () => {
     expect(eur().disabled).toBe(true)
     expect(eur().title).toBe('EUR rate unavailable')
     expect(usd().getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('market hours: on a Wednesday a 30 h round disables the euro option; on a Saturday Friday\'s round keeps it enabled', async () => {
+    vi.setSystemTime(new Date('2026-11-11T12:00:00Z'))
+    stubEur({ rate: 1.1, updatedAt: Date.parse('2026-11-10T06:00:00Z') / 1000, maxStaleness: 90000 })
+    const wed = render(<CurrencySwitch />)
+    await flush()
+    expect(eur().disabled).toBe(true)
+    expect(eur().title).toBe('EUR rate unavailable')
+    wed.unmount()
+    _resetEurRate()
+    vi.setSystemTime(new Date('2026-11-14T12:00:00Z'))
+    stubEur({ rate: 1.1, updatedAt: Date.parse('2026-11-13T20:00:00Z') / 1000, maxStaleness: 90000 })
+    render(<CurrencySwitch />)
+    await flush()
+    expect(eur().disabled).toBe(false)
   })
 
   it('while the first answer is pending the euro option is disabled WITHOUT the unavailable title', () => {

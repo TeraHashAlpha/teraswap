@@ -50,6 +50,19 @@ describe('GET /api/fiat/eur-usd', () => {
     await GET(req('?chainId=42161'))
     expect(readContract).toHaveBeenCalledTimes(3)
   })
+  it('market hours: Saturday with Friday\'s round → 200; Wednesday with a 30 h round → 503', async () => {
+    try {
+      vi.setSystemTime(new Date('2026-11-14T12:00:00Z'))
+      chain({ updatedAt: BigInt(Date.parse('2026-11-13T20:00:00Z') / 1000) })
+      expect((await GET(req())).status).toBe(200)
+      _resetEurRateCache()
+      vi.setSystemTime(new Date('2026-11-11T12:00:00Z'))
+      chain({ updatedAt: BigInt(Date.parse('2026-11-10T06:00:00Z') / 1000) })
+      expect((await GET(req())).status).toBe(503)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
   it('stale round → 503 "EUR rate unavailable"', async () => {
     chain({ updatedAt: now() - 200_000n })
     const res = await GET(req())
