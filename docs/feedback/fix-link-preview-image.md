@@ -10,7 +10,7 @@ Goal: new link-preview card (C1), stale words around it (C2). No PR, CI not poll
 ## Premise check (origin/main 7e566fd, 2026-11-13)
 - Confirmed: `public/og-image.png` 1200x630, 24 190 B, referenced twice in `layout.tsx`.
 - Differs: the alt was already `TeraSwap: Ethereum Meta-Aggregator` (colon, no U+2014); `layout.tsx` has no U+2014 in any string (only in a comment), so C2 changed nothing there.
-- Differs: `manifest.json` `screenshots[0].src` also pointed at `/og-image.png`, so it was not unreferenced. CLAUDE.md rule 4 forbids deleting: after repointing the manifest nothing referenced it, so it moved to `archive/public/og-image.png` (served URL `/og-image.png` now 404s; cached previews keep their own copy).
+- Differs: `manifest.json` `screenshots[0].src` also pointed at `/og-image.png`, so it was not unreferenced. CLAUDE.md rule 4 forbids deleting: after repointing the manifest nothing referenced it, so it moved to `archive/public/og-image.png` (the verbatim old card is kept there). Asked the owner once afterwards (late): decision is to serve the NEW card at `/og-image.png` too, so `build.mjs` writes both files and `layout.og-image.test.ts` pins them byte-identical.
 
 ## Strings changed (before -> after)
 - `layout.tsx` openGraph.images url / twitter.images: `/og-image.png` -> `/og-teraswap-v2.png`

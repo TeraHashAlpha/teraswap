@@ -15,13 +15,15 @@
  * Cache note: chat apps cache a preview by URL. Change the file name (og-teraswap-v2 -> og-teraswap-v3) whenever the
  * image changes, and update src/app/layout.tsx and src/app/layout.og-image.test.ts with it.
  */
-import { readFileSync, statSync } from 'node:fs'
+import { copyFileSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from '@playwright/test'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 export const OUT = path.join(ROOT, 'public', 'og-teraswap-v2.png')
+// The old card's URL (/og-image.png) is still cached by chat apps and may be linked from elsewhere: it serves the same new card.
+export const LEGACY_OUT = path.join(ROOT, 'public', 'og-image.png')
 export const SIZE = { width: 1200, height: 630 }
 export const SAFE = 80
 export const WORDMARK = 'TERASWAP'
@@ -82,6 +84,7 @@ export async function build() {
       }
     }
     await page.screenshot({ path: OUT, type: 'png' })
+    copyFileSync(OUT, LEGACY_OUT)
     const bytes = statSync(OUT).size
     if (bytes > MAX_BYTES) throw new Error(`${OUT} is ${bytes} B, over the ${MAX_BYTES} B limit`)
     return { out: OUT, bytes, boxes }

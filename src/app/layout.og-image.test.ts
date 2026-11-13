@@ -30,6 +30,10 @@ describe('link-preview image', () => {
     expect(layout).not.toContain('og-image.png')
   })
 
+  it('is also served at the old URL /og-image.png (owner decision: cached previews and old links show the new card)', () => {
+    expect(readFileSync(path.join(ROOT, 'public', 'og-image.png')).equals(readFileSync(IMAGE_FILE))).toBe(true)
+  })
+
   it('has the owner-approved alt text, without an em dash', () => {
     const alt = layout.match(/alt:\s*'([^']*)'/)?.[1]
     expect(alt).toBe('TeraSwap: Compare. Verify. Swap. Repeat.')
