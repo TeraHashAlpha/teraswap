@@ -185,6 +185,75 @@ describe('skip', () => {
     expect(TSX).not.toMatch(/preventDefault|stopPropagation/)
   })
 
+  describe('a touch gesture is never cut off by the overlay leaving', () => {
+    /** jsdom's TouchEvent cannot be given a touch list, so send a plain event that carries the one field the component reads. */
+    function touch(type: 'touchstart' | 'touchmove' | 'touchend' | 'touchcancel', fingers: number) {
+      const e = new Event(type, { bubbles: true, cancelable: true })
+      Object.defineProperty(e, 'touches', { value: { length: fingers } })
+      act(() => {
+        window.dispatchEvent(e)
+      })
+    }
+
+    it('a drag hides the overlay at once but keeps the touched element in the DOM until the finger lifts', () => {
+      // Chromium starts a scroll gesture on the element under the finger. Unmounting that element on the first touchmove can
+      // lose the scroll when the removal lands before the scroll begins (seen on a CI runner, not on a fast Mac).
+      const r = render(<Intro />)
+      const touched = curtain(r.container)!
+      touch('touchstart', 1)
+      touch('touchmove', 1)
+      expect(overlay(r.container)).not.toBeNull()
+      expect(curtain(r.container)).toBe(touched)
+      expect(overlay(r.container)!.hasAttribute('data-skipped')).toBe(true)
+      touch('touchend', 0)
+      expect(overlay(r.container)).toBeNull()
+    })
+
+    it('a cancelled touch lets go too', () => {
+      const r = render(<Intro />)
+      touch('touchstart', 1)
+      touch('touchmove', 1)
+      expect(overlay(r.container)).not.toBeNull()
+      touch('touchcancel', 0)
+      expect(overlay(r.container)).toBeNull()
+    })
+
+    it('stays until the LAST finger lifts', () => {
+      const r = render(<Intro />)
+      touch('touchstart', 2)
+      touch('touchmove', 2)
+      touch('touchend', 1)
+      expect(overlay(r.container)).not.toBeNull()
+      touch('touchend', 0)
+      expect(overlay(r.container)).toBeNull()
+    })
+
+    it('a key press or a wheel turn with no finger down still removes it at once', () => {
+      const a = render(<Intro />)
+      act(() => {
+        fireEvent.keyDown(window, { key: 'Tab' })
+      })
+      expect(overlay(a.container)).toBeNull()
+    })
+
+    it('a scroll while a finger is down also waits for the lift', () => {
+      const r = render(<Intro />)
+      touch('touchstart', 1)
+      act(() => {
+        fireEvent.scroll(window)
+      })
+      expect(overlay(r.container)).not.toBeNull()
+      expect(overlay(r.container)!.hasAttribute('data-skipped')).toBe(true)
+      touch('touchend', 0)
+      expect(overlay(r.container)).toBeNull()
+    })
+
+    it('the skipped state is invisible and click-through by CSS, whatever the keyframes say', () => {
+      expect(CSS).toMatch(/\.ts-intro\[data-skipped\]\s*\{[^}]*opacity:\s*0/)
+      expect(CSS).toMatch(/\.ts-intro\[data-skipped\]\s+\.ts-intro__curtain\s*\{[^}]*pointer-events:\s*none\s*!important/)
+    })
+  })
+
   it('removes its listeners once skipped', () => {
     const remove = vi.spyOn(window, 'removeEventListener')
     const r = render(<Intro />)

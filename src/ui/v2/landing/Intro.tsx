@@ -30,6 +30,9 @@ function claimIntro(): boolean {
 /** A key press, a wheel turn, a touch drag or any scroll skips the intro. None of them is cancelled: a scroll still scrolls. */
 const SKIP_EVENTS = ['keydown', 'wheel', 'touchmove', 'scroll'] as const
 
+/** Every touch event carries the fingers still down in `touches`; that count decides whether a skip may unmount yet. */
+const TOUCH_EVENTS = ['touchstart', 'touchmove', 'touchend', 'touchcancel'] as const
+
 /**
  * [round 10] Entry animation on the v2 landing: four words, one at a time, then a curved edge sweeps up and reveals the
  * landing that mounted underneath in the same commit. Overlay only: nothing below it waits for it (the hero's first
@@ -42,6 +45,7 @@ const SKIP_EVENTS = ['keydown', 'wheel', 'touchmove', 'scroll'] as const
  */
 export function Intro() {
   const [playing, setPlaying] = useState(false)
+  const [skipped, setSkipped] = useState(false)
   const claimed = useRef<boolean | null>(null)
 
   useIsoLayoutEffect(() => {
@@ -52,16 +56,34 @@ export function Intro() {
 
   useEffect(() => {
     if (!playing) return undefined
-    const skip = () => setPlaying(false)
+    let fingers = 0
+    let wasSkipped = false
+    const unmount = () => setPlaying(false)
+    // The touch listeners are added first, so a `touchmove` has updated `fingers` before the skip below reads it.
+    const track = (e: Event) => {
+      fingers = (e as TouchEvent).touches?.length ?? 0
+      if (wasSkipped && fingers === 0) unmount()
+    }
+    // A skip hides the overlay at once. While a finger is down it is only hidden, not removed: Chromium starts the scroll
+    // gesture on the element under the finger, and unmounting that element on the first `touchmove` loses the scroll whenever
+    // the removal lands before the scroll begins (a slow CI runner; a fast machine happens to win the race). The last finger
+    // lifting, or the animation ending, removes it. With no finger down (key, wheel, click) it goes immediately.
+    const skip = () => {
+      wasSkipped = true
+      setSkipped(true)
+      if (fingers === 0) unmount()
+    }
+    for (const type of TOUCH_EVENTS) window.addEventListener(type, track, { passive: true })
     for (const type of SKIP_EVENTS) window.addEventListener(type, skip, { passive: true })
     return () => {
+      for (const type of TOUCH_EVENTS) window.removeEventListener(type, track)
       for (const type of SKIP_EVENTS) window.removeEventListener(type, skip)
     }
   }, [playing])
 
   if (!playing) return null
   return (
-    <div className="ts-intro" data-ts-intro="" aria-hidden="true">
+    <div className="ts-intro" data-ts-intro="" data-skipped={skipped ? '' : undefined} aria-hidden="true">
       <noscript>
         <style>{'.ts-intro{display:none!important}'}</style>
       </noscript>

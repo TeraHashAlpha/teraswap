@@ -54,3 +54,16 @@ method stayed. The spy never threw, `claimIntro` saw a working storage and corre
 Node's own Web Storage (constructor `Object`, the `--localstorage-file` warning in every run) and the same spy replaces the method, so it passed here.
 Not order dependent: reproduced with the file alone on Node 22.23.5. Fix: `vi.stubGlobal('sessionStorage', { getItem() { throw }, setItem() { throw }, ... })`
 (restored by the existing `unstubAllGlobals`), same assertion. Checked: Node 25 and Node 22, file alone, 5 shuffled seeds on Node 22, `src/ui/v2/landing` on Node 22.
+
+### 5.2 E2E / v2-mobile-parity: `intro.pw.ts` "a touch scroll skips it and scrolls" (component bug)
+Cause: the first `touchmove` unmounted the overlay (`setPlaying(false)`), i.e. it removed the very element under the finger. Chromium starts the
+scroll gesture on that element; if the removal beats the scroll begin the gesture loses its target and the page never moves. On this Mac the scroll
+begin wins (5/5 and 18/18 throttled runs scrolled, so the CI failure did NOT reproduce here as such), on the CI runner it lost. Forced the ordering to
+prove the mechanism: removing the overlay synchronously on `touchstart` or `touchmove` gives 0/4 scrolled, hiding it with `pointer-events: none` and
+leaving it in the DOM gives 4/4. Also noticed: "overlay gone" in the old test did not prove the gesture skipped it, because the overlay removes itself at 3.3 s.
+No `preventDefault`, `touch-action` or scroll lock was involved (listeners passive, `touch-action: auto` on html/body/curtain, page 9176 px tall).
+Fix: a skip marks the overlay `data-skipped` (opacity 0, curtain `pointer-events: none !important`) and unmounts at once only when no finger is down;
+with a finger down it stays mounted until the last `touchend`/`touchcancel` (or its own animation end). New tests: 5 unit (`intro.test.tsx`) and one
+Chromium spec asserting the overlay is still mounted and already skipped at the first `scroll` event; it FAILS on the old build (false/false) and passes now.
+Verified: `CI=true` headless, the failing spec plus the new one, 10 separate invocations, 10/10; whole intro spec 12/12; touch probe under 1x/6x/20x CPU throttle 8/8 each.
+Concern: other code that unmounts on a scroll or touch event while the finger is down would have the same hazard; not audited here.

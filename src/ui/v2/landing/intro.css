@@ -71,6 +71,11 @@
   100% { transform: translateY(calc(-100% - 4px)); visibility: hidden; }
 }
 
+/* Skipped while a finger is still down (see Intro.tsx): the element under the finger must stay mounted until the gesture ends, so
+   it is only made invisible and click-through here. !important because the curtain's keyframes animate pointer-events. */
+.ts-intro[data-skipped] { opacity: 0; }
+.ts-intro[data-skipped] .ts-intro__curtain { pointer-events: none !important; }
+
 /* Reduced motion: no intro at all. tokens.css sets `animation: none` for the whole tree, which would leave the curtain
    frozen over the page, so it is removed outright. (Intro.tsx does not mount it either.) */
 @media (prefers-reduced-motion: reduce) {

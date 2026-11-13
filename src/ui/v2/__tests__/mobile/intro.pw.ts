@@ -167,6 +167,40 @@ test.describe('v2 landing intro', () => {
     })
   })
 
+  test.describe('the gesture that skips it is not swallowed', () => {
+    test('the touched overlay is still mounted when the scroll begins, and goes once the finger lifts', async ({ browser }) => {
+      // Chromium starts a scroll on the element under the finger. Unmounting it on the first touchmove can lose the scroll when the
+      // removal beats the scroll begin (a slow Linux runner; a fast Mac wins the race), so the overlay may only go when the finger lifts.
+      const { context, page } = await fresh(browser, { viewport: { width: 375, height: 667 }, hasTouch: true, isMobile: true })
+      await context.addInitScript(() => {
+        const w = window as unknown as { __mountedAtFirstScroll?: boolean; __skippedAtFirstScroll?: boolean }
+        window.addEventListener(
+          'scroll',
+          () => {
+            if (w.__mountedAtFirstScroll !== undefined) return
+            const el = document.querySelector('[data-ts-intro]')
+            w.__mountedAtFirstScroll = el !== null
+            w.__skippedAtFirstScroll = el?.hasAttribute('data-skipped') ?? false
+          },
+          { capture: true, passive: true },
+        )
+      })
+      await page.goto('/', { waitUntil: 'domcontentloaded' })
+      await expect(overlay(page)).toHaveCount(1, { timeout: 20_000 })
+      const cdp = await context.newCDPSession(page)
+      // 400 px/s: the whole drag (300 px) takes about 0.75 s, so it ends well before the overlay's own 3.3 s end could remove it
+      await cdp.send('Input.synthesizeScrollGesture', { x: 187, y: 400, yDistance: -300, gestureSourceType: 'touch', speed: 400 })
+      await expect(overlay(page)).toHaveCount(0)
+      await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 5_000 }).toBeGreaterThan(0)
+      const seen = await page.evaluate(() => {
+        const w = window as unknown as { __mountedAtFirstScroll?: boolean; __skippedAtFirstScroll?: boolean }
+        return [w.__mountedAtFirstScroll, w.__skippedAtFirstScroll]
+      })
+      expect(seen).toEqual([true, true]) // mounted, and already marked skipped (invisible, click-through) when the page began to move
+      await context.close()
+    })
+  })
+
   test('prefers-reduced-motion: reduce plays no intro at all', async ({ browser }) => {
     const { context, page } = await fresh(browser, { reducedMotion: 'reduce' })
     await page.goto('/', { waitUntil: 'domcontentloaded' })
