@@ -1,6 +1,6 @@
 # feat/dca-feed-batch-2026-11 — FEEDBACK (no PR, NO tx, no key; Draft PR + **Auditor required**)
 
-Checklist: [x] premise · [x] commit 1 tool + config · [x] commit 2 mirror + pins + keeper data · [ ] commit 3 runbook · [ ] verify · [ ] push
+Checklist: [x] premise · [x] commit 1 tool + config · [x] commit 2 mirror + pins + keeper data · [x] commit 3 runbook · [ ] verify · [ ] push
 
 Owner answer 2026-11-13 (asked once): "enabled: true" and "no keeper change" cannot both hold; the keeper drift guard
 (`contracts/order-engine/executor/price-sources.test.mjs`) requires the keeper Chainlink mirror to equal every enabled row.
