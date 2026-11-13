@@ -1,0 +1,127 @@
+{
+  "now": 1794599727,
+  "feeds": {
+    "0xe95e258bb6615d47515fc849f8542da651f12bf6": [
+      {
+        "description": "MORPHO / USD",
+        "decimals": 8,
+        "answer": "197933500",
+        "updatedAt": 1794594472
+      },
+      {
+        "description": "MORPHO / USD",
+        "decimals": 8,
+        "answer": "197933500",
+        "updatedAt": 1794594472
+      }
+    ],
+    "0x3d6774ef702a10b20fca8ed40fc022f7e4938e07": [
+      {
+        "description": "AAVE / USD",
+        "decimals": 8,
+        "answer": "11296098421",
+        "updatedAt": 1794597353
+      },
+      {
+        "description": "AAVE / USD",
+        "decimals": 8,
+        "answer": "11296098421",
+        "updatedAt": 1794597353
+      }
+    ],
+    "0x17cab8fe31e32f08326e5e27412894e49b0f9d65": [
+      {
+        "description": "LINK / USD",
+        "decimals": 8,
+        "answer": "1003651466",
+        "updatedAt": 1794596984
+      },
+      {
+        "description": "LINK / USD",
+        "decimals": 8,
+        "answer": "1003651466",
+        "updatedAt": 1794596984
+      }
+    ],
+    "0x2330aae3bca5f05169d5f4597964d44522f62930": [
+      {
+        "description": "USDS / USD",
+        "decimals": 8,
+        "answer": "99971510",
+        "updatedAt": 1794580584
+      },
+      {
+        "description": "USDS / USD",
+        "decimals": 8,
+        "answer": "99971510",
+        "updatedAt": 1794580584
+      }
+    ],
+    "0x4ec5970fc728c5f65ba413992cd5ff6fd70fcff0": [
+      {
+        "description": "AERO / USD",
+        "decimals": 8,
+        "answer": "47756520",
+        "updatedAt": 1794599173
+      },
+      {
+        "description": "AERO / USD",
+        "decimals": 8,
+        "answer": "47756520",
+        "updatedAt": 1794599173
+      }
+    ],
+    "0xd7818272b9e248357d13057aab0b417af31e817d": [
+      {
+        "description": "CBETH / USD",
+        "decimals": 8,
+        "answer": "222621510007",
+        "updatedAt": 1794599427
+      },
+      {
+        "description": "CBETH / USD",
+        "decimals": 8,
+        "answer": "222621510007",
+        "updatedAt": 1794599427
+      }
+    ],
+    "0xdc31a4ccfca039bec6222e20be7770e12581bfeb": [
+      {
+        "description": "ZRO / USD",
+        "decimals": 8,
+        "answer": "160605778",
+        "updatedAt": 1794599465
+      },
+      {
+        "description": "ZRO / USD",
+        "decimals": 8,
+        "answer": "160605778",
+        "updatedAt": 1794599465
+      }
+    ],
+    "0xd40e758b5ec80820b68dfc302fc5ce1239083548": [
+      {
+        "description": "YFI / USD",
+        "decimals": 8,
+        "answer": "181316327378",
+        "updatedAt": 1794599500
+      },
+      {
+        "description": "YFI / USD",
+        "decimals": 8,
+        "answer": "181316327378",
+        "updatedAt": 1794599500
+      }
+    ]
+  },
+  "tokenDecimals": {
+    "0xbaa5cc21fd487b8fcc2f632f3f4e8d37262a0842": 18,
+    "0x63706e401c06ac8513145b7687a14804d17f814b": 18,
+    "0x88fb150bdc53a65fe94dea0c9ba0a6daf8c6e196": 18,
+    "0x820c137fa70c8691f0e44dc420a5e53c168921dc": 18,
+    "0x940181a94a35a4569e4529a3cdfb74e38fd98631": 18,
+    "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22": 18,
+    "0x6985884c4392d348587b19cb9eaaf157f13271cd": 18,
+    "0x9eaf8c1e34f05a589eda6bafdf391cf6ad3cb239": 18
+  }
+}

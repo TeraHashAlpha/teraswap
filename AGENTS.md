@@ -1,4 +1,4 @@
-<!-- claude-md-sha256: c7d26a22835c9257d52cac8bd3d7fdb5846ccc3dbdbfb87d20255d5d0f8425d1 -->
+<!-- claude-md-sha256: 208a0b2e6b3f4323ca6c95ccc3c00c9a97ac779dae22971363ed1684c12e9ff9 -->
 # AGENTS.md — TeraSwap for Grok Build and other non-Claude coding agents
 
 Grok Build reads this file, not `CLAUDE.md`. This file exists so a second coding agent gets the same
