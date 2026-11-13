@@ -4,7 +4,7 @@
  * v1 and v2. Owner decision: rewrite with a comma, colon, period or parentheses; an unspaced numeric range ("5–10") stays.
  * Code comments are not copy and are not scanned. A placeholder for "no value" reads `n/a`.
  *
- * Three nets, because each one alone has a hole:
+ * Four nets, because each one alone has a hole (the fourth, the web app manifest, is below net 2):
  *   1. SOURCE SCAN (TypeScript AST): every string literal, template part and JSX text node of the visitor-facing code. This is the
  *      one that reaches conditional UI (modals, error states, gate notices) no render can reach cheaply. Logs (`console.*`),
  *      server routes, monitors and alert channels are not visitor copy and are outside the scope list below.
@@ -146,6 +146,19 @@ describe('net 2: product-claims and help-content values', () => {
     const mod = (await import('@/lib/help-content')) as Record<string, unknown>
     const all: { path: string; text: string }[] = []
     for (const [k, v] of Object.entries(mod)) strings(v, k, all)
+    expect(all.length).toBeGreaterThan(20)
+    expect(all.filter((s) => bad(s.text)).map((s) => `${s.path}: ${s.text.slice(0, 120)}`)).toEqual([])
+  })
+})
+
+// ── net 4: the web app manifest ─────────────────────────────────────────────────────────────────────────────────────────
+// public/manifest.json is read by the install prompt and the app switcher, outside any component: nets 1-3 cannot see it.
+// (layout.tsx, which holds the page metadata, is in net 1's scope; its "covers the visitor-facing tree" test pins that.)
+describe('net 4: public/manifest.json', () => {
+  it('no bad dash in any string of the manifest, at any depth', () => {
+    const manifest = JSON.parse(readFileSync(join(ROOT, 'public', 'manifest.json'), 'utf8')) as unknown
+    const all: { path: string; text: string }[] = []
+    strings(manifest, 'manifest', all)
     expect(all.length).toBeGreaterThan(20)
     expect(all.filter((s) => bad(s.text)).map((s) => `${s.path}: ${s.text.slice(0, 120)}`)).toEqual([])
   })

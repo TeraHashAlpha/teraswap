@@ -1,7 +1,7 @@
 {
   "name": "TeraSwap: DeFi Meta-Aggregator",
   "short_name": "TeraSwap",
-  "description": "Ethereum meta-aggregator that queries 11 liquidity sources for the best swap rate, with multi-oracle protection and privacy proxy.",
+  "description": "Maximum liquidity. Verified prices. TeraSwap is an EVM meta-aggregator on Ethereum, Base, and Arbitrum One that compares quotes across 8 liquidity sources, with multi-oracle price protection (Chainlink + DefiLlama) and a server-side proxy for RPC and quote requests.",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
@@ -72,11 +72,11 @@
   ],
   "screenshots": [
     {
-      "src": "/og-image.png",
+      "src": "/og-teraswap-v2.png",
       "sizes": "1200x630",
       "type": "image/png",
       "form_factor": "wide",
-      "label": "TeraSwap: Ethereum Meta-Aggregator"
+      "label": "TeraSwap: Compare. Verify. Swap. Repeat."
     }
   ],
   "related_applications": [],
