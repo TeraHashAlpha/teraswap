@@ -9,7 +9,7 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test'
+import { expect, test, type Browser, type BrowserContext, type Page, type TestInfo } from '@playwright/test'
 
 const KEY = 'ts_v2_intro_seen'
 const WORDS = ['Compare.', 'Verify.', 'Swap.', 'Repeat.']
@@ -43,6 +43,100 @@ async function sampleFromStart(context: BrowserContext) {
 }
 
 const overlay = (page: Page) => page.locator('[data-ts-intro]')
+
+const PHONE = { viewport: { width: 375, height: 667 }, hasTouch: true, isMobile: true } as const
+/** The one synthesized touch scroll all three phone specs send (the control sends exactly this too, with the intro out of the picture). */
+const SCROLL_GESTURE = { x: 187, y: 400, yDistance: -300, gestureSourceType: 'touch', speed: 800 } as const
+
+type Probe = {
+  counts: Record<string, number>
+  firstTouchmove?: { overlayMounted: boolean; overlaySkipped: boolean; scrollY: number }
+}
+
+/**
+ * Diagnostics for the phone specs: installed before any page script, it counts what the PAGE saw of the gesture (capture phase on
+ * window, so it is recorded before the intro's own listeners run) and notes whether the overlay was mounted at the first touchmove.
+ */
+async function installProbe(context: BrowserContext) {
+  await context.addInitScript(() => {
+    const probe: Probe = { counts: { touchstart: 0, touchmove: 0, touchend: 0, touchcancel: 0, pointercancel: 0, scroll: 0 } }
+    ;(window as unknown as { __probe: Probe }).__probe = probe
+    for (const type of Object.keys(probe.counts)) {
+      window.addEventListener(
+        type,
+        () => {
+          probe.counts[type] += 1
+          if (type === 'touchmove' && !probe.firstTouchmove) {
+            const el = document.querySelector('[data-ts-intro]')
+            probe.firstTouchmove = { overlayMounted: el !== null, overlaySkipped: el?.hasAttribute('data-skipped') ?? false, scrollY: window.scrollY }
+          }
+        },
+        { capture: true, passive: true },
+      )
+    }
+  })
+}
+
+/** Everything that can say why a synthesized touch scroll did not move the page. Never throws: a failed read is itself reported. */
+async function collectDiagnostics(page: Page, label: string) {
+  const browser = page.context().browser()
+  const fromPage = await page
+    .evaluate(() => {
+      const vv = window.visualViewport
+      const se = document.scrollingElement
+      const probe = (window as unknown as { __probe?: Probe }).__probe
+      return {
+        scrollY: window.scrollY,
+        scrollingElement: se ? se.tagName : null,
+        scrollHeight: se?.scrollHeight ?? null,
+        clientHeight: se?.clientHeight ?? null,
+        innerWidth: window.innerWidth,
+        innerHeight: window.innerHeight,
+        visualViewport: vv ? { width: vv.width, height: vv.height, scale: vv.scale, offsetTop: vv.offsetTop, pageTop: vv.pageTop } : null,
+        maxTouchPoints: navigator.maxTouchPoints,
+        ontouchstartInWindow: 'ontouchstart' in window,
+        pointerCoarse: window.matchMedia('(pointer: coarse)').matches,
+        readyState: document.readyState,
+        htmlOverflow: getComputedStyle(document.documentElement).overflow,
+        bodyOverflow: getComputedStyle(document.body).overflow,
+        overlayMountedNow: document.querySelector('[data-ts-intro]') !== null,
+        userAgent: navigator.userAgent,
+        eventsSeenByPage: probe?.counts ?? 'probe not installed',
+        atFirstTouchmove: probe?.firstTouchmove ?? 'no touchmove reached the page',
+      }
+    })
+    .catch((e: unknown) => ({ evaluateFailed: String(e) }))
+  return {
+    spec: label,
+    browser: browser ? `${browser.browserType().name()} ${browser.version()}` : 'unknown',
+    viewportSize: page.viewportSize(),
+    node: process.version,
+    platform: `${process.platform}/${process.arch}`,
+    ci: process.env.CI ?? null,
+    ...fromPage,
+  }
+}
+
+/** One line in the CI log (the list reporter prints stdout) and an attachment on the test, so a red run says what the page saw. */
+async function report(page: Page, testInfo: TestInfo, label: string, outcome: 'FAILED' | 'ok') {
+  const diag = await collectDiagnostics(page, label).catch((e: unknown) => ({ spec: label, collectFailed: String(e) }))
+  const body = JSON.stringify(diag, null, 2)
+  console.log(`INTRO-DIAG ${outcome} ${JSON.stringify(diag)}`)
+  await testInfo.attach(`intro-diagnostics-${outcome}`, { body, contentType: 'application/json' }).catch(() => {})
+}
+
+/**
+ * The assertion every phone spec ends on: the page moved. Same check as before (scrollY > 0 within 5 s); on failure it first reports
+ * the diagnostics above, then rethrows the original error, so it is no weaker and a red run explains itself.
+ */
+async function expectPageScrolled(page: Page, testInfo: TestInfo, label: string) {
+  try {
+    await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 5_000 }).toBeGreaterThan(0)
+  } catch (err) {
+    await report(page, testInfo, label, 'FAILED')
+    throw err
+  }
+}
 
 test.describe('v2 landing intro', () => {
   test('timeline as built: words at 0.0 / 0.6 / 1.2 / 1.8 s, sweep 2.95 to 3.30 s, overlay gone after', async ({ browser }) => {
@@ -144,8 +238,30 @@ test.describe('v2 landing intro', () => {
     await context.close()
   })
 
+  // CONTROL for the two touch-scroll specs below: the intro is marked as already played, so it is never mounted, and the identical
+  // synthesized touch scroll is sent. If THIS fails in an environment, that environment cannot scroll by a synthesized touch gesture
+  // at all and the intro is not the cause; if it passes while the specs below fail, the intro (or its timing) is.
+  // One control per gesture the two specs send (they differ only in speed: 800 and 400 px/s).
+  for (const speed of [800, 400]) {
+    test(`control: with the intro already played, the same synthesized touch scroll (${speed} px/s) moves the page`, async ({ browser }, testInfo) => {
+      const label = `control (no intro, ${speed} px/s)`
+      const { context, page } = await fresh(browser, PHONE)
+      await context.addInitScript((k) => sessionStorage.setItem(k, '1'), KEY)
+      await installProbe(context)
+      await page.goto('/', { waitUntil: 'domcontentloaded' })
+      await expect(page.locator('#hero h1')).toHaveCount(1, { timeout: 20_000 }) // the landing is client-rendered: this means it is up
+      await expect(overlay(page)).toHaveCount(0)
+      await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))))
+      const cdp = await context.newCDPSession(page)
+      await cdp.send('Input.synthesizeScrollGesture', { ...SCROLL_GESTURE, speed })
+      await expectPageScrolled(page, testInfo, label)
+      await report(page, testInfo, label, 'ok') // also logged when green, to compare with a red run next to it
+      await context.close()
+    })
+  }
+
   test.describe('on a phone', () => {
-    test('a tap skips it and does not activate the link under it; a touch scroll skips it and scrolls', async ({ browser }) => {
+    test('a tap skips it and does not activate the link under it; a touch scroll skips it and scrolls', async ({ browser }, testInfo) => {
       const tap = await fresh(browser, { viewport: { width: 375, height: 667 }, hasTouch: true, isMobile: true })
       await tap.page.goto('/', { waitUntil: 'domcontentloaded' })
       await expect(overlay(tap.page)).toHaveCount(1, { timeout: 20_000 })
@@ -156,22 +272,24 @@ test.describe('v2 landing intro', () => {
       await expect(tap.page.locator('#hero h1')).toHaveCount(1)
       await tap.context.close()
 
-      const drag = await fresh(browser, { viewport: { width: 375, height: 667 }, hasTouch: true, isMobile: true })
+      const drag = await fresh(browser, PHONE)
+      await installProbe(drag.context)
       await drag.page.goto('/', { waitUntil: 'domcontentloaded' })
       await expect(overlay(drag.page)).toHaveCount(1, { timeout: 20_000 })
       const cdp = await drag.context.newCDPSession(drag.page)
-      await cdp.send('Input.synthesizeScrollGesture', { x: 187, y: 400, yDistance: -300, gestureSourceType: 'touch', speed: 800 })
+      await cdp.send('Input.synthesizeScrollGesture', SCROLL_GESTURE)
       await expect(overlay(drag.page)).toHaveCount(0)
-      await expect.poll(() => drag.page.evaluate(() => window.scrollY), { timeout: 5_000 }).toBeGreaterThan(0)
+      await expectPageScrolled(drag.page, testInfo, 'intro: tap-then-drag spec (a touch scroll skips it and scrolls)')
       await drag.context.close()
     })
   })
 
   test.describe('the gesture that skips it is not swallowed', () => {
-    test('the touched overlay is still mounted when the scroll begins, and goes once the finger lifts', async ({ browser }) => {
+    test('the touched overlay is still mounted when the scroll begins, and goes once the finger lifts', async ({ browser }, testInfo) => {
       // Chromium starts a scroll on the element under the finger. Unmounting it on the first touchmove can lose the scroll when the
       // removal beats the scroll begin (a slow Linux runner; a fast Mac wins the race), so the overlay may only go when the finger lifts.
-      const { context, page } = await fresh(browser, { viewport: { width: 375, height: 667 }, hasTouch: true, isMobile: true })
+      const { context, page } = await fresh(browser, PHONE)
+      await installProbe(context)
       await context.addInitScript(() => {
         const w = window as unknown as { __mountedAtFirstScroll?: boolean; __skippedAtFirstScroll?: boolean }
         window.addEventListener(
@@ -189,9 +307,9 @@ test.describe('v2 landing intro', () => {
       await expect(overlay(page)).toHaveCount(1, { timeout: 20_000 })
       const cdp = await context.newCDPSession(page)
       // 400 px/s: the whole drag (300 px) takes about 0.75 s, so it ends well before the overlay's own 3.3 s end could remove it
-      await cdp.send('Input.synthesizeScrollGesture', { x: 187, y: 400, yDistance: -300, gestureSourceType: 'touch', speed: 400 })
+      await cdp.send('Input.synthesizeScrollGesture', { ...SCROLL_GESTURE, speed: 400 })
       await expect(overlay(page)).toHaveCount(0)
-      await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 5_000 }).toBeGreaterThan(0)
+      await expectPageScrolled(page, testInfo, 'intro: not-swallowed spec (overlay mounted when the scroll begins)')
       const seen = await page.evaluate(() => {
         const w = window as unknown as { __mountedAtFirstScroll?: boolean; __skippedAtFirstScroll?: boolean }
         return [w.__mountedAtFirstScroll, w.__skippedAtFirstScroll]

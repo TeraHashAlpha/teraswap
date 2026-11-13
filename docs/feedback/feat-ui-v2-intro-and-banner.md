@@ -67,3 +67,17 @@ with a finger down it stays mounted until the last `touchend`/`touchcancel` (or 
 Chromium spec asserting the overlay is still mounted and already skipped at the first `scroll` event; it FAILS on the old build (false/false) and passes now.
 Verified: `CI=true` headless, the failing spec plus the new one, 10 separate invocations, 10/10; whole intro spec 12/12; touch probe under 1x/6x/20x CPU throttle 8/8 each.
 Concern: other code that unmounts on a scroll or touch event while the finger is down would have the same hazard; not audited here.
+
+### 5.3 CI on e8637bc: both touch-scroll specs still red (`intro.pw.ts:148`, `:171`), full-suite green
+The 5.2 fix did not make CI green, so 5.2's explanation is NOT confirmed for the CI runner: it is proven only as a mechanism (forced removal gives 0/4 scrolls
+locally, the new spec fails on the old build). Both CI failures end at the same poll (`scrollY` stays 0 after the overlay is gone, which also happens by itself
+at 3.3 s, so "gone" never proved the gesture skipped it). `intro.pw.ts` is the only spec in the repo that uses `Input.synthesizeScrollGesture`, so no
+existing CI-green spec shows that this runner can scroll by a synthesized touch gesture at all. Wheel scroll DOES work in CI (`:136` passes there), so the page
+exists and scrolls. Added instead of guessing: (1) a CONTROL (one per gesture speed, 800 and 400 px/s): intro marked played, landing loaded, identical
+gesture, `scrollY > 0`. (2) `INTRO-DIAG` on failure for the control and both touch specs: scrollHeight, innerHeight, visualViewport, maxTouchPoints,
+touchstart/touchmove/touchend/pointercancel/scroll counts seen by the page, whether the overlay was mounted (and already skipped) at the first touchmove,
+browser name + version, UA, platform. The control also logs green. The attachment is on the test result, but the only reporter is `list`, so the CI-visible
+channel is the one `INTRO-DIAG` stdout line. Reading how to read a result: touchstart 0 = the gesture never reached the page (synthesis/CI, not the intro);
+control red = same; control green + touch specs red = the intro or its timing; scrollHeight small = the page was short in the rig.
+No cause fixed in this commit: nothing in the config shows a Linux difference (the project `use` sets Desktop Chrome, but these specs open their own
+contexts with `hasTouch` + `isMobile` explicitly; same headless-shell family locally and in CI). Not tried: a Linux container (Docker was not running here).
