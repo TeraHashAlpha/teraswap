@@ -6,7 +6,7 @@ M and L findings of audit A78b (S-8 to S-12) plus the WalletConnect description.
 - [x] C1 Privacy copy: S-8 (section 8), S-9 (section 3.3), S-10 (section 6), Help, Docs, product-claims
 - [x] C2 S-11 caller guard + landing-import guard, S-12 `checkRateLimitWithin` on log-quote, log-swap, log-activity
 - [x] C3 WalletConnect `appDescription` + stale-claim guards
-- [ ] Verify (`agent-verify.sh --codeql`, hosts capture, claims checker, `gen-claude-state.mjs --check`), push, compare link
+- [x] Verify (`agent-verify.sh --codeql`, hosts capture, claims checker, `gen-claude-state.mjs --check`), branch pushed, compare link
 
 ### Premises that were not (fully) true, and what I wrote instead
 - **S-10 half 1 is false as worded.** The Analytics tab does not show "wallet addresses as they appear on-chain". It shows type, token pair, route, time-ago and a tx link, newest 10 of the 50 the API returns (`AnalyticsDashboard.tsx:103-137`, `ui/v2/analytics/AnalyticsTab.tsx:83-111`); the API response cuts each wallet to its first 6 and last 4 characters (`api/analytics/route.ts:468-472`, API-MED-07). Written: the tab does not display addresses, the data holds them shortened, a swap you signed yourself is a public transaction that shows your address. Half 2 is true (below).
@@ -67,3 +67,11 @@ Guards: `wagmiConfig.test.ts` (value equals the derived sentence, names every re
 
 ### Finding while verifying
 First verify run (head 4f304ea): 1 failed of 10650, `client-ip-key.guard.test.ts` "every API route that rate-limits per client..." (`expected 14 to be greater than 15`). It counted routes calling plain `checkRateLimit(`; moving the four log routes to `checkRateLimitWithin` took them out of its scan, so a regression there would have gone unseen. Fixed in its own commit: the regex now matches both names (count back above 15, and the per-client-key rule covers the migrated routes too).
+
+### Evidence 4: verify, diff, compare link
+`scripts/agent-verify.sh --codeql`, head 9d23b75, base origin/main 649105f: suite PASS 10650 passed / 0 failed / 497 files · lint-delta PASS +0 err +0 warn · tsc PASS 0 · build PASS · v1v2-parity PASS 111 · rpc-budget PASS 36 · CodeQL security-extended PASS head 13 / base 13 / new 0 · RESULT PASS (the first run at 4f304ea failed 1, see "Finding while verifying").
+Hosts capture (production build with the CI marker env, `e2e/third-party-hosts`, v1 + v2, 3 chains, wallets, bundle, quote-logging): 16 passed. `check-product-claims.mjs` PASS (9 files, 0 hard-coded claims) · `gen-claude-state.mjs --check` PASS · `check-agents-parity.mjs` PASS (regenerated per commit, not hand-merged). No U+2014 or spaced U+2013 on any added line.
+Not changed: what is logged or stored, orders, swap history, signing, CSP, rate-limit numbers (`LOG_RATE_LIMIT` pinned 120 per 60 s), database, dependencies. Not run: `--keeper` (no keeper code), `goal-lint` (the goal text has no `CONTROL:` first line, same as earlier rounds).
+Open for the owner: (1) the Cloudflare dashboard analytics toggle, which section 8 "we do not ask them for analytics" rests on (not provable from the repo); (2) `analytics-tracker.ts:162` keeps a browser-side `supabaseInsert` that does nothing without server env, not touched; (3) `recentTrades` in the public `/api/analytics` response still carries the shortened address (6 + 4) and the tx hash: the copy now says so, dropping the field would be a separate change.
+Auditor required: yes (Privacy copy, v1 == v2; each new sentence carries its proof in Evidence 1). No PR opened.
+Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/privacy-leftovers-a78b
