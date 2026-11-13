@@ -1,6 +1,6 @@
 ## Evidence 2 to 4: fix/privacy-leftovers-a78b
 
-Companion of `fix-privacy-leftovers-a78b.md` (that file: one-screen summary + Evidence 1, the content-map delta). The goal asks for these in FEEDBACK and for FEEDBACK to stay within one screen plus the content-map delta; they cannot both hold, so the storage table, the break-it proof and the verify output live here.
+Companion of `fix-privacy-leftovers-a78b.md` (that file: one-screen summary + Evidence 1, the content-map delta). The goal asks for these in FEEDBACK and for FEEDBACK to stay within one screen plus the content-map delta; they cannot both hold, so FEEDBACK carries a compact Evidence 2 to 4 and this file keeps the verbose tables and the full per-file stat.
 
 ### Evidence 2: storage-key table (every writer in `src`, non-test; `/api/*` is server code)
 | store | key | written at | what it holds | UI |
