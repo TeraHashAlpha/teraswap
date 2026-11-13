@@ -2,6 +2,7 @@
 
 A78b M and L findings S-8 to S-12 plus the WalletConnect description. Draft PR, Auditor required (Privacy copy, v1 == v2). No PR opened by me. Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/privacy-leftovers-a78b
 
+- **Layout (the goal's "<= 1 screen + content-map" and "evidence 1-4 in FEEDBACK" cannot both be literal, no owner reply):** the narrative below is one screen; Evidence 1 to 4 follow, compact, each with its file:line; the per-file stat and the long tables are in `fix-privacy-leftovers-a78b.evidence.md`. Say so and I cut or expand it.
 - [x] C1 copy S-8, S-9, S-10 (+ Help, Docs, product-claims) · [x] C2 S-11 guard, S-12 limiter · [x] C3 WalletConnect description · [x] verify, hosts capture, push
 - **Premise false, asked once, owner answer 2026-11-13: "Keep it".** S-10 half 1 ("addresses as they appear on-chain") is not true: the tab shows pair, route, time, tx link; the API cuts each wallet to 6 + 4 characters (`api/analytics/route.ts:468-472`). Section 6 says that; half 2 (anyone with an address can request its statistics) is true (`analytics/personal/route.ts:11,47`, `export/route.ts:164,216`).
 - **S-9:** the old list named slippage (`SwapBox.tsx:74`), swap history (`useSwapHistory.ts:24`) and approvals (`useActiveApprovals.ts:9`) as stored; all three are memory only. Sound is not stored either (`lib/sounds.ts` has no storage call).
