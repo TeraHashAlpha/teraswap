@@ -24,9 +24,13 @@ import registrations from '../../config/dca-feed-registrations.json'
 /**
  * [FEAT-DCA-FEED-REGISTRATION-PHASE1] Every ENABLED row of src/config/dca-feed-registrations.json
  * (generated from the owner's directory inventory by scripts/dca-feeds/build-config.mjs) is mirrored
- * into the three tables below by DERIVATION, so no feed address is hand-typed twice. Phase-2 rows
- * are `enabled: false` and contribute nothing. Equality with the config is pinned by
- * chainlink-feeds.test.ts.
+ * into the three tables below by DERIVATION, so no feed address is hand-typed twice. Equality with
+ * the config is pinned by chainlink-feeds.test.ts.
+ *
+ * [feat/dca-feed-batch] A phase-2 row is `enabled: false` and contributes nothing UNTIL a monthly
+ * batch (scripts/dca-feeds/batch.ts) switches it on; from then it is mirrored like a phase-1 row.
+ * ONE EXCEPTION, in `registeredFeedMap`: a token already served by PREFERRED_DIRECT_USD_FEEDS_BY_CHAIN
+ * (Base cbETH) keeps that resolution and is NOT added to the terminal direct map.
  */
 interface RegistrationRow {
   symbol: string; token: string; feed: string; description: string
@@ -37,7 +41,24 @@ function enabledRegistrations(chainId: number): RegistrationRow[] {
   return (chain?.rows ?? []).filter(r => r.enabled)
 }
 function registeredFeedMap(chainId: number): Record<string, `0x${string}`> {
-  return Object.fromEntries(enabledRegistrations(chainId).map(r => [r.token.toLowerCase(), r.feed as `0x${string}`]))
+  // [feat/dca-feed-batch] A hit in the terminal map makes resolveFeed answer 'single' and drops the
+  // token's composition fallback (INC-2026-08-07-001: an unpriced leg). So a token with a
+  // PREFERRED direct feed stays out of this map; its enabled row must name the SAME feed as the
+  // preference, or the swap side and the on-chain DCA floor would read two different feeds.
+  const preferred = preferredDirectUsdFeedsByChain()[chainId] ?? {}
+  const map: Record<string, `0x${string}`> = {}
+  for (const r of enabledRegistrations(chainId)) {
+    const token = r.token.toLowerCase()
+    const preferredFeed = preferred[token]
+    if (preferredFeed === undefined) { map[token] = r.feed as `0x${string}`; continue }
+    if (preferredFeed.toLowerCase() !== r.feed.toLowerCase()) {
+      throw new Error(
+        `[feat/dca-feed-batch] ${r.symbol} on chain ${chainId}: the enabled registration row names feed ${r.feed}, ` +
+        `but the preferred-direct feed is ${preferredFeed}. They must be the same feed.`,
+      )
+    }
+  }
+  return map
 }
 function registeredFeeds(): RegistrationRow[] {
   return [8453, 42161].flatMap(enabledRegistrations)
@@ -72,6 +93,7 @@ export const CHAINLINK_FEEDS_BY_CHAIN: Record<number, Record<string, `0x${string
     //  • USDbC (0xd9aA…b6CA): no Chainlink feed exists on Base (absent from the directory).
     //    Correctly falls through to null → multi-source compare + on-chain minimumOutput.
     // [FEAT-DCA-FEED-REGISTRATION-PHASE1] enabled config rows (Base USDC plain proxy, USDT, cbBTC, EURC, COMP, VIRTUAL, …).
+    // [feat/dca-feed-batch] plus the monthly-batch rows (2026-11: MORPHO, AAVE, LINK, USDS, AERO, ZRO, YFI; cbETH stays preferred-direct).
     ...registeredFeedMap(8453),
   },
   // [SPRINT-46-ARBITRUM-CONFIG → CHORE-47B-ARBITRUM-ADDRESS-REMEDIATION] Arbitrum (42161) — 5 core
@@ -349,14 +371,19 @@ export function getComposedFeed(
  *     0x71E021bc… matching the directory's contractAddress — identical on two independent Base
  *     RPCs. Re-runnable: `node scripts/verify-base-cbeth-feeds.mjs`.
  */
-const PREFERRED_DIRECT_USD_FEEDS_BY_CHAIN: Record<number, Record<string, `0x${string}`>> = {
-  // ── Base (8453) ──
-  8453: {
-    // cbETH (0x2Ae3…0DEc22) → "CBETH / USD" 8 dp, 1200s heartbeat. Falls back to the
-    // cbETH/ETH x ETH/USD composition already configured below for the same token.
-    '0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22': '0xd7818272B9e248357d13057AAb0B417aF31E817d',
-  },
+// [feat/dca-feed-batch] A function DECLARATION (hoisted), not a bare const: `registeredFeedMap` consults
+// it while CHAINLINK_FEEDS_BY_CHAIN is being built further up, before a const here would exist.
+function preferredDirectUsdFeedsByChain(): Record<number, Record<string, `0x${string}`>> {
+  return {
+    // ── Base (8453) ──
+    8453: {
+      // cbETH (0x2Ae3…0DEc22) → "CBETH / USD" 8 dp, 1200s heartbeat. Falls back to the
+      // cbETH/ETH x ETH/USD composition already configured below for the same token.
+      '0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22': '0xd7818272B9e248357d13057AAb0B417aF31E817d',
+    },
+  }
 }
+const PREFERRED_DIRECT_USD_FEEDS_BY_CHAIN = preferredDirectUsdFeedsByChain()
 
 /**
  * [FIX-CBETH-DIRECT-FEED] The DIRECT token/USD feed PREFERRED for a token, or null. Unlike
