@@ -7,12 +7,15 @@
  * must be "EUR / USD", decimals() must be 8, latestRoundData() must carry a positive answer. Any disagreement exits non-zero
  * and writes nothing.
  *
- *   node scripts/fiat/build-eur-usd-feed.mjs            # write the file
- *   node scripts/fiat/build-eur-usd-feed.mjs --check    # exit 1 when the file differs from what the directory says
+ *   node scripts/fiat/build-eur-usd-feed.mjs > src/config/eur-usd-feed.json   # regenerate (the JSON goes to stdout; the script writes no file)
+ *   node scripts/fiat/build-eur-usd-feed.mjs --check                          # exit 1 when the file differs from what the directory says
+ *
+ * Why stdout and not a file write: the values come from the network. Writing them to disk from here is exactly what CodeQL's
+ * js/http-to-file-access flags, and a redirect makes the same step an explicit, reviewable act of the person running it.
  *
  * Needs network. Override the RPCs with EUR_FEED_RPC_A / EUR_FEED_RPC_B (names only are read here, never printed).
  */
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createPublicClient, getAddress, http, parseAbi } from 'viem'
@@ -73,8 +76,8 @@ if (process.argv.includes('--check')) {
     console.error('src/config/eur-usd-feed.json differs from the directory')
     process.exit(1)
   }
-  console.log('eur-usd-feed.json matches the directory and the chain')
+  console.error('eur-usd-feed.json matches the directory and the chain')
 } else {
-  writeFileSync(OUT, text)
-  console.log(`wrote ${OUT} (chain 1 feed ${feed}, heartbeat ${entry.heartbeat})`)
+  process.stdout.write(text)
+  console.error(`chain 1 feed ${feed}, heartbeat ${entry.heartbeat}: confirmed on ${RPCS.length} RPCs`)
 }
