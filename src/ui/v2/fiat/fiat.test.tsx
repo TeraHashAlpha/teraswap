@@ -194,11 +194,11 @@ describe('price cache: 60 s per token, concurrent requests deduped (owner decisi
   const TOK_B = '0x00000000000000000000000000000000000000b2'
   const P = { [NATIVE_ETH.toLowerCase()]: 2490, [TOK_A]: 10, [TOK_B]: 20 }
   const priceCalls = () => calls.filter((c) => c.startsWith('/api/portfolio/prices'))
-  const card = (t: string) => ({ eth: useApproxUsdPrice(1, NATIVE_ETH), tok: useApproxUsdPrice(1, t) })
+  const useCard = (t: string) => ({ eth: useApproxUsdPrice(1, NATIVE_ETH), tok: useApproxUsdPrice(1, t) })
 
   it('A → B → A within 60 s makes TWO requests, not three, and A comes straight back from the cache', async () => {
     stubFetch({ prices: P })
-    const { result, rerender } = renderHook(({ t }) => card(t), { initialProps: { t: TOK_A } })
+    const { result, rerender } = renderHook(({ t }) => useCard(t), { initialProps: { t: TOK_A } })
     await waitFor(() => expect(result.current.tok).toBe(10))
     rerender({ t: TOK_B })
     await waitFor(() => expect(result.current.tok).toBe(20))
@@ -212,7 +212,7 @@ describe('price cache: 60 s per token, concurrent requests deduped (owner decisi
 
   it('after 60 s the price is fetched again', async () => {
     stubFetch({ prices: P })
-    const { result, rerender } = renderHook(({ t }) => card(t), { initialProps: { t: TOK_A } })
+    const { result, rerender } = renderHook(({ t }) => useCard(t), { initialProps: { t: TOK_A } })
     await waitFor(() => expect(result.current.tok).toBe(10))
     rerender({ t: TOK_B })
     await waitFor(() => expect(result.current.tok).toBe(20))
