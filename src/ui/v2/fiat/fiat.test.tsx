@@ -10,7 +10,7 @@ import type { Token } from '@/lib/tokens'
 import { fmtFiat, convertUsd } from './fiat-format'
 import { _resetFiatPreference, FIAT_CURRENCY_KEY, getFiatCurrency, setFiatCurrency, useFiatPreference } from './fiat-preference'
 import { _resetEurRate, judgeEurRate, loadEurRate, rejudge } from './eur-rate'
-import { _resetApproxPrices } from './approx-prices'
+import { _resetApproxPrices, useApproxUsdPrice } from './approx-prices'
 import { fiatText, useFiatDisplay, useFiatValue } from './use-fiat-value'
 
 const ETH = { address: NATIVE_ETH, symbol: 'ETH', decimals: 18 } as unknown as Token
@@ -186,6 +186,72 @@ describe('the EUR rate', () => {
     const payload = { rate: 1.1, updatedAt: nowSec() - 89_000, maxStaleness: 90000 }
     expect(judgeEurRate({ phase: 'ready', payload, at: Date.now() }, Date.now()).status).toBe('ok')
     expect(judgeEurRate({ phase: 'ready', payload, at: Date.now() }, Date.now() + 2_000_000).status).toBe('unavailable')
+  })
+})
+
+describe('price cache: 60 s per token, concurrent requests deduped (owner decision)', () => {
+  const TOK_A = '0x00000000000000000000000000000000000000a1'
+  const TOK_B = '0x00000000000000000000000000000000000000b2'
+  const P = { [NATIVE_ETH.toLowerCase()]: 2490, [TOK_A]: 10, [TOK_B]: 20 }
+  const priceCalls = () => calls.filter((c) => c.startsWith('/api/portfolio/prices'))
+  const card = (t: string) => ({ eth: useApproxUsdPrice(1, NATIVE_ETH), tok: useApproxUsdPrice(1, t) })
+
+  it('A → B → A within 60 s makes TWO requests, not three, and A comes straight back from the cache', async () => {
+    stubFetch({ prices: P })
+    const { result, rerender } = renderHook(({ t }) => card(t), { initialProps: { t: TOK_A } })
+    await waitFor(() => expect(result.current.tok).toBe(10))
+    rerender({ t: TOK_B })
+    await waitFor(() => expect(result.current.tok).toBe(20))
+    rerender({ t: TOK_A })
+    expect(result.current.tok).toBe(10) // no wait: cached
+    await act(async () => {})
+    expect(priceCalls()).toHaveLength(2)
+    expect(decodeURIComponent(priceCalls()[1])).toContain(TOK_B) // the second request is for B only
+    expect(decodeURIComponent(priceCalls()[1])).not.toContain(TOK_A)
+  })
+
+  it('after 60 s the price is fetched again', async () => {
+    stubFetch({ prices: P })
+    const { result, rerender } = renderHook(({ t }) => card(t), { initialProps: { t: TOK_A } })
+    await waitFor(() => expect(result.current.tok).toBe(10))
+    rerender({ t: TOK_B })
+    await waitFor(() => expect(result.current.tok).toBe(20))
+    vi.setSystemTime(Date.now() + 61_000)
+    rerender({ t: TOK_A })
+    await waitFor(() => expect(priceCalls()).toHaveLength(3))
+  })
+
+  it('concurrent consumers of one token share ONE request, including one that mounts while it is still in flight', async () => {
+    calls = []
+    let release: (v: unknown) => void = () => {}
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        calls.push(url)
+        return new Promise((r) => {
+          release = r
+        })
+      }),
+    )
+    const first = renderHook(() => useApproxUsdPrice(1, TOK_A))
+    const sameTick = renderHook(() => useApproxUsdPrice(1, TOK_A))
+    await act(async () => {})
+    const late = renderHook(() => useApproxUsdPrice(1, TOK_A)) // request still pending
+    await act(async () => {})
+    expect(priceCalls()).toHaveLength(1)
+    await act(async () => {
+      release({ ok: true, json: async () => ({ prices: { [TOK_A]: 10 } }) })
+    })
+    await waitFor(() => expect(late.result.current).toBe(10))
+    expect([first.result.current, sameTick.result.current, late.result.current]).toEqual([10, 10, 10])
+    expect(priceCalls()).toHaveLength(1)
+  })
+
+  it('no rate-limit number is touched: the route still allows 10 per minute (unchanged file)', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const route = readFileSync(join(__dirname, '..', '..', '..', 'app', 'api', 'portfolio', 'prices', 'route.ts'), 'utf8')
+    expect(route).toContain('{ limit: 10, windowMs: 60_000 }')
   })
 })
 

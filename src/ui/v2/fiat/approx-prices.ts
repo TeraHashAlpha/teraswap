@@ -6,6 +6,8 @@
  * and no RPC: it only asks that route, for the tokens currently on screen, and shares the answer between every line on the card.
  *
  *  - Requests made in the same tick are merged into one call per chain (Sell, Receive and the fee line are three consumers, one request).
+ *  - Cached per token for 60 s: a token asked for again inside 60 s (A -> B -> A) is served from the cache and costs no request, and a token
+ *    whose request is still in flight is never asked twice (the attempt is stamped BEFORE the call). [owner decision; no rate-limit number changed]
  *  - Refreshed every 60 s, like the Portfolio, and paused in a hidden tab (`setVisibleInterval`).
  *  - A token the route does not price, a failed call, or a price older than ten minutes is `null`: the line renders nothing.
  *
