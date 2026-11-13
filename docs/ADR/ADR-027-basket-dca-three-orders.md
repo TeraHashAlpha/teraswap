@@ -1,10 +1,10 @@
 # ADR-027: Basket DCA on the V3 executor, three orders per basket
 
-- **Status:** Proposed (Architect, 2026-11-13). Becomes Accepted when the owner signs off the three open points in §7.
+- **Status:** Proposed (Architect, 2026-11-13). The three points of §7 are closed; becomes Accepted on the owner's sign-off.
 - **Fund-flow:** yes. The keeper change decides which order fills and when. Auditor pass with 0C/0H before any merge of the keeper and API work.
 - **Contract change:** none. No deploy, no timelock (phase 1).
 - **Follows:** ADR-013 (on-chain floor), ADR-024 (price quorum: skip the cycle, never the order), ADR-026 (infra misses never burn an order).
-- **Evidence:** analyst package v2, v3, v3.1 (`docs/Reports/basket-dca/` once moved in; engine `src/engine_discrete.py`, 17 engine tests, 271 056 runs with exact chunks). Owner decisions of 2026-11-07.
+- **Evidence:** analyst package v2, v3, v3.1, v3.2 (`docs/Reports/basket-dca/` once moved in; engine `src/engine_discrete.py`, 17 engine tests, 271 056 runs with exact chunks). Owner decisions of 2026-11-07.
 - **Spec:** `docs/Prompts/SPEC-BASKET-DCA.md`.
 
 ## 1. Context
@@ -28,7 +28,7 @@ For leg *i* with weight `w_i`, capital `C`, `N` cycles and cadence `T`:
 | `dcaInterval` | `T ÷ 2` (at most 2 chunks of one leg per cycle) |
 | `expiry` | `start + (N + 3) × T + margin` |
 
-The keeper applies the selection rules of the analyst's discrete engine (spec §4): a calendar of chunks due, the worst-performing eligible leg first (rule 4, on the ADR-024 resolved price), a one-cycle cooldown (rule 5), catch-up for legs behind their own count, the drawdown protection (rule 9, soft mode by default, threshold 25%), and "no price, no purchase for that leg this cycle".
+The keeper applies the selection rules of the analyst's discrete engine (spec §4): a calendar of chunks due, the worst-performing eligible leg first (rule 4, on the ADR-024 resolved price), a one-cycle cooldown (rule 5), catch-up for legs behind their own count, the drawdown protection (rule 9, soft mode by default, threshold 25%, soft window the last quarter of the order), and "no price, no purchase for that leg this cycle".
 
 ## 3. What is enforced where
 
@@ -67,6 +67,6 @@ Gas per order with three orders; the real submission order inside a cycle; the s
 
 ## 7. Open points for the owner
 
-1. **Soft mode on short baskets.** As modelled, soft mode stops blocking in the last 10 cycles, so a basket of 10 cycles or fewer is never blocked by rule 9 in soft mode; every weekly basket is in that case. **Owner, 2026-11-13: ask the analyst** for a window proportional to `N` (request v3.2, part A). Open until delivered.
-2. **Stable leg. Owner, 2026-11-13: phase 1 must offer at least one stable leg**, and the interface says which tokens exist today and that more are being added. Closed: USDT and DAI have registered feeds on Base, so the stable leg and the peg band are in phase 1 (spec §4a). The feed parameters come from v3.2, part B.
+1. **Soft mode on short baskets.** Closed 2026-11-13 (analyst v3.2): the soft-mode window is `k_soft = max(1, ceil(N ÷ 4))`, no cap. The fixed 10 of v3.1 never blocked a basket of 10 cycles or fewer (0 of 475 136 positions, 112 796 of which had a leg down 25% or more) and, capped at 10, left long baskets incomplete. With the new rule: 0 incomplete positions in 855 428. Cost to state honestly: in short weekly baskets the largest single-cycle spend rises (41.7% to 66.7% of capital at N = 6).
+2. **Stable leg. Owner, 2026-11-13: phase 1 must offer at least one stable leg**, and the interface says which tokens exist today and that more are being added. Closed: USDT and DAI have registered feeds on Base, so the stable leg and the peg band are in phase 1 (spec §4a). v3.2 confirmed the feed parameters (0.3%, 86 400 s) and 0 incomplete positions for WETH + cbBTC + USDT or DAI at every band.
 3. **Arbitrum.** Closed 2026-11-13: the executor is not paused, the keeper signer is whitelisted, feeds are registered (read on-chain for WETH, USDC, WBTC, ARB), and the owner confirmed on the host that the Arbitrum keeper process is online. Phase 1 still ships on Base first; Arbitrum opens by itself when its keeper publishes the basket capability, after a check of its registered feeds.

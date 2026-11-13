@@ -48,7 +48,7 @@ At tick `t`:
 
 1. **Price `P_i`**: the ADR-024 resolved price of the leg (Chainlink no older than 600 s, else the quorum). No usable price: the leg is out of this tick ("no price").
 2. **Variation** `v_i = P_i ÷ last_i − 1`. At tick 0 there is no previous price: every `v_i` is 0 and the tie rule decides (pinned by the vectors).
-3. **Protected (rule 9)**: `P_i ≤ entry_i × (1 − threshold)`. In soft mode protection stops blocking when `t ≥ N − k_soft` and in grace cycles; in rigid mode it always blocks. `k_soft` is a function of `N`, **pending the analyst's v3.2** (the modelled value, 10, would never block a basket of 10 cycles or fewer); it is one exported function, so the result drops in.
+3. **Protected (rule 9)**: `P_i ≤ entry_i × (1 − threshold)`. In soft mode protection stops blocking when `t ≥ N − k_soft` and in grace cycles; in rigid mode it always blocks. `k_soft = max(1, ceil(N ÷ 4))`, no cap (analyst v3.2, 855 428 positions per candidate: 0 incomplete positions; the earlier fixed 10 never blocked a basket of 10 cycles or fewer, and any cap at 10 left long baskets incomplete). One exported function; the interface shows the order's K.
 4. **Eligible**: not complete (`done_i < n_i`), has a price, not blocked by rule 9, and for the stable leg inside the band (§4a).
 5. **Due**: `due_total = M` if `t ≥ N − 1`, else `min(M, ceil(M × (t + 1) ÷ N))`, with `M = Σ n_i`; `due = due_total − Σ done_i`.
 6. **First chunk (rule 4)**: the eligible leg with the lowest `v_i` (signed minimum); tie: the leg furthest behind its own count (`(n_i − done_i) ÷ n_i`, highest first). **Rule 5**: if that leg is `cooldown` and another leg is eligible, `cooldown` goes to the back of the line.
@@ -61,9 +61,9 @@ A chunk that was picked and did not execute (no route, floor, revert, infra) sta
 
 ### 4a. Peg band (stable leg only)
 
-Band 1% by default; the user may widen it up to 10% without a warning; above 10% one warning, read from `results/v31/aviso_banda.csv` (three wording rules, D = 2 137 days); if the user refuses, the basket is not created (server error, not only interface). The stable's own USD feed is accepted up to its `maxStaleness`; the leg is out of band when `|p − 1| + feed deviation threshold > band`; otherwise the quorum price decides; no price, the leg skips the tick. The deviation thresholds of the USDT/USD and DAI/USD feeds on Base come from the analyst's v3.2, never typed from memory. The token sold never pauses. An out-of-band tick records "band" as the reason, after "no price" and before rule 9.
+Band 1% by default; the user may widen it up to 10% without a warning; above 10% one warning, read from `results/v31/aviso_banda.csv` (three wording rules, D = 2 137 days); if the user refuses, the basket is not created (server error, not only interface). The stable's own USD feed is accepted up to its `maxStaleness`; the leg is out of band when `|p − 1| + feed deviation threshold > band`; otherwise the quorum price decides; no price, the leg skips the tick. USDT/USD and DAI/USD on Base: deviation threshold 0.3%, heartbeat 86 400 s, `maxStaleness` 90 000 s, the same as USDC/USD (analyst v3.2, confirmed against the directory and on-chain); the code reads them from the feed config, never a typed constant. The token sold never pauses. An out-of-band tick records "band" as the reason, after "no price" and before rule 9.
 
-**Reference and acceptance.** The rules above are `engine_discrete.run_discrete` with `L = 2`, `rule = 'hamilton'` and the `k_soft` rule of v3.2. The implementation is a pure module with no I/O. Its test suite replays test vectors exported from the Python engine (the 4 splits × 3 cadences, one strong-fall scenario, one no-price scenario, one rigid-mode scenario, one stable-out-of-band scenario, one restart mid-basket) and must match pick for pick. In soft mode the vectors must show deviation 0.00 pp on completed baskets; rigid-mode vectors show unbought chunks and are asserted as such, not as failures. Until this suite is green in the repo, the sentence "the split you ask for is fulfilled" does not appear in the product.
+**Reference and acceptance.** The rules above are `engine_discrete.run_discrete` with `L = 2`, `rule = 'hamilton'` and `k_soft = max(1, ceil(N ÷ 4))`. The implementation is a pure module with no I/O. Its test suite replays test vectors exported from the Python engine (the 4 splits × 3 cadences, one strong-fall scenario, one no-price scenario, one rigid-mode scenario, one stable-out-of-band scenario, one restart mid-basket) and must match pick for pick. In soft mode the vectors must show deviation 0.00 pp on completed baskets; rigid-mode vectors show unbought chunks and are asserted as such, not as failures. Until this suite is green in the repo, the sentence "the split you ask for is fulfilled" does not appear in the product.
 
 ## 5. Data
 
@@ -90,14 +90,16 @@ No visitor data beyond what the orders already hold. Row-level security as for `
 
 ## 8. Later (specified, not built in phase 1)
 
-- **More tokens, monthly batch (owner, 2026-11-13)**: the repo keeps a list of candidates (weekly job, read-only); once a month the owner chooses, a PR enables the rows and an Auditor reads it, and the owner sends the two admin transactions per token from `docs/Runbooks/dca-feed-registration.md` (queue, 48 h, execute within 7 days). A registered token appears as a possible leg by itself, because the leg list is read from the executor. Batch 1 (Base): AERO, cbETH, MORPHO, ZRO, YFI.
+- **More tokens, monthly batch (owner, 2026-11-13)**: the repo keeps a list of candidates (weekly job, read-only); once a month the owner chooses, a PR enables the rows and an Auditor reads it, and the owner sends the two admin transactions per token from `docs/Runbooks/dca-feed-registration.md` (queue, 48 h, execute within 7 days). A registered token appears as a possible leg by itself, because the leg list is read from the executor. Batch 1 (Base, owner 2026-11-13): MORPHO, AAVE, LINK, USDS, AERO, cbETH, ZRO, YFI. wstETH cannot be registered today: Chainlink has only WSTETH / ETH on Base and the executor needs a USD feed.
 - **EURC** as a leg: needs a band defined against EUR/USD.
 - **Arbitrum.**
 
 ## 9. Interface (v1 and v2 together)
 
 - Create: three tokens, split, amount, cadence, cycles, protection (threshold, mode). A summary before signing: per leg the total, the chunk, the number of purchases; the end date including the 3 extra cycles; "three signatures".
-- Rigid mode: a warning with real numbers from the analyst package (about 22 to 24% of modelled positions ended incomplete).
+- Soft mode text (v3.2, K = the order's `k_soft`): "In soft mode, protection pauses the token until the last K cycles of the order (the last quarter). In those cycles, and in the 3 extra ones, it buys what was left behind, even if the price is still low."
+- Rigid mode warning (v3.2, marked as history, never a promise): "In rigid mode, protection never stops pausing: if the token does not recover before the order ends, that part is not bought and stays in your wallet. In the history we measured (2022 to 2026), this happened in 10% of simulated orders and left up to 71% of the amount unbought."
+- No leg above 50% (the four splits respect it; the 3 extra cycles are sized for that).
 - Card per basket: split asked against split so far, next cycle, per-leg state (buying, paused by protection, no price, complete).
 - **Closing report**: split asked and fulfilled; purchases with transaction links; cycles with no purchase and why; legs not fully bought and why, with the still-active approval and a revoke action; fee and number of purchases. Never "what you would have earned".
 - Fiat values are display only.
@@ -105,7 +107,7 @@ No visitor data beyond what the orders already hold. Row-level security as for `
 ## 10. Order of work (each line one goal, one PR)
 
 1. Docs (Haiku): analyst package to `docs/Reports/basket-dca/`, this spec and ADR-027 into the repo, the stale notes (ADR-015, ADR-024 "255 s", fee 0.20% in FILL-ECONOMICS-CALIBRATION, Arbitrum state in DEPLOYMENTS.md).
-2. Selection module + test vectors (Opus): pure module in the keeper folder, vectors exported from the Python engine. No keeper wiring. Starts when v3.2 is delivered.
+2. Selection module + test vectors (Opus): pure module in the keeper folder, vectors exported from the Python engine (v3.2). No keeper wiring.
 3. Data + keeper wiring (Opus), then **Auditor**.
 4. API (Sonnet), then **Auditor** (same pass as 3 if both are ready).
 5. Interface v1 + v2 (Sonnet), behind `BASKET_DCA_ENABLED`.
