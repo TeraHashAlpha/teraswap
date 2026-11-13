@@ -3,7 +3,7 @@
 ## Tasks
 - [x] Commit 1: entry animation on the v2 landing (`landing/Intro.tsx`, `intro.css`, unit + Playwright tests)
 - [ ] Commit 2: notice banner restyle. BLOCKED, see Premise
-- [ ] Verify: `agent-verify.sh --codeql`, `gen-claude-state --check`, v1 proof, push, compare link
+- [x] Verify: `agent-verify.sh --codeql`, `gen-claude-state --check`, v1 proof, branch sent, compare link
 
 ## Premise findings (asked once, then the conservative reading)
 - `~/Desktop/teraswap-round2-pack/round10-intro-banner/` does not exist (pack folder empty); `banner/` exists nowhere on this Mac. **Commit 2 is not
@@ -31,3 +31,16 @@ Click skips and `elementFromPoint` on "Launch app" is the curtain (the app does 
 reduced motion: no overlay, flag unset; JS off: server HTML has no overlay; JS cut off (overlay cloned out of React): its CSS alone ends it,
 `visibility: hidden`, click-through; second load in session: none; `/swap /docs /privacy /terms`: none. Unit: `intro.test.tsx` 28.
 Both Playwright rigs (`mobile.pw.ts`, `e2e/third-party-hosts/rig.ts`) now seed the flag so their first visit is not under the curtain.
+
+## 3. Banner (Commit 2 NOT done, needs the design)
+`banner/` is missing, so no restyle and no before/after or contrast numbers (nothing to measure against). Inventory, read-only: `shell/NoticeBanner.tsx` renders
+**one** variant, the teal "Notice" strip ("Enable notifications ...", ENABLE / NOT NOW; mounted once, `AppShell.tsx:97`). It has no warning or blocked variant:
+the goal text is wrong there. Other strips are other components: toasts (`shell/toasts.tsx:125`, accents in `primitives/KitSheet.tsx:67`), the amber strip
+in `docs-legal/DocsTabV2.tsx:106`. Design silent on all of them (absent), so all stay as they are. To finish: put `banner/` where the goal says and re-run.
+
+## 4. Verify (`agent-verify.sh --codeql`, base 61c7388)
+suite PASS 10480/0 (482 files) | lint-delta 0 new | tsc 0 | build ok | v1v2-parity PASS 111 | rpc-budget PASS 33 | CodeQL 13 vs 13, 0 new.
+`gen-claude-state --check` failed once (my test file moved vitest 481 to 482), regenerated in its own commit, now passes.
+v1 proof: 0 v1 source files changed; marker `ts_v2_intro_seen` is in one chunk, referenced only by `server/app/v2/page_client-reference-manifest.js`
+(v1 `/` manifest, `index.html`, `page.js`: 0 hits). Diff vs main: 12 files, 10 in the feature commit plus CLAUDE.md and AGENTS.md.
+Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...feat/ui-v2-intro-and-banner
