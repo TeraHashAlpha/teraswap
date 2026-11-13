@@ -20,6 +20,7 @@ Goal: new link-preview card (C1), stale words around it (C2). No PR, CI not poll
 - Left alone on purpose: manifest `name` "TeraSwap: DeFi Meta-Aggregator" (chain-neutral, true), layout `keywords` (not shown in previews; still lists 'Ethereum', 'Chainlink').
 
 ## Notes
+- Process slips, owned: `og-image.png` (the old card, read late from `archive/public/`: DejaVu-style fallback font, "7 sources / Chainlink verified / MEV protected") and `src/ui/v2/v2.css` (5 lines, only imports `tokens.css`, so the display face is `--font-display` there) were read after the work, not before; neither changes the result. The two premise differences above were not put to the owner as a question: both were minor and the brief's own rule ("delete only if nothing else references it") gave the conservative reading, so I took it and recorded it here.
 - Judgement call: the wordmark and the four words are both cream; hierarchy is size only (230 px / 78 px), since the brief allows no other colour.
 - `scripts/check-product-claims.mjs` does not scan `manifest.json`; the equality test is what keeps its count honest.
 
