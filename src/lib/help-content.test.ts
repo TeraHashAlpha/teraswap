@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { helpSections } from './help-content'
-import { INTEGRATED_DEX_SOURCE_COUNT, INTEGRATED_DEX_SOURCE_LABELS, SWAP_CHAIN_LIST_LABEL, formatChainList } from '@/config/product-claims'
+import { INTEGRATED_DEX_SOURCE_COUNT, INTEGRATED_DEX_SOURCE_LABELS, PRIVACY_PROVIDERS_NOTE, PRIVACY_PUBLIC_ANALYTICS_NOTE, SWAP_CHAIN_LIST_LABEL, formatChainList } from '@/config/product-claims'
 import { DISABLED_SOURCES, AGGREGATOR_META, type AggregatorName } from '@/lib/constants'
 
 const whatIs = (sections = helpSections) =>
@@ -46,10 +46,12 @@ describe('help-content: "What is TeraSwap?"', () => {
       PRIVACY_WALLET_ADVICE: 'ZZ-ADVICE.',
       PRIVACY_IP_STORAGE_NOTE: 'ZZ-IP.',
       PRIVACY_WALLET_STORAGE_NOTE: 'ZZ-ADDRESSES.',
+      PRIVACY_PUBLIC_ANALYTICS_NOTE: 'ZZ-PUBLIC.',
+      PRIVACY_PROVIDERS_NOTE: 'ZZ-PROVIDERS.',
     }))
     const mocked = await import('./help-content')
     expect(answer('How does TeraSwap protect my privacy?', mocked.helpSections)).toBe('ZZ-RELAY. ZZ-WALLET. ZZ-ADVICE.')
-    expect(answer('What data does TeraSwap collect?', mocked.helpSections)).toBe('We do not store private keys. ZZ-IP. ZZ-ADDRESSES. See our Privacy Policy for full details.')
+    expect(answer('What data does TeraSwap collect?', mocked.helpSections)).toBe('We do not store private keys. ZZ-IP. ZZ-ADDRESSES. ZZ-PUBLIC. ZZ-PROVIDERS. See our Privacy Policy for full details.')
     expect(whatIs(mocked.helpSections)).toContain('compares quotes across 3 liquidity sources simultaneously on Chain A and Chain B.')
     expect(answer('How does the meta-aggregator work?', mocked.helpSections)).toContain('queries 3 sources (Alpha / Beta / Gamma) in parallel')
     expect(answer('Which networks are supported?', mocked.helpSections)).toContain('supports Chain A and Chain B.')
@@ -96,6 +98,7 @@ describe('help-content: privacy answers say what is relayed and what the wallet 
         'We do not store IP addresses in our database; our hosting and rate-limiting layers process them transiently, and our rate limiter only ever sees a one-way hash. ' +
         'We store your wallet address with your orders, swap history and quotes, because the Orders, History and Analytics tabs are built from them, and with a log of the steps of each swap, approval, quote and order (including errors), which we use for debugging and support. ' +
         "Each quote you request on the swap screen, including its automatic refresh, is logged with its token pair, amount, and the sources' answers; the log carries your wallet address when a wallet is connected and no identifier when none is. " +
+        `${PRIVACY_PUBLIC_ANALYTICS_NOTE} ${PRIVACY_PROVIDERS_NOTE} ` +
         'See our Privacy Policy for full details.',
     )
   })

@@ -32,7 +32,11 @@ import { DocsTabV2 } from './DocsTabV2'
 import {
   PRIVACY_DIRECT_NOTE,
   PRIVACY_IP_STORAGE_NOTE,
+  PRIVACY_LOCAL_COPIES_NOTE,
+  PRIVACY_LOCAL_STORAGE_NOTE,
+  PRIVACY_PROVIDERS_NOTE,
   PRIVACY_PROXY_CLAIM,
+  PRIVACY_PUBLIC_ANALYTICS_NOTE,
   PRIVACY_WALLET_ADVICE,
   PRIVACY_WALLET_STORAGE_NOTE,
 } from '@/config/product-claims'
@@ -84,13 +88,29 @@ describe.each(LEGAL)('Privacy Policy — %s', (_ui, mount) => {
   })
 
   // [fix/privacy-no-usage-tracking] Vercel Web Analytics is removed (package, <Analytics />, built chunks): §8 says there is none.
-  it('§8 says: no cookies for visitors, no analytics service, no ad scripts, no browser error-reporting service; browser storage is for convenience', () => {
+  // [fix/privacy-leftovers-a78b S-8] §8 also names the providers that carry every request.
+  it('§8 says: no cookies for visitors, no analytics service, no ad scripts, no browser error-reporting service; the browser storage list is 3.3; Vercel and Cloudflare carry every request', () => {
     const cookies = section(mount(), 'pp-cookies')
     expect(cookies).toContain('The Interface sets no cookies for visitors, uses no analytics service, and runs no advertising scripts.')
     expect(cookies).toContain('No third-party error-reporting or session-replay service runs in your browser.')
-    expect(cookies).toContain('Any data stored in your browser (local storage, session storage, and the wallet libraries’ own storage) is used solely for your convenience and remains on your device.')
-    expect(cookies).not.toMatch(/Vercel|page views|in aggregate|hosting provider/i)
+    expect(cookies).toContain('What the Interface keeps in your browser is listed in section 3.3.')
+    expect(cookies).toContain(PRIVACY_PROVIDERS_NOTE)
+    expect(PRIVACY_PROVIDERS_NOTE).toBe(
+      'Our hosting and network providers, Vercel and Cloudflare, process every request to the Interface, including your IP address, in order to deliver it, under their own policies. We do not ask them for analytics.',
+    )
+    expect(cookies).not.toMatch(/remains on your device|used solely for your convenience/i)
+    expect(cookies).not.toMatch(/page views|in aggregate/i)
     expect(cookies).not.toMatch(/do not employ any third-party analytics/i)
+  })
+
+  // [fix/privacy-leftovers-a78b S-10] §6 says what the public Analytics tab and the per-address routes expose.
+  it('§6 says the Analytics data is public, shows no wallet address, and that anyone with an address can request its swap statistics and export', () => {
+    const sharing = section(mount(), 'pp-sharing')
+    expect(sharing).toContain(PRIVACY_PUBLIC_ANALYTICS_NOTE)
+    expect(PRIVACY_PUBLIC_ANALYTICS_NOTE).toContain('The tab does not display wallet addresses')
+    expect(PRIVACY_PUBLIC_ANALYTICS_NOTE).toContain('shortened to its first six and last four characters')
+    expect(PRIVACY_PUBLIC_ANALYTICS_NOTE).toContain('Anyone who knows a wallet address can also request the swap statistics and the swap export')
+    expect(PRIVACY_PUBLIC_ANALYTICS_NOTE).not.toMatch(/as they appear on-chain/i)
   })
 })
 
@@ -100,9 +120,32 @@ describe.each(LEGAL)('Privacy Policy §3.3 — %s', (_ui, mount) => {
   it("says the local copies stay local AND that every swap and order is stored server-side (the Auditor's wording)", () => {
     const collect = section(mount(), 'pp-collect')
     expect(collect).toContain(
-      'These copies stay in your browser and are never uploaded as such. Separately, every swap and order you make is sent to our server and stored with your wallet address (see 3.2); that server record is what the History tab shows.',
+      'The copies of your orders and order activity stay in your browser and are never uploaded as such. Separately, every swap and order you make is sent to our server and stored with your wallet address (see 3.2); that server record is what the History tab shows.',
     )
     expect(collect).not.toMatch(/never transmitted to our servers|remains exclusively on your device/i)
+  })
+
+  // [fix/privacy-leftovers-a78b S-9] The list is the code's: see "the browser-storage list is exactly what the code writes" below.
+  it('lists what the app writes to local and session storage, says what is memory only, and calls the wallet libraries\' entries theirs', () => {
+    const collect = section(mount(), 'pp-collect')
+    expect(collect).toContain(PRIVACY_LOCAL_STORAGE_NOTE)
+    expect(collect).toContain(PRIVACY_LOCAL_COPIES_NOTE)
+    for (const phrase of [
+      'your theme',
+      'the tokens you import',
+      'your currency choice',
+      'the Permit2 explainer',
+      'order notifications',
+      'the ids of orders you dismissed',
+      'encrypted copies of your orders and of your order activity',
+      'the direction in which you read the exchange rate',
+      'whether the intro has played',
+      'the signature that authorises reads of your orders, which is sent to our server with those reads',
+      'Slippage settings, swap history, and active approvals are held in memory only',
+      'those entries are theirs',
+    ]) expect(collect, phrase).toContain(phrase)
+    // The old list named three things the app does not store.
+    expect(collect).not.toMatch(/remember your preferences, such as imported tokens, slippage settings, swap history/i)
   })
 })
 
