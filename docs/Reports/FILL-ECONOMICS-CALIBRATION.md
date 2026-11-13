@@ -43,6 +43,11 @@ At these sub-$20 sizes the canonical single 0.05% pool is **as good or slightly 
 
 ## 4. Competitor effective-cost estimates (EVM-only, methodology-first)
 
+> Note 2026-11-13: the "0.20% fee" in row (c) is not the contract fee. `contracts/order-engine/TeraSwapOrderExecutorV3.sol:131`
+> reads `uint256 public constant FEE_BPS = 10;           // 0.1% fee`, applied at line 518. Row (c) and §5 overstate our fee
+> by 0.10 points. The dollar-per-fill gas figures here (1.5 gwei tier, measured 2026-07-22) predate the keeper per-chain gas-tier
+> change (`contracts/order-engine/executor/gas-tier.js`, first on main in `a382a5a`, 2026-10-31); no new gas figures are given.
+
 Neither model below is independently re-implemented here; each row reuses **our own measured single-swap settlement gas** (259k, current Base price) as the floor any comparable EVM settlement contract pays for one fill — this is a **lower bound**, since neither model publishes a Base-specific gas figure and both extract additional value via solver/resolver margin that is not observable without live solver quotes.
 
 | Model | Basis | $10 | $25 | $50 | $100 | $500 |
@@ -54,6 +59,9 @@ Neither model below is independently re-implemented here; each row reuses **our 
 ⚠️ **(a)/(b) are not a fair "all-in" comparison** — they omit the solver's required price-improvement margin, which is the actual mechanism by which those models are paid; public docs describe the *fill condition* (price beats limit by enough to cover solver gas) but not a quoted fee, so no all-in % can be produced from public information alone. Row (c) is the only fully-specified all-in figure in this table.
 
 ## 5. Calibration
+
+> Note 2026-11-13: the `notional×0.0020` term below is a 0.20% fee. The contract fee is 0.1% (`FEE_BPS = 10`, V3 executor line 131).
+> The gas scenarios in the table predate the keeper gas-tier change (see the §4 note); they are kept as written.
 
 **Viability line:** `gas$ ≤ notional×(maxSlippageBps/10000) − notional×0.0020`.
 

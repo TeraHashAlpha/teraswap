@@ -5,6 +5,17 @@ canonical record; if code/docs/env disagree, this (re-verified on-chain) wins.
 
 ## Contracts
 
+> Note 2026-11-13: the Arbitrum OrderExecutor V3 row below says "NOT operational" (2026-08-27). Own read-only `cast call`s on
+> `https://arb1.arbitrum.io/rpc` (chainId 42161) against `0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459`:
+> - `paused()(bool)` → `false`
+> - `whitelistedExecutors(0x5f47F6301ceD087D5e24FD15C7ff8fBF82CE39ab)(bool)` (Arbitrum keeper signer, Keeper registry) → `true`
+> - `tokenUsdFeeds(address)((address,uint8,uint8,uint256,bool))` → `registered = true` for all four catalog tokens:
+>   WETH `0x82aF…Bab1` (feed `0x639F…a612`, staleness 3596 s) · USDC `0xaf88…5831` (feed `0x5083…4aD3`, 596 s) ·
+>   WBTC `0x2f2a…5B0f` (feed `0xd0C7…6d57`, 172886 s) · ARB `0x912C…6548` (feed `0xb2A8…48D6`, 172886 s).
+>
+> So the "no whitelisted executor" and "oracle floor unconfigured" statements of 2026-08-27 do not hold on these reads.
+> Owner confirmed on 2026-11-13 that the Arbitrum keeper is online on the host. Not re-read here: `bootstrapped()`, the router list, admin.
+
 | Role | Chain | Address | Verified facts |
 |------|-------|---------|----------------|
 | **FeeCollector V2** (instant swaps) | Ethereum Mainnet (1) | `0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459` | 5,419 B · has `swapETHWithFee`/`swapTokenWithFee` (minimumOutput/H-04) · feeRecipient `0x107F…`, FEE_BPS 10, admin `0x9A38…` |
