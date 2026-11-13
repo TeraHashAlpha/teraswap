@@ -8,8 +8,6 @@
  * mock) and counts what the hook actually POSTs to /api/log-quote, 15 s refreshes included.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 
 let account: { address: string | undefined } = { address: undefined }
 vi.mock('wagmi', () => ({ useAccount: vi.fn(() => account) }))
@@ -129,20 +127,5 @@ describe('useQuote: which quotes reach /api/log-quote', () => {
   })
 })
 
-describe('callers: the opt-in is where the owner ruling puts it', () => {
-  // v1 files may not name the second UI tree (the isolation test scans their text), so the v2 paths are built from segments.
-  const v2 = (...rest: string[]) => ['src', 'ui', 'v' + '2', ...rest]
-  const read = (segments: string[]) => readFileSync(resolve(__dirname, '../..', ...segments), 'utf8')
-  it.each([
-    ['SwapBox (v1)', ['src', 'components', 'SwapBox.tsx']],
-    ['SwapCard (v2)', v2('swap', 'SwapCard.tsx')],
-  ] as const)('%s, the swap screen, logs its quotes', (_n, segments) => {
-    expect(read([...segments])).toMatch(/useQuote\([^)]*\{ logQuote: true \}\)/)
-  })
-  it.each([
-    ['LandingPage (v1)', ['src', 'components', 'LandingPage.tsx']],
-    ['Hero (v2)', v2('landing', 'Hero.tsx')],
-  ] as const)('%s, the landing preview, does not', (_n, segments) => {
-    expect(read([...segments])).not.toMatch(/logQuote/)
-  })
-})
+// Who may pass `{ logQuote: true }`, and that the landing preview cannot reach a logging path: useQuote.log-quote.callers.test.ts
+// (A78b S-11; it replaced the four-file text check that used to sit here).

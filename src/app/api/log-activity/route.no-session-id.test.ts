@@ -9,7 +9,8 @@ const insert = vi.fn(async (_rows: unknown) => ({ error: null }))
 vi.mock('@/lib/supabase', () => ({ getSupabaseLogger: () => ({ from: () => ({ insert }) }) }))
 vi.mock('@/lib/kv-rate-limiter', async () => {
   const actual = await vi.importActual<typeof import('@/lib/kv-rate-limiter')>('@/lib/kv-rate-limiter')
-  return { ...actual, checkRateLimit: async () => ({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 }) }
+  const allow = async () => ({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 })
+  return { ...actual, checkRateLimit: allow, checkRateLimitWithin: allow }
 })
 
 import { POST } from './route'

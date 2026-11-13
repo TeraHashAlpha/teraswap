@@ -6,8 +6,8 @@ everything below is `src/app/api/rpc/route.ts`; its header (`:13-56`) says why e
 ## Rate limiting
 - New and touched routes limit with `checkRateLimitWithin(key, limit, windowMs, cost?)` (`src/lib/kv-rate-limiter.ts:266-291`). It waits at
   most `RATE_LIMIT_GATE_TIMEOUT_MS` = 1 s (`:258`), then decides by the in-memory fallback — half the limit, per instance: "degraded,
-  never unlimited" (`:262-263`). Used today by `/api/quote`, `/api/rpc` and `src/lib/cow-proxy.ts`.
-- Not yet universal: 18 call sites in `src/app/api` (22 in `src/`) still call plain `checkRateLimit`, which on a hung Redis waited ~4.3 s
+  never unlimited" (`:262-263`). Used today by `/api/quote`, `/api/rpc`, `src/lib/cow-proxy.ts` and the four log routes (`log-event`, `log-quote`, `log-swap`, `log-activity`; `log-routes.limiter.test.ts`, `log-routes.hung-kv.test.ts`).
+- Not yet universal: 15 call sites in `src/app/api` (19 in `src/`) still call plain `checkRateLimit`, which on a hung Redis waited ~4.3 s
   per request (measured by the A76 audit, `kv-rate-limiter.ts:255-257`). Do not copy that pattern into a new route.
 - Every KV/Redis wait in a request path has a deadline: `checkRateLimitWithin`, or `withTimeout` (`src/lib/adapters/shared`) as the quote
   route's kill-switch read does. Pinned for quote by `src/app/api/quote/route.hung-kv.test.ts` and `route.limiter.test.ts`.

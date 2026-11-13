@@ -4,7 +4,7 @@ M and L findings of audit A78b (S-8 to S-12) plus the WalletConnect description.
 
 ### Checklist
 - [x] C1 Privacy copy: S-8 (section 8), S-9 (section 3.3), S-10 (section 6), Help, Docs, product-claims
-- [ ] C2 S-11 caller guard + landing-import guard, S-12 `checkRateLimitWithin` on log-quote, log-swap, log-activity
+- [x] C2 S-11 caller guard + landing-import guard, S-12 `checkRateLimitWithin` on log-quote, log-swap, log-activity
 - [ ] C3 WalletConnect `appDescription` + stale-claim guards
 - [ ] Verify (`agent-verify.sh --codeql`, hosts capture, claims checker, `gen-claude-state.mjs --check`), push, compare link
 
@@ -47,3 +47,14 @@ M and L findings of audit A78b (S-8 to S-12) plus the WalletConnect description.
 | Cache Storage | `teraswap-v1` | `public/sw.js:11-24,51-55` | the site's own static files; API requests are never cached | both |
 | wallet libraries | wagmi, RainbowKit, WalletConnect | e.g. wagmi `recentConnectorId` (`lib/lazy-walletconnect.ts:41,57`) | theirs | both |
 Cookies: none from the app (`document.cookie =` has no hit in `src`; `ts_ui` is set only by the owner-only `/api/admin/ui-version`). Not read, outside the allow-list: `analytics-tracker.ts:162` `supabaseInsert` runs `getSupabase()` (server env), so in a browser it has no client.
+
+### Evidence 3: S-11 break-it proof, S-12 timings
+**S-11** (`src/hooks/useQuote.log-quote.callers.test.ts`, replaces the four-file text check). Two AST scans over every non-test file of `src`: (1) no file but SwapBox, v2 SwapCard, `useQuote.ts`, `lib/analytics.ts` passes an options argument to `useQuote`, builds a `logQuote` object, imports `logQuoteToSupabase` or names `/api/log-quote` (a non-literal options argument counts as logging); (2) the import closure of the landing preview (v1 LandingPage + LandingBelowFold, every file of the v2 landing folder; static, dynamic, re-export) holds no swap screen and no logging module, stopping at `useQuote.ts`. Broken in a scratch worktree (detached at my HEAD, `node_modules` linked, removed afterwards); unbroken baseline 7 passed, restored baseline 7 passed:
+- A, a new `src/hooks/useFoo.ts` calling `useQuote(null, null, '1', true, [], { logQuote: true })`: 1 failed, `AssertionError: expected [ { …(2) }, { …(2) } ] to deeply equal []` with `+ "file": "src/hooks/useFoo.ts"`, `+ "what": "useQuote(...) passes an options argument: { logQuote: true }"`, `+ "what": "object literal with a logQuote property: { logQuote: true }"`.
+- B, `LandingPage.tsx` passes `undefined, { logQuote: true }`: 2 failed (the scan above on `src/components/LandingPage.tsx`, and the landing closure: `expected [ 'src/components/LandingPage.tsx' ] to deeply equal []`).
+- C, v2 `Hero.tsx` adds `dynamic(() => import('@/ui/v2/swap/SwapCard'))`: 1 failed, `expected [ 'src/ui/v2/swap/SwapCard.tsx', …(1) ] to deeply equal []`.
+- D, v2 `Hero.tsx` adds `import '@/lib/analytics'` (the module holding the sink): 1 failed, `expected [ 'src/lib/analytics.ts' ] to deeply equal []`.
+Also pinned: the scan sees an alias (`useQuote as q`), a spread, a pass-through variable, and stays quiet on `useQuote(a, b, c, true, excluded)`.
+
+**S-12** (`log-routes.limiter.test.ts`, `log-routes.hung-kv.test.ts`; `/api/log-quote`, `/api/log-swap` POST and PATCH, `/api/log-activity`, one `checkRateLimitWithin` each, same key `log:<hash>`, `LOG_RATE_LIMIT` 120 per 60 s unchanged and pinned). Hung Redis (every call never settles), real timers, answered 200: log-quote POST **1007 ms**, log-swap POST **1004 ms**, log-swap PATCH **1002 ms**, log-activity POST **1005 ms** (bound < 1500). Degraded limit with the hung KV (fake timers): 60 pass, the 61st is 429, for each of the four. Working KV (in-memory sorted set): request 120 passes and 121 is 429 per route; 40 + 40 + 40 over quote, swap and activity exhausts one shared budget and then every route, `log-event` included, answers 429; the args equal what `log-event` sends. Against the OLD routes (the three route edits reverted) 12 of 18 failed: the plain limiter was called, and the hung-KV requests never answered (10 s test timeout, 20 s for the degraded ones).
+Doc: `src/app/api/CLAUDE.md` said 18 plain-limiter call sites in `src/app/api` (22 in `src`); my grep of `checkRateLimit(` gave 17 / 22 on main and 14 / 19 now, so I subtracted the three routes (15 / 19) without chasing the 1 difference in method.
