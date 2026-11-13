@@ -44,3 +44,13 @@ suite PASS 10480/0 (482 files) | lint-delta 0 new | tsc 0 | build ok | v1v2-pari
 v1 proof: 0 v1 source files changed; marker `ts_v2_intro_seen` is in one chunk, referenced only by `server/app/v2/page_client-reference-manifest.js`
 (v1 `/` manifest, `index.html`, `page.js`: 0 hits). Diff vs main: 12 files, 10 in the feature commit plus CLAUDE.md and AGENTS.md.
 Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...feat/ui-v2-intro-and-banner
+
+## 5. CI fixes after the first push (two red checks, both in the intro)
+
+### 5.1 CI / full-suite: `intro.test.tsx:78` (test bug, component was right)
+Cause: `vi.spyOn(sessionStorage, 'getItem')` is not hermetic. On Node 22 (CI) `sessionStorage` is jsdom's `Storage`: assigning
+`sessionStorage.getItem = ...` is a named-property write, so jsdom stored an item called `getItem` (storage length 1 in the probe) and the real
+method stayed. The spy never threw, `claimIntro` saw a working storage and correctly played the intro. On Node 25 (this Mac) `sessionStorage` is
+Node's own Web Storage (constructor `Object`, the `--localstorage-file` warning in every run) and the same spy replaces the method, so it passed here.
+Not order dependent: reproduced with the file alone on Node 22.23.5. Fix: `vi.stubGlobal('sessionStorage', { getItem() { throw }, setItem() { throw }, ... })`
+(restored by the existing `unstubAllGlobals`), same assertion. Checked: Node 25 and Node 22, file alone, 5 shuffled seeds on Node 22, `src/ui/v2/landing` on Node 22.

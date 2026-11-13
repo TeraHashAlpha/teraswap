@@ -71,12 +71,21 @@ describe('plays once per session', () => {
   })
 
   it('skips when sessionStorage throws: nothing can say it played, so the page is not held for it', () => {
-    const spy = vi.spyOn(sessionStorage, 'getItem').mockImplementation(() => {
-      throw new Error('blocked')
+    // Replace the whole global. `vi.spyOn(sessionStorage, 'getItem')` is NOT hermetic: on jsdom's Storage (Node 22, CI) the
+    // assignment is a named-property write that stores an item called "getItem" and leaves the method alone, so the spy never
+    // throws; on Node 25 `sessionStorage` is Node's own Web Storage and the same spy works. A stubbed global behaves the same on both.
+    vi.stubGlobal('sessionStorage', {
+      getItem() {
+        throw new Error('blocked')
+      },
+      setItem() {
+        throw new Error('blocked')
+      },
+      removeItem() {},
+      clear() {},
     })
     const r = render(<Intro />)
     expect(overlay(r.container)).toBeNull()
-    spy.mockRestore()
   })
 })
 
