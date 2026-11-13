@@ -4,7 +4,7 @@ Base: origin/main 649105f. Goal text pasted at 7e566fd; no PR (owner opens it).
 
 - [x] C1 state block without test-file counts
 - [x] C2 goal-lint false FAIL on pasted goals
-- [ ] C3 Telegram single retry
+- [x] C3 Telegram single retry
 - [ ] Verify (`agent-verify.sh --codeql`, `gen-claude-state.mjs --check`), push, compare link
 
 ## 1. State block (C1)
@@ -28,3 +28,19 @@ Base: origin/main 649105f. Goal text pasted at 7e566fd; no PR (owner opens it).
 - Fix: `firstControlCandidate()` drops those prefixes for the CONTROL/READ-ONLY check only. `**CONTROL:**`, `# CONTROL:`, a
   header that is not on the first content line, and no header at all still FAIL. Length is still BYTES of the raw input.
 - Tests: 17 new cases red on old code, 55/55 green on the fix (each case via lintGoal; BOM+CRLF+quote and stdin via the CLI).
+
+## 3. Telegram retry (C3)
+- Premise held: one attempt, `CHANNEL_FETCH_TIMEOUT_MS = 5000`. Retry lives inside `sendTelegramAlert` only (email/Discord, the
+  wrapper, cooldowns, text untouched). Retries timeout / network error / 5xx / 429; never other 4xx. One retry, one warn line.
+- Worst case, every attempt hung: 5000 + 500 (default pause) + 5000 = 10 500 ms; 429 asking for the cap: 0 + 2000 + 5000 = 7000 ms;
+  hard ceiling `TELEGRAM_TOTAL_BUDGET_MS` = 12 000 ms (attempt 2's timeout shrinks to what is left). Route `maxDuration` = 30 000 ms
+  (`tick/route.ts:19`). Channels run in parallel, so the fan-out costs max(channel), not the sum.
+- Duplicates: CANNOT be excluded. If attempt 1 reached Telegram and only the response was lost, attempt 2 posts it again
+  (`sendMessage` has no idempotency key). A rare duplicate is accepted over a lost alert.
+- Token: scrubbed from every message (retry line, final error, HTTP body), final error has no `cause`; logs go through `forLog`.
+- Tests (`telegram-retry.test.ts`, 26): timeout→success (2 sends, 1 line); network/5xx/429; 400/401/403/404/409 no retry;
+  retry_after honoured + capped; two failures → one "delivery failed" line via the real wrapper; worst-case bounds; token never
+  printed; email/Discord sent before the retry pause ends. Mutation-checked (retry-all, no scrub, no clamp, no cap → red).
+- Further read / concern (not fixed, out of scope): `source-state-machine.ts:274,303,351` fire `emitTransitionAlert` WITHOUT await,
+  so after the tick response the function may be frozen before an alert (now up to 10.5 s) finishes. If the 3 lost alerts came from
+  that, the retry shrinks but does not remove the loss; awaiting or `waitUntil` there needs its own goal.
