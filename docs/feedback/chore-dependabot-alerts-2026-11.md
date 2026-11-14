@@ -4,7 +4,7 @@ Long tables go to `chore-dependabot-alerts-2026-11.evidence.md` (companion file,
 
 ## Checklist
 - [x] Commit 0: this file
-- [ ] Commit 1: fix what has a fix (hono override only, if the measurements below hold)
+- [x] Commit 1: fix what has a fix: hono override 4.13.11 -> 4.13.16 (nothing else has an eligible same-major fix)
 - [ ] Commit 2: reachability of what stays open
 - [ ] Commit 3: why Dependabot opened no PRs, proposal only
 - [ ] Verify: `scripts/agent-verify.sh --keeper --codeql`, `npm audit` before/after, wagmi/connector tests
