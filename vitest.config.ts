@@ -18,6 +18,8 @@ export default defineConfig({
       'scripts/token-catalog/**/*.test.ts',
       // [feat/dependabot-auto-merge] Dependabot auto-merge eligibility rules + workflow safety assertions.
       'scripts/dependabot/**/*.test.ts',
+      // [feat/dca-feed-batch] the monthly feed-batch rules, on recorded fixtures (no network).
+      'scripts/dca-feeds/**/*.test.ts',
       // [CHORE-GROK-DISPATCH] repo-hygiene scripts get the same coverage as source.
       // [CHORE-COLOR-CONTRAST-CHECK] CIEDE2000 + CVD tests live next to the checker.
       // [CHORE-PRODUCT-CLAIMS-TRUTH] hard-coded source-count / live-chain claims.
