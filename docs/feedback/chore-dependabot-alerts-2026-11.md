@@ -36,3 +36,26 @@ Common to all six: first-party code imports none of the seven packages; none of 
 Measured: Dependabot security updates ARE enabled (`gh api repos/TeraHashAlpha/teraswap`: `dependabot_security_updates: enabled`) and do open PRs for transitive packages when a same-major lockfile fix exists (#678 fast-xml-parser in `/contracts/order-engine/executor`, #638 follow-redirects in `/contracts/order-engine`; neither directory is in `dependabot.yml`). The auto-merge workflow only judges PRs that already exist (`dependabot-auto-merge.yml:26-40`), so it is not the reason.
 1. **hono (#149-#153):** a same-major fix existed (4.13.16, 13 days old) but the lockfile copy was pinned by the exact root `overrides` entry `"hono": "4.13.11"`; npm cannot move it and, as far as I can tell, Dependabot does not edit `overrides` (inference, not measured; an earlier hono PR #142 was closed). **The other six:** the only patched versions are majors the parents' ranges forbid (`dependabot.yml` also ignores `semver-major` for `*`; I could not measure whether that ignore applies to security updates, and it does not matter, since a PR would need a parent major: wagmi 3, @sentry/nextjs 11, rainbowkit 0.1.0) or no patch exists (deepmerge, elliptic).
 2. **Smallest config change that would bring PRs (NOT applied):** none of the six open ones can be fixed by config alone. For the hono class of problem, loosen the pin to a range so lockfile-only patch bumps stay possible: `"hono": "^4.13.16"` in `package.json` overrides; and, to let version updates look at transitive packages too, add `allow: [{ dependency-type: "all" }]` to the `npm` entry of `dependabot.yml` (note: it brings every in-range transitive bump, capped by `open-pull-requests-limit: 5`, and auto-merge R4 labels npm indirect/runtime PRs `deps-review`, so they would still wait for the owner). Neither change is in this branch.
+
+## Evidence 4: verify (first run, `scripts/agent-verify.sh --keeper --codeql`, at 84b7f89c, base 130f2ddf)
+```
+suite:       FAIL exit 1; 10630 passed, 2 failed, 494 files
+lint-delta:  PASS errors +0, warnings +0 (0 changed files)
+tsc:         PASS 0 errors
+build:       PASS next build ok
+v1v2-parity: PASS 111 tests passed, 0 failed, 11 files
+rpc-budget:  PASS 36 tests passed, 0 failed, 3 files
+codeql:      PASS security-extended: head 13, base 13, new by rule+file+message 0
+keeper:      FAIL node20:MISSING node22:MISSING (Node 20/22 were not installed)
+diff --stat origin/main...HEAD: evidence.md +49, feedback.md +38, package-lock.json 6 (+3/-3), package.json 2 (+1/-1); 4 files, 91 insertions, 4 deletions
+compare: https://github.com/TeraHashAlpha/teraswap/compare/main...chore/dependabot-alerts-2026-11
+```
+- The 2 suite failures are `src/ui/v2/fiat/fiat.test.tsx` ("a payload that was fresh when fetched but has since aged out…" and "a rate that was fresh when loaded flips to dollars…"). Same file run on a detached worktree of origin/main 130f2ddf (node_modules symlinked): `Tests 2 failed | 20 passed (22)`, the same two. They are the clock-bound tests already known from the privacy-leftovers branch; this branch changes no source.
+- Wagmi config/connector tests are inside that suite (`src/lib/wagmiConfig.test.ts`, `src/lib/lazy-walletconnect.test.ts`) and passed unchanged.
+- **Keeper (node:test, Node 20 + 22): NOT YET RUN.** This branch touches no keeper file or keeper lockfile. After the incident below, re-run `scripts/agent-verify.sh --keeper --codeql` once Node works again.
+
+## Incident during this goal (mine): `brew install node@20 node@22` broke the Homebrew Node 25
+To get Node 20/22 for `--keeper` I ran `brew install node@20 node@22`. It upgraded the shared dependency `simdjson` (to 5.1.1), and the installed `/opt/homebrew/Cellar/node/25.6.1/bin/node` links `libsimdjson.29.dylib`, which no longer exists: `dyld: Library not loaded … libsimdjson.29.dylib`. Every Bash call in this session now fails in the command-guard hook (the hooks run `node`), so the agent cannot run any command. I did not touch the hooks or settings.
+Owner fix (owner terminal): `brew reinstall node` (or `brew upgrade node`), then check `node -v`. Node 20 and 22 ARE installed (`/opt/homebrew/opt/node@20`, `/opt/homebrew/opt/node@22`).
+Left to do after that: (1) commit this section (signed), (2) `scripts/agent-verify.sh --keeper --codeql` once more, (3) `git push origin chore/dependabot-alerts-2026-11`, (4) `git worktree remove ~/ts-worktrees/dependabot-alerts-base` (a detached base worktree I created for the fiat proof; it holds a symlink to this worktree's node_modules, remove it with `git worktree remove --force`).
+Lesson for the harness docs: `agent-verify.sh` tells the agent to `brew install node@20 node@22`; on this Mac that command can break the active Node. Run `brew install --dry-run node@20 node@22` first and stop if it would upgrade a library the active Node links against (here `simdjson`), or ask the owner to install them.
