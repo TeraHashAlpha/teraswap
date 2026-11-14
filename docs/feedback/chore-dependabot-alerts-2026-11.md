@@ -59,3 +59,29 @@ To get Node 20/22 for `--keeper` I ran `brew install node@20 node@22`. It upgrad
 Owner fix (owner terminal): `brew reinstall node` (or `brew upgrade node`), then check `node -v`. Node 20 and 22 ARE installed (`/opt/homebrew/opt/node@20`, `/opt/homebrew/opt/node@22`).
 Left to do after that: (1) commit this section (signed), (2) `scripts/agent-verify.sh --keeper --codeql` once more, (3) `git push origin chore/dependabot-alerts-2026-11`, (4) `git worktree remove ~/ts-worktrees/dependabot-alerts-base` (a detached base worktree I created for the fiat proof; it holds a symlink to this worktree's node_modules, remove it with `git worktree remove --force`).
 Lesson for the harness docs: `agent-verify.sh` tells the agent to `brew install node@20 node@22`; on this Mac that command can break the active Node. Run `brew install --dry-run node@20 node@22` first and stop if it would upgrade a library the active Node links against (here `simdjson`), or ask the owner to install them.
+
+## Evidence 4 (final): verify at 9aff6a94, base origin/main 198a572f (main moved by PR #687 during the goal; this branch is not merged with it)
+```
+suite:       FAIL exit 1; 10625 passed, 7 failed, 494 files
+lint-delta:  PASS errors +0, warnings +0
+tsc:         PASS 0 errors
+build:       PASS next build ok
+v1v2-parity: PASS 111 / rpc-budget: PASS 36
+codeql:      PASS security-extended: head 13, base 13, new by rule+file+message 0
+keeper:      PASS node20:1240-pass/0-fail node22:1240-pass/0-fail
+diff --stat origin/main...HEAD: package.json 2 (+1/-1), package-lock.json 6 (+3/-3), 2 feedback files; 4 files, 114 insertions, 4 deletions
+compare: https://github.com/TeraHashAlpha/teraswap/compare/main...chore/dependabot-alerts-2026-11
+```
+The 7 suite failures, none caused by this diff (it changes one override, its lockfile lines and docs):
+- 2 in `src/ui/v2/fiat/fiat.test.tsx`: clock-bound, fail identically on origin/main 130f2ddf (run on a detached base worktree: 2 failed, 20 passed). PR #687 (tooling-leftovers) is the pin for them; not merged here.
+- 4 in `scripts/agent-verify.test.mjs` ("fake installs" keeper tests): they fail on the untouched base 130f2ddf too (4 failed, 2021 passed) on this Mac, after my `brew install node@20 node@22` changed which Node installs the script finds (active Node is now v26.13.1). Environment, not code. Worth a look at that test's isolation from real brew/nvm installs.
+- 1 in `scripts/agent-hooks.test.mjs` ("A77d H-11 ... stay allowed in the main checkout"): a 5000 ms timeout while the whole suite ran; the file passes when run alone with the other tooling file.
+Wagmi config/connector tests (`src/lib/wagmiConfig.test.ts`, `src/lib/lazy-walletconnect.test.ts`) are in the suite and passed unchanged.
+
+## Incident (mine): `brew install node@20 node@22` broke the active Node
+It upgraded `simdjson`; the Homebrew Node 25.6.1 then could not load `libsimdjson.29.dylib`, and every agent shell call failed in the guard hooks (which run on `node`) until the owner relinked Node. The hooks were not touched. Lesson: run `brew install --dry-run node@20 node@22` first and stop if it would upgrade a library the active Node links against, or ask the owner to install them.
+
+## Left for the owner
+- Push is done by the agent (branch only, no PR): `git push origin chore/dependabot-alerts-2026-11`.
+- Detached base worktree `~/ts-worktrees/dependabot-alerts-base` is removed after the push.
+- Allowlist: propose renewing the zod entry (expires 2026-11-22), see "Allowlist proposals" above.
