@@ -41,5 +41,6 @@ rpc-budget:  PASS 36 tests passed, 0 failed, 3 files
 codeql:      PASS security-extended: head 13, base 13, new 0
 RESULT: PASS
 ```
+After merging origin/main (130f2ddf; CLAUDE.md and AGENTS.md state block regenerated), `agent-verify.sh --codeql` at 1254ee69: suite 10683 passed, **2 failed**, both in `src/ui/v2/fiat/fiat.test.tsx` ("aged out is judged unavailable", "flips to dollars once its round ages out"); the same 2 fail on a clean origin/main checkout, this branch does not touch `src/ui/v2/fiat`, not fixed here. lint +0/+0, tsc 0, build ok, parity 111, rpc-budget 36, CodeQL 13/13/0 new: PASS. RESULT: FAIL for that reason only (owner: fix on main).
 Hosts capture (production build): 16 passed. `check-product-claims.mjs`, `gen-claude-state.mjs --check`, `check-agents-parity.mjs`: PASS. Not run: `--keeper`, `goal-lint`.
 `git diff --stat origin/main...HEAD` without `docs/feedback/`: 27 files changed, 686 insertions(+), 60 deletions(-); largest `useQuote.log-quote.callers.test.ts` 202, `log-routes.limiter.test.ts` 144, `browser-storage-list.test.ts` 100, `log-routes.hung-kv.test.ts` 83, `privacy-copy.test.tsx` 51, `product-claims.ts` 21, `wagmiConfig.test.ts` 21; the three log routes 4 each. Full per-file stat: companion. Compare link above.
