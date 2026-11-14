@@ -24,7 +24,6 @@ export function directoryUrl(chainId: number): string | null {
  * Fetch and shape-check the directory of one chain. THROWS on any failure: callers must fail, never continue with an empty list.
  * Only "a non-empty JSON list" is checked here; each entry's fields are validated by the rules of batch-lib / candidates-lib.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function fetchDirectory(chainId: number): Promise<any[]> {
   const url = directoryUrl(chainId)
   if (!url) throw new Error(`no directory file for chain ${chainId}`)

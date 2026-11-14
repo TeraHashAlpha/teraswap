@@ -62,7 +62,7 @@ try { ctx = await buildContext(chainKey) } catch (e) {
 }
 
 const directoryUrl = directoryUrlOf(chain.id) as string
-let directory: any[] // eslint-disable-line @typescript-eslint/no-explicit-any
+let directory: any[]
 try { directory = await fetchDirectory(chain.id) } catch (e) { console.error(`batch: ${(e as Error).message}`); process.exit(2) }
 const catalog = JSON.parse(readFileSync(resolve(root, `src/config/generated/token-catalog.${chain.id}.json`), 'utf8')).tokens
 
