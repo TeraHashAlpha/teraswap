@@ -171,11 +171,11 @@ always qualify by chain. Operational status and the checks behind each row are i
 | OrderExecutor V3 (conditional orders, oracle floor) | Arbitrum One (42161) | `0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459` |
 | OrderExecutor (testnet) | Sepolia (11155111) | `0xeFC31ADb…f130` + `0xa298e6ed9CF510b708a1F16c9729Bd69c6ee00f2` |
 
-**Workflows** (10, `.github/workflows/`): CI (`ci.yml`), CodeQL (`codeql.yml`), Daily health report (`daily-health-report.yml`), Dependabot auto-merge (`dependabot-auto-merge.yml`), E2E (real-render) (`e2e.yml`), Gitleaks (`gitleaks.yml`), Keeper Tests (`keeper-tests.yml`), Monitoring Watchdog (`monitoring-watchdog.yml`), Security Audit (`security-audit.yml`), Token catalog refresh (`token-catalog-refresh.yml`)
+**Workflows** (11, `.github/workflows/`): CI (`ci.yml`), CodeQL (`codeql.yml`), Daily health report (`daily-health-report.yml`), DCA feed candidates (`dca-feed-candidates.yml`), Dependabot auto-merge (`dependabot-auto-merge.yml`), E2E (real-render) (`e2e.yml`), Gitleaks (`gitleaks.yml`), Keeper Tests (`keeper-tests.yml`), Monitoring Watchdog (`monitoring-watchdog.yml`), Security Audit (`security-audit.yml`), Token catalog refresh (`token-catalog-refresh.yml`)
 
 **ADRs** (`docs/ADR/`): 26 files, ADR-001 to ADR-026; latest `ADR-026-infra-failures-dont-burn-orders`, Status: Proposed
 
-**Test files:** vitest 494 (the `include` globs of `vitest.config.ts`) · keeper node:test 52 · Foundry 3
+**Test files:** vitest 496 (the `include` globs of `vitest.config.ts`) · keeper node:test 52 · Foundry 3
 <!-- state:end -->
 
 - **Chains:** Ethereum Mainnet (1), Base (8453), Arbitrum One (42161), plus a Sepolia testnet row — `docs/DEPLOYMENTS.md`, whose per-row
