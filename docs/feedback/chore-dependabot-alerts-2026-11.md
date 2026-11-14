@@ -85,3 +85,7 @@ It upgraded `simdjson`; the Homebrew Node 25.6.1 then could not load `libsimdjso
 - Push is done by the agent (branch only, no PR): `git push origin chore/dependabot-alerts-2026-11`.
 - Detached base worktree `~/ts-worktrees/dependabot-alerts-base` is removed after the push.
 - Allowlist: propose renewing the zod entry (expires 2026-11-22), see "Allowlist proposals" above.
+
+## Evidence 4 (latest): verify at 2e1c3bd9 (origin/main 198a572f merged in, signed merge commit)
+suite 10687 passed, 4 failed; tsc, build, parity, rpc-budget, lint-delta PASS; codeql 13 to 13, 0 new; keeper PASS node20 1240 and node22 1240. diff --stat origin/main...HEAD: package.json 2, package-lock.json 6, 2 feedback files (4 files, 140 insertions, 4 deletions).
+The 7 earlier failures are now 4: merging main cleared the 2 fiat tests (PR #687) and the hooks timeout. The remaining 4 are all `scripts/agent-verify.test.mjs` fake-install keeper tests; they fail identically on the untouched base commit 130f2ddf on this Mac, because my brew install of node@20 and node@22 changed which Node installs the script finds. Not caused by this diff; fixing them means editing tooling tests, which this goal forbids.
