@@ -2,10 +2,13 @@
 // goal-lint — mechanical checks for a `/goal` paste (docs/Prompts/_PROMPT-TEMPLATE.md §1, §1b, §6).
 //
 //   node scripts/goal-lint.mjs FILE      exit 0 = clean, 1 = violations (listed), 2 = usage/IO error
+//   node scripts/goal-lint.mjs -         the goal on stdin; `/dev/stdin` means the same (file descriptor 0, never the path)
 //
 // Rules (each violation prints `FAIL <rule>: <detail>`):
 //   length          more than 4000 BYTES (UTF-8, counted exactly as `wc -c` does: "·", "→", "—" are 2-3 bytes)
-//   control-line    the first non-empty line does not start with `CONTROL:`
+//   control-line    the first non-empty line does not start with `CONTROL:` — after dropping what a paste adds in front of it
+//                   (BOM, NBSP, zero-width spaces, leading spaces, bracketed-paste ESC markers, "> " quote marks, an
+//                   opening ``` / ~~~ fence line, a "/goal " prefix). A goal with no CONTROL header at all still fails.
 //   exit-clause     no `Exit =` anywhere
 //   banned-phrase   contains "no Monitor" or "CI-poll" (case-insensitive)
 //   risky-command   names pm2, ssh or `cast send` outside a Do-NOT line
@@ -35,13 +38,31 @@ const RISKY = [
 ]
 const BANNED = [/no monitor/i, /ci-poll/i]
 
+// What pasting a goal into a session (rather than reading the file) puts in front of the CONTROL header.
+const BRACKETED_PASTE = /\x1b\[20[01]~/g
+const INVISIBLE = /[\u00a0\u200b-\u200d\u2060\ufeff]/g
+const FENCE = /^(?:`{3,}|~{3,})/
+const QUOTE_MARKS = /^(?:>\s*)+/
+const GOAL_PREFIX = /^\/goal\s+/
+
+/** The first line with content, with paste decoration removed. Used for the CONTROL check only (never for sizes). */
+export function firstControlCandidate(text) {
+  const lines = text.replace(BRACKETED_PASTE, '').split(/\r\n|\r|\n/)
+  for (const raw of lines) {
+    const line = raw.replace(INVISIBLE, ' ').trim()
+    if (line === '' || FENCE.test(line)) continue
+    return line.replace(QUOTE_MARKS, '').replace(GOAL_PREFIX, '').trim()
+  }
+  return ''
+}
+
 /** @param {string|Buffer} input @returns {{rule: string, detail: string}[]} */
 export function lintGoal(input) {
   const out = []
   const bytes = Buffer.isBuffer(input) ? input.length : Buffer.byteLength(input, 'utf8')
   const text = Buffer.isBuffer(input) ? input.toString('utf8') : input
   const lines = text.split('\n')
-  const first = lines.find((l) => l.trim() !== '') ?? ''
+  const first = firstControlCandidate(text)
 
   if (bytes > MAX_BYTES) {
     out.push({ rule: 'length', detail: `${bytes} bytes > ${MAX_BYTES}` })
@@ -78,15 +99,20 @@ export function lintGoal(input) {
   return out
 }
 
+// "The goal is on stdin". Read file descriptor 0 for these, never the path: on Linux /dev/stdin is a link to /proc/self/fd/0,
+// and opening that fails with ENXIO when stdin is a socket, which is what a Node parent (spawnSync, a hook runner) gives its
+// child. macOS duplicates the descriptor instead, so the path only ever worked there.
+const STDIN_ARGS = new Set(['-', '/dev/stdin'])
+
 function main(argv) {
   const file = argv[2]
   if (!file || argv.length > 3) {
-    console.error('usage: node scripts/goal-lint.mjs FILE')
+    console.error('usage: node scripts/goal-lint.mjs FILE   (- or /dev/stdin reads stdin)')
     return 2
   }
   let text // a Buffer: the length rule counts the file's bytes exactly as `wc -c` does
   try {
-    text = readFileSync(file)
+    text = readFileSync(STDIN_ARGS.has(file) ? 0 : file)
   } catch (e) {
     console.error(`goal-lint: cannot read ${file}: ${e.code ?? e.message}`)
     return 2

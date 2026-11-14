@@ -6,7 +6,7 @@
  *   node scripts/dca-feeds/verify.ts [--chain base|arbitrum]
  */
 // @ts-expect-error TS5097 - Node's native type stripping requires the .ts extension; tsc is noEmit here
-import { SentinelError, buildContext, parseArgs, readOnchain, readTokenDecimals, checkFeedLive, eq } from './lib.ts'
+import { SentinelError, buildContext, parseArgs, readOnchain, readTokenDecimals, checkFeedLive, eq, inPlanScope } from './lib.ts'
 
 const { chains } = parseArgs(process.argv.slice(2))
 let failed = false
@@ -19,7 +19,7 @@ for (const key of chains) {
   const { chain, executor, clients, rows, controls } = ctx
   console.log(`\n== ${chain.name} (${chain.id}) executor ${executor} ==`)
   for (const c of controls) console.log(`control  ${c.result.padEnd(16)} ${c.control}`)
-  for (const r of rows.filter(x => x.enabled && x.phase <= 1)) {
+  for (const r of rows.filter(x => (x.enabled && x.phase === 0) || inPlanScope(x))) { // phase-0 controls, phase-1 rows, monthly-batch rows
     const reasons: string[] = []
     const reads = await Promise.all(clients.map(c => readOnchain(c, executor, r.token).catch(() => null)))
     const [a, b] = reads

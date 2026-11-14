@@ -59,7 +59,16 @@ export function deploymentsFor(chain: { deploymentsLabel: string }) {
 export interface Row {
   symbol: string; token: string; feed: string; description: string; decimals: number; tokenDecimals: number
   heartbeat: number; maxStaleness: number | null; tier: string; phase: number; enabled: boolean; action: string; source: string
+  /** [feat/dca-feed-batch] Monthly batch (YYYY-MM) that switched this phase-2 row on; written only by batch.ts. */
+  batch?: string
 }
+/** [feat/dca-feed-batch] A phase-2 row may be enabled ONLY as a well-formed member of a monthly batch. */
+export function isBatchRow(r: Row): boolean {
+  return r.phase === 2 && typeof r.batch === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(r.batch) && r.action === 'register'
+    && (r.tier === 'low' || r.tier === 'medium') && typeof r.maxStaleness === 'number'
+}
+/** The rows plan.ts turns into calldata: enabled phase-1 rows and enabled batch rows. */
+export const inPlanScope = (r: Row): boolean => r.enabled && (r.phase === 1 || isBatchRow(r))
 export function rowsFor(chainId: number): Row[] {
   return ((config.chains as Record<string, { rows: Row[] }>)[String(chainId)]?.rows ?? [])
 }
@@ -95,6 +104,22 @@ export async function checkFeedLive(client: any, feed: string, exp: { descriptio
   }
 }
 
+/** [feat/dca-feed-batch] What ONE RPC answers for a feed, uninterpreted (batch-lib.ts applies the rules). Never throws. */
+export async function readFeedReading(client: any, feed: string): Promise<{ description: string; decimals: number; answer: string; updatedAt: number } | { error: string }> {
+  try {
+    const code = await client.getCode({ address: feed })
+    if (!code || code === '0x') return { error: 'no contract code at feed' }
+    const [description, decimals, round] = await Promise.all([
+      client.readContract({ address: feed, abi: FEED_ABI, functionName: 'description' }),
+      client.readContract({ address: feed, abi: FEED_ABI, functionName: 'decimals' }),
+      client.readContract({ address: feed, abi: FEED_ABI, functionName: 'latestRoundData' }),
+    ])
+    return { description: String(description), decimals: Number(decimals), answer: (round[1] as bigint).toString(), updatedAt: Number(round[3]) }
+  } catch (e) {
+    return { error: (e as Error).message.split('\n')[0] }
+  }
+}
+
 export async function readTokenDecimals(client: any, token: string): Promise<number> {
   return Number(await client.readContract({ address: token, abi: ERC20_ABI, functionName: 'decimals' }))
 }
@@ -119,7 +144,7 @@ export async function buildContext(key: string): Promise<ChainContext> {
   const rows = rowsFor(chain.id)
   if (rows.length === 0) throw new SentinelError(`SENTINEL: no config rows for chain ${chain.id}`)
   for (const r of rows) { sentinel(`${chain.name} ${r.symbol} token`, r.token); sentinel(`${chain.name} ${r.symbol} feed`, r.feed) }
-  if (rows.some(r => r.phase === 2 && r.enabled)) throw new SentinelError('SENTINEL: a phase-2 row is enabled')
+  if (rows.some(r => r.phase === 2 && r.enabled && !isBatchRow(r))) throw new SentinelError('SENTINEL: a phase-2 row is enabled outside a monthly batch (needs batch YYYY-MM, action register, tier low|medium, maxStaleness)')
   const { executor, admin } = deploymentsFor(chain)
   const clients = clientsFor(chain)
   const primary = clients[0]

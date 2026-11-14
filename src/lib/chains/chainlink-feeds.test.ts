@@ -6,7 +6,7 @@
  * (docs/Reports/ARBITRUM-ADDRESS-MANIFEST.json). This suite pins them against drift and
  * confirms mainnet/Base resolution stays byte-identical.
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   CHAINLINK_FEEDS_BY_CHAIN,
   getChainlinkFeed,
@@ -386,37 +386,112 @@ describe('resolveFeed — [ADR-018] exhaustive single/composed dispatch', () => 
 describe('dca-feed-registrations.json ↔ chainlink-feeds.ts [FEAT-DCA-FEED-REGISTRATION-PHASE1]', () => {
   const chains = Object.entries(registrations.chains) as [string, { rows: Array<{
     symbol: string; token: string; feed: string; description: string; decimals: number; heartbeat: number
-    maxStaleness: number | null; phase: number; enabled: boolean }> }][]
+    maxStaleness: number | null; tier: string; phase: number; enabled: boolean; action: string; batch?: string }> }][]
 
-  it('every ENABLED row is present in CHAINLINK_FEEDS_BY_CHAIN, heartbeat and expectation, all equal to the config (lowercase compare)', () => {
+  // [feat/dca-feed-batch] Was "every ENABLED row is present in CHAINLINK_FEEDS_BY_CHAIN": still true for every
+  // row but ONE. A token served by the preferred-direct map (Base cbETH) keeps that resolution, so its row must
+  // name the preferred feed and stay OUT of the terminal map. Every row is now also resolved end to end.
+  it('every ENABLED row is mirrored: feed, heartbeat and expectation all equal to the config (lowercase compare)', () => {
     let checked = 0
+    const viaPreferred: string[] = []
     for (const [chainId, { rows }] of chains) {
       for (const r of rows.filter(x => x.enabled)) {
         const id = Number(chainId)
-        expect(CHAINLINK_FEEDS_BY_CHAIN[id][r.token.toLowerCase()].toLowerCase(), `${chainId} ${r.symbol} feed`).toBe(r.feed.toLowerCase())
+        const resolved = resolveFeed(r.token, id)
+        const preferred = getPreferredDirectUsdFeed(r.token, id)
+        if (preferred) {
+          viaPreferred.push(`${chainId}:${r.symbol}`)
+          expect(preferred.toLowerCase(), `${chainId} ${r.symbol} preferred feed`).toBe(r.feed.toLowerCase())
+          expect(CHAINLINK_FEEDS_BY_CHAIN[id][r.token.toLowerCase()], `${chainId} ${r.symbol} terminal map`).toBeUndefined()
+          expect(resolved?.kind, `${chainId} ${r.symbol} kind`).toBe('preferred')
+          if (resolved?.kind === 'preferred') expect(resolved.primary.address.toLowerCase()).toBe(r.feed.toLowerCase())
+        } else {
+          expect(CHAINLINK_FEEDS_BY_CHAIN[id][r.token.toLowerCase()].toLowerCase(), `${chainId} ${r.symbol} feed`).toBe(r.feed.toLowerCase())
+          expect(resolved?.kind, `${chainId} ${r.symbol} kind`).toBe('single')
+          if (resolved?.kind === 'single') {
+            expect(resolved.leg).toEqual({ address: r.feed, expectedDescription: r.description, expectedDecimals: r.decimals })
+          }
+        }
         expect(getFeedHeartbeatSec(r.feed), `${chainId} ${r.symbol} heartbeat`).toBe(r.heartbeat)
+        expect(getFeedStalenessSec(r.feed, 1), `${chainId} ${r.symbol} staleness`).toBe(Math.round(r.heartbeat * 1.5))
         expect(getFeedExpectation(r.feed), `${chainId} ${r.symbol} expectation`).toEqual({ description: r.description, decimals: r.decimals })
         checked++
       }
     }
     expect(checked).toBeGreaterThan(0)
+    expect(viaPreferred).toEqual(['8453:cbETH'])
   })
 
-  it('phase 2 rows are disabled and contribute NO feed to the swap-side table', () => {
+  // [feat/dca-feed-batch] Was "phase 2 rows are disabled": owner decision 2026-11-13, phase-2 feeds are switched
+  // on in MONTHLY batches. The rule is now exact instead of blanket: a phase-2 row is enabled ONLY as a
+  // well-formed member of a batch, and the full set of batch rows is pinned here by name, per chain.
+  it('a phase-2 row is enabled ONLY inside a monthly batch; any other phase-2 row is disabled and contributes NO feed', () => {
+    const batchRows: Record<string, string[]> = {}
     for (const [chainId, { rows }] of chains) {
       for (const r of rows.filter(x => x.phase === 2)) {
-        expect(r.enabled, `${chainId} ${r.symbol}`).toBe(false)
-        expect(CHAINLINK_FEEDS_BY_CHAIN[Number(chainId)][r.token.toLowerCase()]).toBeUndefined()
+        if (r.batch === undefined) {
+          expect(r.enabled, `${chainId} ${r.symbol}`).toBe(false)
+          expect(CHAINLINK_FEEDS_BY_CHAIN[Number(chainId)][r.token.toLowerCase()]).toBeUndefined()
+          continue
+        }
+        expect(r.batch, `${chainId} ${r.symbol} batch`).toMatch(/^\d{4}-(0[1-9]|1[0-2])$/)
+        expect({ enabled: r.enabled, action: r.action }, `${chainId} ${r.symbol}`).toEqual({ enabled: true, action: 'register' })
+        expect(['low', 'medium'], `${chainId} ${r.symbol} tier`).toContain(r.tier)
+        const key = `${chainId}:${r.batch}`
+        batchRows[key] = [...(batchRows[key] ?? []), r.symbol].sort()
       }
+      // The batch label belongs to phase 2 only: phase-0 and phase-1 rows never carry one.
+      for (const r of rows.filter(x => x.phase !== 2)) expect(r.batch, `${chainId} ${r.symbol}`).toBeUndefined()
     }
+    expect(batchRows).toEqual({
+      '8453:2026-11': ['AAVE', 'AERO', 'LINK', 'MORPHO', 'USDS', 'YFI', 'ZRO', 'cbETH'],
+    })
   })
 
-  it('every enabled phase-1 row has maxStaleness >= heartbeat (the contract-side staleness cannot undercut the feed)', () => {
-    for (const [, { rows }] of chains) {
-      for (const r of rows.filter(x => x.phase === 1 && x.enabled)) {
+  // [feat/dca-feed-batch] Was phase-1 rows only; a batch row is registered on-chain the same way.
+  it('every enabled row that is registered on-chain (phase 1 or a batch) has maxStaleness >= heartbeat', () => {
+    const counts: Record<string, number> = {}
+    for (const [chainId, { rows }] of chains) {
+      for (const r of rows.filter(x => x.enabled && (x.phase === 1 || x.batch !== undefined))) {
         expect(r.maxStaleness).not.toBeNull()
         expect(r.maxStaleness as number).toBeGreaterThanOrEqual(r.heartbeat)
+        const key = `${chainId}:${r.phase === 1 ? 'phase1' : 'batch'}`
+        counts[key] = (counts[key] ?? 0) + 1
       }
     }
+    expect(counts).toEqual({ '8453:phase1': 6, '8453:batch': 8, '42161:phase1': 13 })
+  })
+
+  it('batch 2026-11 on Base: seven tokens gain a terminal direct feed, cbETH keeps direct-first with its composition', () => {
+    const rows = registrations.chains['8453'].rows.filter(r => (r as { batch?: string }).batch === '2026-11')
+    const single = rows.filter(r => resolveFeed(r.token, 8453)?.kind === 'single').map(r => r.symbol).sort()
+    expect(single).toEqual(['AAVE', 'AERO', 'LINK', 'MORPHO', 'USDS', 'YFI', 'ZRO'])
+    for (const r of rows.filter(x => x.symbol !== 'cbETH')) {
+      expect(getChainlinkFeed(r.token, 8453), r.symbol).toBe(r.feed)
+      expect(getComposedFeed(r.token, 8453), r.symbol).toBeNull()
+      expect(r.description, r.symbol).toBe(`${r.symbol} / USD`)
+    }
+    const cbeth = rows.find(r => r.symbol === 'cbETH')!
+    expect(getChainlinkFeed(cbeth.token, 8453)).toBeNull()
+    expect(resolveFeed(cbeth.token, 8453)?.kind).toBe('preferred')
+    expect(getComposedFeed(cbeth.token, 8453)).not.toBeNull()
+  })
+
+  // The on-chain DCA floor reads the row's feed; the swap side reads the preferred-direct feed. For one token
+  // they must be one feed, and the module refuses to load otherwise (no silent second price for cbETH).
+  it('IMPORT FAILS when an enabled row names a different feed than the preferred-direct one of its token', async () => {
+    const specifier = '../../config/dca-feed-registrations.json'
+    const load = async (mutate: (rows: Array<{ symbol: string; feed: string }>) => void) => {
+      vi.resetModules()
+      const copy = structuredClone(registrations)
+      mutate(copy.chains['8453'].rows)
+      vi.doMock(specifier, () => ({ default: copy }))
+      try { return await import('./chainlink-feeds') } finally { vi.doUnmock(specifier); vi.resetModules() }
+    }
+    // Control: the unmodified config loads through the same path.
+    await expect(load(() => {})).resolves.toHaveProperty('CHAINLINK_FEEDS_BY_CHAIN')
+    await expect(load((rows) => {
+      rows.find(r => r.symbol === 'cbETH')!.feed = rows.find(r => r.symbol === 'AERO')!.feed
+    })).rejects.toThrow(/cbETH on chain 8453.*They must be the same feed/)
   })
 })

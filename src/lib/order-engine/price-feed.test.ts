@@ -25,6 +25,7 @@ import { resolveOrderPriceFeed } from './price-feed'
 import { getChainlinkFeeds } from './config'
 import { getChainTokenList } from '../chains/tokens'
 import { CHAINLINK_FEEDS } from '../constants'
+import registrations from '../../config/dca-feed-registrations.json'
 
 /** symbol → feed (lowercased) for every catalog token on `chainId` that resolves at all. */
 function signableBySymbol(chainId: number): Record<string, string> {
@@ -56,18 +57,26 @@ const MAINNET_SIGNABLE: Record<string, string> = {
 }
 // [FEAT-DCA-FEED-REGISTRATION-PHASE1] Re-pinned 2026-10-11 from the resolver's own output: Base USDC is now the
 // plain usdc-usd proxy, and the enabled phase-1 registration rows widen the set (deliberate, owner-approved).
+// [feat/dca-feed-batch] Re-pinned 2026-11-13 the same way: batch 2026-11 adds AERO, MORPHO, YFI and ZRO to this pin,
+// each copied from its config row. The pin enumerates the CURATED Base list (getChainTokenList); AAVE, LINK and USDS
+// are in the full search catalog only, so they are signable too but are asserted from the config in the test after
+// the BASE one. cbETH is in the batch and is NOT signable: it stays preferred-direct, outside the terminal map.
 // Base: CHAINLINK_FEEDS_BY_CHAIN[8453] (address-keyed entries; native sentinel → WETH's).
 // Each verified on Base itself for this commit: eth_getCode 9571 bytes, description() names the
 // pair, decimals() 8, latestRoundData() fresh and > 0, on two independent RPCs.
 const BASE_SIGNABLE: Record<string, string> = {
+  AERO: '0x4ec5970fc728c5f65ba413992cd5ff6fd70fcff0',
   COMP: '0x9dda783de64a9d1a60c49ca761ebe528c35ba428',
   DAI: '0x591e79239a7d679378ec8c847e5038150364c78f',
   ETH: '0x71041dddad3595f9ced3dccfbe3d1f4b0a16bb70',
   EURC: '0xdae398520e2b67cd3f27aef9cf14d93d927f8250',
+  MORPHO: '0xe95e258bb6615d47515fc849f8542da651f12bf6',
   USDC: '0x7e860098f58bbfc8648a4311b374b1d669a2bc6b',
   USDT: '0xf19d560eb8d2adf07bd6d13ed03e1d11215721f9',
   VIRTUAL: '0xeaf310161c9ef7c813a14f8fef6fb271434019f7',
   WETH: '0x71041dddad3595f9ced3dccfbe3d1f4b0a16bb70',
+  YFI: '0xd40e758b5ec80820b68dfc302fc5ce1239083548',
+  ZRO: '0xdc31a4ccfca039bec6222e20be7770e12581bfeb',
   cbBTC: '0x07da0e54543a844a80abe69c8a12f22b3aa59f9d',
 }
 // Arbitrum: CHAINLINK_FEEDS_BY_CHAIN[42161] (5 entries; same per-address verification on Arbitrum).
@@ -145,8 +154,25 @@ describe('resolveOrderPriceFeed — the signable feed set is PINNED per chain', 
   it('BASE: exactly these catalog symbols resolve, to Base feeds — never a mainnet aggregator [H2]', () => {
     expect(signableBySymbol(8453)).toEqual(BASE_SIGNABLE)
     expect(signableTokenCount(8453)).toBe(Object.keys(BASE_SIGNABLE).length)
+    // [feat/dca-feed-batch] 9 before batch 2026-11, 13 after; cbETH is registered for DCA only, never a trigger feed.
+    expect(Object.keys(BASE_SIGNABLE)).toHaveLength(13)
+    expect(Object.keys(BASE_SIGNABLE)).not.toContain('cbETH')
     const mainnetAddrs = new Set(Object.values(getChainlinkFeeds(1)).map(f => f.address.toLowerCase()))
     for (const feed of Object.values(BASE_SIGNABLE)) expect(mainnetAddrs.has(feed)).toBe(false)
+  })
+
+  // [feat/dca-feed-batch] The whole batch, from the config and not from a token list: seven rows are signable
+  // (three of them reachable only through search), and cbETH resolves NOTHING for a Limit / SL-TP order.
+  it('BASE batch 2026-11: seven batch tokens sign their own row feed; cbETH is not a trigger feed', () => {
+    const rows = registrations.chains['8453'].rows.filter(r => (r as { batch?: string }).batch === '2026-11')
+    const feedOf = (r: { token: string; symbol: string }) => resolveOrderPriceFeed({ address: r.token as `0x${string}`, symbol: r.symbol }, 8453)
+    const signable = rows.filter(r => feedOf(r) !== '')
+    expect(signable.map(r => r.symbol).sort()).toEqual(['AAVE', 'AERO', 'LINK', 'MORPHO', 'USDS', 'YFI', 'ZRO'])
+    for (const r of signable) expect(feedOf(r), r.symbol).toBe(r.feed)
+    const curated = new Set(getChainTokenList(8453).map(t => t.symbol))
+    expect(signable.filter(r => !curated.has(r.symbol)).map(r => r.symbol).sort()).toEqual(['AAVE', 'LINK', 'USDS'])
+    const cbeth = rows.find(r => r.symbol === 'cbETH')!
+    expect(feedOf(cbeth)).toBe('')
   })
 
   it('ARBITRUM: exactly these catalog symbols resolve, to Arbitrum feeds — never a mainnet aggregator', () => {

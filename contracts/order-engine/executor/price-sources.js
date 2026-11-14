@@ -93,6 +93,15 @@ export const CHAINLINK_USD_FEED_BY_CHAIN = Object.freeze({
     "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2": { feed: "0xf19d560eB8d2ADf07BD6D13ed03e1D11215721F9", decimals: 8, pair: "USDT / USD" },
     "0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b": { feed: "0xEaf310161c9eF7c813A14f8FEF6Fb271434019F7", decimals: 8, pair: "VIRTUAL / USD" },
     "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf": { feed: "0x07DA0E54543a844a80ABE69c8A12F22B3aA59f9D", decimals: 8, pair: "cbBTC / USD" },
+    // [feat/dca-feed-batch] Batch 2026-11: copied from src/config/dca-feed-registrations.json (the drift test proves equality).
+    "0x940181a94a35a4569e4529a3cdfb74e38fd98631": { feed: "0x4EC5970fC728C5f65ba413992CD5fF6FD70fcfF0", decimals: 8, pair: "AERO / USD" },
+    "0xbaa5cc21fd487b8fcc2f632f3f4e8d37262a0842": { feed: "0xe95e258bb6615d47515Fc849f8542dA651f12bF6", decimals: 8, pair: "MORPHO / USD" },
+    "0x9eaf8c1e34f05a589eda6bafdf391cf6ad3cb239": { feed: "0xD40e758b5eC80820B68DFC302fc5Ce1239083548", decimals: 8, pair: "YFI / USD" },
+    "0x6985884c4392d348587b19cb9eaaf157f13271cd": { feed: "0xdc31a4CCfCA039BeC6222e20BE7770E12581bfEB", decimals: 8, pair: "ZRO / USD" },
+    "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22": { feed: "0xd7818272B9e248357d13057AAb0B417aF31E817d", decimals: 8, pair: "CBETH / USD" },
+    "0x63706e401c06ac8513145b7687a14804d17f814b": { feed: "0x3d6774EF702A10b20FCa8Ed40FC022f7E4938e07", decimals: 8, pair: "AAVE / USD" },
+    "0x88fb150bdc53a65fe94dea0c9ba0a6daf8c6e196": { feed: "0x17CAb8FE31E32f08326e5E27412894e49B0f9D65", decimals: 8, pair: "LINK / USD" },
+    "0x820c137fa70c8691f0e44dc420a5e53c168921dc": { feed: "0x2330aaE3bca5F05169d5f4597964D44522F62930", decimals: 8, pair: "USDS / USD" },
   }),
   42161: Object.freeze({
     "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": { feed: "0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612", decimals: 8, pair: "ETH / USD" },

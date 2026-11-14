@@ -5,6 +5,7 @@ DCA between two registered tokens classifies as `onchain-feed` (the contract enf
 Base first (register USDT, cbBTC, EURC, COMP, VIRTUAL; **replace** USDC's SVR feed with the plain proxy), then Arbitrum
 (USDT, DAI, WBTC, LINK, ARB, AAVE, COMP, CRV, LDO, MAGIC, PENDLE, SUSHI, UNI). Phase 2 (medium tier) and MOG are
 `enabled: false` in the config and are NOT in scope. **ONE CHAIN AT A TIME.**
+Since 2026-11-13 phase-2 rows are switched on in monthly batches: start at **§9 Monthly batch**, which leads back into §1–§6.
 
 **Who/what:** the admin is a plain EOA (`admin()` == the `Contract admin` row of `docs/DEPLOYMENTS.md`). There is **no external
 Timelock/Safe**: the 48 h delay is inside the executor (`TIMELOCK_ORACLE_CHANGE`). Registration is two admin calls:
@@ -66,3 +67,29 @@ these tokens too, and Base USDC validates against the plain proxy instead of the
 
 ## 8. Rollback
 Before execute: `cancelTimelockAction(actionId)` (admin). After execute: queue a new registration with the previous feed (another 48 h).
+
+## 9. Monthly batch (owner decision 2026-11-13)
+One named list of symbols, one chain, one PR per month. Batch 1 is `2026-11` on Base: MORPHO, AAVE, LINK, USDS, AERO, cbETH, ZRO, YFI.
+
+**a. Build the batch** (read-only: one HTTPS GET of Chainlink's feed directory, then `eth_call` on two RPCs; no key, no transaction):
+```
+node --no-warnings scripts/dca-feeds/batch.ts --chain base --batch 2026-12 --symbols SYM1,SYM2 > "$TMPDIR/dca-batch.json" \
+  && mv "$TMPDIR/dca-batch.json" src/config/dca-feed-registrations.json    # never redirect straight onto the config
+```
+It creates a missing row from the directory joined to our token catalog (always the plain proxy, never an SVR or secondary one; no address is
+typed) and sets `enabled`, `action: "register"`, `maxStaleness` (§0 rule), `tier` (the directory category) and `batch`. It refuses the WHOLE
+batch (exit 1, nothing on stdout) when any symbol is not low/medium, is already enabled, fails a live check on either RPC (description, feed
+decimals, answer > 0, age ≤ 2× heartbeat and < 86400 s, both RPCs equal, token `decimals()`), or is a stablecoin outside 0.98 to 1.02.
+A token with no `SYMBOL / USD` feed cannot be built (Base wstETH has only `WSTETH / ETH`); do not build a composite.
+
+**b. Same PR, copied from the config and never typed:** the keeper mirror `contracts/order-engine/executor/price-sources.js` (its drift guard
+fails until it equals the enabled rows), the batch pin in `src/lib/chains/chainlink-feeds.test.ts`, and `BASE_SIGNABLE` in
+`src/lib/order-engine/price-feed.test.ts`. A token with a preferred-direct feed (Base cbETH) is registered like any row but stays out of the
+swap-side terminal map. Run `scripts/agent-verify.sh --codeql --keeper`.
+
+**c. Draft PR + Auditor (0C/0H) before merge.** The §7 mirror takes effect at DEPLOY, before the execute: from then an unreadable or stale
+feed hard-blocks swaps and DCA creation for that token, and the token becomes a Limit/TP trigger feed. The keeper reads its new entries only
+after it is redeployed (owner terminal).
+
+**d. Then §1–§6 for that chain.** `plan.ts` must show exactly the batch as `register` with status `plan`, zero `BLOCKED`, and every earlier
+row `unchanged (skipped)`; its last stderr line is the summary. `verify.ts` covers the batch rows after the execute.

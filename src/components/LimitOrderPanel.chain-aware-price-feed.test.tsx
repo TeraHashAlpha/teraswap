@@ -63,15 +63,26 @@ const USDC: Record<number, { address: string; symbol: string; decimals: number }
 }
 
 /**
- * LINK — a non-stable spend leg. Its MAINNET address has a mainnet feed; its BASE address has NO
- * entry in CHAINLINK_FEEDS_BY_CHAIN[8453]. That asymmetry is the whole point: under the old
- * symbol-keyed lookup both resolved to the mainnet LINK/USD aggregator.
+ * LINK — a non-stable spend leg. Its MAINNET address has a mainnet feed. Its BASE address had NO
+ * entry in CHAINLINK_FEEDS_BY_CHAIN[8453] until batch 2026-11 [feat/dca-feed-batch] switched Base
+ * LINK on; it now has its OWN Base feed. Under the old symbol-keyed lookup both resolved to the
+ * mainnet LINK/USD aggregator, and the Base test below still proves they are different feeds.
  */
 const LINK: Record<number, { address: string; symbol: string; decimals: number }> = {
   8453: { address: '0x88Fb150BDc53A65fe94Dea0c9BA0a6dAf8C6e196', symbol: 'LINK', decimals: 18 },
   1: { address: '0x514910771AF9Ca656af840dff83E8264EcF986CA', symbol: 'LINK', decimals: 18 },
   [UNCOVERED_CHAIN_ID]: { address: '0x514910771AF9Ca656af840dff83E8264EcF986CA', symbol: 'LINK', decimals: 18 },
 }
+
+/**
+ * [feat/dca-feed-batch] The Base token with NO feed. It was LINK until batch 2026-11 switched Base LINK on. wstETH
+ * is the durable example: on Base Chainlink publishes only "WSTETH / ETH" and exchange-rate feeds, never a USD one
+ * (owner decision 2026-11-13: no composite). Address and decimals come from OUR Base catalog, not from a literal.
+ */
+const WSTETH_BASE = (() => {
+  const t = catalog8453.tokens.find(x => x.symbol === 'wstETH')!
+  return { address: t.address, symbol: t.symbol, decimals: t.decimals }
+})()
 
 vi.mock('wagmi', () => ({
   useSwitchChain: () => ({ switchChainAsync: vi.fn().mockResolvedValue(undefined) }),
@@ -168,12 +179,18 @@ vi.mock('@/components/TokenSelector', () => ({
         data-testid="pick-link"
         onClick={() => onSelect({ ...LINK[CHAIN_ID], name: 'Chainlink', logoURI: '', category: 'DeFi', chainId: CHAIN_ID })}
       >pick-link</button>
+      <button
+        data-testid="pick-nofeed"
+        onClick={() => onSelect({ ...WSTETH_BASE, name: 'Wrapped liquid staked Ether 2.0', logoURI: '', category: 'Liquid Staking', chainId: CHAIN_ID })}
+      >pick-nofeed</button>
     </div>
   ),
 }))
 
 import { renderWithProviders, screen, fireEvent, waitFor, act } from '@/test-utils/render'
 import LimitOrderPanel from './LimitOrderPanel'
+import catalog8453 from '@/config/generated/token-catalog.8453.json'
+import registrations from '@/config/dca-feed-registrations.json'
 import { getWrappedNative } from '@/lib/chains/registry'
 import { getChainlinkFeed } from '@/lib/chains/chainlink-feeds'
 import { NATIVE_ETH } from '@/lib/constants'
@@ -320,6 +337,25 @@ describe('LimitOrderPanel: selling the wrapped native directly resolves a feed o
   })
 })
 
+describe('LimitOrderPanel: a batch-registered token signs ITS OWN chain feed [feat/dca-feed-batch]', () => {
+  it('Base LINK (batch 2026-11) signs the feed of its registration row, never the mainnet LINK aggregator', async () => {
+    await renderOn(8453)
+    fireEvent.click(sell('pick-link'))   // non-stable sell leg ⇒ LINK is the feed token
+    fireEvent.click(buy('pick-usdc'))
+    await act(async () => { await Promise.resolve() })
+    enterAmount('10')
+    enterDisplayPrice('20')
+
+    await driveToSignature()
+
+    const row = registrations.chains['8453'].rows.find(r => r.symbol === 'LINK')!
+    expect(row.token).toBe(LINK[8453].address)
+    expect(getChainlinkFeed(LINK[8453].address, 8453)).toBe(row.feed)
+    expect(signedPriceFeed().toLowerCase()).toBe(row.feed.toLowerCase())
+    expect(signedPriceFeed().toLowerCase()).not.toBe(getChainlinkFeed(LINK[1].address, 1)!.toLowerCase())
+  })
+})
+
 describe('LimitOrderPanel: a feed that does not exist fails CLOSED', () => {
   it('an UNCOVERED CHAIN refuses before any wallet call, never a sibling chain’s aggregator', async () => {
     await renderOn(UNCOVERED_CHAIN_ID)
@@ -342,9 +378,10 @@ describe('LimitOrderPanel: a feed that does not exist fails CLOSED', () => {
     expect(mockCreateOrderInSupabase).not.toHaveBeenCalled()
   })
 
-  it('an UNCOVERED TOKEN on a covered chain (LINK on Base) refuses before any wallet call', async () => {
+  // [feat/dca-feed-batch] Was "LINK on Base". Same assertions, on a token that still has no feed.
+  it('an UNCOVERED TOKEN on a covered chain (wstETH on Base) refuses before any wallet call', async () => {
     await renderOn(8453)
-    fireEvent.click(sell('pick-link'))
+    fireEvent.click(sell('pick-nofeed'))
     fireEvent.click(buy('pick-usdc'))
     await act(async () => { await Promise.resolve() })
     enterAmount('10')
@@ -352,9 +389,9 @@ describe('LimitOrderPanel: a feed that does not exist fails CLOSED', () => {
 
     await driveToSignature()
 
-    expect(getChainlinkFeed(LINK[8453].address, 8453)).toBeNull()
+    expect(getChainlinkFeed(WSTETH_BASE.address, 8453)).toBeNull()
     const err = await screen.findByTestId('limit-submit-error')
-    expect(err.textContent).toMatch(/No Chainlink price feed available for LINK/i)
+    expect(err.textContent).toMatch(/No Chainlink price feed available for wstETH/i)
     expectZeroWalletCalls()
     await waitFor(() => expect(mockCreateOrderInSupabase).not.toHaveBeenCalled())
   })
@@ -364,7 +401,7 @@ describe('LimitOrderPanel: a feed that does not exist fails CLOSED', () => {
     // "execute unconditionally" branch. Signing it on a Limit order would strip the price condition
     // entirely and fill at any price, so "no feed" must refuse, never degrade to a zero address.
     await renderOn(8453)
-    fireEvent.click(sell('pick-link'))
+    fireEvent.click(sell('pick-nofeed'))
     fireEvent.click(buy('pick-usdc'))
     await act(async () => { await Promise.resolve() })
     enterAmount('10')

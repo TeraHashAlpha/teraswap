@@ -1,0 +1,346 @@
+[
+  {
+    "name": "USDC / USD",
+    "path": "usdc-usd-svr",
+    "ens": null,
+    "proxyAddress": "0x458138Fc0D67027E9A6778ef40a6ffC318c69061",
+    "secondaryProxyAddress": "0x1550207eAeB590D1557a6E6C066D3d57B5A4Dc65",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "low",
+    "docs": {
+      "baseAsset": "USDC",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "ETH / USD",
+    "path": "eth-usd-shared-svr-2",
+    "ens": null,
+    "proxyAddress": "0x50015f8b17fb2C290Dde41fDc246ed0dcEE93a8b",
+    "secondaryProxyAddress": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+    "heartbeat": 1200,
+    "decimals": 8,
+    "feedCategory": "low",
+    "docs": {
+      "baseAsset": "ETH",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "WSTETH / ETH",
+    "path": "wsteth-eth",
+    "ens": "wsteth-eth",
+    "proxyAddress": "0x43a5C292A453A3bF3606fa856197f09D7B74251a",
+    "heartbeat": 86400,
+    "decimals": 18,
+    "feedCategory": "medium",
+    "docs": {
+      "baseAsset": "WSTETH",
+      "quoteAsset": "ETH"
+    }
+  },
+  {
+    "name": "wstETH-stETH Exchange Rate",
+    "path": "wsteth-steth exchangerate",
+    "ens": "wstethsteth-exchange-rate",
+    "proxyAddress": "0xB88BAc61a4Ca37C43a3725912B1f472c9A5bc061",
+    "heartbeat": 86400,
+    "decimals": 18,
+    "feedCategory": "custom",
+    "docs": {
+      "baseAsset": "wstETH",
+      "quoteAsset": "stETH"
+    }
+  },
+  {
+    "name": "inwstETH / wstETH Exchange Rate",
+    "path": "inwsteth-wsteth-exchange-rate",
+    "ens": "inwsteth-wsteth-exchange-rate",
+    "proxyAddress": "0xb58c5C550Ba19c4CEeE071F8CeeB58f8770e6978",
+    "heartbeat": 86400,
+    "decimals": 18,
+    "feedCategory": "",
+    "docs": {
+      "hidden": true
+    }
+  },
+  {
+    "name": "DAI / USD",
+    "path": "dai-usd",
+    "ens": "dai-usd",
+    "proxyAddress": "0x591e79239a7d679378eC8c847e5038150364C78F",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "low",
+    "docs": {
+      "baseAsset": "DAI",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "USDS / USD",
+    "path": "usds-usd",
+    "ens": "usds-usd",
+    "proxyAddress": "0x2330aaE3bca5F05169d5f4597964D44522F62930",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "medium",
+    "docs": {
+      "baseAsset": "USDS",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "AAVE / USD",
+    "path": "aave-usd-svr",
+    "ens": null,
+    "proxyAddress": "0x65B5d02E1Fff839b8B67Fa26F8540e5f11454316",
+    "secondaryProxyAddress": "0xAAEbc0287EC3BF3fe56fCA1E4bcC793b219De551",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "low",
+    "docs": {
+      "baseAsset": "AAVE",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "CBETH / ETH",
+    "path": "cbeth-eth",
+    "ens": "cbeth-eth",
+    "proxyAddress": "0x806b4Ac04501c29769051e42783cF04dCE41440b",
+    "heartbeat": 86400,
+    "decimals": 18,
+    "feedCategory": "medium",
+    "docs": {
+      "baseAsset": "CBETH",
+      "quoteAsset": "ETH"
+    }
+  },
+  {
+    "name": "wstETH-ETH Exchange Rate",
+    "path": "weth-eth",
+    "ens": "weth-eth",
+    "proxyAddress": "0xa669E5272E60f78299F4824495cE01a3923f4380",
+    "heartbeat": 86400,
+    "decimals": 18,
+    "feedCategory": "custom",
+    "docs": {
+      "baseAsset": "WSTETH",
+      "quoteAsset": "ETH",
+      "hidden": true
+    }
+  },
+  {
+    "name": "LINK / ETH",
+    "path": "link-eth",
+    "ens": "link-eth",
+    "proxyAddress": "0xc5E65227fe3385B88468F9A01600017cDC9F3A12",
+    "heartbeat": 86400,
+    "decimals": 18,
+    "feedCategory": "medium",
+    "docs": {
+      "baseAsset": "LINK",
+      "quoteAsset": "ETH"
+    }
+  },
+  {
+    "name": "USDC / USD",
+    "path": "usdc-usd",
+    "ens": "usdc-usd",
+    "proxyAddress": "0x7e860098F58bBFC8648a4311b374B1D669a2bc6B",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "low",
+    "docs": {
+      "baseAsset": "USDC",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "LINK / USD",
+    "path": "link-usd",
+    "ens": "link-usd",
+    "proxyAddress": "0x17CAb8FE31E32f08326e5E27412894e49B0f9D65",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "low",
+    "docs": {
+      "baseAsset": "LINK",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "CBETH / USD",
+    "path": "cbeth-usd",
+    "ens": "cbeth-usd",
+    "proxyAddress": "0xd7818272B9e248357d13057AAb0B417aF31E817d",
+    "heartbeat": 1200,
+    "decimals": 8,
+    "feedCategory": "medium",
+    "docs": {
+      "baseAsset": "CBETH",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "ETH / USD",
+    "path": "eth-usd-shared-svr",
+    "ens": null,
+    "proxyAddress": "0x5731Ae06077c79A3B292498940211E0aE7130bd3",
+    "secondaryProxyAddress": "0x1428C9E908e32dD2839F99D63C242c91329A58C0",
+    "heartbeat": 1200,
+    "decimals": 18,
+    "feedCategory": "low",
+    "docs": {
+      "baseAsset": "ETH",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "WSTETH / STETH Exchange Rate",
+    "path": "wsteth-steth-exchange-rate-svr",
+    "ens": null,
+    "proxyAddress": "0xfd14a390149e23F972AbC9B7E31d3B1fdf508B38",
+    "secondaryProxyAddress": "0x2d4b8B1083a7C278B4C45c598De155e5f9b7A8D5",
+    "heartbeat": 86400,
+    "decimals": 18,
+    "feedCategory": "custom",
+    "docs": {
+      "baseAsset": "wstETH",
+      "quoteAsset": "stETH"
+    }
+  },
+  {
+    "name": "YFI / USD",
+    "path": "yfi-usd",
+    "ens": "yfi-usd",
+    "proxyAddress": "0xD40e758b5eC80820B68DFC302fc5Ce1239083548",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "medium",
+    "docs": {
+      "baseAsset": "YFI",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "USDC / USD TEST CAPPED",
+    "path": "usdc-usd-capped-test",
+    "ens": "usdc-usd-test-capped",
+    "proxyAddress": "0x09b86FDE72653880F57b78581CAd0E9126e7f97B",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "",
+    "docs": {
+      "hidden": true
+    }
+  },
+  {
+    "name": "ZRO / USD",
+    "path": "zro-usd",
+    "ens": "zro-usd",
+    "proxyAddress": "0xdc31a4CCfCA039BeC6222e20BE7770E12581bfEB",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "medium",
+    "docs": {
+      "baseAsset": "ZRO",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "USDC / USD",
+    "path": "usdc-usd-shared-svr",
+    "ens": null,
+    "proxyAddress": "0xd0Dc8c910565D94D408729D16bE5467B5d7633Ad",
+    "secondaryProxyAddress": "0x1401Fd60F9ba4F718a2fE6149aadf3d1F0dB1b0A",
+    "heartbeat": 86400,
+    "decimals": 18,
+    "feedCategory": "low",
+    "docs": {
+      "baseAsset": "USDC",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "AAVE / USD",
+    "path": "aave-usd",
+    "ens": "aave-usd",
+    "proxyAddress": "0x3d6774EF702A10b20FCa8Ed40FC022f7E4938e07",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "low",
+    "docs": {
+      "baseAsset": "AAVE",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "tETH / wstETH Exchange Rate",
+    "path": "teth-wsteth-exchange-rate",
+    "ens": "teth-wsteth-exchange-rate",
+    "proxyAddress": "0x8004571d9f54dE016fc3D448e7AEe2d70947727A",
+    "heartbeat": 86400,
+    "decimals": 18,
+    "feedCategory": "custom",
+    "docs": {
+      "baseAsset": "tETH",
+      "quoteAsset": "wstETH"
+    }
+  },
+  {
+    "name": "ETH / USD",
+    "path": "eth-usd-svr",
+    "ens": null,
+    "proxyAddress": "0xa4250cE1aA15Ff4cb5E5a8655293b65694e436Ed",
+    "secondaryProxyAddress": "0x9dA00D23465282005DB222a441a663eE7B9dfCc8",
+    "heartbeat": 1200,
+    "decimals": 8,
+    "feedCategory": "low",
+    "docs": {
+      "baseAsset": "ETH",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "AERO / USD",
+    "path": "aero-usd",
+    "ens": "aero-usd",
+    "proxyAddress": "0x4EC5970fC728C5f65ba413992CD5fF6FD70fcfF0",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "medium",
+    "docs": {
+      "baseAsset": "AERO",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "MORPHO / USD",
+    "path": "morpho-usd",
+    "ens": "morpho-usd",
+    "proxyAddress": "0xe95e258bb6615d47515Fc849f8542dA651f12bF6",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "medium",
+    "docs": {
+      "baseAsset": "MORPHO",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "COMP / USD",
+    "path": "comp-usd",
+    "ens": "comp-usd",
+    "proxyAddress": "0x9DDa783DE64A9d1A60c49ca761EbE528C35BA428",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "low",
+    "docs": {
+      "baseAsset": "COMP",
+      "quoteAsset": "USD"
+    }
+  }
+]

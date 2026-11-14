@@ -10,7 +10,7 @@
  * (the TimelockQueued event); the execute payload is emitted as a template with that placeholder.
  */
 // @ts-expect-error TS5097 - Node's native type stripping requires the .ts extension; tsc is noEmit here
-import { ABI, SentinelError, buildContext, parseArgs, readOnchain, readTokenDecimals, checkFeedLive, encodeFunctionData, actionHash, eq } from './lib.ts'
+import { ABI, SentinelError, buildContext, parseArgs, readOnchain, readTokenDecimals, checkFeedLive, encodeFunctionData, actionHash, eq, inPlanScope } from './lib.ts'
 
 const { chains } = parseArgs(process.argv.slice(2))
 const out: any[] = []
@@ -28,7 +28,7 @@ for (const key of chains) {
   const grace = Number(await primary.readContract({ address: executor, abi: ABI, functionName: 'TIMELOCK_GRACE' }))
   const table: string[][] = [['symbol', 'action', 'current feed', 'target feed', 'status']]
   const items: any[] = []
-  for (const r of rows.filter(x => x.phase === 1 && x.enabled)) {
+  for (const r of rows.filter(inPlanScope)) { // enabled phase-1 rows + enabled monthly-batch rows
     const on = await readOnchain(primary, executor, r.token)
     const tokDec = await readTokenDecimals(primary, r.token)
     const live = await checkFeedLive(primary, r.feed, r)
@@ -55,6 +55,9 @@ for (const key of chains) {
   }
   console.error(`\n== ${chain.name} (${chain.id}) executor ${executor} admin ${admin} (EOA, no external timelock) delay ${delay}s grace ${grace}s ==`)
   for (const t of table) console.error(t.map((c, i) => c.padEnd([8, 8, 44, 44, 20][i])).join(' '))
+  const count = (f: (i: any) => boolean) => items.filter(f).length
+  console.error(`summary: ${count(i => i.status === 'plan' && i.action === 'register')} register, ${count(i => i.status === 'plan' && i.action === 'replace')} replace, ` +
+    `${count(i => i.status === 'BLOCKED')} BLOCKED, ${count(i => i.status === 'unchanged (skipped)')} unchanged (skipped)`)
   out.push({ chain: chain.name, chainId: chain.id, executor, admin, delaySeconds: delay, graceSeconds: grace, controls, items })
 }
 console.log(JSON.stringify(out, (_k, v) => (typeof v === 'bigint' ? v.toString() : v), 2))
