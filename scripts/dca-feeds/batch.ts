@@ -20,12 +20,6 @@ import type { LiveReadings } from './batch-lib' // type-only: erased before Node
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const CONFIG_PATH = resolve(root, 'src/config/dca-feed-registrations.json')
-/** Chainlink's public reference-data directory. Host and paths are fixed here; nothing from argv reaches the URL. */
-const DIRECTORY_HOST = 'reference-data-directory.vercel.app'
-const DIRECTORY_PATH: Record<number, string> = {
-  8453: '/feeds-ethereum-mainnet-base-1.json',
-  42161: '/feeds-ethereum-mainnet-arbitrum-1.json',
-}
 
 function usage(message: string): never {
   console.error(`batch: ${message}\nusage: batch.ts --chain base|arbitrum --batch YYYY-MM --symbols SYM1,SYM2,...`)
@@ -52,9 +46,12 @@ if (configText.trim() === '') {
 const { CHAINS, SentinelError, buildContext, readFeedReading, readTokenDecimals } = await import('./lib.ts')
 // @ts-expect-error TS5097 - same
 const { applyBatch, selectBatch, serializeConfig } = await import('./batch-lib.ts')
+// Host and paths live in directory.ts (shared with candidates.ts); nothing from argv reaches the URL.
+// @ts-expect-error TS5097 - same
+const { directoryUrl: directoryUrlOf, fetchDirectory } = await import('./directory.ts')
 
 const chain = CHAINS[chainKey]
-if (!chain || !DIRECTORY_PATH[chain.id]) usage(`unknown chain "${chainKey}"`)
+if (!chain || !directoryUrlOf(chain.id)) usage(`unknown chain "${chainKey}"`)
 const config = JSON.parse(configText)
 if (serializeConfig(config) !== configText) { console.error('batch: the config is not in canonical form (JSON.stringify, 2 spaces, trailing newline); refusing to rewrite it'); process.exit(2) }
 
@@ -64,11 +61,9 @@ try { ctx = await buildContext(chainKey) } catch (e) {
   throw e
 }
 
-const directoryUrl = `https://${DIRECTORY_HOST}${DIRECTORY_PATH[chain.id]}`
-const res = await fetch(directoryUrl, { signal: AbortSignal.timeout(30_000) })
-if (!res.ok) { console.error(`batch: directory fetch failed: HTTP ${res.status}`); process.exit(2) }
-const directory = await res.json()
-if (!Array.isArray(directory) || directory.length === 0) { console.error('batch: the directory answer is not a non-empty list'); process.exit(2) }
+const directoryUrl = directoryUrlOf(chain.id) as string
+let directory: any[] // eslint-disable-line @typescript-eslint/no-explicit-any
+try { directory = await fetchDirectory(chain.id) } catch (e) { console.error(`batch: ${(e as Error).message}`); process.exit(2) }
 const catalog = JSON.parse(readFileSync(resolve(root, `src/config/generated/token-catalog.${chain.id}.json`), 'utf8')).tokens
 
 // Chain reads only for the symbols the directory and the catalog already allow.

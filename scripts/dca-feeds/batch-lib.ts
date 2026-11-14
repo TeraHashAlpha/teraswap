@@ -62,7 +62,7 @@ const ROW_KEYS = ['symbol', 'token', 'feed', 'description', 'decimals', 'tokenDe
 export const serializeConfig = (config: RegistrationConfig): string => `${JSON.stringify(config, null, 2)}\n`
 
 const lc = (a: string) => a.toLowerCase()
-function isChecksummed(a: unknown): a is string {
+export function isChecksummed(a: unknown): a is string {
   if (typeof a !== 'string' || a.length !== 42) return false
   try { return getAddress(a) === a } catch { return false }
 }

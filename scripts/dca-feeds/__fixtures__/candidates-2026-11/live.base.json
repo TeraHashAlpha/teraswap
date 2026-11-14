@@ -1,0 +1,234 @@
+{
+  "now": 1794665941,
+  "feeds": {
+    "0xccadc697c55bbb68dc5bcdf8d3cbe83cdd4e071e": [
+      {
+        "description": "WBTC / USD",
+        "decimals": 8,
+        "answer": "6646248906335",
+        "updatedAt": 1794665872
+      },
+      {
+        "description": "WBTC / USD",
+        "decimals": 8,
+        "answer": "6646248906335",
+        "updatedAt": 1794665872
+      }
+    ],
+    "0xaa98ae504658766dfe11f31c5d95a0bdcabde0b1": [
+      {
+        "description": "RSR / USD",
+        "decimals": 8,
+        "answer": "141320",
+        "updatedAt": 1794660183
+      },
+      {
+        "description": "RSR / USD",
+        "decimals": 8,
+        "answer": "141320",
+        "updatedAt": 1794660183
+      }
+    ],
+    "0xe3971ed6f1a5903321479ef3148b5950c0612075": [
+      {
+        "description": "SNX / USD",
+        "decimals": 8,
+        "answer": "15463002",
+        "updatedAt": 1794664936
+      },
+      {
+        "description": "SNX / USD",
+        "decimals": 8,
+        "answer": "15463002",
+        "updatedAt": 1794664936
+      }
+    ],
+    "0x42868efcee13c0e71af89c04ff7d96f5bec479b0": [
+      {
+        "description": "GHO / USD",
+        "decimals": 8,
+        "answer": "99873026",
+        "updatedAt": 1794581658
+      },
+      {
+        "description": "GHO / USD",
+        "decimals": 8,
+        "answer": "99873026",
+        "updatedAt": 1794581658
+      }
+    ],
+    "0x4aeb6d15769ead32d0c5be2940f40c7cff53801d": [
+      {
+        "description": "MOG / USD",
+        "decimals": 18,
+        "answer": "80100000000",
+        "updatedAt": 1794664918
+      },
+      {
+        "description": "MOG / USD",
+        "decimals": 18,
+        "answer": "80100000000",
+        "updatedAt": 1794664918
+      }
+    ],
+    "0xe62bce5d7cb9d16ab8b4d622538bc0a50a5799c2": [
+      {
+        "description": "DEGEN / USD",
+        "decimals": 8,
+        "answer": "71425",
+        "updatedAt": 1794665670
+      },
+      {
+        "description": "DEGEN / USD",
+        "decimals": 8,
+        "answer": "71425",
+        "updatedAt": 1794665670
+      }
+    ],
+    "0xaabc55ca55d70b034e4daa2551a224239890282f": [
+      {
+        "description": "VVV / USD",
+        "decimals": 18,
+        "answer": "17996548000000000000",
+        "updatedAt": 1794665679
+      },
+      {
+        "description": "VVV / USD",
+        "decimals": 18,
+        "answer": "17996548000000000000",
+        "updatedAt": 1794665679
+      }
+    ],
+    "0x7e860098f58bbfc8648a4311b374b1d669a2bc6b": [
+      {
+        "description": "USDC / USD",
+        "decimals": 8,
+        "answer": "99976250",
+        "updatedAt": 1794661147
+      },
+      {
+        "description": "USDC / USD",
+        "decimals": 8,
+        "answer": "99976250",
+        "updatedAt": 1794661147
+      }
+    ],
+    "0xef7541b388a77c1709a3d44bfbfc5c1ed3f0ac94": [
+      {
+        "description": "MAMO / USD",
+        "decimals": 8,
+        "answer": "465228",
+        "updatedAt": 1794665213
+      },
+      {
+        "description": "MAMO / USD",
+        "decimals": 8,
+        "answer": "465228",
+        "updatedAt": 1794665213
+      }
+    ]
+  },
+  "tokenDecimals": {
+    "0x0555e30da8f98308edb960aa94c0db47230d2b9c": 8,
+    "0xab36452dbac151be02b16ca17d8919826072f64a": 18,
+    "0x22e6966b799c4d5b13be962e1d117b56327fda66": 18,
+    "0x6bb7a212910682dcfdbd5bcbb3e28fb4e8da10ee": 18,
+    "0x2da56acb9ea78330f947bd57c54119debda7af71": 18,
+    "0x4ed4e862860bed51a9570b96d89af5e1b0efefed": 18,
+    "0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf": 18,
+    "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": 6,
+    "0x7300b37dfdfab110d83290a29dfb31b1740219fe": 18
+  },
+  "registered": {
+    "0x0555e30da8f98308edb960aa94c0db47230d2b9c": [
+      {
+        "registered": false,
+        "feed": "0x0000000000000000000000000000000000000000"
+      },
+      {
+        "registered": false,
+        "feed": "0x0000000000000000000000000000000000000000"
+      }
+    ],
+    "0xab36452dbac151be02b16ca17d8919826072f64a": [
+      {
+        "registered": false,
+        "feed": "0x0000000000000000000000000000000000000000"
+      },
+      {
+        "registered": false,
+        "feed": "0x0000000000000000000000000000000000000000"
+      }
+    ],
+    "0x22e6966b799c4d5b13be962e1d117b56327fda66": [
+      {
+        "registered": false,
+        "feed": "0x0000000000000000000000000000000000000000"
+      },
+      {
+        "registered": false,
+        "feed": "0x0000000000000000000000000000000000000000"
+      }
+    ],
+    "0x6bb7a212910682dcfdbd5bcbb3e28fb4e8da10ee": [
+      {
+        "registered": false,
+        "feed": "0x0000000000000000000000000000000000000000"
+      },
+      {
+        "registered": false,
+        "feed": "0x0000000000000000000000000000000000000000"
+      }
+    ],
+    "0x2da56acb9ea78330f947bd57c54119debda7af71": [
+      {
+        "registered": false,
+        "feed": "0x0000000000000000000000000000000000000000"
+      },
+      {
+        "registered": false,
+        "feed": "0x0000000000000000000000000000000000000000"
+      }
+    ],
+    "0x4ed4e862860bed51a9570b96d89af5e1b0efefed": [
+      {
+        "registered": false,
+        "feed": "0x0000000000000000000000000000000000000000"
+      },
+      {
+        "registered": false,
+        "feed": "0x0000000000000000000000000000000000000000"
+      }
+    ],
+    "0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf": [
+      {
+        "registered": false,
+        "feed": "0x0000000000000000000000000000000000000000"
+      },
+      {
+        "registered": false,
+        "feed": "0x0000000000000000000000000000000000000000"
+      }
+    ],
+    "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": [
+      {
+        "registered": true,
+        "feed": "0x7e860098F58bBFC8648a4311b374B1D669a2bc6B"
+      },
+      {
+        "registered": true,
+        "feed": "0x7e860098F58bBFC8648a4311b374B1D669a2bc6B"
+      }
+    ],
+    "0x7300b37dfdfab110d83290a29dfb31b1740219fe": [
+      {
+        "registered": false,
+        "feed": "0x0000000000000000000000000000000000000000"
+      },
+      {
+        "registered": false,
+        "feed": "0x0000000000000000000000000000000000000000"
+      }
+    ]
+  }
+}
