@@ -150,7 +150,26 @@ export const PRIVACY_WALLET_STORAGE_NOTE =
 // swap history but read as "your swaps never reach our server" — while every swap is POSTed to /api/log-swap and every
 // order to /api/orders, stored with the wallet address, and read back by /api/history for the History tab.
 export const PRIVACY_LOCAL_COPIES_NOTE =
-  'These copies stay in your browser and are never uploaded as such. Separately, every swap and order you make is sent to our server and stored with your wallet address (see 3.2); that server record is what the History tab shows.'
+  'The copies of your orders and order activity stay in your browser and are never uploaded as such. Separately, every swap and order you make is sent to our server and stored with your wallet address (see 3.2); that server record is what the History tab shows.'
+// [fix/privacy-leftovers-a78b S-9] Privacy §3.3 lists what the app itself writes to localStorage and sessionStorage, key by key
+// (docs/feedback/fix-privacy-leftovers-a78b.md, "Evidence 2: storage-key table"). Not written, and said so: slippage (useState),
+// swap history (in-memory store), active approvals (no persist). Wallet libraries' own entries are described as theirs.
+export const PRIVACY_LOCAL_STORAGE_NOTE =
+  "Depending on the parts of the Interface you use, it writes these entries to your browser's local storage: your theme, the tokens you import (one entry per chain), your currency choice (dollars or euros), whether you have seen the Permit2 explainer, whether you turned on order notifications and whether you dismissed the notification prompt, the ids of orders you dismissed, and encrypted copies of your orders and of your order activity (the key is derived from your wallet address). " +
+  "It writes these to session storage, which the browser clears when the session ends: the direction in which you read the exchange rate, whether the intro has played, the time of your last click, key press, scroll or touch while a wallet is connected (for the one-hour idle timeout), and the signature that authorises reads of your orders, which is sent to our server with those reads. " +
+  "Slippage settings, swap history, and active approvals are held in memory only and are not written to your browser's storage. " +
+  "A service worker keeps the site's own static files in your browser's cache and does not cache requests to our API. " +
+  'The wallet libraries the Interface uses keep their own entries in your browser\'s storage, such as the wallet you last connected; those entries are theirs.'
+// [fix/privacy-leftovers-a78b S-8] Privacy §8. Vercel hosts the site (vercel.json); Cloudflare sits in front of it (owner fact,
+// 2026-11-11; the repo's own statement is cloudflare-ips.ts:4). "We do not ask them for analytics": no analytics package or
+// script is installed or loaded (package.json, layout.tsx, csp-policy.js).
+export const PRIVACY_PROVIDERS_NOTE =
+  'Our hosting and network providers, Vercel and Cloudflare, process every request to the Interface, including your IP address, in order to deliver it, under their own policies. We do not ask them for analytics.'
+// [fix/privacy-leftovers-a78b S-10] Privacy §6. Verified against the routes: /api/analytics (no auth, every confirmed swap and
+// confirmed order fill, newest 50 in `recentTrades` with the wallet cut to first 6 + last 4 characters), the tab renders pair,
+// route, time and a tx link and no wallet; /api/analytics/personal and /api/analytics/export take `?wallet=` with no signature.
+export const PRIVACY_PUBLIC_ANALYTICS_NOTE =
+  'The data behind the Analytics tab is public: the tab lists recent swaps and order fills made through the site by all users, each with its token pair, route, time and a link to its transaction on a block explorer. The tab does not display wallet addresses, and the data behind it holds each address shortened to its first six and last four characters, but a swap you signed yourself is a public blockchain transaction that shows your address. Anyone who knows a wallet address can also request the swap statistics and the swap export the site holds for that address: those requests carry the address and no signature.'
 export const PRIVACY_BADGE = 'Proxied RPC & quotes'
 
 export const SITE_META_DESCRIPTION =

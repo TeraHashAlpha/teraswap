@@ -4,7 +4,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { getSupabaseLogger } from '@/lib/supabase'
 import { trackQuoteFailure } from '@/lib/security-tracker'
 import { trackWalletAction } from '@/lib/wallet-activity-server'
-import { checkRateLimit, LOG_RATE_LIMIT } from '@/lib/kv-rate-limiter'
+import { checkRateLimitWithin, LOG_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { bodySizeGuard, clientIp } from '@/lib/body-limit'
 
 /**
@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
     // BEFORE any parse or Supabase work.
     const tooLarge = bodySizeGuard(req)
     if (tooLarge) return tooLarge
-    const rate = await checkRateLimit(`log:${clientIp(req)}`, LOG_RATE_LIMIT.limit, LOG_RATE_LIMIT.windowMs)
+    const rate = await checkRateLimitWithin(`log:${clientIp(req)}`, LOG_RATE_LIMIT.limit, LOG_RATE_LIMIT.windowMs)
     if (!rate.allowed) {
       return NextResponse.json(
         { error: 'Rate limit exceeded' },

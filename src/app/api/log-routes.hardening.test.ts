@@ -40,7 +40,7 @@ vi.mock('@/lib/security-tracker', () => ({
 const mockCheckRateLimit = vi.fn(async (..._args: unknown[]) => ({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 }))
 vi.mock('@/lib/kv-rate-limiter', async () => {
   const actual = await vi.importActual<typeof import('@/lib/kv-rate-limiter')>('@/lib/kv-rate-limiter')
-  // log-event uses the bounded limiter (A78 S-7); log-quote / log-swap / log-activity still use checkRateLimit. One shared mock.
+  // All four log routes use the bounded limiter (A78 S-7, S-12). One shared mock; both names kept so a regression to the plain one still hits it.
   return {
     ...actual,
     checkRateLimit: (...args: unknown[]) => mockCheckRateLimit(...args),

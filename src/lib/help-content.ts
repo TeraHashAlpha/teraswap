@@ -3,7 +3,9 @@ import {
   INTEGRATED_DEX_SOURCE_LABELS,
   PRIVACY_DIRECT_NOTE,
   PRIVACY_IP_STORAGE_NOTE,
+  PRIVACY_PROVIDERS_NOTE,
   PRIVACY_PROXY_CLAIM,
+  PRIVACY_PUBLIC_ANALYTICS_NOTE,
   PRIVACY_WALLET_ADVICE,
   PRIVACY_WALLET_STORAGE_NOTE,
   SWAP_CHAIN_LIST_LABEL,
@@ -130,7 +132,7 @@ export const helpSections: HelpSection[] = [
       },
       {
         q: 'What data does TeraSwap collect?',
-        a: `We do not store private keys. ${PRIVACY_IP_STORAGE_NOTE} ${PRIVACY_WALLET_STORAGE_NOTE} See our Privacy Policy for full details.`,
+        a: `We do not store private keys. ${PRIVACY_IP_STORAGE_NOTE} ${PRIVACY_WALLET_STORAGE_NOTE} ${PRIVACY_PUBLIC_ANALYTICS_NOTE} ${PRIVACY_PROVIDERS_NOTE} See our Privacy Policy for full details.`,
       },
     ],
   },

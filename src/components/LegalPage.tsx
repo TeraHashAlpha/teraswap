@@ -8,7 +8,10 @@ import {
   PRIVACY_DIRECT_NOTE,
   PRIVACY_IP_STORAGE_NOTE,
   PRIVACY_LOCAL_COPIES_NOTE,
+  PRIVACY_LOCAL_STORAGE_NOTE,
+  PRIVACY_PROVIDERS_NOTE,
   PRIVACY_PROXY_CLAIM,
+  PRIVACY_PUBLIC_ANALYTICS_NOTE,
   PRIVACY_WALLET_ADVICE,
   PRIVACY_WALLET_STORAGE_NOTE,
   SWAP_CHAIN_LIST_LABEL,
@@ -69,9 +72,7 @@ function PrivacyPolicy() {
 
       <SubTitle>3.3 Local Storage</SubTitle>
       <P>
-        The Interface uses your browser&rsquo;s local storage to remember your preferences, such as
-        imported tokens, slippage settings, swap history, theme preferences, and active approvals.
-        {PRIVACY_LOCAL_COPIES_NOTE}
+        {PRIVACY_LOCAL_STORAGE_NOTE} {PRIVACY_LOCAL_COPIES_NOTE}
       </P>
 
       <SectionTitle id="pp-use">4. How We Use Your Information</SectionTitle>
@@ -111,6 +112,7 @@ function PrivacyPolicy() {
         third party for marketing purposes. We may disclose the records described in section 3.2 when a
         law or a valid legal order requires it.
       </P>
+      <P>{PRIVACY_PUBLIC_ANALYTICS_NOTE}</P>
 
       <SectionTitle id="pp-chainlink">7. Oracle Price Verification</SectionTitle>
       <P>
@@ -123,9 +125,8 @@ function PrivacyPolicy() {
       <SectionTitle id="pp-cookies">8. Cookies &amp; Tracking</SectionTitle>
       <P>
         The Interface sets no cookies for visitors, uses no analytics service, and runs no advertising scripts.
-        No third-party error-reporting or session-replay service runs in your browser. Any data stored in your
-        browser (local storage, session storage, and the wallet libraries&rsquo; own storage) is used solely for your
-        convenience and remains on your device.
+        No third-party error-reporting or session-replay service runs in your browser. What the Interface keeps in your
+        browser is listed in section 3.3. {PRIVACY_PROVIDERS_NOTE}
       </P>
 
       <SectionTitle id="pp-security">9. Data Security</SectionTitle>
