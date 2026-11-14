@@ -46,9 +46,10 @@
           "maxStaleness": 90000,
           "tier": "medium",
           "phase": 2,
-          "enabled": false,
-          "action": "none",
-          "source": "chainlink-directory 2026-10-11"
+          "enabled": true,
+          "action": "register",
+          "source": "chainlink-directory 2026-10-11",
+          "batch": "2026-11"
         },
         {
           "symbol": "COMP",
@@ -121,9 +122,10 @@
           "maxStaleness": 90000,
           "tier": "medium",
           "phase": 2,
-          "enabled": false,
-          "action": "none",
-          "source": "chainlink-directory 2026-10-11"
+          "enabled": true,
+          "action": "register",
+          "source": "chainlink-directory 2026-10-11",
+          "batch": "2026-11"
         },
         {
           "symbol": "USDT",
@@ -181,9 +183,10 @@
           "maxStaleness": 90000,
           "tier": "medium",
           "phase": 2,
-          "enabled": false,
-          "action": "none",
-          "source": "chainlink-directory 2026-10-11"
+          "enabled": true,
+          "action": "register",
+          "source": "chainlink-directory 2026-10-11",
+          "batch": "2026-11"
         },
         {
           "symbol": "ZRO",
@@ -196,9 +199,10 @@
           "maxStaleness": 90000,
           "tier": "medium",
           "phase": 2,
-          "enabled": false,
-          "action": "none",
-          "source": "chainlink-directory 2026-10-11"
+          "enabled": true,
+          "action": "register",
+          "source": "chainlink-directory 2026-10-11",
+          "batch": "2026-11"
         },
         {
           "symbol": "cbBTC",
@@ -226,9 +230,58 @@
           "maxStaleness": 4800,
           "tier": "medium",
           "phase": 2,
-          "enabled": false,
-          "action": "none",
-          "source": "chainlink-directory 2026-10-11"
+          "enabled": true,
+          "action": "register",
+          "source": "chainlink-directory 2026-10-11",
+          "batch": "2026-11"
+        },
+        {
+          "symbol": "AAVE",
+          "token": "0x63706e401c06ac8513145b7687A14804d17f814b",
+          "feed": "0x3d6774EF702A10b20FCa8Ed40FC022f7E4938e07",
+          "description": "AAVE / USD",
+          "decimals": 8,
+          "tokenDecimals": 18,
+          "heartbeat": 86400,
+          "maxStaleness": 90000,
+          "tier": "low",
+          "phase": 2,
+          "enabled": true,
+          "action": "register",
+          "source": "chainlink-directory 2026-11-13",
+          "batch": "2026-11"
+        },
+        {
+          "symbol": "LINK",
+          "token": "0x88Fb150BDc53A65fe94Dea0c9BA0a6dAf8C6e196",
+          "feed": "0x17CAb8FE31E32f08326e5E27412894e49B0f9D65",
+          "description": "LINK / USD",
+          "decimals": 8,
+          "tokenDecimals": 18,
+          "heartbeat": 86400,
+          "maxStaleness": 90000,
+          "tier": "low",
+          "phase": 2,
+          "enabled": true,
+          "action": "register",
+          "source": "chainlink-directory 2026-11-13",
+          "batch": "2026-11"
+        },
+        {
+          "symbol": "USDS",
+          "token": "0x820C137fa70C8691f0e44Dc420a5e53c168921Dc",
+          "feed": "0x2330aaE3bca5F05169d5f4597964D44522F62930",
+          "description": "USDS / USD",
+          "decimals": 8,
+          "tokenDecimals": 18,
+          "heartbeat": 86400,
+          "maxStaleness": 90000,
+          "tier": "medium",
+          "phase": 2,
+          "enabled": true,
+          "action": "register",
+          "source": "chainlink-directory 2026-11-13",
+          "batch": "2026-11"
         }
       ]
     },

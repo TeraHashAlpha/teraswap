@@ -175,7 +175,7 @@ always qualify by chain. Operational status and the checks behind each row are i
 
 **ADRs** (`docs/ADR/`): 26 files, ADR-001 to ADR-026; latest `ADR-026-infra-failures-dont-burn-orders`, Status: Proposed
 
-**Test files:** vitest 497 (the `include` globs of `vitest.config.ts`) · keeper node:test 52 · Foundry 3
+**Test files:** vitest 498 (the `include` globs of `vitest.config.ts`) · keeper node:test 52 · Foundry 3
 <!-- state:end -->
 
 - **Chains:** Ethereum Mainnet (1), Base (8453), Arbitrum One (42161), plus a Sepolia testnet row — `docs/DEPLOYMENTS.md`, whose per-row
