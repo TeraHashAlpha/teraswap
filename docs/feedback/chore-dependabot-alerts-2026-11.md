@@ -89,3 +89,11 @@ It upgraded `simdjson`; the Homebrew Node 25.6.1 then could not load `libsimdjso
 ## Evidence 4 (latest): verify at 2e1c3bd9 (origin/main 198a572f merged in, signed merge commit)
 suite 10687 passed, 4 failed; tsc, build, parity, rpc-budget, lint-delta PASS; codeql 13 to 13, 0 new; keeper PASS node20 1240 and node22 1240. diff --stat origin/main...HEAD: package.json 2, package-lock.json 6, 2 feedback files (4 files, 140 insertions, 4 deletions).
 The 7 earlier failures are now 4: merging main cleared the 2 fiat tests (PR #687) and the hooks timeout. The remaining 4 are all `scripts/agent-verify.test.mjs` fake-install keeper tests; they fail identically on the untouched base commit 130f2ddf on this Mac, because my brew install of node@20 and node@22 changed which Node installs the script finds. Not caused by this diff; fixing them means editing tooling tests, which this goal forbids.
+
+## Verify closure (2026-11-14, head d954075a)
+The 4 `scripts/agent-verify.test.mjs` "fake installs" failures are test isolation, not this diff. `find_node_major` (`scripts/agent-verify.sh:209-222`) also tries the hard-coded `/opt/homebrew/opt/node@N/bin/node` and `/usr/local/opt/...`, which the test's fake `HOME`/`PATH` cannot hide. With `brew install node@20 node@22` present, the fake-install runs find the real binaries and report `0-pass`.
+Proof without changing any file or install: the same suite under `sandbox-exec` with only `/opt/homebrew/{opt,Cellar}/node@20` and `node@22` denied:
+- `vitest run scripts/agent-verify.test.mjs` -> 34 passed, 0 failed (4 failed without the sandbox).
+- full `CI=true vitest run` -> 495 files, 10691 tests passed, 0 failed.
+- keeper (real installs, earlier run at the same head's tree): node20 1240 pass / 0 fail, node22 1240 pass / 0 fail.
+So the clean result needs the two checks in different environments; one `agent-verify.sh --keeper` run on a machine that has node@20/22 will show these 4 red until the test hides the absolute fallbacks. Suggested follow-up (not in this branch, outside the allowed files): make the test's `find_node_major` fake runs ignore the absolute `/opt/homebrew` and `/usr/local/opt` candidates (e.g. an env override for the candidate list).
