@@ -51,7 +51,7 @@ always qualify by chain. Operational status and the checks behind each row are i
 
 **ADRs** (\`docs/ADR/\`): 3 files, ADR-001 to ADR-003; latest \`ADR-003-third\`, Status: Proposed
 
-**Test files:** vitest 3 (the \`include\` globs of \`vitest.config.ts\`) · keeper node:test 2 · Foundry 1
+**Test suites** (no counts here, they change on every PR; \`node scripts/gen-claude-state.mjs --counts\` prints them): vitest, \`npx vitest run\`, config \`vitest.config.ts\` · keeper node:test, \`node --test\` in \`contracts/order-engine/executor/\` · Foundry, \`forge test\`, configs \`contracts/foundry.toml\`, \`contracts/order-engine/foundry.toml\`
 <!-- state:end -->`
 
 function put(root, rel, content) {
@@ -85,6 +85,10 @@ function makeRepo({ deployments = DEPLOYMENTS(), claudeBlock = '<!-- state:begin
   put(root, 'contracts/order-engine/executor/k.test.mjs', '')
   put(root, 'contracts/order-engine/executor/j.test.mjs', '')
   put(root, 'contracts/order-engine/executor/node_modules/dep/z.test.mjs', '') // vendored
+  put(root, 'contracts/order-engine/executor/package.json', '{}')
+  put(root, 'contracts/foundry.toml', '[profile.default]\n')
+  put(root, 'contracts/order-engine/foundry.toml', '[profile.default]\n')
+  put(root, 'contracts/lib/forge-std/foundry.toml', '') // vendored
   put(root, 'contracts/test/Fee.t.sol', '')
   put(root, 'contracts/lib/forge-std/test/Vendored.t.sol', '') // vendored
   put(root, 'contracts/out/Built.t.sol', '') // build output
@@ -150,14 +154,54 @@ describe('gen-claude-state', () => {
     expect(result.stderr).toContain('gen-claude-state.mjs --write')
   })
 
-  it('a new ADR or workflow or test file also makes --check fail', () => {
+  it('a new ADR makes --check fail', () => {
     const root = sandbox({ claudeBlock: EXPECTED_BLOCK })
+    expect(run(root, ['--check']).code).toBe(0)
     put(root, 'docs/ADR/ADR-004-fourth.md', '# ADR-004\n\n- **Status:** Accepted\n')
     expect(run(root, ['--check']).code).toBe(1)
     run(root, ['--write'])
     expect(run(root, ['--check']).code).toBe(0)
+  })
+
+  it('adding a test file of any kind does NOT change the block (the merge-conflict fix)', () => {
+    const root = sandbox({ claudeBlock: EXPECTED_BLOCK })
+    expect(run(root, ['--check']).code).toBe(0)
     put(root, 'src/c.test.ts', '')
-    expect(run(root, ['--check']).code).toBe(1)
+    put(root, 'src/deep/d.test.tsx', '')
+    put(root, 'scripts/z.test.mjs', '')
+    put(root, 'contracts/order-engine/executor/m.test.mjs', '')
+    put(root, 'contracts/test/Other.t.sol', '')
+    const result = run(root, ['--check'])
+    expect([result.code, result.stdout]).toEqual([0, expect.stringContaining('is current')])
+    expect(run(root, ['--print']).stdout.trimEnd()).toBe(EXPECTED_BLOCK)
+  })
+
+  it('changing something the block still states does: a new Foundry project, a moved keeper dir, no vitest config', () => {
+    const root = sandbox({ claudeBlock: EXPECTED_BLOCK })
+    put(root, 'contracts/extra/foundry.toml', '')
+    const r = run(root, ['--check'])
+    expect(r.code).toBe(1)
+    expect(r.stderr).toContain('contracts/extra/foundry.toml')
+
+    const moved = sandbox({ claudeBlock: EXPECTED_BLOCK })
+    rmSync(path.join(moved, 'contracts/order-engine/executor'), { recursive: true })
+    expect(run(moved, ['--check']).stderr).toContain('contracts/order-engine/executor/package.json not found')
+
+    const noCfg = sandbox({ claudeBlock: EXPECTED_BLOCK })
+    rmSync(path.join(noCfg, 'vitest.config.ts'))
+    expect(run(noCfg, ['--check']).code).toBe(1)
+  })
+
+  it('--counts prints the counts to stdout, touches nothing, and the block carries no digit-count line', () => {
+    const root = sandbox({ claudeBlock: EXPECTED_BLOCK })
+    const before = readFileSync(path.join(root, 'CLAUDE.md'), 'utf8')
+    const c = run(root, ['--counts'])
+    expect(c.code).toBe(0)
+    expect(c.stdout.trim()).toBe('vitest 3 · keeper node:test 2 · Foundry 1')
+    put(root, 'src/c.test.ts', '')
+    expect(run(root, ['--counts']).stdout.trim()).toBe('vitest 4 · keeper node:test 2 · Foundry 1')
+    expect(readFileSync(path.join(root, 'CLAUDE.md'), 'utf8')).toBe(before)
+    expect(EXPECTED_BLOCK).not.toMatch(/(?:vitest|node:test|Foundry) \d+/)
   })
 
   it('fails closed: missing markers, missing Contracts table, empty table', () => {
@@ -172,5 +216,6 @@ describe('gen-claude-state', () => {
   it('needs exactly one mode flag', () => {
     expect(run(sandbox(), []).code).toBe(1)
     expect(run(sandbox(), ['--check', '--write']).code).toBe(1)
+    expect(run(sandbox(), ['--counts', '--print']).code).toBe(1)
   })
 })
