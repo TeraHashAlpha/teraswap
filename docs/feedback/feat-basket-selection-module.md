@@ -7,10 +7,10 @@ Long tables (vectors, spec-vs-engine with engine lines, mutation names): `feat-b
 ## Checklist
 - [x] Commit 1 `9bb0e9d`: `scripts/basket-dca/export_vectors.py` + `contracts/order-engine/executor/fixtures/basket-dca/*.json` (engine sha256 in every header)
 - [x] Commit 2 `ecca0d9`: `contracts/order-engine/executor/basket-scheduler.js` (`chooseN`, `kSoft`, `legAmounts`, `decideTick`)
-- [x] Commit 3: `basket-scheduler.test.mjs` (replay, soft/rigid ends, beyond-engine cases, seeded property test); CLAUDE.md state block (keeper test files 52 -> 53) + AGENTS.md pin
+- [x] Commit 3 `df738de`: `basket-scheduler.test.mjs` (replay, soft/rigid ends, beyond-engine cases, seeded property test); CLAUDE.md state block (keeper test files 52 -> 53) + AGENTS.md pin
 - [x] Mutation proof in a scratch copy: 15 of 15 killed (cooldown, k_soft window, 2-per-leg limit, band_add, tie-break, ...)
-- [ ] Verify: `scripts/agent-verify.sh --keeper --codeql`; `node scripts/gen-claude-state.mjs --check`
-- [ ] Push, compare link; evidence 5
+- [x] Verify: `scripts/agent-verify.sh --keeper --codeql` RED on 2 fiat tests that are main's, not this branch's (§5); `gen-claude-state --check` current
+- [ ] Push, compare link: asked the owner first (red verify, rule 11)
 
 ## 1 Engine and vectors
 `engine_discrete.py` sha256 `282581bab72abf16b19096ab0f1be15e50fe0f2b5cdd3a3a7e165d9f2f281685` (pinned in the exporter and
@@ -31,6 +31,8 @@ h. §3.3 minFill is per leg's route; the engine and `chooseN` take one value (se
 
 ## 3 Tests
 `basket-scheduler.test.mjs`: 162 tests in 15 suites. Node 20.20.2: 162 pass, 0 fail, 0 cancelled; Node 22.23.5: same.
+Whole keeper suite (agent-verify): Node 20 1402 pass / 0 fail / 0 cancelled, Node 22 1402 / 0 / 0 (1240 before + 162).
+Node 20.20.2 and 22.23.5 are the official darwin tarballs (sha256 checked against SHASUMS256.txt) in a scratch NVM_DIR.
 
 ## 4 Mutation proof
 15 mutants in a scratch copy (Node 22), all killed; failing names per mutant in the evidence file. E.g. rule 5 off: 49
@@ -38,7 +40,19 @@ replays + the not-executed test; k_soft window a tick late: `fall-n9-leg1-stays-
 2-per-leg -> 3: 4 replays + the property test; band_add ignored: `band-n12-stable2-b100-soft` + the property test.
 
 ## 5 Verify
-Pending.
+`scripts/agent-verify.sh --keeper --codeql` @ `df738de` (base origin/main `130f2dd`): **RESULT: FAIL (1 failed)**.
+suite 10630 passed / **2 failed**, 494 files · lint-delta +0/+0 · tsc 0 errors · build ok · v1v2-parity 111/0 · rpc-budget
+36/0 · codeql security-extended head 13, base 13, new 0 · keeper node20 1402/0/0, node22 1402/0/0.
+**The 2 failures are main's:** `src/ui/v2/fiat/fiat.test.tsx` ("a payload that was fresh when fetched but has since aged
+out…", "a rate that was fresh when loaded flips to dollars…"), real-clock EUR tests red on a Saturday (2026-11-14). The
+same 2 fail on the main checkout (`7e566fd`, `src/ui/v2/fiat` identical to origin/main): 2 failed / 20 passed. This
+branch touches no file under `src/`. The fix (a pinned weekday clock) is pushed on `chore/tooling-leftovers-2026-11`
+(`0188776`), not merged.
+`node scripts/gen-claude-state.mjs --check`: "CLAUDE.md state block is current" (keeper 53); AGENTS.md parity OK.
+`export_vectors.py --check`: "same" for all nine fixtures. `git diff --stat origin/main...HEAD` before this commit: 16
+files, 10108 insertions, 2 deletions (fixtures 8438, exporter 672, test 477, module 329, feedback 190, CLAUDE.md and
+AGENTS.md one line each).
+Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...feat/basket-selection-module
 
 ## Findings
 - Edge (wiring goal): `next.cooldown` is the first PICKED leg (§4.9 "picked"), also when its chunk did not execute; §4's
