@@ -70,6 +70,8 @@ describe('CurrencySwitch', () => {
   })
 
   it('a STALE rate is the same: disabled, dollars selected even when euros were stored', async () => {
+    // A Wednesday: on the real clock this fails every Sunday, when the closed FX market makes the product accept a round this old.
+    vi.setSystemTime(new Date('2026-11-11T12:00:00Z'))
     localStorage.setItem(FIAT_CURRENCY_KEY, 'EUR')
     _resetFiatPreference()
     stubEur({ rate: 1.1, updatedAt: Math.floor(Date.now() / 1000) - 200_000, maxStaleness: 90000 })

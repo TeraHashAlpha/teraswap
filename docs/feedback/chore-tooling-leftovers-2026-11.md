@@ -69,3 +69,44 @@ Base origin/main 649105f. No PR (owner opens it). C1–C3 and verify done; this 
   Friday 21:43:20 UTC and Monday 00:26:40 UTC, and pass outside it. Same 2 failures on the untouched main checkout (7e566fd) at 22:09 UTC.
   CI `full-suite` will be red on them for any run in that window, on any branch. Fix needs its own goal: pin a weekday with
   `vi.setSystemTime` in those two tests, as `:261` and `:269` of the same file already do.
+
+## 7. Fiat on a weekend: what the product does (owner question 2026-11-14, answered before any pinning)
+- Euros stay ON through the FX-closed window: Friday's last round is accepted as fresh, the euro option is not disabled.
+- Code: one rule, `isEurRateFresh` (`src/lib/eur-usd-feed.ts:97-103`), read by the route (`route.ts:69`: 200 or 503), by the browser at
+  load (`eur-rate.ts:68`) and on the minute tick (`eur-rate.ts:85`). A round inside the 25 h ceiling is always fresh. Friday 22:00 UTC to
+  Monday 01:00 UTC the last round before the close is fresh too, if it was inside the ceiling AT the close. A feed already stale at the
+  close stays stale all weekend; Monday 01:00 UTC with no new round: dollars, option disabled.
+- Measured, production, Saturday 2026-11-14 13:54 UTC: `GET /api/fiat/eur-usd?chainId=1` → 200, rate 1.1031, updatedAt 1794584771
+  (Friday 2026-11-13 15:46:11 UTC), maxStaleness 90000. The same round as the chain's latest at that minute.
+- Measured, chain (60 rounds of the mainnet feed of `src/config/eur-usd-feed.json`, public RPC, read-only): the feed posts its 24 h
+  heartbeat on weekends. Last weekend: Fri 2026-11-06 15:00:47, Sat 15:00:59, Sun 15:01:11, Mon 06:07:35 UTC; longest gap 24.00 h. So
+  a real round stays under the 25 h ceiling all weekend, and the closed-window rule only decides when a weekend heartbeat is more
+  than 1 h late. At the production read the round was 22.13 h old: answered by the plain ceiling, not by the weekend rule.
+- Not measured: production at a moment when the round is older than 25 h (it needs a late heartbeat). That case rests on the unit
+  tests of the rule (`src/lib/eur-usd-feed.test.ts:49-68`, pinned clocks).
+
+## 8. Fiat clock pins (C5, owner decision 2026-11-14: a second commit on this branch, test files only)
+- Edge case not covered by the request: asked to pin the two tests of §6; a sweep with the wall clock shifted (a temporary vitest
+  setup file, not committed) found THREE MORE of the same kind. They feed a round `now - 200 000 s` old and expect it refused; from
+  the code the weekend rule accepts it from Sunday 04:33:20 UTC (30 h 33 min after the close) to Monday 01:00 UTC. Measured: green
+  Saturday 12:00, red Sunday 12:00 and Monday 00:40. They are `fiat.test.tsx` "STALE → dollars", `currency-switch.test.tsx` "a STALE
+  rate is the same" and `route.test.ts` "stale round → 503". All five now pin Wednesday 2026-11-11 12:00 UTC and no assertion changed.
+  The three extra pins go beyond the two asked: without them CI turns red again on Sunday. The owner can drop them.
+- One test added, Saturday clock: `fiat.test.tsx` "SATURDAY NIGHT, Friday's round already PAST the 25 h ceiling". Saturday 23:30 UTC,
+  round of Friday 20:00 (27.5 h old): euros shown, option available; still euros when re-judged Sunday 12:00, Sunday 22:30 and Monday
+  00:59:59 UTC; dollars and option disabled at Monday 01:00:00 UTC.
+- Mutation (local, reverted; `git diff` of the product file is empty): closed-market rule removed from `isEurRateFresh` → the new test
+  and 3 tests of `src/lib/eur-usd-feed.test.ts` red. Test gap found: the older hook, switch and route "Saturday" cases stay green under
+  that mutation, because their round is 16 h old, inside the plain ceiling. Before this commit only the unit tests exercised the rule.
+- Sweep after the pins: the 9 fiat test files 76/0 on the real clock (Saturday 13:58 UTC) and shifted to Fri 12:00, Fri 21:50, Sat
+  12:00, Sun 12:00, Mon 00:40, Mon 00:59, Wed 12:00; the whole suite 10656/0 (494 files) shifted to Sun 12:00 and to Mon 00:50. The
+  same sweep before the pins: 2 red on Saturday, 5 on Sunday, 3 at Monday 00:40, 0 on Friday noon and Wednesday.
+- Product code: not touched.
+- Concern for the owner: until this merges, CI on `main` and on every other branch is red on these tests for any run between Friday
+  21:43 UTC and Monday 01:00 UTC (two of them from Friday, three more from Sunday 04:33 UTC).
+
+## 9. Verify (C5)
+- `agent-verify.sh` on this commit's code (§8 and §9 written after the run), Saturday 2026-11-14 14:03 UTC, inside the FX-closed
+  window, base origin/main 130f2dd: suite 10656/0 (494 files), lint +0/+0 (9 changed files), tsc 0, build ok, v1v2-parity 111/0,
+  rpc-budget 36/0 → RESULT PASS. CodeQL and keeper not requested (no keeper code, test-only and one CLI read changed).
+- Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...chore/tooling-leftovers-2026-11

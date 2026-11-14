@@ -43,6 +43,11 @@ function stubFetch(opts: { prices?: Record<string, number>; eur?: { rate: number
 
 const PRICES = { [NATIVE_ETH.toLowerCase()]: 1403.6, [AAVE.address.toLowerCase()]: 180 }
 const FRESH_EUR = () => ({ rate: 1.1, updatedAt: nowSec() - 600, maxStaleness: 90000 })
+/**
+ * A Wednesday. A test that expects an OLD round to be refused pins this first: while the FX market is closed (Friday 22:00 UTC to
+ * Monday 01:00 UTC) the product accepts the last round before the close, so on the real clock the same test fails every weekend.
+ */
+const FX_OPEN = new Date('2026-11-11T12:00:00Z')
 
 beforeEach(() => {
   localStorage.clear()
@@ -162,6 +167,7 @@ describe('the EUR rate', () => {
     expect(calls.filter((c) => c.startsWith('/api/fiat/eur-usd'))).toEqual(['/api/fiat/eur-usd?chainId=1']) // the feed's chain, one cache entry
   })
   it('STALE → dollars are shown, the euro option is unavailable, and no euro figure is ever produced', async () => {
+    vi.setSystemTime(FX_OPEN)
     stubFetch({ prices: PRICES, eur: { rate: 1.1, updatedAt: nowSec() - 200_000, maxStaleness: 90000 } })
     setFiatCurrency('EUR')
     const { result } = renderHook(() => ({ d: useFiatDisplay(1), v: useFiatValue('1', ETH, 1) }))
@@ -183,6 +189,7 @@ describe('the EUR rate', () => {
     expect(result.current.currency).toBe('USD')
   })
   it('a payload that was fresh when fetched but has since aged out is judged unavailable at the moment of use', () => {
+    vi.setSystemTime(FX_OPEN)
     const payload = { rate: 1.1, updatedAt: nowSec() - 89_000, maxStaleness: 90000 }
     expect(judgeEurRate({ phase: 'ready', payload, at: Date.now() }, Date.now()).status).toBe('ok')
     expect(judgeEurRate({ phase: 'ready', payload, at: Date.now() }, Date.now() + 2_000_000).status).toBe('unavailable')
@@ -265,6 +272,21 @@ describe('EUR staleness by market hours (owner decision)', () => {
     await waitFor(() => expect(result.current.v.text).toMatch(/^≈ €/))
     expect(result.current.d).toMatchObject({ currency: 'EUR', eurAvailable: true, usdPerEur: 1.1 })
   })
+  it('SATURDAY NIGHT, Friday\'s round already PAST the 25 h ceiling: euros stay on while the market is closed, until the grace ends Monday 01:00 UTC', async () => {
+    vi.setSystemTime(new Date('2026-11-14T23:30:00Z')) // Friday 20:00's round is 27.5 h old: only the closed-market rule can accept it
+    stubFetch({ prices: PRICES, eur: { rate: 1.1, updatedAt: sec('2026-11-13T20:00:00Z'), maxStaleness: 90000 } })
+    setFiatCurrency('EUR')
+    const { result } = renderHook(() => ({ d: useFiatDisplay(1), v: useFiatValue('1', ETH, 1) }))
+    await waitFor(() => expect(result.current.v.text).toMatch(/^≈ €/))
+    expect(result.current.d).toMatchObject({ currency: 'EUR', eurAvailable: true, usdPerEur: 1.1 })
+    // The page stays open and the minute tick re-judges: nothing changes while the market is closed or in its grace.
+    for (const still of ['2026-11-15T12:00:00Z', '2026-11-15T22:30:00Z', '2026-11-16T00:59:59Z']) {
+      act(() => rejudge(Date.parse(still)))
+      expect(result.current.d, still).toMatchObject({ currency: 'EUR', eurAvailable: true, usdPerEur: 1.1 })
+    }
+    act(() => rejudge(Date.parse('2026-11-16T01:00:00Z'))) // Monday 01:00 UTC and still no new round: stale
+    expect(result.current.d).toMatchObject({ currency: 'USD', usdPerEur: null, preference: 'EUR', eurAvailable: false, eurStatus: 'unavailable' })
+  })
   it('WEDNESDAY with a 30 h old round: dollars, and the option is disabled', async () => {
     vi.setSystemTime(new Date('2026-11-11T12:00:00Z'))
     stubFetch({ prices: PRICES, eur: { rate: 1.1, updatedAt: sec('2026-11-10T06:00:00Z'), maxStaleness: 90000 } })
@@ -277,6 +299,7 @@ describe('EUR staleness by market hours (owner decision)', () => {
 
 describe('aging while the page stays open', () => {
   it('a rate that was fresh when loaded flips to dollars once its round ages out (the tick re-judges; render never reads the clock)', async () => {
+    vi.setSystemTime(FX_OPEN)
     stubFetch({ prices: PRICES, eur: { rate: 1.1, updatedAt: nowSec() - 89_000, maxStaleness: 90000 } })
     setFiatCurrency('EUR')
     const { result } = renderHook(() => useFiatDisplay(1))
