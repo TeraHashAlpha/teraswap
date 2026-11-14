@@ -6,7 +6,7 @@ Long tables go to `chore-dependabot-alerts-2026-11.evidence.md` (companion file,
 - [x] Commit 0: this file
 - [x] Commit 1: fix what has a fix: hono override 4.13.11 -> 4.13.16 (nothing else has an eligible same-major fix)
 - [x] Commit 2: reachability of what stays open (evidence in the companion file, section C)
-- [ ] Commit 3: why Dependabot opened no PRs, proposal only
+- [x] Commit 3: why Dependabot opened no PRs, proposal only
 - [ ] Verify: `scripts/agent-verify.sh --keeper --codeql`, `npm audit` before/after, wagmi/connector tests
 - [ ] Push, compare link
 
@@ -31,3 +31,8 @@ Common to all six: first-party code imports none of the seven packages; none of 
 
 ## Allowlist proposals (propose only; `audit-allowlist.json` untouched)
 `scripts/audit-gate.mjs` gates high/critical only, so only zod is gate-relevant. The zod entry `GHSA-mrhx-c7xc-m3w5` expires **2026-11-22**, eight days from now. Proposal: renew it to 2026-12-22 and replace its reachability sentence with the measurement above (copies absent from browser and server output, 3.22.4 lacks the vulnerable function, cdp-sdk uses the v3 API). The uuid entry can drop "reachability NOT yet verified" (verified: only `v4`/`validate`). The minimatch, glob, uuid, elliptic and deepmerge entries expire 2026-12-06 and need no change now. If the owner wants glob cleared in practice, `npm update glob` (13.0.7) is the in-range candidate (companion D1). No entry for hono: it is fixed.
+
+## Commit 3: why Dependabot opened no PR for these alerts (read: `.github/dependabot.yml`, `dependabot-auto-merge.yml` header + gate, `security-audit.yml`)
+Measured: Dependabot security updates ARE enabled (`gh api repos/TeraHashAlpha/teraswap`: `dependabot_security_updates: enabled`) and do open PRs for transitive packages when a same-major lockfile fix exists (#678 fast-xml-parser in `/contracts/order-engine/executor`, #638 follow-redirects in `/contracts/order-engine`; neither directory is in `dependabot.yml`). The auto-merge workflow only judges PRs that already exist (`dependabot-auto-merge.yml:26-40`), so it is not the reason.
+1. **hono (#149-#153):** a same-major fix existed (4.13.16, 13 days old) but the lockfile copy was pinned by the exact root `overrides` entry `"hono": "4.13.11"`; npm cannot move it and, as far as I can tell, Dependabot does not edit `overrides` (inference, not measured; an earlier hono PR #142 was closed). **The other six:** the only patched versions are majors the parents' ranges forbid (`dependabot.yml` also ignores `semver-major` for `*`; I could not measure whether that ignore applies to security updates, and it does not matter, since a PR would need a parent major: wagmi 3, @sentry/nextjs 11, rainbowkit 0.1.0) or no patch exists (deepmerge, elliptic).
+2. **Smallest config change that would bring PRs (NOT applied):** none of the six open ones can be fixed by config alone. For the hono class of problem, loosen the pin to a range so lockfile-only patch bumps stay possible: `"hono": "^4.13.16"` in `package.json` overrides; and, to let version updates look at transitive packages too, add `allow: [{ dependency-type: "all" }]` to the `npm` entry of `dependabot.yml` (note: it brings every in-range transitive bump, capped by `open-pull-requests-limit: 5`, and auto-merge R4 labels npm indirect/runtime PRs `deps-review`, so they would still wait for the owner). Neither change is in this branch.
