@@ -64,10 +64,16 @@ describe('GET /api/fiat/eur-usd', () => {
     }
   })
   it('stale round → 503 "EUR rate unavailable"', async () => {
-    chain({ updatedAt: now() - 200_000n })
-    const res = await GET(req())
-    expect(res.status).toBe(503)
-    expect(await res.json()).toEqual({ error: 'EUR rate unavailable' })
+    try {
+      // A Wednesday: on the real clock this fails every Sunday, when the closed FX market makes the route accept a round this old.
+      vi.setSystemTime(new Date('2026-11-11T12:00:00Z'))
+      chain({ updatedAt: now() - 200_000n })
+      const res = await GET(req())
+      expect(res.status).toBe(503)
+      expect(await res.json()).toEqual({ error: 'EUR rate unavailable' })
+    } finally {
+      vi.useRealTimers()
+    }
   })
   it('wrong identity, bad decimals, non-positive answer, carried-over round → 503', async () => {
     for (const over of [{ description: 'ETH / USD' }, { decimals: 18 }, { answer: 0n }, { answer: -1n }, { roundId: 5n, answeredInRound: 4n }]) {

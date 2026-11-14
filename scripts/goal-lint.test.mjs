@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, openSync, closeSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -165,5 +165,118 @@ describe('goal-lint A77 lows: bytes and Do-NOT shapes', () => {
     expect(rules(`${HEAD}Do NOT:\n- ssh\n\nNow run ssh host.`)).toEqual(['risky-command'])
     expect(rules(`${HEAD}1. ssh first`)).toEqual(['risky-command'])
     expect(rules(`${HEAD}- [ ] run pm2`)).toEqual(['risky-command'])
+  })
+})
+
+describe('goal-lint pasted goals (CONTROL header behind paste decoration)', () => {
+  const BODY = 'CONTROL: model Sonnet · effort medium · NO CI polling · Exit = branch pushed + compare link.\nSigned commits.\n\nDo NOT touch prod.\n'
+  // Reproduced 2026-11-13 against the old check: every row below failed `control-line` while the same text from a clean file passed.
+  it.each([
+    ['BOM', '﻿' + BODY],
+    ['NBSP before CONTROL', ' ' + BODY],
+    ['zero-width space before CONTROL', '​' + BODY],
+    ['leading spaces', '  ' + BODY],
+    ['leading tab', '\t' + BODY],
+    ['bracketed-paste markers', '\x1b[200~' + BODY + '\x1b[201~'],
+    ['"> " quote on every line', '> ' + BODY.replace(/\n(?=.)/g, '\n> ')],
+    ['">" quote without a space', '>' + BODY],
+    ['opening code fence', '```\n' + BODY + '```\n'],
+    ['opening code fence with a language', '```text\n' + BODY + '```\n'],
+    ['tilde fence', '~~~\n' + BODY + '~~~\n'],
+    ['"/goal " prefix', '/goal ' + BODY],
+    ['blank lines then a fence then CONTROL', '\n \n```\n' + BODY],
+  ])('accepts: %s', (_name, text) => {
+    expect(lintGoal(text)).toEqual([])
+  })
+
+  // These already passed before the fix; pinned so a later change cannot break them.
+  it.each([
+    ['CRLF', BODY.replace(/\n/g, '\r\n')],
+    ['lone CR', BODY.replace(/\n/g, '\r')],
+    ['leading blank lines', '\n\n  \n' + BODY],
+    ['an NBSP-only first line', ' \n' + BODY],
+    ['NBSP after the colon', BODY.replace('CONTROL: ', 'CONTROL: ')],
+  ])('still accepts: %s', (_name, text) => {
+    expect(lintGoal(text)).toEqual([])
+  })
+
+  it('a goal with NO control header still fails, however it is wrapped', () => {
+    const noHeader = 'NO CI polling. Exit = pushed.\nSigned commits.\n'
+    for (const wrapped of [noHeader, '﻿' + noHeader, '> ' + noHeader, '```\n' + noHeader + '```\n', '/goal ' + noHeader, '\x1b[200~' + noHeader]) {
+      expect(rules(wrapped), JSON.stringify(wrapped.slice(0, 12))).toContain('control-line')
+    }
+  })
+
+  it('only the FIRST content line counts: CONTROL: later in the text does not rescue it', () => {
+    expect(rules('> preface\n> CONTROL: x · Exit = y')).toContain('control-line')
+    expect(rules('```\nfoo\n```\nCONTROL: x · Exit = y')).toContain('control-line')
+  })
+
+  it('bold or other markup in front of CONTROL: is still refused (not paste decoration)', () => {
+    expect(rules('**CONTROL:** x · Exit = y')).toContain('control-line')
+    expect(rules('# CONTROL: x · Exit = y')).toContain('control-line')
+  })
+
+  it('the audit rule still reads the cleaned first line', () => {
+    expect(rules('> CONTROL: READ-ONLY · Exit = report')).toContain('audit-verdict')
+    expect(rules('> CONTROL: READ-ONLY · Exit = report on ANY verdict')).toEqual([])
+  })
+
+  it('sizes stay measured in BYTES of the input as given, decoration included', () => {
+    const head = 'CONTROL: x · Exit = y\n'
+    const room = MAX_CHARS - Buffer.byteLength('﻿' + head) // the BOM is 3 bytes
+    expect(rules('﻿' + head + 'a'.repeat(room))).toEqual([])
+    expect(rules('﻿' + head + 'a'.repeat(room + 1))).toContain('length')
+  })
+
+  describe('through the CLI (file and stdin)', () => {
+    const run = (args, input) => spawnSync('node', [SCRIPT, ...args], { encoding: 'utf8', input })
+    const dir = mkdtempSync(path.join(tmpdir(), 'goal-lint-paste-'))
+    afterAll(() => rmSync(dir, { recursive: true, force: true }))
+
+    it('BOM + CRLF + quote file passes with the exact byte count', () => {
+      const text = '﻿> ' + BODY.replace(/\n/g, '\r\n')
+      const f = path.join(dir, 'pasted.md')
+      writeFileSync(f, text)
+      const r = run([f])
+      expect([r.status, r.stdout.trim()]).toEqual([0, `OK ${Buffer.byteLength(text)} bytes`])
+    })
+    it('the same decorated text on /dev/stdin gives the same verdict as the file', () => {
+      const text = '```\n' + BODY + '```\n'
+      const f = path.join(dir, 'fenced.md')
+      writeFileSync(f, text)
+      expect(run(['/dev/stdin'], text).stdout).toBe(run([f]).stdout)
+      expect(run(['/dev/stdin'], text).status).toBe(0)
+    })
+    it('a decorated goal without a header exits 1 on control-line', () => {
+      const r = run(['/dev/stdin'], '> NO CI polling. Exit = pushed.\n')
+      expect(r.status).toBe(1)
+      expect(r.stdout).toContain('FAIL control-line')
+    })
+    // Node hands a child its stdin as a socket; on Linux the PATH /dev/stdin cannot be opened then (ENXIO), so
+    // goal-lint reads file descriptor 0 for both spellings. `-` never names a file, on any platform.
+    it('"-" reads stdin too, with the same verdict and status as /dev/stdin', () => {
+      const good = '```\n' + BODY + '```\n'
+      const bad = '> NO CI polling. Exit = pushed.\n'
+      for (const text of [good, bad]) {
+        const [dash, dev] = [run(['-'], text), run(['/dev/stdin'], text)]
+        expect([dash.status, dash.stdout, dash.stderr]).toEqual([dev.status, dev.stdout, dev.stderr])
+      }
+      expect(run(['-'], good).status).toBe(0)
+      expect(run(['-'], bad).status).toBe(1)
+    })
+    it('a read error on stdin is exit 2, like any unreadable file', () => {
+      const fd = openSync(dir, 'r') // a directory as stdin: reading descriptor 0 fails with EISDIR
+      try {
+        for (const arg of ['-', '/dev/stdin']) {
+          const r = spawnSync('node', [SCRIPT, arg], { encoding: 'utf8', stdio: [fd, 'pipe', 'pipe'] })
+          expect([arg, r.status, r.stdout, r.stderr.trim()]).toEqual([arg, 2, '', `goal-lint: cannot read ${arg}: EISDIR`])
+        }
+      } finally {
+        closeSync(fd)
+      }
+      const asFile = run([dir]) // and a path that is not stdin is still opened as a path
+      expect([asFile.status, asFile.stdout, asFile.stderr.trim()]).toEqual([2, '', `goal-lint: cannot read ${dir}: EISDIR`])
+    })
   })
 })
