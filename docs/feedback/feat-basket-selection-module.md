@@ -10,7 +10,8 @@ Long tables (vectors, spec-vs-engine with engine lines, mutation names): `feat-b
 - [x] Commit 3 `df738de`: `basket-scheduler.test.mjs` (replay, soft/rigid ends, beyond-engine cases, seeded property test); CLAUDE.md state block (keeper test files 52 -> 53) + AGENTS.md pin
 - [x] Mutation proof in a scratch copy: 15 of 15 killed (cooldown, k_soft window, 2-per-leg limit, band_add, tie-break, ...)
 - [x] Verify: `scripts/agent-verify.sh --keeper --codeql` RED on 2 fiat tests that are main's, not this branch's (§5); `gen-claude-state --check` current
-- [ ] Push, compare link: asked the owner first (red verify, rule 11)
+- [x] Push, compare link. Asked once (red verify outside the diff, rule 11); the owner, 2026-11-14: "Push now" (the two
+  fiat failures stay recorded in §5 as main's)
 
 ## 1 Engine and vectors
 `engine_discrete.py` sha256 `282581bab72abf16b19096ab0f1be15e50fe0f2b5cdd3a3a7e165d9f2f281685` (pinned in the exporter and
