@@ -1,0 +1,1562 @@
+{
+  "header": {
+    "family": "mixed",
+    "about": "seeded mixes of holes, falls and stable excursions; soft and rigid",
+    "generator": "scripts/basket-dca/export_vectors.py",
+    "engine": {
+      "file": "engine_discrete.py",
+      "sha256": "282581bab72abf16b19096ab0f1be15e50fe0f2b5cdd3a3a7e165d9f2f281685",
+      "package": "analyst package basket-dca-v2, docs-Reports-basket-dca/src (v3.2)"
+    },
+    "run": {
+      "function": "run_discrete",
+      "L": 2,
+      "rule": "hamilton",
+      "kSoft": "max(1, ceil(N / 4))",
+      "graceTicks": 3,
+      "pd0": [null, null, null],
+      "Pe": "the decision prices (Pe values fills only; no decision reads it)"
+    },
+    "idleReasons": {
+      "calendário": "calendar",
+      "regra 6": "complete",
+      "sem preço": "no_price",
+      "banda": "band",
+      "regra 9": "rule9",
+      "regra 5": "rule5"
+    },
+    "generatedWith": {
+      "python": "3.14.2",
+      "numpy": "2.5.4"
+    }
+  },
+  "vectors": [
+    {
+      "id": "mixed-00-soft",
+      "notes": "seeded mix (seed \"mixed/0\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "input": {
+        "weights": [
+          [1, 3],
+          [1, 3],
+          [1, 3]
+        ],
+        "capitalUsd": 500,
+        "cycles": 6,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": 0,
+        "band": 0.01,
+        "bandAdd": [0.003, 0.003, 0.0, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "prices": [
+          [1.000349, 97077.441003, 1.217267],
+          [0.999802, 93444.717147, 1.221866],
+          [1.001291, null, null],
+          [null, 92950.027361, 1.283346],
+          [1.0, 95831.330062, 1.29577],
+          [1.0, 98501.664167, 1.231458],
+          [1.0, 91351.288764, 1.290889],
+          [1.0, 94790.153395, 1.270882],
+          [1.0, 98111.010314, 1.261867]
+        ]
+      },
+      "expected": {
+        "n": [2, 2, 2],
+        "kSoft": 2,
+        "fills": [
+          [0, 0, "select"],
+          [1, 1, "select"],
+          [2, 0, "select"],
+          [3, 1, "select"],
+          [4, 2, "select"],
+          [5, 2, "select"]
+        ],
+        "idle": [
+          [6, "complete"],
+          [7, "complete"],
+          [8, "complete"]
+        ],
+        "done": [2, 2, 2],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "mixed-01-rigid",
+      "notes": "seeded mix (seed \"mixed/1\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "input": {
+        "weights": [
+          [1, 3],
+          [1, 3],
+          [1, 3]
+        ],
+        "capitalUsd": 5000,
+        "cycles": 26,
+        "minFillUsd": 16,
+        "mode": "rigid",
+        "threshold": 0.25,
+        "stableLeg": 0,
+        "band": 0.01,
+        "bandAdd": [0.003, 0.0, 0.003, 0.003, 0.0, 0.003, 0.003, 0.0, 0.003, 0.0, 0.003, 0.003, 0.0, 0.003, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0, 0.003, 0.003, 0.0, 0.0, 0.0, 0.0, 0.003, 0.003, 0.003],
+        "prices": [
+          [null, null, null],
+          [null, null, null],
+          [1.001223, null, 1.230959],
+          [0.997104, 93546.571472, 1.26763],
+          [null, null, null],
+          [1.002734, null, 1.208591],
+          [0.970813, 92451.68037, 1.243027],
+          [1.000535, 92624.508937, 1.285836],
+          [1.000976, null, 1.297087],
+          [0.964433, 98048.967511, 1.249108],
+          [1.001172, 95477.56659, 1.287197],
+          [0.95705, 96199.510399, 1.219926],
+          [1.001209, 96480.796263, null],
+          [1.001145, 98087.369058, 1.240472],
+          [null, 97917.301653, 1.208665],
+          [1.000683, 94450.59911, 1.235211],
+          [0.998118, 97283.894943, null],
+          [0.999688, 94311.957758, 1.292017],
+          [null, 95663.184412, 1.21866],
+          [null, null, null],
+          [0.99721, 97623.847554, 1.229264],
+          [0.999228, 93393.916514, 1.231561],
+          [0.999159, 96456.673852, 1.218014],
+          [1.001822, 98140.133358, 1.217194],
+          [1.051755, 93941.617232, null],
+          [0.94971, 96639.128553, 1.246461],
+          [0.998731, 97880.708694, null],
+          [null, null, null],
+          [1.001002, 95160.032384, 1.274649]
+        ]
+      },
+      "expected": {
+        "n": [9, 9, 8],
+        "kSoft": null,
+        "fills": [
+          [2, 0, "select"],
+          [2, 2, "catchup"],
+          [2, 0, "catchup"],
+          [3, 1, "select"],
+          [5, 2, "select"],
+          [5, 0, "catchup"],
+          [6, 1, "select"],
+          [7, 0, "select"],
+          [8, 2, "select"],
+          [9, 1, "select"],
+          [10, 2, "select"],
+          [11, 1, "select"],
+          [12, 0, "select"],
+          [13, 1, "select"],
+          [14, 2, "select"],
+          [15, 1, "select"],
+          [16, 0, "select"],
+          [17, 1, "select"],
+          [18, 2, "select"],
+          [20, 0, "select"],
+          [20, 2, "catchup"],
+          [21, 1, "select"],
+          [22, 2, "select"],
+          [23, 0, "select"],
+          [24, 1, "select"],
+          [26, 0, "select"]
+        ],
+        "idle": [
+          [0, "no_price"],
+          [1, "no_price"],
+          [4, "no_price"],
+          [19, "no_price"],
+          [25, "band"],
+          [27, "complete"],
+          [28, "complete"]
+        ],
+        "done": [9, 9, 8],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "mixed-02-soft",
+      "notes": "seeded mix (seed \"mixed/2\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "input": {
+        "weights": [
+          [3, 10],
+          [3, 10],
+          [2, 5]
+        ],
+        "capitalUsd": 100,
+        "cycles": 12,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.4,
+        "stableLeg": 2,
+        "band": 0.1,
+        "bandAdd": [0.0, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "prices": [
+          [3190.323315, 95296.145479, 0.999854],
+          [3137.406832, null, 1.002402],
+          [3139.610156, 94204.757307, 0.999291],
+          [3114.217575, 98351.472933, 0.997768],
+          [3099.548575, 96866.164759, 0.997509],
+          [3216.612898, 96080.434779, 1.002946],
+          [3074.061161, null, 1.001073],
+          [3088.425688, 97983.321496, 0.998725],
+          [3173.742157, 98778.606796, null],
+          [3325.40016, 95487.915222, 1.0],
+          [2555.574439, 91474.315849, 1.0],
+          [2513.736743, 97941.931998, 1.0],
+          [2559.981286, 92980.482834, 1.0],
+          [2489.841601, 91564.761611, 1.0],
+          [3145.907852, 91590.423311, 1.0]
+        ]
+      },
+      "expected": {
+        "n": [1, 1, 2],
+        "kSoft": 3,
+        "fills": [
+          [0, 0, "select"],
+          [3, 2, "select"],
+          [6, 2, "select"],
+          [9, 1, "select"]
+        ],
+        "idle": [
+          [1, "calendar"],
+          [2, "calendar"],
+          [4, "calendar"],
+          [5, "calendar"],
+          [7, "calendar"],
+          [8, "calendar"],
+          [10, "complete"],
+          [11, "complete"],
+          [12, "complete"],
+          [13, "complete"],
+          [14, "complete"]
+        ],
+        "done": [1, 1, 2],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "mixed-03-rigid",
+      "notes": "seeded mix (seed \"mixed/3\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "input": {
+        "weights": [
+          [3, 10],
+          [3, 10],
+          [2, 5]
+        ],
+        "capitalUsd": 500,
+        "cycles": 12,
+        "minFillUsd": 16,
+        "mode": "rigid",
+        "threshold": 0.1,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "prices": [
+          [3257.037617, 92912.130395, 1.218798],
+          [3145.815666, 93589.045839, 1.288191],
+          [3074.938104, 93603.499154, 1.284587],
+          [3074.916863, 95581.593744, 1.205869],
+          [3301.569066, 94111.64799, 1.287084],
+          [3166.821603, 96223.455789, 1.202482],
+          [3123.411072, 97296.120646, 1.23923],
+          [3319.4489, null, 1.296501],
+          [null, 98448.142953, 1.256535],
+          [null, null, null],
+          [3156.235063, 98033.91551, 1.226489],
+          [3144.319292, 95162.270539, 1.251205],
+          [3096.619059, 95261.26206, null],
+          [3241.349068, 95576.12012, 1.257288],
+          [3113.189499, 96118.953693, 1.254932]
+        ]
+      },
+      "expected": {
+        "n": [4, 3, 5],
+        "kSoft": null,
+        "fills": [
+          [0, 0, "select"],
+          [1, 1, "select"],
+          [2, 0, "select"],
+          [3, 2, "select"],
+          [4, 1, "select"],
+          [5, 2, "select"],
+          [6, 0, "select"],
+          [7, 2, "select"],
+          [8, 1, "select"],
+          [10, 0, "select"],
+          [10, 2, "catchup"],
+          [11, 2, "select"]
+        ],
+        "idle": [
+          [9, "no_price"],
+          [12, "complete"],
+          [13, "complete"],
+          [14, "complete"]
+        ],
+        "done": [4, 3, 5],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "mixed-04-soft",
+      "notes": "seeded mix (seed \"mixed/4\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "input": {
+        "weights": [
+          [1, 3],
+          [1, 3],
+          [1, 3]
+        ],
+        "capitalUsd": 100,
+        "cycles": 9,
+        "minFillUsd": 3,
+        "mode": "soft",
+        "threshold": 0.4,
+        "stableLeg": 0,
+        "band": 0.05,
+        "bandAdd": [0.003, 0.003, 0.003, 0.0, 0.0, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "prices": [
+          [0.999525, 93877.09976, 1.244487],
+          [1.001548, 93721.390802, 1.239718],
+          [0.998468, 91577.684864, 1.268561],
+          [0.998842, 93158.50932, null],
+          [0.998987, 94327.808715, 1.225385],
+          [0.998943, 91573.954889, 1.224262],
+          [1.0, 96269.34282, 1.288284],
+          [1.0, 92900.946506, 1.276153],
+          [1.0, 95563.770481, 1.217892],
+          [1.0, 93171.910009, 1.275942],
+          [1.0, 96501.393764, 1.290424],
+          [1.0, 93155.027959, 1.228536]
+        ]
+      },
+      "expected": {
+        "n": [3, 3, 3],
+        "kSoft": 3,
+        "fills": [
+          [0, 0, "select"],
+          [1, 2, "select"],
+          [2, 1, "select"],
+          [3, 0, "select"],
+          [4, 2, "select"],
+          [5, 1, "select"],
+          [6, 0, "select"],
+          [7, 1, "select"],
+          [8, 2, "select"]
+        ],
+        "idle": [
+          [9, "complete"],
+          [10, "complete"],
+          [11, "complete"]
+        ],
+        "done": [3, 3, 3],
+        "unbought": [0, 0, 0],
+        "deviationPp": 5.551115123125783e-15
+      }
+    },
+    {
+      "id": "mixed-05-rigid",
+      "notes": "seeded mix (seed \"mixed/5\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "input": {
+        "weights": [
+          [1, 3],
+          [1, 3],
+          [1, 3]
+        ],
+        "capitalUsd": 100,
+        "cycles": 7,
+        "minFillUsd": 3,
+        "mode": "rigid",
+        "threshold": 0.4,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "prices": [
+          [3285.505695, 94894.075834, 1.296476],
+          [3075.745276, 94009.201077, 1.245418],
+          [2310.909368, null, 1.222742],
+          [2338.966634, 91678.509566, 1.233883],
+          [2297.513553, null, 1.247585],
+          [3292.433791, 94345.474757, 1.289636],
+          [3198.538665, 93848.969038, null],
+          [3147.489717, 98252.555077, 1.231323],
+          [3165.254594, 91982.619101, 1.24059],
+          [3234.172047, 93518.91757, 1.297859]
+        ]
+      },
+      "expected": {
+        "n": [3, 2, 2],
+        "kSoft": null,
+        "fills": [
+          [0, 0, "select"],
+          [1, 2, "select"],
+          [2, 0, "select"],
+          [3, 1, "select"],
+          [4, 0, "select"],
+          [5, 1, "select"],
+          [7, 2, "select"]
+        ],
+        "idle": [
+          [6, "no_price"],
+          [8, "complete"],
+          [9, "complete"]
+        ],
+        "done": [3, 2, 2],
+        "unbought": [0, 0, 0],
+        "deviationPp": 5.551115123125783e-15
+      }
+    },
+    {
+      "id": "mixed-06-soft",
+      "notes": "seeded mix (seed \"mixed/6\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "input": {
+        "weights": [
+          [3, 10],
+          [3, 10],
+          [2, 5]
+        ],
+        "capitalUsd": 5000,
+        "cycles": 9,
+        "minFillUsd": 3,
+        "mode": "soft",
+        "threshold": 0.4,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "prices": [
+          [3220.409608, 96109.60349, 1.282622],
+          [3300.321866, 93081.873894, null],
+          [3252.071261, 98648.844829, 1.223618],
+          [3118.252278, 96947.052125, 1.239537],
+          [1890.230473, 91277.197808, 1.244389],
+          [1908.334569, 94116.667125, null],
+          [1847.082655, 97424.087986, 1.279724],
+          [1877.014341, 92721.284684, 1.239369],
+          [1878.440187, 92264.096808, 1.242027],
+          [1858.665062, 91434.82318, 1.242433],
+          [1846.118132, 93475.437555, 1.203906],
+          [3153.088319, 92831.054754, 1.262901]
+        ]
+      },
+      "expected": {
+        "n": [3, 3, 3],
+        "kSoft": 3,
+        "fills": [
+          [0, 0, "select"],
+          [1, 1, "select"],
+          [2, 2, "select"],
+          [3, 0, "select"],
+          [4, 1, "select"],
+          [5, 1, "select"],
+          [6, 0, "select"],
+          [7, 2, "select"],
+          [8, 2, "select"]
+        ],
+        "idle": [
+          [9, "complete"],
+          [10, "complete"],
+          [11, "complete"]
+        ],
+        "done": [3, 3, 3],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "mixed-07-rigid",
+      "notes": "seeded mix (seed \"mixed/7\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "input": {
+        "weights": [
+          [2, 5],
+          [2, 5],
+          [1, 5]
+        ],
+        "capitalUsd": 100,
+        "cycles": 12,
+        "minFillUsd": 3,
+        "mode": "rigid",
+        "threshold": 0.4,
+        "stableLeg": 1,
+        "band": 0.05,
+        "bandAdd": [0.0, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0, 0.003, 0.0, 0.003, 0.0, 0.003, 0.0, 0.0, 0.0],
+        "prices": [
+          [3201.188597, 0.997257, 1.225104],
+          [3241.16996, 1.001791, 1.290702],
+          [3097.385303, 1.000186, 1.234939],
+          [3080.069286, 0.970196, null],
+          [3115.287295, 1.001723, 1.287716],
+          [null, null, null],
+          [3205.563626, 0.997291, 1.260516],
+          [3222.167318, 0.999662, 1.211052],
+          [3088.071706, null, 1.216325],
+          [3205.524913, 0.977424, 1.253234],
+          [3255.698458, 1.001679, 0.680133],
+          [null, 0.999043, null],
+          [3072.099712, null, 1.255801],
+          [3102.390195, 0.997188, 1.260006],
+          [3101.301845, null, 1.250213]
+        ]
+      },
+      "expected": {
+        "n": [5, 5, 2],
+        "kSoft": null,
+        "fills": [
+          [0, 0, "select"],
+          [1, 1, "select"],
+          [2, 0, "select"],
+          [3, 1, "select"],
+          [4, 0, "select"],
+          [6, 2, "select"],
+          [6, 1, "catchup"],
+          [7, 1, "select"],
+          [8, 0, "select"],
+          [9, 1, "select"],
+          [10, 0, "select"],
+          [12, 2, "select"]
+        ],
+        "idle": [
+          [5, "no_price"],
+          [11, "no_price"],
+          [13, "complete"],
+          [14, "complete"]
+        ],
+        "done": [5, 5, 2],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "mixed-08-soft",
+      "notes": "seeded mix (seed \"mixed/8\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "input": {
+        "weights": [
+          [2, 5],
+          [2, 5],
+          [1, 5]
+        ],
+        "capitalUsd": 5000,
+        "cycles": 12,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.4,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "prices": [
+          [3079.98303, 93660.289345, 1.289375],
+          [3104.297072, null, null],
+          [3099.91455, null, 1.214759],
+          [2033.449374, 97971.409136, null],
+          [1998.705299, null, 1.260368],
+          [null, 97968.375376, 1.249921],
+          [null, null, null],
+          [2008.500552, 92862.030755, 0.939241],
+          [3106.006868, 96963.993527, 0.955097],
+          [3180.457463, 94302.162987, 0.963993],
+          [3104.886221, 93057.426527, 0.975938],
+          [3283.598199, 92012.185896, 0.962649],
+          [3315.637154, 93219.909251, 0.958488],
+          [3241.629615, 92547.392927, 1.286402],
+          [3290.349064, 97013.690515, 1.228]
+        ]
+      },
+      "expected": {
+        "n": [5, 5, 2],
+        "kSoft": 3,
+        "fills": [
+          [0, 0, "select"],
+          [1, 0, "select"],
+          [2, 2, "select"],
+          [3, 0, "select"],
+          [4, 2, "select"],
+          [5, 1, "select"],
+          [7, 1, "select"],
+          [7, 1, "catchup"],
+          [8, 0, "select"],
+          [9, 1, "select"],
+          [10, 0, "select"],
+          [11, 1, "select"]
+        ],
+        "idle": [
+          [6, "no_price"],
+          [12, "complete"],
+          [13, "complete"],
+          [14, "complete"]
+        ],
+        "done": [5, 5, 2],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "mixed-09-rigid",
+      "notes": "seeded mix (seed \"mixed/9\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "input": {
+        "weights": [
+          [3, 10],
+          [3, 10],
+          [2, 5]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 7,
+        "minFillUsd": 3,
+        "mode": "rigid",
+        "threshold": 0.25,
+        "stableLeg": 1,
+        "band": 0.01,
+        "bandAdd": [0.003, 0.003, 0.0, 0.003, 0.0, 0.0, 0.003, 0.0, 0.0, 0.0],
+        "prices": [
+          [3173.321051, 1.000097, null],
+          [3292.410575, 1.001033, 1.228701],
+          [3123.535486, 1.001854, null],
+          [3207.06168, 0.997186, 1.23327],
+          [3169.634707, 1.002409, 1.263964],
+          [3221.153225, 1.031888, 1.249134],
+          [3268.309657, 0.999139, 1.269115],
+          [3213.240962, 0.979844, 1.271518],
+          [null, null, null],
+          [3186.819822, 1.002226, 1.232278]
+        ]
+      },
+      "expected": {
+        "n": [2, 2, 3],
+        "kSoft": null,
+        "fills": [
+          [0, 0, "select"],
+          [1, 2, "select"],
+          [2, 0, "select"],
+          [3, 1, "select"],
+          [4, 2, "select"],
+          [5, 2, "select"],
+          [6, 1, "select"]
+        ],
+        "idle": [
+          [7, "complete"],
+          [8, "complete"],
+          [9, "complete"]
+        ],
+        "done": [2, 2, 3],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "mixed-10-soft",
+      "notes": "seeded mix (seed \"mixed/10\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "input": {
+        "weights": [
+          [1, 3],
+          [1, 3],
+          [1, 3]
+        ],
+        "capitalUsd": 500,
+        "cycles": 15,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": 0,
+        "band": 0.05,
+        "bandAdd": [0.003, 0.0, 0.0, 0.003, 0.0, 0.0, 0.003, 0.003, 0.0, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "prices": [
+          [1.002234, 91233.496006, null],
+          [null, null, null],
+          [null, null, null],
+          [1.000999, 76295.89955, 1.220558],
+          [0.999761, 76417.418026, 1.242944],
+          [0.999552, 76299.255658, 1.248101],
+          [null, 77418.21388, 1.225304],
+          [null, null, null],
+          [1.000963, 76655.221523, 1.236874],
+          [1.001823, 77770.510573, 0.823031],
+          [0.999155, 77646.532319, 0.815143],
+          [1.0, 77880.093791, 0.81103],
+          [1.0, 78359.112795, 0.826844],
+          [1.0, 78659.69928, 1.200793],
+          [1.0, 77370.380641, 1.256887],
+          [1.0, 76329.74545, 1.22968],
+          [1.0, 78240.105468, 1.286229],
+          [1.0, 91401.958941, 1.266015]
+        ]
+      },
+      "expected": {
+        "n": [5, 5, 5],
+        "kSoft": 4,
+        "fills": [
+          [0, 0, "select"],
+          [3, 1, "select"],
+          [3, 2, "catchup"],
+          [3, 1, "catchup"],
+          [4, 0, "select"],
+          [5, 1, "select"],
+          [6, 2, "select"],
+          [8, 1, "select"],
+          [8, 0, "catchup"],
+          [9, 0, "select"],
+          [10, 1, "select"],
+          [11, 2, "select"],
+          [12, 0, "select"],
+          [13, 2, "select"],
+          [14, 2, "select"]
+        ],
+        "idle": [
+          [1, "no_price"],
+          [2, "no_price"],
+          [7, "no_price"],
+          [15, "complete"],
+          [16, "complete"],
+          [17, "complete"]
+        ],
+        "done": [5, 5, 5],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "mixed-11-rigid",
+      "notes": "seeded mix (seed \"mixed/11\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "input": {
+        "weights": [
+          [2, 5],
+          [2, 5],
+          [1, 5]
+        ],
+        "capitalUsd": 100,
+        "cycles": 26,
+        "minFillUsd": 16,
+        "mode": "rigid",
+        "threshold": 0.4,
+        "stableLeg": 0,
+        "band": 0.02,
+        "bandAdd": [0.003, 0.003, 0.0, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.0, 0.0, 0.0, 0.003, 0.003, 0.0, 0.0, 0.003, 0.0, 0.0, 0.003, 0.003, 0.0, 0.003, 0.0, 0.0, 0.0, 0.003, 0.0, 0.0],
+        "prices": [
+          [1.000507, 96390.339021, 1.293481],
+          [0.998434, 97708.628887, 1.226138],
+          [1.001318, 96930.010578, 1.237656],
+          [null, 95507.959927, 1.253691],
+          [0.999408, 93060.065525, 1.247803],
+          [1.002056, 95761.837997, null],
+          [0.998552, 97824.777788, 1.217872],
+          [0.949498, 91883.168724, 1.207597],
+          [1.034803, 94932.926976, 1.211732],
+          [1.001415, 94633.826159, 1.214131],
+          [0.997485, 93477.605692, 1.202387],
+          [0.998032, 95395.458312, 1.223565],
+          [null, 94425.163946, 1.269414],
+          [1.000332, 96718.292395, 1.29707],
+          [null, null, null],
+          [1.000555, 94612.294617, null],
+          [null, null, null],
+          [null, null, null],
+          [0.998386, 96991.983579, 1.114145],
+          [1.00166, 96824.006163, 1.09071],
+          [null, null, null],
+          [0.998047, 92149.619598, 1.235863],
+          [1.000972, 91506.272762, 1.244376],
+          [1.000702, 95740.333403, 1.235813],
+          [1.001437, 91729.213813, 1.297182],
+          [0.997541, 94020.870287, 1.243531],
+          [1.012416, 94241.050609, 1.214908],
+          [1.007208, 95588.118799, 1.245616],
+          [1.002046, null, 1.293557]
+        ]
+      },
+      "expected": {
+        "n": [2, 2, 1],
+        "kSoft": null,
+        "fills": [
+          [0, 0, "select"],
+          [5, 0, "select"],
+          [10, 1, "select"],
+          [15, 1, "select"],
+          [21, 2, "select"]
+        ],
+        "idle": [
+          [1, "calendar"],
+          [2, "calendar"],
+          [3, "calendar"],
+          [4, "calendar"],
+          [6, "calendar"],
+          [7, "calendar"],
+          [8, "calendar"],
+          [9, "calendar"],
+          [11, "calendar"],
+          [12, "calendar"],
+          [13, "calendar"],
+          [14, "calendar"],
+          [16, "calendar"],
+          [17, "calendar"],
+          [18, "calendar"],
+          [19, "calendar"],
+          [20, "no_price"],
+          [22, "complete"],
+          [23, "complete"],
+          [24, "complete"],
+          [25, "complete"],
+          [26, "complete"],
+          [27, "complete"],
+          [28, "complete"]
+        ],
+        "done": [2, 2, 1],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "mixed-12-soft",
+      "notes": "seeded mix (seed \"mixed/12\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "input": {
+        "weights": [
+          [1, 4],
+          [1, 4],
+          [1, 2]
+        ],
+        "capitalUsd": 5000,
+        "cycles": 7,
+        "minFillUsd": 3,
+        "mode": "soft",
+        "threshold": 0.4,
+        "stableLeg": 2,
+        "band": 0.02,
+        "bandAdd": [0.0, 0.0, 0.003, 0.0, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "prices": [
+          [3126.298335, 92285.685418, 0.997069],
+          [3311.232042, 57575.891653, 1.02515],
+          [3186.436885, 58742.492602, 0.998505],
+          [3113.76335, 94642.892154, 0.997033],
+          [3280.880218, 98266.113987, 1.001401],
+          [3272.375184, 94988.594454, 1.0],
+          [3113.985461, 95632.611861, 1.0],
+          [3155.616196, 94062.470499, 1.0],
+          [3310.233334, 92798.141448, 1.0],
+          [3075.919487, 94042.286085, 1.0]
+        ]
+      },
+      "expected": {
+        "n": [2, 2, 3],
+        "kSoft": 2,
+        "fills": [
+          [0, 0, "select"],
+          [1, 1, "select"],
+          [2, 0, "select"],
+          [3, 2, "select"],
+          [4, 1, "select"],
+          [5, 2, "select"],
+          [6, 2, "select"]
+        ],
+        "idle": [
+          [7, "complete"],
+          [8, "complete"],
+          [9, "complete"]
+        ],
+        "done": [2, 2, 3],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "mixed-13-rigid",
+      "notes": "seeded mix (seed \"mixed/13\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "input": {
+        "weights": [
+          [3, 10],
+          [3, 10],
+          [2, 5]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 9,
+        "minFillUsd": 16,
+        "mode": "rigid",
+        "threshold": 0.1,
+        "stableLeg": 0,
+        "band": 0.01,
+        "bandAdd": [0.003, 0.0, 0.003, 0.0, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003],
+        "prices": [
+          [0.998112, null, 1.227862],
+          [1.00103, 92212.032223, 1.225881],
+          [1.000268, 98233.161208, null],
+          [0.998489, 93006.16308, null],
+          [0.999936, 97649.283864, 1.273366],
+          [0.998277, 93001.619516, 1.27901],
+          [0.999553, 91261.83115, 1.290172],
+          [null, 96556.74869, 1.250474],
+          [null, 91888.854233, 1.262569],
+          [0.999516, 93390.964417, 1.260395],
+          [1.019791, 91634.186084, 1.201394],
+          [0.99871, 92679.455869, 1.287201]
+        ]
+      },
+      "expected": {
+        "n": [3, 3, 3],
+        "kSoft": null,
+        "fills": [
+          [0, 0, "select"],
+          [1, 2, "select"],
+          [2, 0, "select"],
+          [3, 1, "select"],
+          [4, 0, "select"],
+          [5, 1, "select"],
+          [6, 2, "select"],
+          [7, 1, "select"],
+          [8, 2, "select"]
+        ],
+        "idle": [
+          [9, "complete"],
+          [10, "complete"],
+          [11, "complete"]
+        ],
+        "done": [3, 3, 3],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "mixed-14-soft",
+      "notes": "seeded mix (seed \"mixed/14\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "input": {
+        "weights": [
+          [1, 4],
+          [1, 4],
+          [1, 2]
+        ],
+        "capitalUsd": 5000,
+        "cycles": 7,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.4,
+        "stableLeg": 2,
+        "band": 0.1,
+        "bandAdd": [0.003, 0.0, 0.0, 0.003, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "prices": [
+          [3133.28694, null, null],
+          [3237.716684, 95399.155634, 0.998863],
+          [3302.678889, 98470.162737, null],
+          [null, null, null],
+          [3141.019168, 92097.451297, 0.974972],
+          [3314.132639, 91917.885282, 1.0],
+          [3106.330856, 98301.354028, 1.0],
+          [3296.069695, 97038.748287, 1.0],
+          [3167.017348, 54110.298124, 1.0],
+          [3273.9027, 96071.79692, 1.0]
+        ]
+      },
+      "expected": {
+        "n": [2, 2, 3],
+        "kSoft": 2,
+        "fills": [
+          [0, 0, "select"],
+          [1, 1, "select"],
+          [2, 0, "select"],
+          [4, 1, "select"],
+          [4, 2, "catchup"],
+          [5, 2, "select"],
+          [6, 2, "select"]
+        ],
+        "idle": [
+          [3, "no_price"],
+          [7, "complete"],
+          [8, "complete"],
+          [9, "complete"]
+        ],
+        "done": [2, 2, 3],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "mixed-15-rigid",
+      "notes": "seeded mix (seed \"mixed/15\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "input": {
+        "weights": [
+          [1, 3],
+          [1, 3],
+          [1, 3]
+        ],
+        "capitalUsd": 5000,
+        "cycles": 26,
+        "minFillUsd": 3,
+        "mode": "rigid",
+        "threshold": 0.4,
+        "stableLeg": 2,
+        "band": 0.02,
+        "bandAdd": [0.003, 0.003, 0.003, 0.0, 0.003, 0.0, 0.0, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0, 0.003, 0.0, 0.003, 0.0, 0.0, 0.003, 0.003, 0.003, 0.0, 0.0, 0.0, 0.003, 0.0, 0.003, 0.003, 0.003],
+        "prices": [
+          [3250.080184, 92722.932172, 1.001787],
+          [3274.326784, 94874.689633, 0.997771],
+          [3167.033097, 97011.892152, 0.998144],
+          [3252.765651, 93509.010165, 1.000944],
+          [null, null, null],
+          [2536.602298, 97479.133749, 0.998051],
+          [null, 91958.490666, 1.002001],
+          [null, null, null],
+          [3123.95396, 94065.685964, 1.002477],
+          [3196.525023, 94311.092307, null],
+          [3261.031645, 98115.075096, 0.999554],
+          [3285.647993, 96096.792943, 1.025743],
+          [3098.187765, 98271.320963, 1.000239],
+          [3213.381193, 94492.238259, 1.000117],
+          [3193.771721, 92839.90676, 0.963187],
+          [3077.366207, 93086.228031, 0.998257],
+          [3106.940594, 93547.31978, 1.002355],
+          [3320.844601, 96542.279579, 1.000966],
+          [null, null, null],
+          [3259.093049, 92943.532106, null],
+          [3289.789602, 92961.808476, 1.001108],
+          [3300.741851, 95209.282121, 1.001493],
+          [3096.963255, 96045.290529, 1.016262],
+          [3273.201487, 96045.183947, 1.002378],
+          [null, null, null],
+          [3198.574193, 95129.672779, 0.956015],
+          [3135.234258, 92759.507346, 0.999538],
+          [3318.096825, 96988.352439, 0.998783],
+          [null, null, null]
+        ]
+      },
+      "expected": {
+        "n": [9, 9, 8],
+        "kSoft": null,
+        "fills": [
+          [0, 0, "select"],
+          [1, 2, "select"],
+          [2, 0, "select"],
+          [3, 1, "select"],
+          [5, 0, "select"],
+          [5, 1, "catchup"],
+          [6, 1, "select"],
+          [8, 2, "select"],
+          [8, 2, "catchup"],
+          [9, 1, "select"],
+          [10, 2, "select"],
+          [11, 1, "select"],
+          [12, 0, "select"],
+          [13, 1, "select"],
+          [14, 0, "select"],
+          [15, 1, "select"],
+          [16, 2, "select"],
+          [17, 1, "select"],
+          [19, 1, "select"],
+          [19, 0, "catchup"],
+          [20, 2, "select"],
+          [21, 0, "select"],
+          [22, 2, "select"],
+          [23, 0, "select"],
+          [25, 0, "select"],
+          [26, 2, "select"]
+        ],
+        "idle": [
+          [4, "no_price"],
+          [7, "no_price"],
+          [18, "no_price"],
+          [24, "no_price"],
+          [27, "complete"],
+          [28, "complete"]
+        ],
+        "done": [9, 9, 8],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "mixed-16-soft",
+      "notes": "seeded mix (seed \"mixed/16\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "input": {
+        "weights": [
+          [1, 3],
+          [1, 3],
+          [1, 3]
+        ],
+        "capitalUsd": 5000,
+        "cycles": 7,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": 2,
+        "band": 0.02,
+        "bandAdd": [0.003, 0.0, 0.0, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "prices": [
+          [null, null, null],
+          [3270.942349, null, 1.001566],
+          [3298.062343, 93876.480259, 1.002507],
+          [3321.759872, 91529.189537, 1.000366],
+          [2334.349489, 92414.030121, 1.000506],
+          [2372.468234, 93466.643068, 1.0],
+          [2399.804264, 92287.101215, 1.0],
+          [2383.606109, 93348.731962, 1.0],
+          [2377.62624, 96135.850075, 1.0],
+          [2309.225322, 93576.506512, 1.0]
+        ]
+      },
+      "expected": {
+        "n": [3, 2, 2],
+        "kSoft": 2,
+        "fills": [
+          [1, 0, "select"],
+          [1, 2, "catchup"],
+          [2, 1, "select"],
+          [3, 2, "select"],
+          [4, 1, "select"],
+          [5, 0, "select"],
+          [6, 0, "select"]
+        ],
+        "idle": [
+          [0, "no_price"],
+          [7, "complete"],
+          [8, "complete"],
+          [9, "complete"]
+        ],
+        "done": [3, 2, 2],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "mixed-17-rigid",
+      "notes": "seeded mix (seed \"mixed/17\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "input": {
+        "weights": [
+          [3, 10],
+          [3, 10],
+          [2, 5]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 7,
+        "minFillUsd": 16,
+        "mode": "rigid",
+        "threshold": 0.25,
+        "stableLeg": 2,
+        "band": 0.1,
+        "bandAdd": [0.003, 0.0, 0.0, 0.003, 0.003, 0.0, 0.0, 0.0, 0.003, 0.0],
+        "prices": [
+          [null, null, null],
+          [null, 97354.311725, 0.99784],
+          [null, 96621.160073, 1.000397],
+          [null, 94477.271682, 1.001225],
+          [2396.215035, 94396.398584, null],
+          [2375.153826, 92725.924926, 0.942884],
+          [2351.579566, null, 1.00265],
+          [2407.894647, 95693.629844, 1.003658],
+          [3168.502715, 91873.12967, null],
+          [3231.9234, 98195.14035, 0.99886]
+        ]
+      },
+      "expected": {
+        "n": [2, 2, 3],
+        "kSoft": null,
+        "fills": [
+          [1, 1, "select"],
+          [1, 2, "catchup"],
+          [2, 2, "select"],
+          [3, 1, "select"],
+          [4, 0, "select"],
+          [5, 2, "select"],
+          [6, 0, "select"]
+        ],
+        "idle": [
+          [0, "no_price"],
+          [7, "complete"],
+          [8, "complete"],
+          [9, "complete"]
+        ],
+        "done": [2, 2, 3],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "mixed-18-soft",
+      "notes": "seeded mix (seed \"mixed/18\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "input": {
+        "weights": [
+          [2, 5],
+          [2, 5],
+          [1, 5]
+        ],
+        "capitalUsd": 5000,
+        "cycles": 9,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "prices": [
+          [3177.414727, 91704.845056, 1.285164],
+          [3094.22649, 98177.750285, 1.234091],
+          [1962.878154, 91296.391639, 1.219014],
+          [1955.408413, 95881.932792, 1.218254],
+          [null, null, null],
+          [1948.691499, 98732.840141, 1.233384],
+          [3148.809539, 92287.713846, 1.258549],
+          [3176.350249, 92901.949966, 1.245874],
+          [3124.902612, 93152.206246, 1.267872],
+          [3132.662341, 98482.273199, 1.267013],
+          [3079.68745, 97368.571836, 1.257838],
+          [3229.812933, 97491.930409, 1.270972]
+        ]
+      },
+      "expected": {
+        "n": [4, 3, 2],
+        "kSoft": 3,
+        "fills": [
+          [0, 0, "select"],
+          [1, 2, "select"],
+          [2, 1, "select"],
+          [3, 2, "select"],
+          [5, 1, "select"],
+          [5, 1, "catchup"],
+          [6, 0, "select"],
+          [7, 0, "select"],
+          [8, 0, "select"]
+        ],
+        "idle": [
+          [4, "no_price"],
+          [9, "complete"],
+          [10, "complete"],
+          [11, "complete"]
+        ],
+        "done": [4, 3, 2],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "mixed-19-rigid",
+      "notes": "seeded mix (seed \"mixed/19\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "input": {
+        "weights": [
+          [3, 10],
+          [3, 10],
+          [2, 5]
+        ],
+        "capitalUsd": 100,
+        "cycles": 6,
+        "minFillUsd": 16,
+        "mode": "rigid",
+        "threshold": 0.25,
+        "stableLeg": 0,
+        "band": 0.05,
+        "bandAdd": [0.003, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "prices": [
+          [null, null, null],
+          [0.999982, 92141.01444, 1.280972],
+          [0.999167, 91658.894046, 1.205101],
+          [1.002643, 94628.553512, 1.286348],
+          [0.999115, 97544.231317, 1.253584],
+          [0.998433, 96929.815899, 1.278626],
+          [0.972167, 92925.615462, 1.206962],
+          [null, 97068.435594, 1.297033],
+          [0.99834, 93886.856698, 1.249009]
+        ]
+      },
+      "expected": {
+        "n": [1, 1, 2],
+        "kSoft": null,
+        "fills": [
+          [1, 0, "select"],
+          [1, 1, "catchup"],
+          [3, 2, "select"],
+          [4, 2, "select"]
+        ],
+        "idle": [
+          [0, "no_price"],
+          [2, "calendar"],
+          [5, "complete"],
+          [6, "complete"],
+          [7, "complete"],
+          [8, "complete"]
+        ],
+        "done": [1, 1, 2],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "mixed-20-soft",
+      "notes": "seeded mix (seed \"mixed/20\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "input": {
+        "weights": [
+          [2, 5],
+          [2, 5],
+          [1, 5]
+        ],
+        "capitalUsd": 5000,
+        "cycles": 15,
+        "minFillUsd": 3,
+        "mode": "soft",
+        "threshold": 0.4,
+        "stableLeg": 2,
+        "band": 0.05,
+        "bandAdd": [0.0, 0.0, 0.003, 0.0, 0.0, 0.003, 0.0, 0.003, 0.003, 0.0, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "prices": [
+          [null, 96650.850056, 0.999621],
+          [3326.129415, 98576.574302, 0.95721],
+          [3267.094766, null, 1.000231],
+          [null, 92134.983108, 0.949775],
+          [3218.63515, 94986.882125, 0.977903],
+          [3180.643143, 92697.321431, 1.002606],
+          [3297.917782, 64952.719607, 0.998917],
+          [null, null, null],
+          [3288.716202, 64823.973636, 0.999432],
+          [3266.803688, 64982.671775, 1.001513],
+          [3162.857941, 64856.284314, 0.99876],
+          [3312.359373, 96320.957161, 1.0],
+          [3133.90083, 93417.498651, 1.0],
+          [3251.664718, 96401.684328, 1.0],
+          [3091.912184, 93553.86957, 1.0],
+          [3176.646711, 92479.116231, 1.0],
+          [3104.236688, 96979.436915, 1.0],
+          [3207.642959, 93144.100604, 1.0]
+        ]
+      },
+      "expected": {
+        "n": [6, 6, 3],
+        "kSoft": 4,
+        "fills": [
+          [0, 1, "select"],
+          [1, 2, "select"],
+          [2, 0, "select"],
+          [3, 1, "select"],
+          [4, 0, "select"],
+          [5, 1, "select"],
+          [6, 2, "select"],
+          [8, 0, "select"],
+          [8, 0, "catchup"],
+          [9, 2, "select"],
+          [10, 0, "select"],
+          [11, 1, "select"],
+          [12, 0, "select"],
+          [13, 1, "select"],
+          [14, 1, "select"]
+        ],
+        "idle": [
+          [7, "no_price"],
+          [15, "complete"],
+          [16, "complete"],
+          [17, "complete"]
+        ],
+        "done": [6, 6, 3],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "mixed-21-rigid",
+      "notes": "seeded mix (seed \"mixed/21\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "input": {
+        "weights": [
+          [1, 3],
+          [1, 3],
+          [1, 3]
+        ],
+        "capitalUsd": 100,
+        "cycles": 15,
+        "minFillUsd": 3,
+        "mode": "rigid",
+        "threshold": 0.4,
+        "stableLeg": 2,
+        "band": 0.02,
+        "bandAdd": [0.0, 0.0, 0.0, 0.003, 0.0, 0.0, 0.0, 0.003, 0.0, 0.0, 0.003, 0.003, 0.003, 0.003, 0.0, 0.0, 0.003, 0.003],
+        "prices": [
+          [3169.108838, 92807.587829, null],
+          [3220.51203, 93248.774666, 0.998948],
+          [3187.392011, 95371.210279, 0.998926],
+          [3309.286474, 96616.891422, 1.042901],
+          [3147.381014, 92588.052879, 1.00112],
+          [3284.30828, 93773.945258, 0.998388],
+          [3074.10974, 94053.917252, 1.002957],
+          [3100.211406, 93556.942245, 1.000049],
+          [3153.076734, 95630.395188, 0.998289],
+          [3261.278844, 98367.636588, null],
+          [3298.424413, 97926.384053, 1.00113],
+          [3223.948356, null, 1.001382],
+          [3181.206053, 98052.392026, 1.006008],
+          [3175.448517, 98193.022333, 1.000695],
+          [3160.244615, null, 0.998544],
+          [3228.110371, 59010.582801, 1.00113],
+          [3193.982763, 57266.078922, 0.98034],
+          [3129.412653, 94256.461249, 0.998782]
+        ]
+      },
+      "expected": {
+        "n": [5, 5, 5],
+        "kSoft": null,
+        "fills": [
+          [0, 0, "select"],
+          [1, 2, "select"],
+          [2, 0, "select"],
+          [3, 1, "select"],
+          [4, 0, "select"],
+          [5, 2, "select"],
+          [6, 0, "select"],
+          [7, 1, "select"],
+          [8, 2, "select"],
+          [9, 1, "select"],
+          [10, 2, "select"],
+          [11, 0, "select"],
+          [12, 1, "select"],
+          [13, 2, "select"],
+          [15, 1, "select"]
+        ],
+        "idle": [
+          [14, "no_price"],
+          [16, "complete"],
+          [17, "complete"]
+        ],
+        "done": [5, 5, 5],
+        "unbought": [0, 0, 0],
+        "deviationPp": 5.551115123125783e-15
+      }
+    },
+    {
+      "id": "mixed-22-soft",
+      "notes": "seeded mix (seed \"mixed/22\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "input": {
+        "weights": [
+          [3, 10],
+          [3, 10],
+          [2, 5]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 9,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.4,
+        "stableLeg": 0,
+        "band": 0.01,
+        "bandAdd": [0.003, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "prices": [
+          [null, 96575.460301, 1.287503],
+          [0.997206, null, 1.247568],
+          [null, 92315.403672, 1.292182],
+          [1.001044, 92652.752484, 1.235122],
+          [null, null, null],
+          [null, 96719.168568, 0.900266],
+          [1.0, 94696.893533, 0.887609],
+          [1.0, 98434.069049, 0.882957],
+          [1.0, 97107.402369, 1.213081],
+          [1.0, 93453.552623, 1.211353],
+          [1.0, 97484.552046, 1.271915],
+          [1.0, 92738.90485, 1.237234]
+        ]
+      },
+      "expected": {
+        "n": [3, 3, 3],
+        "kSoft": 3,
+        "fills": [
+          [0, 1, "select"],
+          [1, 2, "select"],
+          [2, 1, "select"],
+          [3, 2, "select"],
+          [5, 2, "select"],
+          [5, 1, "catchup"],
+          [6, 0, "select"],
+          [7, 0, "select"],
+          [8, 0, "select"]
+        ],
+        "idle": [
+          [4, "no_price"],
+          [9, "complete"],
+          [10, "complete"],
+          [11, "complete"]
+        ],
+        "done": [3, 3, 3],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "mixed-23-rigid",
+      "notes": "seeded mix (seed \"mixed/23\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "input": {
+        "weights": [
+          [3, 10],
+          [3, 10],
+          [2, 5]
+        ],
+        "capitalUsd": 5000,
+        "cycles": 26,
+        "minFillUsd": 16,
+        "mode": "rigid",
+        "threshold": 0.25,
+        "stableLeg": 1,
+        "band": 0.1,
+        "bandAdd": [0.0, 0.003, 0.0, 0.003, 0.0, 0.0, 0.0, 0.003, 0.003, 0.003, 0.003, 0.003, 0.0, 0.0, 0.0, 0.0, 0.003, 0.003, 0.0, 0.003, 0.0, 0.0, 0.0, 0.0, 0.003, 0.003, 0.0, 0.0, 0.003],
+        "prices": [
+          [3126.962766, 0.998204, 1.271722],
+          [3191.140069, 1.00139, 1.210663],
+          [3214.557919, 0.997787, 1.20663],
+          [3151.341552, 1.015186, 1.219159],
+          [3144.811234, 0.998019, 1.220752],
+          [null, null, null],
+          [3115.295626, 0.997543, null],
+          [3271.795061, null, 1.281109],
+          [3259.613876, 1.002366, 1.21305],
+          [3326.139758, 0.997196, 1.216927],
+          [3282.750137, 1.00079, 1.235989],
+          [3262.336113, 1.002589, 1.266675],
+          [3145.082121, 1.000622, null],
+          [3168.465389, 1.000666, 1.240003],
+          [null, null, null],
+          [3161.576182, 0.997286, 1.244872],
+          [null, null, null],
+          [3201.348187, 0.99842, 1.212574],
+          [3150.013393, 0.998551, 1.238928],
+          [3089.764089, 0.997992, 1.266437],
+          [3215.603974, 0.999162, null],
+          [3085.739264, 0.99761, 1.262554],
+          [3232.531232, 0.999347, 1.239856],
+          [null, 1.000522, 1.237593],
+          [3316.142361, 1.002364, 1.259583],
+          [null, null, null],
+          [3234.701187, 0.998522, 1.268797],
+          [3198.843656, 1.002344, 1.295382],
+          [null, null, null]
+        ]
+      },
+      "expected": {
+        "n": [8, 8, 10],
+        "kSoft": null,
+        "fills": [
+          [0, 0, "select"],
+          [1, 2, "select"],
+          [2, 1, "select"],
+          [3, 0, "select"],
+          [4, 1, "select"],
+          [6, 0, "select"],
+          [6, 1, "catchup"],
+          [7, 2, "select"],
+          [8, 0, "select"],
+          [9, 1, "select"],
+          [10, 0, "select"],
+          [11, 1, "select"],
+          [12, 0, "select"],
+          [13, 2, "select"],
+          [15, 1, "select"],
+          [15, 2, "catchup"],
+          [17, 2, "select"],
+          [17, 2, "catchup"],
+          [18, 0, "select"],
+          [19, 1, "select"],
+          [20, 0, "select"],
+          [21, 2, "select"],
+          [22, 1, "select"],
+          [23, 2, "select"],
+          [24, 2, "select"],
+          [26, 2, "select"]
+        ],
+        "idle": [
+          [5, "no_price"],
+          [14, "no_price"],
+          [16, "no_price"],
+          [25, "no_price"],
+          [27, "complete"],
+          [28, "complete"]
+        ],
+        "done": [8, 8, 10],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    }
+  ]
+}
