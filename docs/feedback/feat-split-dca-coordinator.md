@@ -7,16 +7,21 @@ coordinator yet: the keeper behaves as today. Long tables: `feat-split-dca-coord
 Model: CONTROL says Opus; the session runs on Fable 5.2 and the owner's standing answer of 2026-11-16 for
 implementation goals is "run here" (asked once on `feat/basket-selection-reference`). Run in-session.
 
-Base: `origin/main` `b47ca15e` (PR #701 merged).
+No question was asked. No premise was false; the one that changed under the work (commit 1's copy, which PR #704
+did meanwhile) left nothing to decide (§1). Where a rule left a choice, the spec's own text pointed one way; the four
+readings I made are listed at the end of §3 so the Architect or the Auditor can overrule them.
+
+Base: `origin/main` `4a4129ef` (PR #705). Main moved twice during the work (`b47ca15e` → `ace16fa7` with PR #704, →
+`4a4129ef` with PR #705); the commits, never pushed, were rebased each time with no conflict.
 
 ## Checklist
-- [x] Commit 1 `43721af8`: spec and ADR-027 copied from the architect pack, byte for byte; this file
-- [x] Commit 2 `13e661be`: migration `baskets`, `basket_ticks`, `orders.basket_id` (a file only; no database touched)
-- [x] Commit 3 `f064dedc`: `contracts/order-engine/executor/basket-coordinator.js`
-- [x] Commit 4: tests (node:test, Node 20 and 22), engine vectors replayed through the coordinator, one test per rule
-- [ ] Mutation proof in a scratch copy (the goal's five)
-- [ ] Verify: `scripts/agent-verify.sh --keeper --codeql`; `node scripts/gen-claude-state.mjs --check`
-- [ ] Push `feat/split-dca-coordinator`, compare link
+- [x] Commit 1 `28bf0da9`: this file, with the goal's checklist. The copy of the spec and ADR-027 is no longer in it: see §1
+- [x] Commit 2 `814963a4`: migration `baskets`, `basket_ticks`, `orders.basket_id` (a file only; no database touched)
+- [x] Commit 3 `6b7e815a`: `contracts/order-engine/executor/basket-coordinator.js`
+- [x] Commit 4 `6ecbe7cf`: tests (node:test, Node 20 and 22), engine vectors replayed through the coordinator, one test per rule
+- [x] Mutation proof in a scratch copy: the goal's five in 15 forms, and 68 more; 83 of 83 killed on both Nodes (§4)
+- [x] Verify: `scripts/agent-verify.sh --keeper --codeql` **RESULT: PASS**, 8 of 8; `node scripts/gen-claude-state.mjs --check` current (§5)
+- [x] Push `feat/split-dca-coordinator`, compare link (§5)
 
 ## 1 sha256 pairs (commit 1)
 Copied with `cp`, compared with `cmp` (identical) and hashed with `shasum -a 256`:
@@ -26,16 +31,16 @@ Copied with `cp`, compared with `cmp` (identical) and hashed with `shasum -a 256
 | `docs/Prompts/SPEC-BASKET-DCA.md` (18 989 bytes) | `daa33be5bd0f45418b4ebd06955a8f3c0238a42c603a10f47f320264d9d11e0d` | `daa33be5bd0f45418b4ebd06955a8f3c0238a42c603a10f47f320264d9d11e0d` |
 | `docs/ADR/ADR-027-basket-dca-three-orders.md` (8 027 bytes) | `26eaa85460036a59cf444bd5e321d34e4842ae556b111c85a16c719e178d65d1` | `26eaa85460036a59cf444bd5e321d34e4842ae556b111c85a16c719e178d65d1` |
 
-Before the copy the repo held `8a3cbc01…c37b` (spec) and `50cb00b1…0e8c` (ADR), the versions of PR #687.
-
-The pack's ADR-027 says `Status: Accepted (owner, 2026-11-13)`; the repo copy said Proposed. `CLAUDE.md`'s generated
-state block reads that line, so `node scripts/gen-claude-state.mjs --check` failed after the copy
-("Status: Proposed" committed, "Status: Accepted" generated). The block is regenerated in the same commit
-(`--write`); `scripts/check-agents-parity.mjs` stays OK (the pin excludes the state block).
+When the branch started (`b47ca15e`) the repo held `8a3cbc01…c37b` (spec) and `50cb00b1…0e8c` (ADR), the versions of
+PR #687, and the first commit replaced them and regenerated `CLAUDE.md`'s state block ("Status: Proposed" had become
+"Status: Accepted"). **While the branch was being written, PR #704 merged the same two files to main**: its copies
+hash to the same two values (`git show origin/main:<path> | shasum -a 256`). After the rebase the copy is therefore
+not a change any more, and the first commit holds this file only. The pairs above were re-measured after the rebase:
+pack = repo = main.
 
 ## 2 Schema (commit 2)
 `supabase/migrations/20261116120000_baskets_split_dca.sql`: two new tables, one new nullable column on `orders`, two
-read policies. Every column with its reason: evidence file §2. In short:
+read policies. Every column with its reason: evidence §2. In short:
 
 - `baskets`: the columns of spec §5, plus `first_buy` (`'reference'` default, or `'now'`), plus `stable_leg` (which leg
   the peg band applies to: the coordinator and the selection module both need it and §5 does not list it). The leg
@@ -49,13 +54,18 @@ read policies. Every column with its reason: evidence file §2. In short:
 - No visitor data: nothing about the browser, the request or the session in either table.
 - RLS enabled on both; a user may only SELECT their own rows, on the wallet claim `orders` uses.
 
-**The SQL was not run anywhere.** The goal forbids touching a database, and this Mac has no PostgreSQL and no SQL
-parser (`psql`, `postgres`: not found; nothing in `node_modules`). What stands in for a run: the file was read
-statement by statement against PostgreSQL's rules (three-valued logic in every CHECK over a nullable column, operator
-precedence around `IS NULL`, NaN ordering in the price checks), and `basket-coordinator.test.mjs` pins its text: the
-column sets against the row the coordinator writes and the rows it reads, DOUBLE PRECISION on the four doubles, no
-NUMERIC anywhere, the unique key, the value lists against the code's constants, the only ALTER of an existing table,
-and the mirror in `schema.sql`. The owner (or a staging project) is the first to execute it.
+**The SQL was not run anywhere.** The goal forbids touching a database, and this Mac has no PostgreSQL and no
+PostgreSQL parser (`psql`, `postgres`: not found; nothing in `node_modules`). What stands in for a run: the file was
+read statement by statement against PostgreSQL's rules (three-valued logic in every CHECK over a nullable column,
+operator precedence around `IS NULL`, NaN ordering in the price checks), and `basket-coordinator.test.mjs` pins its
+text: the column sets against the row the coordinator writes and the rows it reads, DOUBLE PRECISION on the four
+doubles, no NUMERIC anywhere, the unique key, the value lists against the code's constants, the only ALTER of an
+existing table, and the mirror in `schema.sql`. The owner (or a staging project) is the first to execute it.
+
+`contracts/order-engine/schema.sql` is the one existing file this branch changes outside `docs/`: the migration's body
+is appended to it unchanged, because the last three migrations all say "mirrored in contracts/order-engine/schema.sql"
+and `infra-miss-ladder.test.mjs` holds the previous one to it. It is neither a keeper file nor a contract. If the
+goal's "no change to … contracts" was meant to cover it, dropping the mirror is one hunk and one test.
 
 ## 3 The coordinator (commit 3)
 `coordinateBasket({ basket, orders, inFlight }, { now, db, resolvePrice })`, one call per poll per basket. It returns
@@ -68,7 +78,7 @@ module gets, which picks are executable, what a failure leaves behind) is eviden
 |---|---|
 | Reference row, `T/2` deadline | `'reference'` mode, first sight strictly before `t0 + T/2`: the three prices as journal tick -1, prices only. At `t0 + T/2` or later: never written, and tick 0 runs with `last` null. Written once: a later sight reads it |
 | Tick times | `'reference'`: `t0 + (t + 1) × T`; `'now'`: `t0 + t × T`; `t = 0 … N + 2`; second slot `+ T/2` |
-| State from rows | every call starts from the rows alone: `last` = latest row with a price (reference included), `entry` = first TICK row with a price, `cooldown` = the previous tick's stored next-cooldown (none if that tick has no row), `done` = the order rows |
+| State from rows | every call starts from the rows alone, in whatever order the database returns them: `last` = latest row with a price (reference included), `entry` = first TICK row with a price, `cooldown` = the previous tick's stored next-cooldown (none if that tick has no row), `done` = the order rows |
 | Decide once | a row for the current tick is read; no price is resolved and nothing is decided |
 | Write before return | the decision is inserted first; the picks are computed from the row the database answered with; a failed or unconfirmed insert returns no pick |
 | Slot timing | slot 1 from the tick time, slot 2 from `+ T/2`, both until the next tick's time; per leg only its next outstanding slot; a pick the order row shows as executed is not offered again |
@@ -88,3 +98,202 @@ Readings I had to choose, none of them inventing a rule (each is in the decision
   (evidence §3.5).
 - **First sight before `t0`** (a keeper clock a moment behind the server's): the reference is written; the rule gives
   only the upper bound.
+
+## 4 Tests and mutation proof (commit 4)
+`contracts/order-engine/executor/basket-coordinator.test.mjs`, node:test, 458 tests in 15 suites. The database is an
+in-memory fake that passes every row through JSON in both directions (as PostgREST does), returns the journal newest
+first, and enforces `UNIQUE (basket_id, tick)`; every poll is a fresh `coordinateBasket` call on fresh row copies.
+
+| | Node 20.20.2 | Node 22.23.5 |
+|---|---|---|
+| `basket-coordinator.test.mjs` | 458 pass, 0 fail, 0 cancelled | 458 pass, 0 fail, 0 cancelled |
+| Whole keeper suite (`node --test`, 54 files) | 2021 pass, 0 fail, 0 cancelled | 2021 pass, 0 fail, 0 cancelled |
+
+(1 563 keeper tests before this branch.) What the 458 are:
+
+- **Engine vectors through the coordinator, 385 tests.** Each of the 96 run vectors of `fixtures/basket-dca/` is
+  replayed four ways, with a poll at the reference and four polls inside every tick (at +3 s, `T/2` - 1 s, `T/2`,
+  `T` - 1 s), executing each offered pick on the order row:
+  - `'reference'` mode: the journal equals the selection module alone, row for row (picks, perLeg, next, idle reason),
+    every decided pick comes out as executable exactly once and never before its slot time, and the fills, done, idle
+    reasons and per-leg values are the ENGINE's (`expected` of the fixture), the decision prices bit for bit;
+  - `'now'` mode: the same against the module with no reference (and against the engine for the 12 vectors that have
+    none);
+  - with about 30% of the ticks never polled: the module with no prices at those ticks, and no row for them, ever;
+  - with about 25% of (tick, leg) refusing to execute: the module with those chunks not executed (done from the orders).
+- **One test per Coordinator rule, 60 tests in 12 suites**, named after the rule. The ones the goal lists: restart
+  between the row write and the execution; two calls for the same tick; a missed tick; reference seen too late; slot 2
+  before and after its time; in-flight block; journal write failure; a leg order that does not match (28 cases);
+  `decideTick` throwing (a real throw of the real module: a variation that is not finite); `'now'` mode with leg 0
+  unpriced. Also: two keepers racing on one tick, the picks read from the row as stored, an unreadable basket (34
+  cases), an unreadable journal (25 cases), a clock in milliseconds, errors nobody foresaw, both status transitions.
+- **The module itself, 4 tests**: its only import is the selection module; no clock, timer, network, environment or
+  module-level variable; `executor.js` does not mention it.
+- **The migration as text, 9 tests** (§2).
+
+**Mutation proof.** A scratch copy outside the repo, one exact string replacement per mutant (each checked to occur
+exactly once), the test file run on every mutant with a reporter that lists the failing tests. **83 mutants, 83
+killed, 0 survived, on Node 22.23.5 and on Node 20.20.2**, the same failing tests on both. Every mutant is killed by
+at least one rule test by name, not only by the vector replays. The goal's five, in 15 forms (the count is failing
+tests of 458; in brackets, how many of them are vector replays; every name and the other 68 mutants: evidence §4):
+
+- **Decide twice.** G1a, the current tick's row is ignored: 395 (384). G1b, and the refused duplicate write is
+  swallowed so the new decision executes: 168 (158). Both fail
+  `two calls for the same tick: the second reads the row and never decides again, even when the prices have changed`,
+  `restart between the row write and the execution: the stored picks come back, nothing is decided again` and
+  `two keepers on one tick: the one whose write loses executes nothing; its next poll reads the winner's row`.
+- **Return before writing.** G2a, the decision is never written: 425 (385). G2b, a failed write is ignored: 3,
+  `journal write failure: nothing executes and nothing is reported as written; the next poll decides`,
+  `two keepers on one tick: …` and `it never throws and never returns a pick, whatever it is given`. G2c, the picks
+  come from the decision in memory, not from the stored row: 3,
+  `the row is in the database before the call returns, and the picks are read from the row AS STORED`,
+  `an insert the database does not confirm with the row is a failed write: no row back, the wrong tick, or a malformed row`
+  and `an error nobody foresaw is still fail closed (internal_error), never a rejection: …`. G2d, the write is started
+  and not awaited: 7, among them the two tests of G2c and `journal write failure: …`.
+- **Entry from the reference row.** G3a, the reference row counts for `entry`: 280 (252). G3b, the same from tick 1
+  on only (so the module's own tick 0 check does not catch it): 250 (246). Both fail
+  `entry is the first TICK row's price, never the reference row's: 30% under the reference at the first tick is not protected`
+  and `last = the latest row with a price (reference included), entry = the first TICK row with a price, …`.
+- **A late decision.** G4a, a previous tick with no row is decided now: 103 (93). G4b, every missed tick is decided
+  before the current one: 98 (93). Both fail
+  `a missed tick never gets a row, and the next tick treats it as a tick with no prices: cooldown none, last and entry unchanged`,
+  `every tick missed but the last: only the current tick is ever decided` and
+  `in flight for a whole tick: that tick is missed, not decided late`. G4c, the previous tick's row stands in for a
+  current tick that has none (an old decision executes late): 415 (385), among them
+  `a pick is executable until the next tick's time and not after: the next tick decides anew, and the chunk is due again`.
+- **Execute on an unreadable basket.** G5a, an unreadable basket row is used anyway: 1,
+  `an unreadable basket row: nothing executes, whatever is wrong with it`. G5b, the status is not looked at (a
+  cancelled basket executes): 363 (362), `a basket that is not active executes nothing and is not touched`. G5c, a
+  leg order that does not match is used anyway: 1,
+  `a leg order that does not match the basket (token, n, owner, chain): nothing executes for the basket`. G5d, an
+  unreadable journal row is used anyway: 2, `an unreadable journal: a failed read, a malformed row, a tick twice, a reference row in 'now' mode`
+  and `an insert the database does not confirm with the row is a failed write: …`.
+
+The first run of the rig left 3 of 74 mutants alive, and each was a real gap, now closed by a test: the conversion of
+`threshold_bps` and of `band_bps` to a double (`× 0.0001` instead of `÷ 10 000` passed every vector: the two differ for
+3 241 of the 9 999 values, never for the vectors' own), and the catch-all for an error nobody foresaw. A fourth gap I
+found by reading: the fake handed the journal out oldest first, so a coordinator that relied on that order passed; the
+fake now returns it newest first and a test shuffles it.
+
+## 5 Verify
+`scripts/agent-verify.sh --keeper --codeql` at `6ecbe7cf` (base `origin/main` `4a4129ef`), with this file and the
+evidence file as the only uncommitted changes: **RESULT: PASS**, 8 of 8 (the block as printed: evidence §5).
+
+| Check | Result |
+|---|---|
+| suite | PASS: 10 845 tests passed, 0 failed, 507 files |
+| lint-delta | PASS: errors +0, warnings +0 (2 changed files; head 0 / 0, base 0 / 0) |
+| tsc | PASS: 0 errors |
+| build | PASS: `next build` ok |
+| v1v2-parity | PASS: 123 tests passed, 0 failed, 11 files |
+| rpc-budget | PASS: 36 tests passed, 0 failed, 3 files |
+| codeql | PASS: security-extended, head 13, base 13, new by rule + file + message 0 |
+| keeper | PASS: Node 20 2021 pass / 0 fail / 0 cancelled; Node 22 2021 pass / 0 fail / 0 cancelled |
+
+- `node scripts/gen-claude-state.mjs --check`: "CLAUDE.md state block is current". `node scripts/check-agents-parity.mjs`:
+  OK. `--counts`: vitest 507 · keeper node:test 54 · Foundry 3 (the new test file is the keeper's 54th; vitest does not
+  pick it up).
+- `gitleaks detect --log-opts="origin/main..HEAD"` with the repo's config: no leaks found (after the fix described under
+  "Assumption that turned out wrong"; `agent-verify` has no gitleaks check).
+- An earlier full run on the same module and tests, at base `ace16fa7`, also passed 8 of 8 (suite 10 814 / 0 in 502
+  files, CodeQL 13 = 13, keeper 2021 / 0 / 0 on both Nodes). PR #705 then moved main and the gitleaks fix changed the
+  migration's comments and column order, so the run above is the one that counts. The mutation rig was run again on
+  these final sources: 83 of 83 on both Nodes.
+- `git diff --stat origin/main...HEAD`, without these two feedback files: 4 files changed, 2 953 insertions, 0
+  deletions (`basket-coordinator.js` 678, `basket-coordinator.test.mjs` 1 748, `schema.sql` 238, the migration 289).
+  `git diff --name-only origin/main...HEAD` lists those four and the two feedback files, nothing else.
+- Untouched: `executor.js` and every other existing keeper file, the Solidity contracts, `src/` (API and UI),
+  `package.json` and the lockfiles. No new dependency. No database was touched.
+- Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...feat/split-dca-coordinator
+- **Auditor required** (fund-flow: the keeper's decision path and its data model). The owner opens the PR, as Draft.
+  No PR was opened and no CI was polled.
+
+## Feedback — commits 2 to 4 (`814963a4`, `6b7e815a`, `6ecbe7cf`)
+
+### Edge case
+- **`stable_leg` is not in spec §5.** The coordinator has to know which leg the peg band applies to (the selection
+  module takes `stableLeg`, and the price of that leg comes as a pair), so `baskets.stable_leg` exists. The API goal
+  must set it.
+- **`keeper_runtime_config.basket_capable` (spec §6) is not in this migration.** The goal scopes the migration to §5
+  and the Coordinator rules. The keeper wiring goal needs that column before it can publish the capability.
+- **The second slot and the contract's own interval.** The coordinator offers slot 2 from tick time `+ T/2`, as the
+  rule says. If slot 1 executed late (say at `+ 0.3 T`), the contract refuses the leg's next chunk until `+ 0.8 T`;
+  likewise a slot 2 executed late in tick `t` delays that leg's slot 1 in tick `t + 1`. The wiring must treat "the
+  order's `dcaInterval` has not elapsed" as "not yet": no miss, no retry count (ADR-026).
+- **A tick decided late inside its window.** A keeper that comes back at tick time `+ 0.9 T` decides that tick then,
+  with the price of that moment, and the next tick's variation is measured over `0.1 T`. Only a tick whose whole window
+  passed is "missed". This is the reading in §3; if the Architect wants a tighter deadline (for instance `T/2`, like
+  the reference), it is one comparison in `coordinateBasket` and one test.
+- **A reference row is final.** A leg with no price at first sight has no reference even if the price is back a poll
+  later (the spec foresees a leg with no reference price). First sight a moment BEFORE `t0` (clock skew between the
+  API and the keeper host) writes the reference: the rule only gives the upper bound.
+- **A leg order that is cancelled, failed or expired while its basket is active.** The coordinator does not look at an
+  order's status beyond `executing`: it keeps deciding, the dead leg stays owed and takes up to two picks per tick that
+  cannot execute, the other legs still buy, and the basket ends `expired`, not `completed`. Whether the 8-miss ladder
+  may fail one leg of a basket, and what the basket does then, is for the wiring and API goals.
+- **An execution outside the journal is not flagged.** If a leg's executed count rises by more than its picks of the
+  tick, the picks simply count as used. The wiring could alert on it: it would mean a leg order took the ordinary
+  path, which spec §6 forbids.
+- **The three order rows are needed whatever their status.** `done` is read from them, a completed leg's too.
+  `fetchActiveOrders` returns only `active` rows (and at most `MAX_BATCH × 3`), so the wiring needs its own read.
+- **`'now'` mode and leg 0.** If leg 0 has no price (or is the stable leg out of band) at the keeper's first poll,
+  another leg buys first; the journal says why. The API's check at creation cannot rule this out: the price can go
+  between the creation and the first poll.
+- **`completed` is written one poll after the last chunk's order row update**, and only from `active`. The leg orders
+  get their own `executed` status from the executor as today.
+
+### Assumption that turned out wrong
+- **The repo copy of the spec and the ADR was older than the pack** when the branch started, and equal to it an hour
+  later (PR #704, §1). Other sessions merge to main while a goal runs: a "copy over" step can become a no-op.
+- **"RLS like `orders`", copied literally, gives users an INSERT and an UPDATE policy.** `orders` has "Users can
+  create own orders" and "Users can cancel own orders". On `baskets` those would be a second way to create a basket,
+  past the feed-registry, capability and signature checks of spec §7 and §11, and a way to cancel a basket without its
+  three orders. The migration copies the read rule only. If the owner wants the literal three policies, it is two
+  statements; say so and I add them.
+- **700 bps is not a boundary case.** I first wrote the band conversion test at 7%; `700 × 0.0001` happens to equal
+  `0.07`. The test uses 6% (`600 × 0.0001 = 0.060000000000000005`).
+- **A green `agent-verify` is not a green CI: it does not run gitleaks.** The first full verify passed 8 of 8 while
+  `gitleaks detect --log-opts="origin/main..HEAD"` (8.30.1, the repo's `.gitleaks.toml`) reported 3 findings in the
+  migration: its `generic-api-key` rule read `leg0_token_out  TEXT NOT NULL,` and the column name on the next line as
+  a credential name and its value (the same for legs 1 and 2). False positives, but the Gitleaks job of the PR would
+  have been red. Fixed by the shape of the text, not by an allowlist entry or an inline ignore (an alert is fixed or
+  reported, never suppressed): every leg column now has a trailing comment, as the other columns of the table do, and
+  `legN_n` follows `legN_token_out`. After the fix: "4 commits scanned … no leaks found"; the same scan with the
+  DEFAULT rules on the three files under the allowlisted `contracts/order-engine/` path: 0 findings. Suggestion for
+  the harness: a `gitleaks` check in `scripts/agent-verify.sh`.
+
+### Security concern
+- **`orders` already has a user INSERT policy** (pre-existing, `contracts/order-engine/schema.sql`). With the new
+  column, a row carrying SOMEONE ELSE'S `basket_id` could be inserted by whoever holds a JWT with a `wallet_address`
+  claim. Nothing in the repo mints such a token today (the claim appears only in `schema.sql`; the server uses the
+  service role), so it is not reachable now. To stay safe if that changes: the wiring should fetch a basket's legs by
+  the basket's three `order_hash` values, never by `basket_id` alone; the coordinator refuses anything but exactly three
+  rows that carry those hashes and match on basket id, owner, chain, tokens and n (row and signed `order_data`).
+- **Nothing an error says reaches a log through this module.** `detail` is built from constants, indexes and field
+  names; a caught error contributes its class name only (an RPC URL with a key sat in an error message in
+  INC-2026-10-30-001). A price source label must match `^[a-z0-9][a-z0-9:+_.-]{0,63}$`, so a URL cannot be journaled
+  and then served by `GET /api/baskets`.
+- **A clock in milliseconds would expire every active basket** (every `now` would be past every end). `deps.now()`
+  above 99 999 999 999 is refused before anything is written.
+
+### Test gap
+- **No test runs the SQL** (§2). The first real execution is the owner's.
+- **The fake database is not PostgREST.** The adapter the wiring goal writes must: reject from `insertTick` on any
+  non-2xx (`supabaseFetch` in `executor.js` returns the response and does not throw), ask for the stored row
+  (`Prefer: return=representation`) and return it, never return a truncated journal from `readTicks`, and make
+  `setBasketStatus` conditional on `status = 'active'`. The coordinator already treats "no row back" as a failed write.
+- **The float8 and JSONB round trips are argued, not measured**: PostgreSQL 12+ prints a `double precision` as the
+  shortest text that reads back to the same double, and JSONB keeps a JSON number as the decimal it was given. The
+  wiring goal should write one awkward double (`0.1 + 0.2`) to the live table and read it back before trusting it.
+- **`resolvePrice` does not exist yet.** Its contract is in the JSDoc: `(token, { stable })` gives `null` /
+  `{ price: null }`, or `{ price, source }` and, for the stable leg, `bandAdd`. Whether a single-source price
+  (ADR-024 mode `single`) is a usable DECISION price is not something this module decides.
+
+### Concern
+- **`done` must be true before the coordinator is called.** If the keeper dies between a transaction and the order
+  row update, the row undercounts; the coordinator would offer that pick again (the contract refuses it for `T/2`,
+  then allows it). The wiring must reconcile an order it finds locked after a restart against the chain, and must
+  list as in flight every pick whose outcome is not yet in its order row.
+- **Performance: one journal read per active basket per poll** (at most `N + 4` rows, 90 for the longest basket).
+  The wiring can read the journals of all active baskets of the chain in one query per cycle and hand each basket
+  its rows through `db.readTicks`.
