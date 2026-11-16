@@ -21,6 +21,7 @@
 
 import { kv } from '@/lib/kv'
 import { emitTransitionAlert } from './alert-wrapper'
+import { trackAlert } from './alert-inflight'
 import { isP0Reason } from './p0-reasons'
 import { forLog } from './log-sanitize'
 import thresholdsJson from '../../data/source-thresholds.json'
@@ -271,11 +272,12 @@ function alertKVFailure(sourceId: string, operation: string, err: unknown): void
   // Route through the standard alert pipeline (fans out to all channels, HTML-escaped).
   // 'kv-store-failure' is a P0 reason → bypasses grace period and uses short dedup TTL.
   // If KV is down, the dedup check in alert-wrapper will fail-open (existing behaviour).
-  emitTransitionAlert(sourceId, 'active', 'active', `kv-store-failure: ${operation} — ${message}`).catch(alertErr => {
+  // trackAlert keeps the function alive until the fan-out settles (alert-inflight.ts); the state machine still never waits for it.
+  trackAlert(emitTransitionAlert(sourceId, 'active', 'active', `kv-store-failure: ${operation} — ${message}`).catch(alertErr => {
     // Last resort: if even the alert-wrapper fails, log to console.
     // The GitHub Actions watchdog will catch the stale heartbeat.
     console.error(`[STATE] Alert emission also failed: ${alertErr instanceof Error ? alertErr.message : alertErr}`)
-  })
+  }))
 }
 
 // ── Utility ─────────────────────────────────────────────
@@ -299,11 +301,12 @@ function transition(status: SourceStatus, newState: SourceState, reason: string,
   if (opts?.alert === false) return
 
   // Sole alert path — fans out to Telegram/Email/Discord via alert-wrapper
-  // with dedup, grace period, and HTML escaping. Fire-and-forget to never block.
-  emitTransitionAlert(status.id, from, newState, reason).catch(err => {
+  // with dedup, grace period, and HTML escaping. Never awaited here (it must not block the decision), but handed to
+  // trackAlert so the platform keeps the function alive until it settles (collector on the tick, `after()` on a request).
+  trackAlert(emitTransitionAlert(status.id, from, newState, reason).catch(err => {
     // `status.id` is KV-loaded, so it is sanitised for the log (CodeQL js/tainted-format-string, js/log-injection).
     console.error('[STATE] alert emission failed for %s:', forLog(status.id), forLog(err instanceof Error ? err.message : err))
-  })
+  }))
 }
 
 // ── Public API (async — backed by KV) ───────────────────
@@ -348,9 +351,9 @@ export async function recordHealthCheck(
     s.lastInfraAt = now
     console.warn(`[STATE] ${forLog(sourceId)}: probe infra error #${s.infraFailures} (not counted as source failure): ${forLog(result.error ?? 'unknown')}`)
     if (s.infraFailures === INFRA_ALERT_AFTER) {
-      emitTransitionAlert(sourceId, s.state, s.state, `probe-infra-failure: ${INFRA_ALERT_AFTER} consecutive probe errors — ${result.error ?? 'unknown'}`).catch(err => {
+      trackAlert(emitTransitionAlert(sourceId, s.state, s.state, `probe-infra-failure: ${INFRA_ALERT_AFTER} consecutive probe errors — ${result.error ?? 'unknown'}`).catch(err => {
         console.error('[STATE] infra alert emission failed for %s:', forLog(sourceId), forLog(err instanceof Error ? err.message : err))
-      })
+      }))
     }
     await saveToKV(s)
     return

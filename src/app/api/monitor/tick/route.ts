@@ -14,11 +14,20 @@ import { NextRequest, NextResponse } from 'next/server'
 import { bodySizeGuard } from '@/lib/body-limit'
 import { runMonitoringTick } from '@/lib/monitoring-loop'
 import { verifyBearerToken } from '@/lib/auth'
+import { runWithAlertsSettled } from '@/lib/alert-inflight'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30 // Allow up to 30s for all health checks
 
+/**
+ * The response goes out by this point (ms after the request arrived), leaving 3 s of the 30 s `maxDuration` for
+ * serialising and sending it. The tick waits for the alerts it caused only until then (and never longer than
+ * ALERT_SETTLE_MAX_MS): see `runWithAlertsSettled`.
+ */
+const TICK_RESPONSE_DEADLINE_MS = 27_000
+
 export async function POST(req: NextRequest) {
+  const requestedAt = Date.now()
   // [AUDIT-W6 / W6-L-01] Oversized body -> 413 before any other work.
   const tooLarge = bodySizeGuard(req)
   if (tooLarge) return tooLarge
@@ -34,7 +43,9 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await runMonitoringTick()
+    // Nobody waits on this cron call, so the alerts the tick caused (state-machine transitions are fire-and-forget) are
+    // awaited, bounded, before the response: a frozen function must not cut a Telegram message in flight.
+    const result = await runWithAlertsSettled(() => runMonitoringTick(), { deadlineAt: requestedAt + TICK_RESPONSE_DEADLINE_MS })
 
     // [API-M-03] Skipped tick (concurrent lock) — 200 OK, not an error
     if (result.skipped) {
