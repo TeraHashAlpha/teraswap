@@ -17,8 +17,25 @@
  * @internal — server-only module. Same import restrictions as source-state-machine.ts.
  */
 
-import { AsyncLocalStorage } from 'node:async_hooks'
-import { after } from 'next/server'
+import type { AsyncLocalStorage as AsyncLocalStorageType } from 'node:async_hooks'
+
+// `after` is loaded lazily, never by a static `import { after } from 'next/server'`: this module is reachable from a client
+// bundle (adapters/circuit-breaker.ts imports the state machine dynamically), and Next refuses a static `after` import there
+// ("only available in Server Components"). On the server the load below finishes at module init, long before a request.
+type AfterFn = (task: Promise<unknown>) => void
+let afterFn: AfterFn | undefined
+const afterLoaded: Promise<void> = (typeof window !== 'undefined' ? Promise.resolve({ after: undefined }) : import('next/server')).then(
+  (m) => { afterFn = m.after as AfterFn | undefined },
+  () => { /* no hook available: alerts fall back to plain fire-and-forget */ },
+)
+
+/** Hand `task` to Next's `after()`; throws (caller catches) outside a request scope. Falls back to a late load if the hook was not ready yet. */
+function handToAfter(task: Promise<unknown>): void {
+  if (afterFn) { afterFn(task); return }
+  void afterLoaded.then(() => {
+    try { afterFn?.(task) } catch { /* no request scope */ }
+  })
+}
 
 /**
  * Hard cap on how long the tick waits for the alerts it caused. A Telegram send alone is bounded by
@@ -31,14 +48,19 @@ interface Collector {
   pending: Set<Promise<void>>
 }
 
-const scope = new AsyncLocalStorage<Collector>()
+// Same reason as `after` above: a static `node:async_hooks` import cannot be bundled into a client chunk, so the module is taken from
+// the running Node (22+) at init. Without it (a browser chunk that never runs this) `runWithAlertsSettled` simply runs `fn`.
+const asyncHooks = typeof process !== 'undefined' && typeof process.getBuiltinModule === 'function'
+  ? process.getBuiltinModule('node:async_hooks')
+  : undefined
+const scope: AsyncLocalStorageType<Collector> | undefined = asyncHooks ? new asyncHooks.AsyncLocalStorage<Collector>() : undefined
 
 /** Hand one alert promise to whoever keeps the function alive. Never throws; the promise is never left bare. */
 export function trackAlert(alert: Promise<unknown>): void {
   // Callers already .catch and log; this swallow is the belt, so a late rejection can never become an unhandled one.
   const settled: Promise<void> = alert.then(() => undefined, () => undefined)
 
-  const collector = scope.getStore()
+  const collector = scope?.getStore()
   if (collector) {
     collector.pending.add(settled)
     void settled.then(() => { collector.pending.delete(settled) })
@@ -46,7 +68,7 @@ export function trackAlert(alert: Promise<unknown>): void {
   }
 
   try {
-    after(settled)
+    handToAfter(settled)
   } catch {
     // Outside a request scope (script, test, module init): nothing to hand it to; it runs as before.
   }
@@ -84,7 +106,7 @@ async function settleCollector(collector: Collector, waitMs: number): Promise<nu
 export async function runWithAlertsSettled<T>(fn: () => Promise<T>, opts: AlertSettleOptions = {}): Promise<T> {
   const collector: Collector = { pending: new Set() }
   try {
-    return await scope.run(collector, fn)
+    return await (scope ? scope.run(collector, fn) : fn())
   } finally {
     const maxWait = opts.maxWaitMs ?? ALERT_SETTLE_MAX_MS
     const left = opts.deadlineAt === undefined ? maxWait : opts.deadlineAt - Date.now()
@@ -94,7 +116,7 @@ export async function runWithAlertsSettled<T>(fn: () => Promise<T>, opts: AlertS
     if (stillInFlight > 0) {
       console.warn(`[ALERT] ${stillInFlight} alert(s) still in flight after ${Date.now() - startedAt}ms — responding anyway`)
       try {
-        after(Promise.allSettled([...collector.pending]))
+        handToAfter(Promise.allSettled([...collector.pending]))
       } catch {
         // No request scope: nothing more to do.
       }

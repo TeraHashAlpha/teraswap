@@ -72,4 +72,10 @@ describe('emitTransitionAlert is never left bare', () => {
     expect(code.match(/emitTransitionAlert\s*\(/g) ?? []).toHaveLength(3)
     expect(code.match(/trackAlert\(emitTransitionAlert\s*\(/g) ?? []).toHaveLength(3)
   })
+
+  it('alert-inflight.ts keeps `after` and node:async_hooks out of static imports (the module is reachable from a client chunk; `next build` fails otherwise)', () => {
+    const text = readFileSync(path.join(SRC, 'lib/alert-inflight.ts'), 'utf8')
+    const imports = text.split('\n').filter((l) => /^import\s/.test(l) && !/^import type\s/.test(l))
+    expect(imports.filter((l) => /next\/server|node:async_hooks/.test(l))).toEqual([])
+  })
 })
