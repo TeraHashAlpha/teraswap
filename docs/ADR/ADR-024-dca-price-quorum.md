@@ -34,6 +34,12 @@ Scope addition (Architect, owner-approved, 2026-10-11 00:51 WEST), verbatim:
 
 ## Context
 
+> Note 2026-11-13: the 1-wei statement below holds only for pairs WITHOUT registered feeds. On the V3
+> executor (`contracts/order-engine/TeraSwapOrderExecutorV3.sol`) the floor is `max(oracleFloor, scaledMin)`
+> when a feed exists: `uint256 floorOut = scaledMin;` (line 541), `if (oracleFloor > floorOut) floorOut = oracleFloor;`
+> (line 553), and `_fairValueOut` returns `hasFeed = false` unless BOTH tokens resolve: `if (!okIn || !okOut) return (0, false);`
+> (line 1082), with `tokenUsdFeeds` registration per token (ADR-013 §1). Read on-chain 2026-11-13: see the DEPLOYMENTS note.
+
 DCA signs `minAmountOut = 1`, so the on-chain per-chunk floor is a 1-wei no-op (ADR-013 §Context).
 The keeper's `order-floor.js` gate is the live protection: it rejects a fill whose built output is
 below an independent fair-value reference × (1 − `DCA_ORACLE_FLOOR_BPS`). Until this ADR that
