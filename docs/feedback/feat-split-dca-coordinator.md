@@ -8,8 +8,9 @@ Model: CONTROL says Opus, effort high. **This goal was NOT run on Opus**: the wh
 which is set to Fable 5.2. I did not ask about it for this goal; I relied on the owner's answer to the same question
 earlier the same day, recorded in `docs/feedback/feat-basket-selection-reference.md` ("Model. CONTROL says Opus; the
 session was set to Fable 5.2 just before the goal. Owner: run here, on Fable 5.2", merged with PR #701). The stop
-check named this as unmet; I reported it to the owner as open ("if you want this one run on Opus, that is your call")
-and the owner's reply was "continue", with no request to run it again. That it covers the model line is my reading.
+check named this as unmet, rightly: an answer given for another goal is not an instruction for this one. Asked for
+this goal (2026-11-16, second question, on the model line alone), **the owner accepted it as run on Fable 5.2**
+(answer 5 below). Nothing was re-run.
 
 Required reading, and what the code took from it: spec §2 to §6 and ADR-027 (the pack's copies, §1); the
 `decideTick` contract of `basket-scheduler.js` (the state it takes, `perLeg`, `next`, its throws); `price-sources.js`
@@ -26,7 +27,7 @@ is asked (`canExecute`, `:1616-1627`); "not yet" unlocks the order and skips it,
 Base: `origin/main` `4a4129ef` (PR #705). Main moved twice during the work (`b47ca15e` → `ace16fa7` with PR #704, →
 `4a4129ef` with PR #705); the commits, not yet pushed then, were rebased each time with no conflict.
 
-## Owner answers (asked once, 2026-11-16; they supersede the goal text)
+## Owner answers (2026-11-16; they supersede the goal text)
 The first push (`eb164897`) had chosen four readings without asking and had changed `schema.sql` against the goal's
 "no change to … contracts". The stop check refused that exit, rightly: the goal says to ask. One dialog, four parts:
 
@@ -40,6 +41,12 @@ The first push (`eb164897`) had chosen four readings without asking and had chan
 4. **Three differences from the goal's letter, all accepted:** RLS copies only the read policy of `orders`;
    `baskets.stable_leg` is added although spec §5 does not list it; commit 1 no longer contains the spec/ADR copy,
    because PR #704 merged the same bytes to main meanwhile (§1).
+
+A second question, on its own, after the stop check refused the exit on the CONTROL line:
+
+5. **CONTROL says "model Opus, effort high"; the goal ran in this session on Fable 5.2.** Offered: accept as run, have
+   an Opus agent re-implement commits 2 to 4 for comparison, or have an Opus agent review the diff read-only.
+   **Owner: accept as run on Fable 5.2.**
 
 For the Architect: the spec's Coordinator rule still reads "a tick whose time passed with no row is never decided
 late"; answer 2 gives it its deadline, "a tick is decided only before its time + T ÷ 2".
