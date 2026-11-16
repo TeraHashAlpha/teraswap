@@ -25,6 +25,8 @@ export const USER_FACING_FILES = Object.freeze([
   'src/components/DocsPage.tsx',
   'src/components/SwapBox.tsx',
   'src/components/DCAPanel.tsx',
+  // [fix/privacy-leftovers-a78b] Shown by wallets at connection (WALLETCONNECT_METADATA.appDescription).
+  'src/lib/wagmiConfig.ts',
 ])
 
 const SPELLED =

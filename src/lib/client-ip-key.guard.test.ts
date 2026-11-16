@@ -42,7 +42,8 @@ describe('the raw client IP has one reader', () => {
   })
 
   it('every API route that rate-limits per client takes its bucket from clientIpKey / clientIp', () => {
-    const routes = sources.filter((f) => f.rel.startsWith('app/api/') && /\bcheckRateLimit\s*\(/.test(f.code))
+    const routes = sources.filter((f) => f.rel.startsWith('app/api/') && /\bcheckRateLimit(?:Within)?\s*\(/.test(f.code))
+    // [fix/privacy-leftovers-a78b] Both limiter names: moving a route to the bounded checkRateLimitWithin must not take it out of this guard.
     expect(routes.length).toBeGreaterThan(15)
     // A per-client key is one built from an `ip`-named value or the helpers; a key built from a wallet or an API-key hash is not.
     const perClient = routes.filter((f) => /\b(clientIpKey|clientIp)\s*\(|\$\{\s*(ip|postIp)\s*\}/.test(f.code))

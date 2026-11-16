@@ -5,10 +5,15 @@ everything below is `src/app/api/rpc/route.ts`; its header (`:13-56`) says why e
 
 ## Rate limiting
 - New and touched routes limit with `checkRateLimitWithin(key, limit, windowMs, cost?)` (`src/lib/kv-rate-limiter.ts:266-291`). It waits at
-  most `RATE_LIMIT_GATE_TIMEOUT_MS` = 1 s (`:258`), then decides by the in-memory fallback — half the limit, per instance: "degraded,
-  never unlimited" (`:262-263`). Used today by `/api/quote`, `/api/rpc` and `src/lib/cow-proxy.ts`.
-- Not yet universal: 18 call sites in `src/app/api` (22 in `src/`) still call plain `checkRateLimit`, which on a hung Redis waited ~4.3 s
-  per request (measured by the A76 audit, `kv-rate-limiter.ts:255-257`). Do not copy that pattern into a new route.
+  most `RATE_LIMIT_GATE_TIMEOUT_MS` = 1 s (`:258`), then decides by the in-memory fallback: "degraded, never unlimited" (`:263`). Used today by
+  `/api/quote`, `/api/rpc`, `/api/fiat/eur-usd`, `src/lib/cow-proxy.ts` and the four log routes (`log-event`, `log-quote`, `log-swap`, `log-activity`; `log-routes.limiter.test.ts`, `log-routes.hung-kv.test.ts`, `log-swap/route.slow-kv.test.ts`).
+- The fallback is per instance, not global. Every request that outlives the gate (Redis hung, slow or erroring) is charged to an in-memory counter that
+  allows `ceil(limit / 2)` per key per window in that one process (`fallbackRateLimit`, `kv-rate-limiter.ts:122-159`); a late Redis answer or error is
+  not charged again (`:246-247`). So the ceiling is `ceil(limit / 2)` × the warm instances serving the key, not half the limit overall: the log routes
+  (limit 120, `:41`) pass 60 a minute per instance, and three instances pass 180, more than the 120 Redis would allow. Each such request also waits the full 1 s.
+  Pinned for `log-swap` by `log-swap/route.slow-kv.test.ts`.
+- Not yet universal: 14 call sites in `src/app/api` (18 in `src/`, counted 2026-11-16 with `grep -rnE "\bcheckRateLimit\(" src`, tests and `kv-rate-limiter.ts` excluded)
+  still call plain `checkRateLimit`, which on a hung Redis waited ~4.3 s per request (measured by the A76 audit, `kv-rate-limiter.ts:255-257`). Do not copy that pattern into a new route.
 - Every KV/Redis wait in a request path has a deadline: `checkRateLimitWithin`, or `withTimeout` (`src/lib/adapters/shared`) as the quote
   route's kill-switch read does. Pinned for quote by `src/app/api/quote/route.hung-kv.test.ts` and `route.limiter.test.ts`.
 - Cost per JSON-RPC call, not per HTTP request: `rpcRateLimitUnits` (`rpc/route.ts:103-108`, `rpc/route.rate-units.test.ts`).
