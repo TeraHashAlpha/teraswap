@@ -24,7 +24,7 @@ interface Props {
   type: LegalType
 }
 
-const LAST_UPDATED = 'November 12, 2026'
+const LAST_UPDATED = 'November 16, 2026'
 
 /* ────────────────────────────────────────────────────────────────
    PRIVACY POLICY

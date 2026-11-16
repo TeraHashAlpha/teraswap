@@ -23,7 +23,7 @@ import './docs-legal.css'
 export type LegalType = 'privacy' | 'terms'
 
 /** v1's LegalPage.tsx — byte-identical copy, this is just the wrapper restyle; a parity test pins the two together. */
-const LAST_UPDATED = 'November 12, 2026'
+const LAST_UPDATED = 'November 16, 2026'
 
 interface TocSection {
   id: string
