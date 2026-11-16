@@ -1,0 +1,3 @@
+symbol,start,max_drop_pct,recovered,days_to_recover,keeper_series
+DAI,2023-03-11 04:01:20,10.537332,True,2.2916319444444446,"Chainlink (Ethereum), hora a hora"
+USDT,2022-05-11 00:00:00,2.4399999999999977,True,0.25,"Chainlink (Ethereum), hora a hora"

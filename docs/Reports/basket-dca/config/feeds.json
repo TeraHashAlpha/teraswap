@@ -1,0 +1,189 @@
+{
+  "ETH": {
+    "network": "arbitrum",
+    "chainId": 42161,
+    "ens": "eth-usd",
+    "proxy": "0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612",
+    "expectedDescription": "ETH / USD",
+    "directoryDecimals": 8,
+    "heartbeat": 1755,
+    "deviationThreshold": 0.05,
+    "inRepo": "chainlink-feeds.ts map entry"
+  },
+  "WBTC": {
+    "network": "arbitrum",
+    "chainId": 42161,
+    "ens": "wbtc-usd",
+    "proxy": "0xd0C7101eACbB49F3deCcCc166d238410D6D46d57",
+    "expectedDescription": "WBTC / USD",
+    "directoryDecimals": 8,
+    "heartbeat": 86400,
+    "deviationThreshold": 0.05,
+    "inRepo": "dca-feed-registrations.json chain 42161 WBTC enabled=True"
+  },
+  "USDC": {
+    "network": "arbitrum",
+    "chainId": 42161,
+    "ens": "usdc-usd",
+    "proxy": "0x50834F3163758fcC1Df9973b6e91f0F0F0434aD3",
+    "expectedDescription": "USDC / USD",
+    "directoryDecimals": 8,
+    "heartbeat": 255,
+    "deviationThreshold": 0.1,
+    "inRepo": "chainlink-feeds.ts map entry"
+  },
+  "USDT": {
+    "network": "arbitrum",
+    "chainId": 42161,
+    "ens": "usdt-usd",
+    "proxy": "0x3f3f5dF88dC9F13eac63DF89EC16ef6e7E25DdE7",
+    "expectedDescription": "USDT / USD",
+    "directoryDecimals": 8,
+    "heartbeat": 255,
+    "deviationThreshold": 0.1,
+    "inRepo": "dca-feed-registrations.json chain 42161 USDT enabled=True"
+  },
+  "DAI": {
+    "network": "arbitrum",
+    "chainId": 42161,
+    "ens": "dai-usd",
+    "proxy": "0xc5C8E77B397E531B8EC06BFb0048328B30E9eCfB",
+    "expectedDescription": "DAI / USD",
+    "directoryDecimals": 8,
+    "heartbeat": 86400,
+    "deviationThreshold": 0.1,
+    "inRepo": "dca-feed-registrations.json chain 42161 DAI enabled=True"
+  },
+  "SOL": {
+    "network": "arbitrum",
+    "chainId": 42161,
+    "ens": "sol-usd",
+    "proxy": "0x24ceA4b8ce57cdA5058b924B9B9987992450590c",
+    "expectedDescription": "SOL / USD",
+    "directoryDecimals": 8,
+    "heartbeat": 86400,
+    "deviationThreshold": 0.1,
+    "inRepo": null
+  },
+  "XRP": {
+    "network": "arbitrum",
+    "chainId": 42161,
+    "ens": "xrp-usd",
+    "proxy": "0xB4AD57B52aB9141de9926a3e0C8dc6264c2ef205",
+    "expectedDescription": "XRP / USD",
+    "directoryDecimals": 8,
+    "heartbeat": 86400,
+    "deviationThreshold": 0.5,
+    "inRepo": null
+  },
+  "CRV": {
+    "network": "arbitrum",
+    "chainId": 42161,
+    "ens": "crv-usd",
+    "proxy": "0xaebDA2c976cfd1eE1977Eac079B4382acb849325",
+    "expectedDescription": "CRV / USD",
+    "directoryDecimals": 8,
+    "heartbeat": 3600,
+    "deviationThreshold": 0.5,
+    "inRepo": "dca-feed-registrations.json chain 42161 CRV enabled=True"
+  },
+  "cbBTC": {
+    "network": "base",
+    "chainId": 8453,
+    "ens": "cbbtc-usd",
+    "proxy": "0x07DA0E54543a844a80ABE69c8A12F22B3aA59f9D",
+    "expectedDescription": "cbBTC / USD",
+    "directoryDecimals": 8,
+    "heartbeat": 1200,
+    "deviationThreshold": 0.3,
+    "inRepo": "dca-feed-registrations.json chain 8453 cbBTC enabled=True"
+  },
+  "AERO": {
+    "network": "base",
+    "chainId": 8453,
+    "ens": "aero-usd",
+    "proxy": "0x4EC5970fC728C5f65ba413992CD5fF6FD70fcfF0",
+    "expectedDescription": "AERO / USD",
+    "directoryDecimals": 8,
+    "heartbeat": 86400,
+    "deviationThreshold": 0.5,
+    "inRepo": "dca-feed-registrations.json chain 8453 AERO enabled=False"
+  },
+  "UST_ETH": {
+    "network": "mainnet",
+    "chainId": 1,
+    "ens": "ust-eth",
+    "proxy": "0xa20623070413d42a5C01Db2c8111640DD7A5A03a",
+    "expectedDescription": "USTC / ETH",
+    "directoryDecimals": 18,
+    "heartbeat": 86400,
+    "deviationThreshold": 3,
+    "inRepo": null
+  },
+  "ETH_mainnet": {
+    "network": "mainnet",
+    "chainId": 1,
+    "ens": "eth-usd",
+    "proxy": "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",
+    "expectedDescription": "ETH / USD",
+    "directoryDecimals": 8,
+    "heartbeat": 3600,
+    "deviationThreshold": 0.5,
+    "inRepo": "constants.ts CHAINLINK_ETH_USD (mainnet)"
+  },
+  "WBTC_BTC_mainnet": {
+    "network": "mainnet",
+    "chainId": 1,
+    "ens": "wbtc-btc",
+    "proxy": "0xfdFD9C85aD200c506Cf9e21F1FD8dd01932FBB23",
+    "expectedDescription": "WBTC / BTC",
+    "directoryDecimals": 8,
+    "heartbeat": 86400,
+    "deviationThreshold": 0.5,
+    "inRepo": null
+  },
+  "BTC_mainnet": {
+    "network": "mainnet",
+    "chainId": 1,
+    "ens": "btc-usd",
+    "proxy": "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c",
+    "expectedDescription": "BTC / USD",
+    "directoryDecimals": 8,
+    "heartbeat": 3600,
+    "deviationThreshold": 0.5,
+    "inRepo": null
+  },
+  "SOL_mainnet": {
+    "network": "mainnet",
+    "chainId": 1,
+    "ens": "sol-usd",
+    "proxy": "0x4ffC43a60e009B551865A93d232E33Fce9f01507",
+    "expectedDescription": "SOL / USD",
+    "directoryDecimals": 8,
+    "heartbeat": 86400,
+    "deviationThreshold": 2,
+    "inRepo": null
+  },
+  "CRV_mainnet": {
+    "network": "mainnet",
+    "chainId": 1,
+    "ens": "crv-usd",
+    "proxy": "0xCd627aA160A6fA45Eb793D19Ef54f5062F20f33f",
+    "expectedDescription": "CRV / USD",
+    "directoryDecimals": 8,
+    "heartbeat": 86400,
+    "deviationThreshold": 1,
+    "inRepo": null
+  },
+  "ETH_base": {
+    "network": "base",
+    "chainId": 8453,
+    "ens": null,
+    "proxy": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+    "expectedDescription": "ETH / USD",
+    "directoryDecimals": 8,
+    "heartbeat": 1200,
+    "deviationThreshold": null,
+    "inRepo": "chainlink-feeds.ts 8453 WETH (not ENS-listed in directory)"
+  }
+}

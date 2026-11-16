@@ -1,0 +1,4 @@
+key,proxy,network,description,decimals,descriptionMatches,heartbeat_registry,enabled
+USDC_base,0x7e860098F58bBFC8648a4311b374B1D669a2bc6B,base,USDC / USD,8,True,86400,True
+cbBTC,0x07DA0E54543a844a80ABE69c8A12F22B3aA59f9D,base,cbBTC / USD,8,True,1200,True
+ETH_base,0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70,base,ETH / USD,8,True,1200,True

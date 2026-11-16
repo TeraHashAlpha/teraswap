@@ -1,0 +1,4 @@
+feed,directory_threshold_pct,directory_heartbeat_s,registry_heartbeat_s,rounds_used,median_gap_s,share_heartbeat_updates_pct,empirical_min_step_pct,empirical_median_step_pct
+ETH/USD · Base,,,1200,6000,360.0,21.33688948158026,0.15163838904397828,0.17501710342231674
+cbBTC/USD · Base,0.3,1200.0,1200,6000,1230.0,79.19653275545924,0.30142064074180924,0.3254856802141902
+USDC/USD · Base,0.3,86400.0,86400,1223,86418.0,97.13584288052373,0.00016192605611243442,0.0044290186742958525
