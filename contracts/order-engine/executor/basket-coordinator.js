@@ -22,9 +22,11 @@
 //   Slots            a pick is executable from its slot time (slot 1 = the tick time, slot 2 = + T / 2) until the
 //                    next tick's time. Per leg only its next outstanding slot is offered; a pick is outstanding while
 //                    the order row has not executed it (done now against the done stored at the decision).
-//   Missed tick      a tick whose time passed with no row never gets one: only the CURRENT tick is ever decided. The
-//                    next tick then finds no row for it: cooldown none, last and entry unchanged, which is a tick
-//                    with no prices.
+//   Missed tick      a tick is decided only from its time until its time + T / 2 (owner, 2026-11-16: the same half
+//                    cycle the reference row gets). A tick that reaches + T / 2 with no row never gets one, whatever
+//                    kept it from being decided (keeper down, no price read, a transaction in flight, a failed write).
+//                    Only the CURRENT tick is ever decided. The next tick then finds no row for it: cooldown none,
+//                    last and entry unchanged, which is a tick with no prices.
 //   In flight        no decision while a transaction of this basket is in flight, and a leg in flight is not offered.
 //   Journal          per leg the decision price as a double, its source, the stable leg's bandAdd, and the module's
 //                    perLeg, picks and next exactly as returned.
@@ -82,6 +84,7 @@ export const COORDINATOR_REASONS = Object.freeze({
   BEFORE_FIRST_TICK: "before_first_tick",
   REFERENCE_RECORDED: "reference_recorded",
   IN_FLIGHT: "in_flight",
+  TICK_MISSED: "tick_missed",
   TICK_IDLE: "tick_idle",
   SLOT_NOT_REACHED: "slot_not_reached",
   PICKS_EXECUTED: "picks_executed",
@@ -168,10 +171,13 @@ function errorName(err) {
  *
  * t = 0 … N + 2 (N nominal ticks and GRACE_TICKS grace ticks). The second slot of a tick is at + T / 2. A tick is
  * current from its time until the next tick's time; the last grace tick's window ends at `end`, one T after its time.
+ * A tick can be DECIDED only in the first half of that window: strictly before its time + T / 2 (`decisionDeadline`,
+ * owner decision 2026-11-16), the moment its second slot opens. Its picks stay executable until the next tick's time.
  *
  * @param {{ t0: number, cadence_s: number, cycles: number, first_buy: "reference"|"now" }} basket
  * @returns {{ firstTick: number, lastTick: number, end: number, referenceDeadline: number|null,
  *   tickTime: (tick: number) => number, slotTime: (tick: number, slot: 1|2) => number,
+ *   decisionDeadline: (tick: number) => number,
  *   tickAt: (now: number) => number|null }} `tickAt` is the current tick, null before the first tick; it does not
  *   stop at `end`. referenceDeadline is t0 + T / 2 in 'reference' mode, null in 'now' mode
  */
@@ -192,6 +198,7 @@ export function basketTimeline(basket) {
     referenceDeadline: firstBuy === FIRST_BUY.REFERENCE ? t0 + T / 2 : null,
     tickTime,
     slotTime: (tick, slot) => tickTime(tick) + (slot - 1) * (T / 2),
+    decisionDeadline: (tick) => tickTime(tick) + T / 2,
     tickAt: (now) => (now < firstTick ? null : Math.floor((now - firstTick) / T)),
   }
 }
@@ -662,10 +669,14 @@ export async function coordinateBasket(input, deps) {
       return result([], R.REFERENCE_RECORDED, "the reference prices are recorded; the first purchase is one cycle after t0")
     }
 
-    // The current tick. Its row is read if it exists and never decided again; only the current tick is ever
-    // decided, so a tick whose window passed with no row stays without one.
+    // The current tick. Its row is read if it exists and never decided again. With no row it is decided now, but
+    // only before its time + T / 2: later it is a missed tick and never gets a row (never decided late). Only the
+    // current tick is ever decided, so a tick of an earlier cycle stays as it is too.
     let row = rows.get(tick)
     if (row === undefined) {
+      if (now >= timeline.decisionDeadline(tick)) {
+        return result([], R.TICK_MISSED, `tick ${tick} was not decided before its time + T / 2: it is missed, the next tick catches up`)
+      }
       if (inFlight.size > 0) return result([], R.IN_FLIGHT, `no decision for tick ${tick} while a transaction is in flight`)
       row = await decideAndStore(basket, rows, orders, tick, now, deps, wrote)
     }

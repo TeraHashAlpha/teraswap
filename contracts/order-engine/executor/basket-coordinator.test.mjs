@@ -277,6 +277,7 @@ const RUN_FAMILIES = ["calm", "fall", "no-price", "band", "min-fill", "ties", "m
 const NO_REFERENCE = [null, null, null]
 const [V, E, P, B, RSN] = [0, 3, 6, 9, 10] // first column of each group of `expected.perLeg`
 const POLL_OFFSETS = [3, HALF - 1, HALF, DAY - 1] // seconds after the tick time
+const LATE_OFFSETS = [HALF, HALF + 7, DAY - 1] // a keeper that is back only once the decision deadline has passed
 
 function fixture(name) {
   return JSON.parse(readFileSync(new URL(`./fixtures/basket-dca/${name}.json`, import.meta.url), "utf8"))
@@ -312,9 +313,10 @@ function moduleAlone(input, { reference = input.reference, missed = new Set(), r
 /**
  * The same vector through the coordinator: a basket row, three order rows, the vector's prices behind resolvePrice,
  * and polls at the reference and four times inside every tick. Each pick the coordinator hands out is executed on the
- * spot (the order row's dca_executed), unless `refused(tick, leg)`; a `missed` tick is never polled.
+ * spot (the order row's dca_executed), unless `refused(tick, leg)`. A `missed` tick is never polled, unless it is also
+ * `late`: then the keeper is back only from its time + T / 2 on, which must come to the same thing.
  */
-async function throughCoordinator(v, firstBuy, { missed = new Set(), refused = () => false } = {}) {
+async function throughCoordinator(v, firstBuy, { missed = new Set(), late = new Set(), refused = () => false } = {}) {
   const { input } = v
   const bps = (x) => Math.round(x * 10_000)
   const w = makeWorld({
@@ -340,13 +342,19 @@ async function throughCoordinator(v, firstBuy, { missed = new Set(), refused = (
   const polls = firstBuy === FIRST_BUY.REFERENCE ? [[null, T0 + 7]] : []
   for (let t = 0; t <= w.tl.lastTick; t += 1) {
     if (!missed.has(t)) for (const offset of POLL_OFFSETS) polls.push([t, w.at(t, offset)])
+    else if (late.has(t)) for (const offset of LATE_OFFSETS) polls.push([t, w.at(t, offset), true])
   }
   polls.push([null, w.tl.end])
   const executed = []
-  for (const [t, now] of polls) {
+  for (const [t, now, tooLate] of polls) {
     const result = await w.poll(now)
     assert.equal(result.failClosed, false, `${v.id} @${now}: ${result.reason} (${result.detail})`)
     assert.equal(result.reason === null, result.picks.length > 0, `${v.id} @${now}: a reason exactly when nothing is executable`)
+    if (tooLate) {
+      // From + T / 2 on an undecided tick is missed, unless the basket had already finished.
+      assert.ok([R.TICK_MISSED, R.COMPLETED, R.BASKET_NOT_ACTIVE].includes(result.reason), `${v.id} tick ${t} first polled at + T / 2 or later: ${result.reason}`)
+      assert.deepEqual(result.wrote.filter((entry) => entry.table === "basket_ticks"), [], `${v.id} tick ${t}: decided late`)
+    }
     for (const pick of result.picks) {
       assert.equal(pick.tick, t, `${v.id}: a pick of tick ${pick.tick} offered during tick ${t}`)
       assert.ok(now >= w.tl.slotTime(t, pick.slot), `${v.id} tick ${t}: slot ${pick.slot} offered before its time`)
@@ -447,11 +455,14 @@ describe(`engine vectors through the coordinator (${VECTORS.length}), a fresh ca
   }
 
   for (const v of VECTORS) {
-    test(`missed ticks: ${v.id} with ticks never polled is the module with no prices at those ticks`, async () => {
+    test(`missed ticks: ${v.id} with ticks never polled, or polled only from + T / 2 on, is the module with no prices at those ticks`, async () => {
       const rnd = mulberry32(hashString(`missed/${v.id}`))
       const missed = new Set()
       for (let t = 0; t < v.input.cycles + GRACE_TICKS; t += 1) if (rnd() < 0.3) missed.add(t)
-      const run = await throughCoordinator(v, FIRST_BUY.REFERENCE, { missed })
+      // About half of them are not a keeper that was away for the whole cycle, but one that came back too late.
+      const coin = mulberry32(hashString(`late/${v.id}`))
+      const late = new Set([...missed].filter(() => coin() < 0.5))
+      const run = await throughCoordinator(v, FIRST_BUY.REFERENCE, { missed, late })
       assertSameAsModule(v, run, moduleAlone(v.input, { missed }), { missed })
     })
 
@@ -603,12 +614,14 @@ describe("rule: both modes' tick times", () => {
     assert.equal(reference.referenceDeadline, T0 + HALF)
     assert.equal(reference.slotTime(3, 1), T0 + 4 * DAY)
     assert.equal(reference.slotTime(3, 2), T0 + 4 * DAY + HALF)
+    assert.equal(reference.decisionDeadline(3), T0 + 4 * DAY + HALF, "a tick is decided before its time + T / 2")
     const now = basketTimeline(makeBasket({ cycles: 6, firstBuy: FIRST_BUY.NOW }))
     assert.equal(now.firstTick, T0)
     assert.equal(now.lastTick, 8)
     assert.equal(now.end, T0 + 9 * DAY, "(N + 3) × T")
     assert.equal(now.referenceDeadline, null)
     assert.equal(now.slotTime(0, 2), T0 + HALF)
+    assert.equal(now.decisionDeadline(0), T0 + HALF)
     for (const tl of [reference, now]) {
       assert.equal(tl.tickAt(tl.firstTick - 1), null)
       for (let t = 0; t <= tl.lastTick; t += 1) {
@@ -626,7 +639,7 @@ describe("rule: both modes' tick times", () => {
   })
 
   for (const firstBuy of [FIRST_BUY.REFERENCE, FIRST_BUY.NOW]) {
-    test(`'${firstBuy}': the coordinator decides tick t in [tick time, next tick time) and nothing a second earlier`, async () => {
+    test(`'${firstBuy}': the coordinator decides tick t at its tick time, nothing a second earlier, and the row serves until the next tick`, async () => {
       const w = makeWorld({ firstBuy })
       if (firstBuy === FIRST_BUY.REFERENCE) await w.poll(T0 + 1)
       assert.equal((await w.poll(w.tl.firstTick - 1)).reason, R.BEFORE_FIRST_TICK)
@@ -640,6 +653,30 @@ describe("rule: both modes' tick times", () => {
         assert.equal(w.row(t + 1), undefined)
       }
       assert.deepEqual(w.rows().filter((row) => row.tick >= 0).map((row) => row.tick), [0, 1, 2, 3, 4, 5, 6, 7, 8])
+    })
+
+    test(`'${firstBuy}': a tick is decided only before its time + T / 2: a second before it is, at + T / 2 it is missed`, async () => {
+      for (const [offset, decided] of [[0, true], [1, true], [HALF - 1, true], [HALF, false], [HALF + 1, false], [DAY - 1, false]]) {
+        const w = makeWorld({ firstBuy })
+        if (firstBuy === FIRST_BUY.REFERENCE) await w.poll(T0 + 1)
+        const calls = w.calls.length
+        // The first poll of tick 2 comes `offset` seconds after its time (ticks 0 and 1 were never polled).
+        const result = await w.poll(w.at(2, offset))
+        assert.equal(result.tick, 2, `+${offset} s`)
+        assert.equal(result.failClosed, false, `+${offset} s`)
+        if (decided) {
+          assert.ok(result.picks.length > 0, `+${offset} s: decided, and its picks are executable`)
+          assert.equal(result.wrote.length, 1, `+${offset} s`)
+          assert.equal(w.row(2).decided_at, new Date(w.at(2, offset) * 1000).toISOString())
+        } else {
+          assert.equal(result.reason, R.TICK_MISSED, `+${offset} s`)
+          assert.deepEqual(result.picks, [], `+${offset} s`)
+          assert.deepEqual(result.wrote, [], `+${offset} s`)
+          assert.equal(w.row(2), undefined, `+${offset} s: no row`)
+          assert.equal(w.calls.length, calls, `+${offset} s: no price is resolved for a tick that can no longer be decided`)
+          assert.match(result.detail, /T \/ 2/)
+        }
+      }
     })
   }
 })
@@ -964,6 +1001,59 @@ describe("rule: a missed tick is never decided late", () => {
     assert.equal(w.store.state.log.filter((entry) => entry.startsWith("insertTick")).length, 2)
     assertRowIsDecision(w.row(8), decide(w.basket, 8, [[0, 100, null], [0, 200, null], [0, 300, null]], null, FLAT), "tick 8")
   })
+
+  test("a keeper back only after the tick's time + T / 2: the tick is missed for good, and the next tick catches up by the calendar", async () => {
+    const prices = { ref: [100, 100, 100], 0: [90, 100, 100], 1: [10, 10, 10], 2: [80, 100, 100] }
+    const w = makeWorld({ prices })
+    await w.poll(T0 + 1)
+    const first = await w.poll(w.at(0, 1))
+    w.execute(first.picks[0])
+    const calls = w.calls.length
+    // Tick 1: the keeper is back half a cycle late, and stays up for the rest of it.
+    for (const offset of [HALF, HALF + 30, DAY - 1]) {
+      const late = await w.poll(w.at(1, offset))
+      assert.equal(late.reason, R.TICK_MISSED, `+${offset} s`)
+      assert.equal(late.tick, 1)
+      assert.equal(late.failClosed, false)
+      assert.deepEqual(late.picks, [], "nothing of tick 0 is offered either: its window is over")
+      assert.deepEqual(late.wrote, [])
+    }
+    assert.equal(w.row(1), undefined)
+    assert.equal(w.calls.length, calls, "tick 1's prices were never read")
+    // Tick 2, on time: the same decision as when tick 1 was never polled at all.
+    const third = await w.poll(w.at(2, 1))
+    assertRowIsDecision(w.row(2), decide(w.basket, 2, [[1, 90, 90], [0, 100, 100], [0, 100, 100]], null, prices[2]), "tick 2")
+    assert.equal(third.picks.length, 2, "three chunks are due by tick 2 and one is done: the calendar catches up")
+    assert.deepEqual(w.rows().map((row) => row.tick), [-1, 0, 2])
+  })
+
+  test("whatever kept a tick from being decided before + T / 2 (a price read that fails, a selection error, a write that fails), it is then missed, not decided late", async () => {
+    const causes = [
+      ["a price read that fails", R.PRICE_ERROR, (w) => { w.answer = () => { throw new Error("rpc down") } }, (w) => { w.answer = null }],
+      ["a selection error", R.DECIDE_ERROR, (w) => { w.prices[0] = [1e300, 100, 100] }, (w) => { w.prices[0] = [99, 100, 100] }],
+      ["a journal write that fails", R.JOURNAL_WRITE_FAILED, (w) => { w.store.state.failInsert = new Error("db down") }, (w) => { w.store.state.failInsert = null }],
+    ]
+    for (const [name, reason, breakIt, repairIt] of causes) {
+      const w = makeWorld({ prices: { ref: [1e-300, 100, 100] } })
+      await w.poll(T0 + 1)
+      breakIt(w)
+      for (const offset of [1, 600, HALF - 1]) assertFailClosed(await w.poll(w.at(0, offset)), reason, `${name}, +${offset} s`)
+      // Everything works again exactly at the deadline: too late for tick 0.
+      repairIt(w)
+      const late = await w.poll(w.at(0, HALF))
+      assert.equal(late.reason, R.TICK_MISSED, name)
+      assert.equal(w.row(0), undefined, name)
+      // One second earlier it would still have been decided.
+      const other = makeWorld({ prices: { ref: [1e-300, 100, 100] } })
+      await other.poll(T0 + 1)
+      breakIt(other)
+      await other.poll(other.at(0, 1))
+      repairIt(other)
+      const inTime = await other.poll(other.at(0, HALF - 1))
+      assert.equal(inTime.failClosed, false, name)
+      assert.ok(other.row(0), `${name}: decided one second before the deadline`)
+    }
+  })
 })
 
 describe("rule: no decision while a transaction is in flight", () => {
@@ -1004,10 +1094,17 @@ describe("rule: no decision while a transaction is in flight", () => {
     const w = makeWorld()
     await w.poll(T0 + 1)
     const first = await w.poll(w.at(0, 1))
-    for (const offset of [1, HALF, DAY - 1]) {
-      assert.equal((await w.poll(w.at(1, offset), { inFlight: [{ orderId: first.picks[0].orderId }] })).reason, R.IN_FLIGHT)
+    const inFlight = [{ orderId: first.picks[0].orderId }]
+    for (const offset of [1, HALF - 1]) {
+      assert.equal((await w.poll(w.at(1, offset), { inFlight })).reason, R.IN_FLIGHT, `+${offset} s: still waiting`)
+    }
+    // From + T / 2 on tick 1 can no longer be decided, whether or not the transaction has landed by then.
+    for (const offset of [HALF, DAY - 1]) {
+      assert.equal((await w.poll(w.at(1, offset), { inFlight })).reason, R.TICK_MISSED, `+${offset} s: with the transaction still in flight`)
     }
     w.execute(first.picks[0])
+    assert.equal((await w.poll(w.at(1, DAY - 1))).reason, R.TICK_MISSED, "and once it has landed")
+    assert.equal(w.row(1), undefined)
     await w.poll(w.at(2, 1))
     assert.deepEqual(w.rows().map((row) => row.tick), [-1, 0, 2])
     assertRowIsDecision(w.row(2), decide(w.basket, 2, [[1, 100, 100], [0, 200, 200], [0, 300, 300]], null, FLAT), "tick 2")
@@ -1472,7 +1569,7 @@ describe("rule: fail closed", () => {
     assert.equal(new Set(all).size, all.length)
     assert.deepEqual(
       all.filter((reason) => !FAIL_CLOSED_REASONS.includes(reason)).sort(),
-      ["basket_not_active", "before_first_tick", "completed", "expired", "in_flight", "picks_executed", "reference_recorded", "slot_not_reached", "tick_idle"],
+      ["basket_not_active", "before_first_tick", "completed", "expired", "in_flight", "picks_executed", "reference_recorded", "slot_not_reached", "tick_idle", "tick_missed"],
     )
     assert.ok(FAIL_CLOSED_REASONS.every((reason) => all.includes(reason)))
   })
@@ -1498,9 +1595,13 @@ describe("rule: status", () => {
   test("expired after the last grace tick's window, one T after its time: a second earlier the last grace tick still executes", async () => {
     const w = makeWorld()
     await w.poll(T0 + 1)
+    // The last grace tick is decided on time; nothing executes, so its picks are still owed a second before the end.
+    const decided = await w.poll(w.at(8, 1))
+    assert.equal(decided.tick, 8)
+    assert.ok(decided.picks.length > 0)
     const lastSecond = await w.poll(w.tl.end - 1)
     assert.equal(lastSecond.tick, 8)
-    assert.ok(lastSecond.picks.length > 0, "the last grace tick is decided and executable until its window ends")
+    assert.deepEqual(lastSecond.picks, decided.picks, "the last grace tick's picks are executable until its window ends")
     assert.deepEqual(w.store.state.statusWrites, [])
     const calls = w.calls.length
     const expired = await w.poll(w.tl.end)
