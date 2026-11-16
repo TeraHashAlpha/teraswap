@@ -143,3 +143,25 @@ RESULT: PASS
  (+ this feedback file)
 ```
 Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/alerts-not-dropped-on-freeze (no PR; the owner opens it; Auditor recommended: this touches the alert path).
+
+## 7. Reads from the goal's list that were first only grepped or skimmed (read in full afterwards)
+
+The first pass only grepped `next.config.js`, `alert-channels/email.ts`, `discord.ts`, `status.ts`, `telegram-retry.test.ts`, `telegram.test.ts`, the second half of
+`tick/route.test.ts`, and read part of `source-state-machine.rate-limit.test.ts` and `.recovery.test.ts`. All were read in full afterwards. What they show:
+
+- `next.config.js`: no `experimental` block and no function-duration setting; `after()` needs no flag on Next 16.4.5. `webpack()` is ignored by Turbopack, and Sentry wraps
+  the config (`withSentryConfig`); neither touches `after()`. Nothing to change.
+- `email.ts`, `discord.ts`: one attempt each, `AbortSignal.timeout(CHANNEL_FETCH_TIMEOUT_MS)` = 5 000 ms, no retry; they throw `Resend API <status>: <body>` /
+  `Discord webhook <status>: <body>`. This confirms the fan-out bound of 12 000 ms (Telegram) vs 5 000 ms (email, Discord), in parallel. Unconfigured or invalid channels
+  warn and return at once. Concern, not changed: only Telegram scrubs its token from errors; the Resend key and the Discord webhook URL are not in these messages today
+  (the key is only in a header, the URL only in `fetch`), but a transport error that quotes a URL would not be scrubbed on those two channels.
+- `status.ts` (+ test): `getAlertChannelStatus` is the "is anything configured" gate the tick logs once per run. Unrelated to timing; unchanged.
+- `telegram-retry.test.ts`: exercises the real fan-out with fake timers, which is the model my tick test follows. It pins the realistic all-hung total at
+  **5 000 + 500 + 5 000 = 10 500 ms** and the ceiling at `TELEGRAM_TOTAL_BUDGET_MS` = 12 000 ms (a 429 asking for the 2 000 ms cap, then a hang). So section 2's 12 000 ms is
+  the ceiling; the realistic all-hung case is 10 500 ms. It also pins that email and Discord are sent before the retry pause ends (parallel, not summed), which section 2 relies on.
+  My tick test fakes the three channel modules (it models their timeouts directly); the real Telegram channel is covered by this file, not duplicated.
+- `telegram.test.ts`: keyboard builder only; no timing. Unchanged.
+- `tick/route.test.ts`: auth (401/503), 200 with a mocked `runMonitoringTick`, no `GET` export. It still passes unchanged; my new `route.alerts.test.ts` sits beside it.
+- `source-state-machine.rate-limit.test.ts`, `.recovery.test.ts`: both mock `./alert-wrapper` and assert the exact sequence of `emitTransitionAlert` calls (for example
+  `active->degraded, degraded->disabled, disabled->degraded, degraded->active`, and exactly one `probe-infra-failure` per streak, quiet 429 degrades with no alert). They pass
+  unchanged, which is the evidence that which alerts fire, and when, did not change. In them `after()` throws (no request scope) on every alert and `trackAlert` swallows it.
