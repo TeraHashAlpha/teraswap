@@ -107,7 +107,10 @@ describe.each(LEGAL)('Privacy Policy — %s', (_ui, mount) => {
   it('§6 says the Analytics data is public, shows no wallet address, and that anyone with an address can request its swap statistics and export', () => {
     const sharing = section(mount(), 'pp-sharing')
     expect(sharing).toContain(PRIVACY_PUBLIC_ANALYTICS_NOTE)
-    expect(PRIVACY_PUBLIC_ANALYTICS_NOTE).toContain('The tab does not display wallet addresses')
+    // [S-22] Sentence 2 also says the amounts and dollar value are in the data, and that every listed trade shows its wallet on-chain.
+    expect(PRIVACY_PUBLIC_ANALYTICS_NOTE).toContain(
+      "The tab does not display wallet addresses or amounts; the data behind it holds each trade's amounts and dollar value and each address shortened to its first six and last four characters, and every swap or order fill it lists is a public blockchain transaction that shows the wallet behind it.",
+    )
     expect(PRIVACY_PUBLIC_ANALYTICS_NOTE).toContain('shortened to its first six and last four characters')
     // [S-13] What needs no signature and what does: each clause is proved against its route in product-claims.ts.
     expect(PRIVACY_PUBLIC_ANALYTICS_NOTE).toContain(
