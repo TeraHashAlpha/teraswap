@@ -12,8 +12,8 @@ Base: `origin/main` `b47ca15e` (PR #701 merged).
 ## Checklist
 - [x] Commit 1 `43721af8`: spec and ADR-027 copied from the architect pack, byte for byte; this file
 - [x] Commit 2 `13e661be`: migration `baskets`, `basket_ticks`, `orders.basket_id` (a file only; no database touched)
-- [x] Commit 3: `contracts/order-engine/executor/basket-coordinator.js`
-- [ ] Commit 4: tests (node:test, Node 20 and 22), engine vectors replayed through the coordinator, one test per rule
+- [x] Commit 3 `f064dedc`: `contracts/order-engine/executor/basket-coordinator.js`
+- [x] Commit 4: tests (node:test, Node 20 and 22), engine vectors replayed through the coordinator, one test per rule
 - [ ] Mutation proof in a scratch copy (the goal's five)
 - [ ] Verify: `scripts/agent-verify.sh --keeper --codeql`; `node scripts/gen-claude-state.mjs --check`
 - [ ] Push `feat/split-dca-coordinator`, compare link
