@@ -71,3 +71,86 @@ Constraints: `UNIQUE (basket_id, tick)` (the goal; what makes "decide once" hold
 | `basket_ticks` | yes | SELECT rows of own baskets (subquery on `baskets`) | `order_executions`: SELECT rows of own orders |
 
 No INSERT, UPDATE or DELETE policy on either table: see "Concern" in the feedback file.
+
+## 3 The coordinator's decision table
+
+`coordinateBasket({ basket, orders, inFlight }, { now, db, resolvePrice })` in
+`contracts/order-engine/executor/basket-coordinator.js`. One call = one poll of one basket. It never throws.
+
+### 3.1 Times (all unix seconds; `T` = `cadence_s`, `N` = `cycles`)
+
+| | `first_buy = 'reference'` | `first_buy = 'now'` |
+|---|---|---|
+| Reference row (journal tick -1) | written at first sight if `now < t0 + T/2`; never later | never |
+| Tick `t`, `t = 0 … N + 2` | `t0 + (t + 1) × T` | `t0 + t × T` |
+| Slot 1 / slot 2 of tick `t` | tick time / tick time `+ T/2` | the same |
+| Tick `t` is current (decidable, its picks executable) | from its tick time until the next tick's time | the same |
+| End (the last grace tick's window closes) | `t0 + (N + 4) × T` | `t0 + (N + 3) × T` |
+
+### 3.2 One poll, in order (the first row that applies ends the poll)
+
+"FC" = fail closed (`result.failClosed`): something is wrong; nothing executes for this basket in this poll.
+
+| # | When | Reads | Writes | Picks | `reason` |
+|---|---|---|---|---|---|
+| 1 | `deps.now`, `deps.resolvePrice` or a `deps.db` method is missing; the input is not an object | - | - | none | `internal_error` FC |
+| 2 | the basket row is null or undefined | - | - | none | `basket_missing` FC |
+| 3 | a field of the basket row is missing or out of range (id, wallet, chain_id, token_in, cadence_s even, cycles, t0 in seconds, first_buy, mode, threshold_bps 1 … 9 999, stable_leg explicit, band_bps with it, status, the three legs' token, n, order hash; two legs alike; a leg buying the token sold) | - | - | none | `basket_unreadable` FC |
+| 4 | `status` is not `active` | - | - | none | `basket_not_active` |
+| 5 | not exactly three order rows; a leg with no row carrying its order hash; a row whose basket_id, type, chain, wallet, token_in, token_out, dca_total or dca_executed (0 … n) does not match; the same for owner, tokenIn, tokenOut, dcaTotal of the signed `order_data` | - | - | none | `orders_mismatch` FC |
+| 6 | `inFlight` is not an array, or an entry names no leg of this basket | - | - | none | `in_flight_unreadable` FC |
+| 7 | `now()` throws or is not a plausible number of unix seconds (milliseconds are refused) | - | - | none | `clock_invalid` FC |
+| 8 | every leg has `dca_executed ≥ n` | - | `baskets.status = completed` | none | `completed` (`status_write_failed` FC if the write is not confirmed) |
+| 9 | `now ≥ end` and a leg is in flight | - | - | none | `in_flight` |
+| 10 | `now ≥ end` | - | `baskets.status = expired` | none | `expired` (`status_write_failed` FC) |
+| 11 | the journal cannot be read; a row is malformed, another basket's, or beyond the last grace tick; a tick twice; a reference row in `'now'` mode | journal | - | none | `journal_unreadable` FC |
+| 12 | the journal holds a tick later than the clock's current tick | journal | - | none | `clock_behind_journal` FC |
+| 13 | before the first tick, `'reference'` mode, no reference row, `now < t0 + T/2` | journal, 3 prices | row tick -1 (prices, sources, band_add; nothing else) | none | `reference_recorded` (`price_error` or `journal_write_failed` FC) |
+| 14 | before the first tick, anything else | journal | - | none | `before_first_tick` |
+| 15 | the current tick has a row | journal | - | § 3.4 | § 3.4 |
+| 16 | the current tick has no row and a leg is in flight | journal | - | none | `in_flight` |
+| 17 | the current tick has no row | journal, 3 prices | row of the current tick: the decision | § 3.4, from the row as stored | § 3.4 (`price_error`, `decide_error` or `journal_write_failed` FC: nothing written) |
+
+A tick other than the current one is never decided: there is no row 15-17 for a past tick.
+
+### 3.3 The state the selection module gets at tick `c` (row 17)
+
+| Input of `decideTick` | From |
+|---|---|
+| `params.cycles`, `mode` | `baskets.cycles`, `mode` |
+| `params.threshold`, `band` | `threshold_bps ÷ 10 000`, `band_bps ÷ 10 000` (the double of the decimal) |
+| `params.stableLeg` | `baskets.stable_leg` |
+| `tick` | `c`, from the clock |
+| `legs[i].n` | `baskets.leg{i}_n` (= the order's `dca_total`, checked) |
+| `legs[i].done` | the order row's `dca_executed`, never the picks |
+| `legs[i].last` | the price of leg `i` in the latest journal row before `c` that has one, the reference row included |
+| `legs[i].entry` | the price of leg `i` in the first TICK row (tick ≥ 0) that has one; the reference row never |
+| `cooldown` | `next_state.cooldown` of the row of tick `c - 1`; none if that tick has no row, or `c = 0` |
+| `prices[i]` | `resolvePrice(leg token, { stable })`: a positive finite price with a source label, or no price |
+| `bandAdd` | the stable leg's answer carries it with the price (a price without it: `price_error`); 0 when the stable leg has no price; not passed without a stable leg |
+
+### 3.4 Which picks of the current tick's row are executable now (rows 15 and 17)
+
+First: if any leg's `dca_executed` is LOWER than the `done` stored in the row, `orders_mismatch` FC.
+
+For each pick of the row, in decision order, with `executed = dca_executed now - done stored in the row` for its leg:
+
+| The pick | Outcome |
+|---|---|
+| `slot ≤ executed` | already executed: skipped |
+| a lower slot of the same leg is still outstanding | not offered (one pick per leg per poll: its next outstanding slot) |
+| its leg is in flight (the caller's list, or the order row is `executing`) | waits |
+| `now <` tick time `+ (slot - 1) × T/2` | waits |
+| otherwise | executable: `{ orderId, leg, tick, slot, kind }` |
+
+When no pick is executable: `tick_idle` (the row picked nothing; the detail carries the module's idle reason),
+else `in_flight` (a pick waits for a transaction), else `slot_not_reached` (a second slot waits for its time),
+else `picks_executed`.
+
+### 3.5 What "fail closed" leaves behind
+
+In rows 1-7, 11, 12 nothing is read beyond what the row says and nothing is written. In rows 13 and 17 a failure
+before or during the write leaves no row, so the next poll starts from the same state; a write the database refuses
+(another keeper's row for the same tick) leaves THAT row, which the next poll reads. The reason is returned to the
+caller (`result.reason`, `result.detail`), not journaled: a journal row for (basket, tick) IS the decision and exists
+at most once, so writing a failure there would stop the next poll from deciding.

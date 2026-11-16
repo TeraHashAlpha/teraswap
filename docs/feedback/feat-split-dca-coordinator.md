@@ -11,8 +11,8 @@ Base: `origin/main` `b47ca15e` (PR #701 merged).
 
 ## Checklist
 - [x] Commit 1 `43721af8`: spec and ADR-027 copied from the architect pack, byte for byte; this file
-- [x] Commit 2: migration `baskets`, `basket_ticks`, `orders.basket_id` (a file only; no database touched)
-- [ ] Commit 3: `contracts/order-engine/executor/basket-coordinator.js`
+- [x] Commit 2 `13e661be`: migration `baskets`, `basket_ticks`, `orders.basket_id` (a file only; no database touched)
+- [x] Commit 3: `contracts/order-engine/executor/basket-coordinator.js`
 - [ ] Commit 4: tests (node:test, Node 20 and 22), engine vectors replayed through the coordinator, one test per rule
 - [ ] Mutation proof in a scratch copy (the goal's five)
 - [ ] Verify: `scripts/agent-verify.sh --keeper --codeql`; `node scripts/gen-claude-state.mjs --check`
@@ -56,3 +56,35 @@ precedence around `IS NULL`, NaN ordering in the price checks), and `basket-coor
 column sets against the row the coordinator writes and the rows it reads, DOUBLE PRECISION on the four doubles, no
 NUMERIC anywhere, the unique key, the value lists against the code's constants, the only ALTER of an existing table,
 and the mirror in `schema.sql`. The owner (or a staging project) is the first to execute it.
+
+## 3 The coordinator (commit 3)
+`coordinateBasket({ basket, orders, inFlight }, { now, db, resolvePrice })`, one call per poll per basket. It returns
+`{ picks, wrote, reason, detail, failClosed, tick, basketId }`: the picks executable NOW as
+`{ orderId, leg, tick, slot, kind }`, the rows it stored, and a reason whenever there is no pick. It never throws:
+whatever goes wrong is `{ picks: [], reason, failClosed: true }`. The full decision table (17 rows, the state the
+module gets, which picks are executable, what a failure leaves behind) is evidence §3. Each Coordinator rule, as built:
+
+| Rule | As built |
+|---|---|
+| Reference row, `T/2` deadline | `'reference'` mode, first sight strictly before `t0 + T/2`: the three prices as journal tick -1, prices only. At `t0 + T/2` or later: never written, and tick 0 runs with `last` null. Written once: a later sight reads it |
+| Tick times | `'reference'`: `t0 + (t + 1) × T`; `'now'`: `t0 + t × T`; `t = 0 … N + 2`; second slot `+ T/2` |
+| State from rows | every call starts from the rows alone: `last` = latest row with a price (reference included), `entry` = first TICK row with a price, `cooldown` = the previous tick's stored next-cooldown (none if that tick has no row), `done` = the order rows |
+| Decide once | a row for the current tick is read; no price is resolved and nothing is decided |
+| Write before return | the decision is inserted first; the picks are computed from the row the database answered with; a failed or unconfirmed insert returns no pick |
+| Slot timing | slot 1 from the tick time, slot 2 from `+ T/2`, both until the next tick's time; per leg only its next outstanding slot; a pick the order row shows as executed is not offered again |
+| Missed tick | only the current tick is ever decided; a past tick with no row stays without one, and the next decision finds no previous row: cooldown none, `last` and `entry` unchanged |
+| In-flight block | no decision while any leg has a transaction in flight; a leg in flight is not offered; an order row that is `executing` counts as in flight |
+| Stable pair | `resolvePrice(token, { stable: true })` must return the price with its `bandAdd`; a price alone is refused |
+| Fail closed | missing or unreadable basket, mismatched leg order (row and signed `order_data`), unreadable journal, clock not in seconds or behind the journal, resolver error, selection-module error, failed write: no pick, a reason, nothing written |
+| Status | `completed` when every leg has `dca_executed ≥ n` (checked first); `expired` once `now ≥` the end of the last grace tick's window, unless a transaction is still in flight |
+
+Readings I had to choose, none of them inventing a rule (each is in the decision table and pinned by a test):
+- **"A tick whose time passed"** is a tick that is no longer the current one. A tick is decidable from its time until
+  the next tick's time, the same window in which its picks are executable. No other deadline is in the spec.
+- **"Expired after the last grace tick"** is after that tick's WINDOW, one `T` after its time (`t0 + (N + 4) × T` in
+  `'reference'` mode): the spec's expiry formula keeps "one cycle of room for the last second slot", and an earlier
+  cut would make the last grace tick's picks unexecutable.
+- **"With a recorded reason"**: the reason is in the result of the call, for the caller's log. It is not a journal row
+  (evidence §3.5).
+- **First sight before `t0`** (a keeper clock a moment behind the server's): the reference is written; the rule gives
+  only the upper bound.
