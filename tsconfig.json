@@ -39,6 +39,7 @@
     "node_modules",
     "workers",
     "e2e",
+    "archive",
     "integrations/defillama/upstream/index.ts"
   ]
 }
