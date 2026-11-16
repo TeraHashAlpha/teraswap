@@ -150,7 +150,8 @@ describe.each(LEGAL)('Privacy Policy §3.3 — %s', (_ui, mount) => {
       'Slippage settings, swap history, and active approvals are held in memory only',
       // [S-17] The worker caches pages (network-first navigations, sw.js:112-121) as well as static assets, and never the API (sw.js:51).
       "A service worker keeps the site's own pages and static files in your browser's cache and does not cache requests to our API.",
-      'those entries are theirs',
+      // [S-18] Said once, with IndexedDB named and the before-you-connect writes owned up to.
+      "The wallet libraries the Interface uses keep their own entries in your browser's storage and IndexedDB, such as the wallet you last connected, and some write theirs when the page loads, before you connect a wallet; those entries are theirs.",
     ]) expect(collect, phrase).toContain(phrase)
     // The old list named three things the app does not store.
     expect(collect).not.toMatch(/remember your preferences, such as imported tokens, slippage settings, swap history/i)

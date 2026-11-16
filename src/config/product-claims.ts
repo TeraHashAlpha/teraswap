@@ -159,7 +159,9 @@ export const PRIVACY_LOCAL_STORAGE_NOTE =
   "It writes these to session storage, which the browser clears when the session ends: the direction in which you read the exchange rate, whether the intro has played, the time of your last click, key press, scroll or touch while a wallet is connected (for the one-hour idle timeout), and the signature that authorises reads of your orders, which is sent to our server with those reads. " +
   "Slippage settings, swap history, and active approvals are held in memory only and are not written to your browser's storage. " +
   "A service worker keeps the site's own pages and static files in your browser's cache and does not cache requests to our API. " +
-  'The wallet libraries the Interface uses keep their own entries in your browser\'s storage, such as the wallet you last connected; those entries are theirs.'
+  // [S-18] @walletconnect/keyvaluestorage has an IndexedDB backend (node_modules/@walletconnect/keyvaluestorage/dist/types/browser/lib/indexedDb.d.ts);
+  // wagmi's `recentConnectorId` is the localStorage example (lib/lazy-walletconnect.ts:41,57). "Before you connect": the Auditor's A78c observation.
+  "The wallet libraries the Interface uses keep their own entries in your browser's storage and IndexedDB, such as the wallet you last connected, and some write theirs when the page loads, before you connect a wallet; those entries are theirs."
 // [fix/privacy-leftovers-a78b S-8] Privacy §8. Vercel hosts the site (vercel.json); Cloudflare sits in front of it (owner fact,
 // 2026-11-11; the repo's own statement is cloudflare-ips.ts:4). "We do not ask them for analytics": no analytics package or
 // script is installed or loaded (package.json, layout.tsx, csp-policy.js).
