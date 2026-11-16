@@ -6,7 +6,7 @@ import { getSupabase, getSupabaseLogger } from '@/lib/supabase'
 import { trackLargeTrade, trackSwapFailed, trackOracleDeviation, trackOracleUnavailable } from '@/lib/security-tracker'
 import { trackWalletAction } from '@/lib/wallet-activity-server'
 import { computeTokenAmountUsd } from '@/lib/chainlink'
-import { checkRateLimit, LOG_RATE_LIMIT } from '@/lib/kv-rate-limiter'
+import { checkRateLimitWithin, LOG_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { bodySizeGuard, clientIp } from '@/lib/body-limit'
 import { forLog } from '@/lib/log-sanitize'
 
@@ -15,7 +15,7 @@ import { forLog } from '@/lib/log-sanitize'
 async function ingestionGuards(req: NextRequest): Promise<NextResponse | null> {
   const tooLarge = bodySizeGuard(req)
   if (tooLarge) return tooLarge
-  const rate = await checkRateLimit(`log:${clientIp(req)}`, LOG_RATE_LIMIT.limit, LOG_RATE_LIMIT.windowMs)
+  const rate = await checkRateLimitWithin(`log:${clientIp(req)}`, LOG_RATE_LIMIT.limit, LOG_RATE_LIMIT.windowMs)
   if (!rate.allowed) {
     return NextResponse.json(
       { error: 'Rate limit exceeded' },

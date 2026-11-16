@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 // [P114/M-03] Fire-and-forget batch insert → INSERT-only logger client.
 import { getSupabaseLogger } from '@/lib/supabase'
 import { getAllowedOrigin } from '@/lib/cors'
-import { checkRateLimit, LOG_RATE_LIMIT } from '@/lib/kv-rate-limiter'
+import { checkRateLimitWithin, LOG_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { bodySizeGuard, clientIp } from '@/lib/body-limit'
 
 // CORS — restricted to teraswap.app, Vercel previews, and localhost (EXT-L-01).
@@ -48,7 +48,7 @@ export async function POST(req: Request) {
 
   // [AUDIT-W6 / W6-M-02] Per-IP budget shared by all log-* routes, BEFORE
   // any Supabase work (unbounded unauthenticated inserts were the finding).
-  const rate = await checkRateLimit(`log:${clientIp(req)}`, LOG_RATE_LIMIT.limit, LOG_RATE_LIMIT.windowMs)
+  const rate = await checkRateLimitWithin(`log:${clientIp(req)}`, LOG_RATE_LIMIT.limit, LOG_RATE_LIMIT.windowMs)
   if (!rate.allowed) {
     return NextResponse.json(
       { error: 'Rate limit exceeded' },

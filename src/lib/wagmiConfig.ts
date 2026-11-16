@@ -11,6 +11,7 @@ import { mainnet, base, arbitrum } from 'wagmi/chains'
 import { fallback } from 'wagmi'
 import type { Transport } from 'viem'
 import { guardedHttp } from '@/lib/rpc-guarded-transport'
+import { INTEGRATED_DEX_SOURCE_COUNT, SWAP_CHAIN_LIST_LABEL } from '@/config/product-claims'
 import { proxyRpcUrl } from '@/lib/rpc-proxy-url'
 import { serverRpcUrl } from '@/lib/rpc-env'
 
@@ -112,9 +113,10 @@ if (!walletConnectProjectId && typeof window !== 'undefined') {
 // in Reown. See FEEDBACK.
 export const WALLETCONNECT_METADATA = {
   appName: 'TeraSwap',
-  // [feat/retire-force-mev, owner 2026-11-06] ", with MEV protection" removed (retired claim). The stale "Ethereum & Base" /
-  // "11" are pre-existing and out of this change's scope — see docs/feedback/feat-retire-force-mev.md.
-  appDescription: 'Ethereum & Base meta-aggregator: best swap price across 11 liquidity sources.',
+  // [fix/privacy-leftovers-a78b] Wallets show this when you connect. Same words and the same two constants as the page description
+  // (SITE_META_DESCRIPTION in product-claims.ts): the chain list is the chain registry's, the count is the quoting adapters', and no
+  // "best" (the claims file makes no such promise). Pinned by metadata.copy.guard.test.ts and wagmiConfig.test.ts.
+  appDescription: `TeraSwap is an EVM meta-aggregator on ${SWAP_CHAIN_LIST_LABEL} that compares quotes across ${INTEGRATED_DEX_SOURCE_COUNT} liquidity sources.`,
   appUrl: 'https://www.teraswap.app',
   appIcon: 'https://www.teraswap.app/apple-touch-icon.png',
 } as const
