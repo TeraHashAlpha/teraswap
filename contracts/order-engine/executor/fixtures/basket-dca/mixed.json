@@ -1,12 +1,13 @@
 {
   "header": {
     "family": "mixed",
-    "about": "seeded mixes of holes, falls and stable excursions; soft and rigid",
+    "about": "seeded mixes of holes, falls, stable excursions and missing references; soft and rigid",
     "generator": "scripts/basket-dca/export_vectors.py",
     "engine": {
       "file": "engine_discrete.py",
       "sha256": "282581bab72abf16b19096ab0f1be15e50fe0f2b5cdd3a3a7e165d9f2f281685",
-      "package": "analyst package basket-dca-v2, docs-Reports-basket-dca/src (v3.2)"
+      "package": "analyst package basket-dca-v2, docs-Reports-basket-dca/src (v3.2)",
+      "copy": "contracts/order-engine/executor/fixtures/basket-dca/engine_discrete.py (byte for byte)"
     },
     "run": {
       "function": "run_discrete",
@@ -14,7 +15,7 @@
       "rule": "hamilton",
       "kSoft": "max(1, ceil(N / 4))",
       "graceTicks": 3,
-      "pd0": [null, null, null],
+      "pd0": "input.reference of each vector: the decision prices one cycle before tick 0 (null = nan: the leg has no reference). It gives `last`; `entry` is the first tick price",
       "Pe": "the decision prices (Pe values fills only; no decision reads it)"
     },
     "idleReasons": {
@@ -25,6 +26,14 @@
       "regra 9": "rule9",
       "regra 5": "rule5"
     },
+    "perLegColumns": ["variation0", "variation1", "variation2", "entry0", "entry1", "entry2", "protected0", "protected1", "protected2", "inBand", "reason0", "reason1", "reason2"],
+    "perLeg": {
+      "variation": "v = price / last - 1, unrounded; null when the leg has no price or no previous price (nan in the engine)",
+      "entry": "rule 9's base price: the leg's first tick with a price; null before it. Never the reference",
+      "protected": "price <= entry x (1 - threshold); false without a price. Reported in the soft window too, where it no longer blocks",
+      "inBand": "the stable leg only: not(|price - 1| + band_add > band); null without a stable leg or without its price",
+      "reason": "picked = at least one fill on the tick; complete / no_price / band / rule9 = the engine's why_not; cooldown = eligible, not picked, and first in the rule 4 order until rule 5 sent it to the back of the line; not_due = eligible and not picked for any other reason (nothing due, or the chunks due went to legs ahead of it)"
+    },
     "generatedWith": {
       "python": "3.14.2",
       "numpy": "2.5.4"
@@ -33,7 +42,7 @@
   "vectors": [
     {
       "id": "mixed-00-soft",
-      "notes": "seeded mix (seed \"mixed/0\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "notes": "seeded mix (seed \"mixed/0\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; soft",
       "input": {
         "weights": [
           [1, 3],
@@ -48,6 +57,7 @@
         "stableLeg": 0,
         "band": 0.01,
         "bandAdd": [0.003, 0.003, 0.0, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "reference": [1.000288, null, null],
         "prices": [
           [1.000349, 97077.441003, 1.217267],
           [0.999802, 93444.717147, 1.221866],
@@ -64,8 +74,8 @@
         "n": [2, 2, 2],
         "kSoft": 2,
         "fills": [
-          [0, 0, "select"],
-          [1, 1, "select"],
+          [0, 1, "select"],
+          [1, 0, "select"],
           [2, 0, "select"],
           [3, 1, "select"],
           [4, 2, "select"],
@@ -78,12 +88,23 @@
         ],
         "done": [2, 2, 2],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [6.098243705809914e-05, null, null, 1.000349, 97077.441003, 1.217267, false, false, false, true, "not_due", "picked", "not_due"],
+          [-0.0005468091636018357, -0.03742088603146976, 0.0037781357746491384, 1.000349, 97077.441003, 1.217267, false, false, false, true, "picked", "cooldown", "not_due"],
+          [0.0014892948803861827, null, null, 1.000349, 97077.441003, 1.217267, false, false, false, true, "picked", "no_price", "no_price"],
+          [null, -0.0052939299417194, 0.05031648314954351, 1.000349, 97077.441003, 1.217267, false, false, false, null, "complete", "picked", "not_due"],
+          [-0.0012893354679108793, 0.030998406163018855, 0.009680943408870268, 1.000349, 97077.441003, 1.217267, false, false, false, true, "complete", "complete", "picked"],
+          [0.0, 0.027864938358597158, -0.04963226498529838, 1.000349, 97077.441003, 1.217267, false, false, false, true, "complete", "complete", "picked"],
+          [0.0, -0.0725914172462836, 0.04826067961716918, 1.000349, 97077.441003, 1.217267, false, false, false, true, "complete", "complete", "complete"],
+          [0.0, 0.037644401929392446, -0.015498621492630149, 1.000349, 97077.441003, 1.217267, false, false, false, true, "complete", "complete", "complete"],
+          [0.0, 0.035033775134445166, -0.007093498845683555, 1.000349, 97077.441003, 1.217267, false, false, false, true, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-01-rigid",
-      "notes": "seeded mix (seed \"mixed/1\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "notes": "seeded mix (seed \"mixed/1\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; rigid",
       "input": {
         "weights": [
           [1, 3],
@@ -98,6 +119,7 @@
         "stableLeg": 0,
         "band": 0.01,
         "bandAdd": [0.003, 0.0, 0.003, 0.003, 0.0, 0.003, 0.003, 0.0, 0.003, 0.0, 0.003, 0.003, 0.0, 0.003, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0, 0.003, 0.003, 0.0, 0.0, 0.0, 0.0, 0.003, 0.003, 0.003],
+        "reference": [0.997424, 92657.497072, 1.259058],
         "prices": [
           [null, null, null],
           [null, null, null],
@@ -134,12 +156,12 @@
         "n": [9, 9, 8],
         "kSoft": null,
         "fills": [
-          [2, 0, "select"],
-          [2, 2, "catchup"],
+          [2, 2, "select"],
           [2, 0, "catchup"],
-          [3, 1, "select"],
+          [2, 0, "catchup"],
+          [3, 0, "select"],
           [5, 2, "select"],
-          [5, 0, "catchup"],
+          [5, 2, "catchup"],
           [6, 1, "select"],
           [7, 0, "select"],
           [8, 2, "select"],
@@ -154,7 +176,7 @@
           [17, 1, "select"],
           [18, 2, "select"],
           [20, 0, "select"],
-          [20, 2, "catchup"],
+          [20, 1, "catchup"],
           [21, 1, "select"],
           [22, 2, "select"],
           [23, 0, "select"],
@@ -172,12 +194,43 @@
         ],
         "done": [9, 9, 8],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, null, null, null, null, null, false, false, false, null, "no_price", "no_price", "no_price"],
+          [null, null, null, null, null, null, false, false, false, null, "no_price", "no_price", "no_price"],
+          [0.0038088114984198285, null, -0.022317478622907005, 1.001223, null, 1.230959, false, false, false, true, "picked", "no_price", "picked"],
+          [-0.004113968616382135, 0.009595277533874347, 0.02979059416276253, 1.001223, 93546.571472, 1.230959, false, false, false, true, "picked", "not_due", "not_due"],
+          [null, null, null, 1.001223, 93546.571472, 1.230959, false, false, false, null, "no_price", "no_price", "no_price"],
+          [0.00564635183491391, null, -0.04657431584926208, 1.001223, 93546.571472, 1.230959, false, false, false, true, "not_due", "no_price", "picked"],
+          [-0.03183396593712784, -0.011704235492240533, 0.028492682801708913, 1.001223, 93546.571472, 1.230959, false, false, false, false, "band", "picked", "not_due"],
+          [0.030615576841265923, 0.0018693934637892262, 0.034439316281947185, 1.001223, 93546.571472, 1.230959, false, false, false, true, "picked", "cooldown", "not_due"],
+          [0.0004407641911579052, null, 0.008749949449230021, 1.001223, 93546.571472, 1.230959, false, false, false, true, "cooldown", "no_price", "picked"],
+          [-0.036507368808043394, 0.05856396580401335, -0.03698980870211477, 1.001223, 93546.571472, 1.230959, false, false, false, false, "band", "picked", "cooldown"],
+          [0.0380938852154582, -0.0262256807621305, 0.030492959776096118, 1.001223, 93546.571472, 1.230959, false, false, false, true, "not_due", "cooldown", "picked"],
+          [-0.04407034955032696, 0.0075613972452834854, -0.052261619627764766, 1.001223, 93546.571472, 1.230959, false, false, false, false, "band", "picked", "cooldown"],
+          [0.0461407449976492, 0.0029239843615973538, null, 1.001223, 93546.571472, 1.230959, false, false, false, true, "picked", "cooldown", "no_price"],
+          [-6.392271743471678e-05, 0.016651736482570012, 0.016842005170805363, 1.001223, 93546.571472, 1.230959, false, false, false, true, "cooldown", "picked", "not_due"],
+          [null, -0.0017338359325289598, -0.02564104631140396, 1.001223, 93546.571472, 1.230959, false, false, false, null, "no_price", "not_due", "picked"],
+          [-0.0004614716150007636, -0.03540439211943702, 0.02196307496287231, 1.001223, 93546.571472, 1.230959, false, false, false, true, "not_due", "picked", "not_due"],
+          [-0.002563249300727599, 0.029997648079503225, null, 1.001223, 93546.571472, 1.230959, false, false, false, true, "picked", "not_due", "no_price"],
+          [0.0015729603113059376, -0.030549117988556085, 0.04598890392005894, 1.001223, 93546.571472, 1.230959, false, false, false, true, "not_due", "picked", "not_due"],
+          [null, 0.014327203952940737, -0.0567771167097646, 1.001223, 93546.571472, 1.230959, false, false, false, null, "no_price", "not_due", "picked"],
+          [null, null, null, 1.001223, 93546.571472, 1.230959, false, false, false, null, "no_price", "no_price", "no_price"],
+          [-0.0024787733772937415, 0.020495482708958068, 0.008701360510724676, 1.001223, 93546.571472, 1.230959, false, false, false, true, "picked", "picked", "not_due"],
+          [0.0020236459722626776, -0.04332887041417055, 0.0018685977951033994, 1.001223, 93546.571472, 1.230959, false, false, false, true, "not_due", "picked", "not_due"],
+          [-6.905330915463193e-05, 0.0327939704460396, -0.01099986115182272, 1.001223, 93546.571472, 1.230959, false, false, false, true, "not_due", "not_due", "picked"],
+          [0.002665241468074564, 0.017453012205076, -0.000673227072923499, 1.001223, 93546.571472, 1.230959, false, false, false, true, "picked", "not_due", "complete"],
+          [0.049842187534312465, -0.04278082760173629, null, 1.001223, 93546.571472, 1.230959, false, false, false, false, "band", "picked", "complete"],
+          [-0.09702354635822974, 0.028714763493353335, 0.024044646950280635, 1.001223, 93546.571472, 1.230959, false, false, false, false, "band", "complete", "complete"],
+          [0.05161680934179902, 0.012847592477192915, null, 1.001223, 93546.571472, 1.230959, false, false, false, true, "picked", "complete", "complete"],
+          [null, null, null, 1.001223, 93546.571472, 1.230959, false, false, false, null, "complete", "complete", "complete"],
+          [0.0022738855607764563, -0.027795837875525864, 0.022614425962785845, 1.001223, 93546.571472, 1.230959, false, false, false, true, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-02-soft",
-      "notes": "seeded mix (seed \"mixed/2\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "notes": "seeded mix (seed \"mixed/2\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; soft",
       "input": {
         "weights": [
           [3, 10],
@@ -192,6 +245,7 @@
         "stableLeg": 2,
         "band": 0.1,
         "bandAdd": [0.0, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "reference": [null, 97247.923374, 0.997796],
         "prices": [
           [3190.323315, 95296.145479, 0.999854],
           [3137.406832, null, 1.002402],
@@ -214,10 +268,10 @@
         "n": [1, 1, 2],
         "kSoft": 3,
         "fills": [
-          [0, 0, "select"],
-          [3, 2, "select"],
+          [0, 1, "select"],
+          [3, 0, "select"],
           [6, 2, "select"],
-          [9, 1, "select"]
+          [9, 2, "select"]
         ],
         "idle": [
           [1, "calendar"],
@@ -234,12 +288,29 @@
         ],
         "done": [1, 1, 2],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, -0.020070124145415202, 0.002062545851055697, 3190.323315, 95296.145479, 0.999854, false, false, false, true, "not_due", "picked", "not_due"],
+          [-0.01658655809309406, null, 0.002548372062321169, 3190.323315, 95296.145479, 0.999854, false, false, false, true, "not_due", "complete", "not_due"],
+          [0.0007022755154120208, -0.011452595133981558, -0.0031035452842272937, 3190.323315, 95296.145479, 0.999854, false, false, false, true, "not_due", "complete", "not_due"],
+          [-0.008087813371183472, 0.04401811272106393, -0.001524080573126363, 3190.323315, 95296.145479, 0.999854, false, false, false, true, "picked", "complete", "not_due"],
+          [-0.0047103324179269546, -0.015102043006634203, -0.0002595793811788205, 3190.323315, 95296.145479, 0.999854, false, false, false, true, "complete", "complete", "not_due"],
+          [0.037768184678312444, -0.008111500872929889, 0.005450577388274036, 3190.323315, 95296.145479, 0.999854, false, false, false, true, "complete", "complete", "not_due"],
+          [-0.04431734296925638, null, -0.0018674983498611075, 3190.323315, 95296.145479, 0.999854, false, false, false, true, "complete", "complete", "picked"],
+          [0.004672817568576626, 0.01980514265341271, -0.0023454832964230343, 3190.323315, 95296.145479, 0.999854, false, false, false, true, "complete", "complete", "not_due"],
+          [0.02762458210715435, 0.008116537466352991, null, 3190.323315, 95296.145479, 0.999854, false, false, false, null, "complete", "complete", "no_price"],
+          [0.04778523128147105, -0.03331380833094777, 0.0012766277003180004, 3190.323315, 95296.145479, 0.999854, false, false, false, true, "complete", "complete", "picked"],
+          [-0.2314986720274892, -0.042032537454281704, 0.0, 3190.323315, 95296.145479, 0.999854, false, false, false, true, "complete", "complete", "complete"],
+          [-0.016371151378541393, 0.07070417623758263, 0.0, 3190.323315, 95296.145479, 0.999854, false, false, false, true, "complete", "complete", "complete"],
+          [0.018396732724211162, -0.05065704813849614, 0.0, 3190.323315, 95296.145479, 0.999854, false, false, false, true, "complete", "complete", "complete"],
+          [-0.027398514740548774, -0.015226004209157762, 0.0, 3190.323315, 95296.145479, 0.999854, false, false, false, true, "complete", "complete", "complete"],
+          [0.2634971842130449, 0.0002802573779314699, 0.0, 3190.323315, 95296.145479, 0.999854, false, false, false, true, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-03-rigid",
-      "notes": "seeded mix (seed \"mixed/3\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "notes": "seeded mix (seed \"mixed/3\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; rigid",
       "input": {
         "weights": [
           [3, 10],
@@ -254,6 +325,7 @@
         "stableLeg": null,
         "band": null,
         "bandAdd": null,
+        "reference": [3149.643891, 96475.172831, 1.21595],
         "prices": [
           [3257.037617, 92912.130395, 1.218798],
           [3145.815666, 93589.045839, 1.288191],
@@ -276,10 +348,10 @@
         "n": [4, 3, 5],
         "kSoft": null,
         "fills": [
-          [0, 0, "select"],
-          [1, 1, "select"],
-          [2, 0, "select"],
-          [3, 2, "select"],
+          [0, 1, "select"],
+          [1, 0, "select"],
+          [2, 2, "select"],
+          [3, 0, "select"],
           [4, 1, "select"],
           [5, 2, "select"],
           [6, 0, "select"],
@@ -297,12 +369,29 @@
         ],
         "done": [4, 3, 5],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [0.034097101042715794, -0.03693222133161189, 0.0023422015707883492, 3257.037617, 92912.130395, 1.218798, false, false, false, null, "not_due", "picked", "not_due"],
+          [-0.034148193566902796, 0.007285544321524062, 0.05693560376699014, 3257.037617, 92912.130395, 1.218798, false, false, false, null, "picked", "not_due", "not_due"],
+          [-0.022530742270135296, 0.00015443383219082563, -0.00279772176641524, 3257.037617, 92912.130395, 1.218798, false, false, false, null, "cooldown", "not_due", "picked"],
+          [-6.907781321618955e-06, 0.021132699181956482, -0.0612788390354253, 3257.037617, 92912.130395, 1.218798, false, false, false, null, "picked", "not_due", "cooldown"],
+          [0.07371002635136947, -0.015378962584961853, 0.0673497701657475, 3257.037617, 92912.130395, 1.218798, false, false, false, null, "not_due", "picked", "not_due"],
+          [-0.040813158927265114, 0.022439388153359996, -0.06573152956605777, 3257.037617, 92912.130395, 1.218798, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.013707918045928524, 0.011147644284904334, 0.030560124808520994, 3257.037617, 92912.130395, 1.218798, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.0627640177616684, null, 0.0462149883395333, 3257.037617, 92912.130395, 1.218798, false, false, false, null, "not_due", "no_price", "picked"],
+          [null, 0.011840372456282111, -0.03082604641261355, 3257.037617, 92912.130395, 1.218798, false, false, false, null, "no_price", "picked", "cooldown"],
+          [null, null, null, 3257.037617, 92912.130395, 1.218798, false, false, false, null, "no_price", "complete", "no_price"],
+          [-0.0491689560276104, -0.004207569900000596, -0.023911789166238928, 3257.037617, 92912.130395, 1.218798, false, false, false, null, "picked", "complete", "picked"],
+          [-0.003775311648896662, -0.02929236230197374, 0.020151831773460582, 3257.037617, 92912.130395, 1.218798, false, false, false, null, "complete", "complete", "picked"],
+          [-0.015170289201024367, 0.0010402391666286537, null, 3257.037617, 92912.130395, 1.218798, false, false, false, null, "complete", "complete", "complete"],
+          [0.046738073441535244, 0.0033052056333422453, 0.004861713308370819, 3257.037617, 92912.130395, 1.218798, false, false, false, null, "complete", "complete", "complete"],
+          [-0.03953895933802587, 0.005679594153000123, -0.00187387456175514, 3257.037617, 92912.130395, 1.218798, false, false, false, null, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-04-soft",
-      "notes": "seeded mix (seed \"mixed/4\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "notes": "seeded mix (seed \"mixed/4\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; soft",
       "input": {
         "weights": [
           [1, 3],
@@ -317,6 +406,7 @@
         "stableLeg": 0,
         "band": 0.05,
         "bandAdd": [0.003, 0.003, 0.003, 0.0, 0.0, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "reference": [null, 92724.535012, 1.266155],
         "prices": [
           [0.999525, 93877.09976, 1.244487],
           [1.001548, 93721.390802, 1.239718],
@@ -336,15 +426,15 @@
         "n": [3, 3, 3],
         "kSoft": 3,
         "fills": [
-          [0, 0, "select"],
-          [1, 2, "select"],
-          [2, 1, "select"],
-          [3, 0, "select"],
+          [0, 2, "select"],
+          [1, 1, "select"],
+          [2, 0, "select"],
+          [3, 1, "select"],
           [4, 2, "select"],
           [5, 1, "select"],
           [6, 0, "select"],
-          [7, 1, "select"],
-          [8, 2, "select"]
+          [7, 2, "select"],
+          [8, 0, "select"]
         ],
         "idle": [
           [9, "complete"],
@@ -353,12 +443,26 @@
         ],
         "done": [3, 3, 3],
         "unbought": [0, 0, 0],
-        "deviationPp": 5.551115123125783e-15
+        "deviationPp": 5.551115123125783e-15,
+        "perLeg": [
+          [null, 0.012429986819031624, -0.01711322863314524, 0.999525, 93877.09976, 1.244487, false, false, false, true, "not_due", "not_due", "picked"],
+          [0.0020239613816563917, -0.0016586468733916782, -0.003832101098685481, 0.999525, 93877.09976, 1.244487, false, false, false, true, "not_due", "picked", "cooldown"],
+          [-0.003075239529208851, -0.022873176759923286, 0.023265774958498575, 0.999525, 93877.09976, 1.244487, false, false, false, true, "picked", "cooldown", "not_due"],
+          [0.0003745738471336857, 0.017262114218629332, null, 0.999525, 93877.09976, 1.244487, false, false, false, true, "cooldown", "picked", "no_price"],
+          [0.00014516810466513874, 0.01255171860880111, -0.034035414930776, 0.999525, 93877.09976, 1.244487, false, false, false, true, "not_due", "not_due", "picked"],
+          [-4.4044617197203095e-05, -0.029194506514197083, -0.0009164466677819005, 0.999525, 93877.09976, 1.244487, false, false, false, true, "not_due", "picked", "not_due"],
+          [0.0010581184311817537, 0.051274272654178166, 0.05229436182777869, 0.999525, 93877.09976, 1.244487, false, false, false, true, "picked", "complete", "not_due"],
+          [0.0, -0.03498929373910953, -0.009416401973477817, 0.999525, 93877.09976, 1.244487, false, false, false, true, "not_due", "complete", "picked"],
+          [0.0, 0.02866304462062752, -0.04565361676852231, 0.999525, 93877.09976, 1.244487, false, false, false, true, "picked", "complete", "complete"],
+          [0.0, -0.025028946220529757, 0.04766432491550976, 0.999525, 93877.09976, 1.244487, false, false, false, true, "complete", "complete", "complete"],
+          [0.0, 0.03573484491922918, 0.011350045691732147, 0.999525, 93877.09976, 1.244487, false, false, false, true, "complete", "complete", "complete"],
+          [0.0, -0.03467686501175038, -0.047959430388771374, 0.999525, 93877.09976, 1.244487, false, false, false, true, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-05-rigid",
-      "notes": "seeded mix (seed \"mixed/5\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "notes": "seeded mix (seed \"mixed/5\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; rigid",
       "input": {
         "weights": [
           [1, 3],
@@ -373,6 +477,7 @@
         "stableLeg": null,
         "band": null,
         "bandAdd": null,
+        "reference": [3124.850699, 91513.363378, 1.293073],
         "prices": [
           [3285.505695, 94894.075834, 1.296476],
           [3075.745276, 94009.201077, 1.245418],
@@ -390,27 +495,39 @@
         "n": [3, 2, 2],
         "kSoft": null,
         "fills": [
-          [0, 0, "select"],
-          [1, 2, "select"],
-          [2, 0, "select"],
+          [0, 2, "select"],
+          [1, 0, "select"],
+          [2, 2, "select"],
           [3, 1, "select"],
           [4, 0, "select"],
           [5, 1, "select"],
-          [7, 2, "select"]
+          [6, 0, "select"]
         ],
         "idle": [
-          [6, "no_price"],
+          [7, "complete"],
           [8, "complete"],
           [9, "complete"]
         ],
         "done": [3, 2, 2],
         "unbought": [0, 0, 0],
-        "deviationPp": 5.551115123125783e-15
+        "deviationPp": 5.551115123125783e-15,
+        "perLeg": [
+          [0.05141205499879131, 0.03694228177403813, 0.002631715301456339, 3285.505695, 94894.075834, 1.296476, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.06384418061402863, -0.00932486827257717, -0.039382140510121344, 3285.505695, 94894.075834, 1.296476, false, false, false, null, "picked", "not_due", "not_due"],
+          [-0.2486668561171188, null, -0.01820754156435822, 3285.505695, 94894.075834, 1.296476, false, false, false, null, "cooldown", "no_price", "picked"],
+          [0.012141223013121483, -0.02479216379140392, 0.009111488768685616, 3285.505695, 94894.075834, 1.296476, false, false, false, null, "not_due", "picked", "complete"],
+          [-0.01772281844359136, null, 0.01110478059913289, 3285.505695, 94894.075834, 1.296476, false, false, false, null, "picked", "no_price", "complete"],
+          [0.43304216277674357, 0.029090407377096783, 0.03370591983712545, 3285.505695, 94894.075834, 1.296476, false, false, false, null, "not_due", "picked", "complete"],
+          [-0.02851845533133146, -0.005262634167444991, null, 3285.505695, 94894.075834, 1.296476, false, false, false, null, "picked", "complete", "complete"],
+          [-0.01596008469699084, 0.046922050227498735, -0.04521663477136184, 3285.505695, 94894.075834, 1.296476, false, false, false, null, "complete", "complete", "complete"],
+          [0.005644141394346658, -0.06381448269804568, 0.007526051247316978, 3285.505695, 94894.075834, 1.296476, false, false, false, null, "complete", "complete", "complete"],
+          [0.021773115227646578, 0.016702051800820072, 0.04616271290273177, 3285.505695, 94894.075834, 1.296476, false, false, false, null, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-06-soft",
-      "notes": "seeded mix (seed \"mixed/6\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "notes": "seeded mix (seed \"mixed/6\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; soft",
       "input": {
         "weights": [
           [3, 10],
@@ -425,6 +542,7 @@
         "stableLeg": null,
         "band": null,
         "bandAdd": null,
+        "reference": [3163.839393, 92015.046225, 1.238937],
         "prices": [
           [3220.409608, 96109.60349, 1.282622],
           [3300.321866, 93081.873894, null],
@@ -461,12 +579,26 @@
         ],
         "done": [3, 3, 3],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [0.017880242317344308, 0.04449877963423243, 0.03526006568534146, 3220.409608, 96109.60349, 1.282622, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.024814314862769526, -0.03150288302162252, null, 3220.409608, 96109.60349, 1.282622, false, false, false, null, "not_due", "picked", "no_price"],
+          [-0.014619969493605778, 0.059807250349724894, -0.04600264146412569, 3220.409608, 96109.60349, 1.282622, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.04114884707626343, -0.01725101502151305, 0.013009779195794824, 3220.409608, 96109.60349, 1.282622, false, false, false, null, "picked", "not_due", "not_due"],
+          [-0.3938173359686069, -0.05848403012491299, 0.003914364799114445, 3220.409608, 96109.60349, 1.282622, true, false, false, null, "rule9", "picked", "not_due"],
+          [0.009577718833019722, 0.031108199913989276, null, 3220.409608, 96109.60349, 1.282622, true, false, false, null, "rule9", "picked", "no_price"],
+          [-0.032097052055236386, 0.03514171253649767, 0.02839546154779593, 3220.409608, 96109.60349, 1.282622, true, false, false, null, "picked", "complete", "not_due"],
+          [0.016204843848744988, -0.048271463446245444, -0.0315341432996491, 3220.409608, 96109.60349, 1.282622, true, false, false, null, "complete", "complete", "picked"],
+          [0.0007596351124521394, -0.004930775900680473, 0.002144639731992637, 3220.409608, 96109.60349, 1.282622, true, false, false, null, "complete", "complete", "picked"],
+          [-0.010527417980543796, -0.008988042550567621, 0.0003268850033049109, 3220.409608, 96109.60349, 1.282622, true, false, false, null, "complete", "complete", "complete"],
+          [-0.006750506186681604, 0.02231769367544789, -0.031009318007490072, 3220.409608, 96109.60349, 1.282622, true, false, false, null, "complete", "complete", "complete"],
+          [0.7079558801494941, -0.006893605612927511, 0.04900299525045981, 3220.409608, 96109.60349, 1.282622, false, false, false, null, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-07-rigid",
-      "notes": "seeded mix (seed \"mixed/7\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "notes": "seeded mix (seed \"mixed/7\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; rigid",
       "input": {
         "weights": [
           [2, 5],
@@ -481,6 +613,7 @@
         "stableLeg": 1,
         "band": 0.05,
         "bandAdd": [0.0, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0, 0.003, 0.0, 0.003, 0.0, 0.003, 0.0, 0.0, 0.0],
+        "reference": [null, 0.999458, 1.245945],
         "prices": [
           [3201.188597, 0.997257, 1.225104],
           [3241.16996, 1.001791, 1.290702],
@@ -503,7 +636,7 @@
         "n": [5, 5, 2],
         "kSoft": null,
         "fills": [
-          [0, 0, "select"],
+          [0, 2, "select"],
           [1, 1, "select"],
           [2, 0, "select"],
           [3, 1, "select"],
@@ -514,7 +647,7 @@
           [8, 0, "select"],
           [9, 1, "select"],
           [10, 0, "select"],
-          [12, 2, "select"]
+          [12, 0, "select"]
         ],
         "idle": [
           [5, "no_price"],
@@ -524,12 +657,29 @@
         ],
         "done": [5, 5, 2],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, -0.002202193588925261, -0.016727062591045394, 3201.188597, 0.997257, 1.225104, false, false, false, true, "not_due", "not_due", "picked"],
+          [0.012489536866859163, 0.004546470969870597, 0.053544841907299245, 3201.188597, 0.997257, 1.225104, false, false, false, true, "not_due", "picked", "not_due"],
+          [-0.04436196150602367, -0.0016021305841239508, -0.04320362097525221, 3201.188597, 0.997257, 1.225104, false, false, false, true, "picked", "not_due", "not_due"],
+          [-0.00559052726931597, -0.029984422897341156, null, 3201.188597, 0.997257, 1.225104, false, false, false, true, "not_due", "picked", "no_price"],
+          [0.011434161289838096, 0.03249549575549682, 0.04273652382830262, 3201.188597, 0.997257, 1.225104, false, false, false, true, "picked", "not_due", "not_due"],
+          [null, null, null, 3201.188597, 0.997257, 1.225104, false, false, false, null, "no_price", "no_price", "no_price"],
+          [0.02897849297716215, -0.004424376798775609, -0.021122669905476177, 3201.188597, 0.997257, 1.225104, false, false, false, true, "not_due", "picked", "picked"],
+          [0.005179648241990575, 0.0023774404862773046, -0.039241072703559476, 3201.188597, 0.997257, 1.225104, false, false, false, true, "not_due", "picked", "complete"],
+          [-0.04161658870130702, null, 0.004354065721372979, 3201.188597, 0.997257, 1.225104, false, false, false, null, "picked", "no_price", "complete"],
+          [0.03803448176795676, -0.022245518985417156, 0.03034468583643335, 3201.188597, 0.997257, 1.225104, false, false, false, true, "not_due", "picked", "complete"],
+          [0.0156522087214237, 0.0248152286008938, -0.4572976794437431, 3201.188597, 0.997257, 1.225104, false, false, true, true, "picked", "complete", "complete"],
+          [null, -0.002631581574536357, null, 3201.188597, 0.997257, 1.225104, false, false, false, true, "no_price", "complete", "complete"],
+          [-0.056393043879372606, null, 0.8464050413669091, 3201.188597, 0.997257, 1.225104, false, false, false, null, "picked", "complete", "complete"],
+          [0.009859863233501631, -0.0018567769355273267, 0.003348460464675629, 3201.188597, 0.997257, 1.225104, false, false, false, true, "complete", "complete", "complete"],
+          [-0.00035081015977744823, null, -0.00777218521181644, 3201.188597, 0.997257, 1.225104, false, false, false, null, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-08-soft",
-      "notes": "seeded mix (seed \"mixed/8\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "notes": "seeded mix (seed \"mixed/8\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; soft",
       "input": {
         "weights": [
           [2, 5],
@@ -544,6 +694,7 @@
         "stableLeg": null,
         "band": null,
         "bandAdd": null,
+        "reference": [3096.337415, 94990.513887, 1.274961],
         "prices": [
           [3079.98303, 93660.289345, 1.289375],
           [3104.297072, null, null],
@@ -566,14 +717,14 @@
         "n": [5, 5, 2],
         "kSoft": 3,
         "fills": [
-          [0, 0, "select"],
+          [0, 1, "select"],
           [1, 0, "select"],
           [2, 2, "select"],
           [3, 0, "select"],
           [4, 2, "select"],
           [5, 1, "select"],
           [7, 1, "select"],
-          [7, 1, "catchup"],
+          [7, 0, "catchup"],
           [8, 0, "select"],
           [9, 1, "select"],
           [10, 0, "select"],
@@ -587,12 +738,29 @@
         ],
         "done": [5, 5, 2],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [-0.005281848457720506, -0.01400376192913766, 0.011305443852792196, 3079.98303, 93660.289345, 1.289375, false, false, false, null, "not_due", "picked", "not_due"],
+          [0.00789421297558257, null, null, 3079.98303, 93660.289345, 1.289375, false, false, false, null, "picked", "no_price", "no_price"],
+          [-0.0014117598600755787, null, -0.05786989820649546, 3079.98303, 93660.289345, 1.289375, false, false, false, null, "not_due", "no_price", "picked"],
+          [-0.34403050755060327, 0.046029323859121174, null, 3079.98303, 93660.289345, 1.289375, false, false, false, null, "picked", "not_due", "no_price"],
+          [-0.017086274900296572, null, 0.037545718945074746, 3079.98303, 93660.289345, 1.289375, false, false, false, null, "cooldown", "no_price", "picked"],
+          [null, -3.0965768756052725e-05, -0.008288848971094054, 3079.98303, 93660.289345, 1.289375, false, false, false, null, "no_price", "picked", "complete"],
+          [null, null, null, 3079.98303, 93660.289345, 1.289375, false, false, false, null, "no_price", "no_price", "complete"],
+          [0.0049007990347054164, -0.052122377261049624, -0.24855970897360713, 3079.98303, 93660.289345, 1.289375, false, false, false, null, "picked", "picked", "complete"],
+          [0.5464306768086962, 0.044172658498308204, 0.016881716194246277, 3079.98303, 93660.289345, 1.289375, false, false, false, null, "picked", "cooldown", "complete"],
+          [0.023969874557276727, -0.027451742066077367, 0.009314237192662222, 3079.98303, 93660.289345, 1.289375, false, false, false, null, "not_due", "picked", "complete"],
+          [-0.02376112332240299, -0.01319944761152081, 0.012391168815541143, 3079.98303, 93660.289345, 1.289375, false, false, false, null, "picked", "not_due", "complete"],
+          [0.05755830174750853, -0.011232210797240794, -0.013616643680233742, 3079.98303, 93660.289345, 1.289375, false, false, false, null, "complete", "picked", "complete"],
+          [0.009757270243891947, 0.013125689203439705, -0.004322447745751523, 3079.98303, 93660.289345, 1.289375, false, false, false, null, "complete", "complete", "complete"],
+          [-0.022320759348083974, -0.007214299277949587, 0.3421159159008773, 3079.98303, 93660.289345, 1.289375, false, false, false, null, "complete", "complete", "complete"],
+          [0.015029307720586083, 0.04825957216885568, -0.0453994940928264, 3079.98303, 93660.289345, 1.289375, false, false, false, null, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-09-rigid",
-      "notes": "seeded mix (seed \"mixed/9\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "notes": "seeded mix (seed \"mixed/9\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; rigid",
       "input": {
         "weights": [
           [3, 10],
@@ -607,6 +775,7 @@
         "stableLeg": 1,
         "band": 0.01,
         "bandAdd": [0.003, 0.003, 0.0, 0.003, 0.0, 0.0, 0.003, 0.0, 0.0, 0.0],
+        "reference": [3248.938233, 0.998198, 1.251226],
         "prices": [
           [3173.321051, 1.000097, null],
           [3292.410575, 1.001033, 1.228701],
@@ -639,12 +808,24 @@
         ],
         "done": [2, 2, 3],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [-0.023274428929409563, 0.0019024281755724015, null, 3173.321051, 1.000097, null, false, false, false, true, "picked", "not_due", "no_price"],
+          [0.03752835659741138, 0.0009359092168059746, -0.018002343301689594, 3173.321051, 1.000097, 1.228701, false, false, false, true, "not_due", "not_due", "picked"],
+          [-0.05129223259161708, 0.0008201527821760646, null, 3173.321051, 1.000097, 1.228701, false, false, false, true, "picked", "not_due", "no_price"],
+          [0.026740914061765153, -0.0046593615436979485, 0.003718561309871138, 3173.321051, 1.000097, 1.228701, false, false, false, true, "complete", "picked", "not_due"],
+          [-0.011670175610716593, 0.005237738997539099, 0.024888305075125405, 3173.321051, 1.000097, 1.228701, false, false, false, true, "complete", "cooldown", "picked"],
+          [0.016253771416063545, 0.02940815575279143, -0.011732929102411194, 3173.321051, 1.000097, 1.228701, false, false, false, false, "complete", "band", "picked"],
+          [0.014639611563340038, -0.03173697145426624, 0.015995881947012958, 3173.321051, 1.000097, 1.228701, false, false, false, true, "complete", "picked", "complete"],
+          [-0.016849289320568173, -0.0193116273111148, 0.0018934454324470718, 3173.321051, 1.000097, 1.228701, false, false, false, false, "complete", "complete", "complete"],
+          [null, null, null, 3173.321051, 1.000097, 1.228701, false, false, false, null, "complete", "complete", "complete"],
+          [-0.008222582841578951, 0.022842411649201422, -0.03086075069326577, 3173.321051, 1.000097, 1.228701, false, false, false, true, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-10-soft",
-      "notes": "seeded mix (seed \"mixed/10\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "notes": "seeded mix (seed \"mixed/10\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; soft",
       "input": {
         "weights": [
           [1, 3],
@@ -659,6 +840,7 @@
         "stableLeg": 0,
         "band": 0.05,
         "bandAdd": [0.003, 0.0, 0.0, 0.003, 0.0, 0.0, 0.003, 0.003, 0.0, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "reference": [0.998041, 98332.876785, 1.25646],
         "prices": [
           [1.002234, 91233.496006, null],
           [null, null, null],
@@ -684,10 +866,10 @@
         "n": [5, 5, 5],
         "kSoft": 4,
         "fills": [
-          [0, 0, "select"],
+          [0, 1, "select"],
           [3, 1, "select"],
           [3, 2, "catchup"],
-          [3, 1, "catchup"],
+          [3, 0, "catchup"],
           [4, 0, "select"],
           [5, 1, "select"],
           [6, 2, "select"],
@@ -710,12 +892,32 @@
         ],
         "done": [5, 5, 5],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [0.004201230209981421, -0.07219742787066474, null, 1.002234, 91233.496006, null, false, false, false, true, "not_due", "picked", "no_price"],
+          [null, null, null, 1.002234, 91233.496006, null, false, false, false, null, "no_price", "no_price", "no_price"],
+          [null, null, null, 1.002234, 91233.496006, null, false, false, false, null, "no_price", "no_price", "no_price"],
+          [-0.0012322471598450457, -0.163729300201514, -0.02857392993012109, 1.002234, 91233.496006, 1.220558, false, false, false, true, "picked", "picked", "picked"],
+          [-0.0012367644722921511, 0.0015927261716124352, 0.0183407916706948, 1.002234, 91233.496006, 1.220558, false, false, false, true, "picked", "not_due", "not_due"],
+          [-0.00020904996294113243, -0.0015462753263896234, 0.004149020390298963, 1.002234, 91233.496006, 1.220558, false, false, false, true, "not_due", "picked", "not_due"],
+          [null, 0.014665388441213123, -0.018265348717771968, 1.002234, 91233.496006, 1.220558, false, false, false, null, "no_price", "not_due", "picked"],
+          [null, null, null, 1.002234, 91233.496006, 1.220558, false, false, false, null, "no_price", "no_price", "no_price"],
+          [0.0014116324113202516, -0.0098554631883222, 0.00944255466398558, 1.002234, 91233.496006, 1.220558, false, false, false, true, "picked", "picked", "not_due"],
+          [0.0008591726167699321, 0.014549420480969744, -0.33458783999016883, 1.002234, 91233.496006, 1.220558, false, false, true, true, "picked", "not_due", "rule9"],
+          [-0.0026631450865072237, -0.001594155073517567, -0.009584086140133286, 1.002234, 91233.496006, 1.220558, false, false, true, true, "cooldown", "picked", "rule9"],
+          [0.0008457146288614048, 0.003008009051073124, -0.0050457404406342166, 1.002234, 91233.496006, 1.220558, false, false, true, true, "not_due", "complete", "picked"],
+          [0.0, 0.006150724539257579, 0.019498662194986638, 1.002234, 91233.496006, 1.220558, false, false, true, true, "picked", "complete", "not_due"],
+          [0.0, 0.003836011846974241, 0.45226064408763933, 1.002234, 91233.496006, 1.220558, false, false, false, true, "complete", "complete", "picked"],
+          [0.0, -0.016391095450422388, 0.04671412974592637, 1.002234, 91233.496006, 1.220558, false, false, false, true, "complete", "complete", "picked"],
+          [0.0, -0.013450046159505957, -0.02164633733979271, 1.002234, 91233.496006, 1.220558, false, false, false, true, "complete", "complete", "complete"],
+          [0.0, 0.02502772682834875, 0.04598676078329311, 1.002234, 91233.496006, 1.220558, false, false, false, true, "complete", "complete", "complete"],
+          [0.0, 0.1682238718144773, -0.01571570847803938, 1.002234, 91233.496006, 1.220558, false, false, false, true, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-11-rigid",
-      "notes": "seeded mix (seed \"mixed/11\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "notes": "seeded mix (seed \"mixed/11\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; rigid",
       "input": {
         "weights": [
           [2, 5],
@@ -730,6 +932,7 @@
         "stableLeg": 0,
         "band": 0.02,
         "bandAdd": [0.003, 0.003, 0.0, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.0, 0.0, 0.0, 0.003, 0.003, 0.0, 0.0, 0.003, 0.0, 0.0, 0.003, 0.003, 0.0, 0.003, 0.0, 0.0, 0.0, 0.003, 0.0, 0.0],
+        "reference": [0.998708, 95667.483572, 1.238048],
         "prices": [
           [1.000507, 96390.339021, 1.293481],
           [0.998434, 97708.628887, 1.226138],
@@ -800,12 +1003,43 @@
         ],
         "done": [2, 2, 1],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [0.0018013273148909104, 0.0075559157825655365, 0.0447745160123032, 1.000507, 96390.339021, 1.293481, false, false, false, true, "picked", "not_due", "not_due"],
+          [-0.0020719495215925088, 0.013676576712867261, -0.052063385546444185, 1.000507, 96390.339021, 1.293481, false, false, false, true, "not_due", "not_due", "not_due"],
+          [0.0028885234276876393, -0.007968777352310052, 0.00939372240318792, 1.000507, 96390.339021, 1.293481, false, false, false, true, "not_due", "not_due", "not_due"],
+          [null, -0.014670901638411227, 0.01295594252360921, 1.000507, 96390.339021, 1.293481, false, false, false, null, "no_price", "not_due", "not_due"],
+          [-0.00190748593353951, -0.025630265831989463, -0.004696532080074034, 1.000507, 96390.339021, 1.293481, false, false, false, true, "not_due", "not_due", "not_due"],
+          [0.002649568544578429, 0.029032565760166884, null, 1.000507, 96390.339021, 1.293481, false, false, false, true, "picked", "not_due", "no_price"],
+          [-0.0034968105574938457, 0.021542399709001403, -0.023986959479981973, 1.000507, 96390.339021, 1.293481, false, false, false, true, "complete", "not_due", "not_due"],
+          [-0.04912513319286327, -0.060737261032949186, -0.008436847222039745, 1.000507, 96390.339021, 1.293481, false, false, false, false, "complete", "not_due", "not_due"],
+          [0.08984221135800174, 0.03319169652453868, 0.0034241555750800234, 1.000507, 96390.339021, 1.293481, false, false, false, false, "complete", "not_due", "not_due"],
+          [-0.03226507847387372, -0.003150654114726814, 0.0019798107172213086, 1.000507, 96390.339021, 1.293481, false, false, false, true, "complete", "not_due", "not_due"],
+          [-0.003924446907625723, -0.012217834932060856, -0.009672761835419763, 1.000507, 96390.339021, 1.293481, false, false, false, true, "complete", "picked", "not_due"],
+          [0.0005483791736218269, 0.02051670671068706, 0.017613297548958684, 1.000507, 96390.339021, 1.293481, false, false, false, true, "complete", "not_due", "not_due"],
+          [null, -0.010171284704420192, 0.03747165046401291, 1.000507, 96390.339021, 1.293481, false, false, false, null, "complete", "not_due", "not_due"],
+          [0.0023045353255206624, 0.024285141303131752, 0.021786430589232353, 1.000507, 96390.339021, 1.293481, false, false, false, true, "complete", "not_due", "not_due"],
+          [null, null, null, 1.000507, 96390.339021, 1.293481, false, false, false, null, "complete", "no_price", "no_price"],
+          [0.00022292598857198698, -0.021774555007640584, null, 1.000507, 96390.339021, 1.293481, false, false, false, true, "complete", "picked", "no_price"],
+          [null, null, null, 1.000507, 96390.339021, 1.293481, false, false, false, null, "complete", "complete", "no_price"],
+          [null, null, null, 1.000507, 96390.339021, 1.293481, false, false, false, null, "complete", "complete", "no_price"],
+          [-0.0021677968727357166, 0.025152005578484404, -0.1410293970256039, 1.000507, 96390.339021, 1.293481, false, false, false, true, "complete", "complete", "not_due"],
+          [0.0032792927785445514, -0.0017318690658923996, -0.021034066481472213, 1.000507, 96390.339021, 1.293481, false, false, false, true, "complete", "complete", "not_due"],
+          [null, null, null, 1.000507, 96390.339021, 1.293481, false, false, false, null, "complete", "complete", "no_price"],
+          [-0.0036070123594832415, -0.04827714479331524, 0.133081203986394, 1.000507, 96390.339021, 1.293481, false, false, false, true, "complete", "complete", "picked"],
+          [0.002930723703392646, -0.0069815463027042, 0.006888303962494291, 1.000507, 96390.339021, 1.293481, false, false, false, true, "complete", "complete", "complete"],
+          [-0.0002697378148439622, 0.04627071470840516, -0.006881360617691068, 1.000507, 96390.339021, 1.293481, false, false, false, true, "complete", "complete", "complete"],
+          [0.0007344843919567801, -0.04189581806777287, 0.04965880760276842, 1.000507, 96390.339021, 1.293481, false, false, false, true, "complete", "complete", "complete"],
+          [-0.00389040948157493, 0.024982842201959787, -0.04135965500600536, 1.000507, 96390.339021, 1.293481, false, false, false, true, "complete", "complete", "complete"],
+          [0.014911667791098315, 0.0023418239091799187, -0.023017520270905867, 1.000507, 96390.339021, 1.293481, false, false, false, true, "complete", "complete", "complete"],
+          [-0.005144130476009701, 0.014293857945078647, 0.025275987976044245, 1.000507, 96390.339021, 1.293481, false, false, false, true, "complete", "complete", "complete"],
+          [-0.0051250585777715685, null, 0.03848778435729794, 1.000507, 96390.339021, 1.293481, false, false, false, true, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-12-soft",
-      "notes": "seeded mix (seed \"mixed/12\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "notes": "seeded mix (seed \"mixed/12\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; soft",
       "input": {
         "weights": [
           [1, 4],
@@ -820,6 +1054,7 @@
         "stableLeg": 2,
         "band": 0.02,
         "bandAdd": [0.0, 0.0, 0.003, 0.0, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "reference": [3128.068693, 96596.864848, 1.001594],
         "prices": [
           [3126.298335, 92285.685418, 0.997069],
           [3311.232042, 57575.891653, 1.02515],
@@ -837,12 +1072,12 @@
         "n": [2, 2, 3],
         "kSoft": 2,
         "fills": [
-          [0, 0, "select"],
-          [1, 1, "select"],
-          [2, 0, "select"],
-          [3, 2, "select"],
-          [4, 1, "select"],
-          [5, 2, "select"],
+          [0, 1, "select"],
+          [1, 0, "select"],
+          [2, 2, "select"],
+          [3, 0, "select"],
+          [4, 2, "select"],
+          [5, 1, "select"],
           [6, 2, "select"]
         ],
         "idle": [
@@ -852,12 +1087,24 @@
         ],
         "done": [2, 2, 3],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [-0.0005659587987827397, -0.044630635132763996, -0.004517798628985492, 3126.298335, 92285.685418, 0.997069, false, false, false, true, "not_due", "picked", "not_due"],
+          [0.0591542096061668, -0.37611243399000616, 0.028163547357304308, 3126.298335, 92285.685418, 0.997069, false, false, false, false, "picked", "cooldown", "band"],
+          [-0.03768843603138827, 0.020261969298380977, -0.025991318343657088, 3126.298335, 92285.685418, 0.997069, false, false, false, true, "cooldown", "not_due", "picked"],
+          [-0.02280714717498633, 0.6111487266166453, -0.001474203934882623, 3126.298335, 92285.685418, 0.997069, false, false, false, true, "picked", "not_due", "not_due"],
+          [0.05367038185480588, 0.03828308445080486, 0.004380998422319093, 3126.298335, 92285.685418, 0.997069, false, false, false, true, "complete", "not_due", "picked"],
+          [-0.002592302502644972, -0.033353507124883275, -0.001399039945036984, 3126.298335, 92285.685418, 0.997069, false, false, false, true, "complete", "picked", "not_due"],
+          [-0.04840206702899863, 0.006779944589156539, 0.0, 3126.298335, 92285.685418, 0.997069, false, false, false, true, "complete", "complete", "picked"],
+          [0.013368956124358622, -0.01641847201958846, 0.0, 3126.298335, 92285.685418, 0.997069, false, false, false, true, "complete", "complete", "complete"],
+          [0.04899744721680355, -0.013441376186408505, 0.0, 3126.298335, 92285.685418, 0.997069, false, false, false, true, "complete", "complete", "complete"],
+          [-0.0707846920014128, 0.013406999510837903, 0.0, 3126.298335, 92285.685418, 0.997069, false, false, false, true, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-13-rigid",
-      "notes": "seeded mix (seed \"mixed/13\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "notes": "seeded mix (seed \"mixed/13\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; rigid",
       "input": {
         "weights": [
           [3, 10],
@@ -872,6 +1119,7 @@
         "stableLeg": 0,
         "band": 0.01,
         "bandAdd": [0.003, 0.0, 0.003, 0.0, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003],
+        "reference": [0.999822, 91909.877206, 1.203196],
         "prices": [
           [0.998112, null, 1.227862],
           [1.00103, 92212.032223, 1.225881],
@@ -908,12 +1156,26 @@
         ],
         "done": [3, 3, 3],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [-0.0017103044341892915, null, 0.020500400599736013, 0.998112, null, 1.227862, false, false, false, true, "picked", "no_price", "not_due"],
+          [0.0029235196050143575, 0.003287514097345179, -0.0016133734898546859, 0.998112, 92212.032223, 1.227862, false, false, false, true, "not_due", "not_due", "picked"],
+          [-0.0007612159475741676, 0.06529656531632311, null, 0.998112, 92212.032223, 1.227862, false, false, false, true, "picked", "not_due", "no_price"],
+          [-0.001778523355740691, -0.053210118291238784, null, 0.998112, 92212.032223, 1.227862, false, false, false, true, "not_due", "picked", "no_price"],
+          [0.001449189725675648, 0.04992272157282929, 0.038735407433511115, 0.998112, 92212.032223, 1.227862, false, false, false, true, "picked", "not_due", "not_due"],
+          [-0.0016591061827957443, -0.047595478062829155, 0.004432347023558103, 0.998112, 92212.032223, 1.227862, false, false, false, true, "complete", "picked", "not_due"],
+          [0.0012782023426363143, -0.018707076017108415, 0.008727062337276603, 0.998112, 92212.032223, 1.227862, false, false, false, true, "complete", "cooldown", "picked"],
+          [null, 0.05801897105589693, -0.030769540805411943, 0.998112, 92212.032223, 1.227862, false, false, false, null, "complete", "picked", "cooldown"],
+          [null, -0.048343533935535477, 0.009672332251610127, 0.998112, 92212.032223, 1.227862, false, false, false, null, "complete", "complete", "picked"],
+          [-3.7016546396317906e-05, 0.016347033560687674, -0.0017218860909781197, 0.998112, 92212.032223, 1.227862, false, false, false, true, "complete", "complete", "complete"],
+          [0.02028481785184022, -0.018811009651381272, -0.04681151543762063, 0.998112, 92212.032223, 1.227862, false, false, false, false, "complete", "complete", "complete"],
+          [-0.020671882768135696, 0.011406984987478497, 0.07142286377325013, 0.998112, 92212.032223, 1.227862, false, false, false, true, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-14-soft",
-      "notes": "seeded mix (seed \"mixed/14\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "notes": "seeded mix (seed \"mixed/14\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; soft",
       "input": {
         "weights": [
           [1, 4],
@@ -928,6 +1190,7 @@
         "stableLeg": 2,
         "band": 0.1,
         "bandAdd": [0.003, 0.0, 0.0, 0.003, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "reference": [3104.564261, 96137.275462, 1.001132],
         "prices": [
           [3133.28694, null, null],
           [3237.716684, 95399.155634, 0.998863],
@@ -961,12 +1224,24 @@
         ],
         "done": [2, 2, 3],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [0.009251758567480284, null, null, 3133.28694, null, null, false, false, false, null, "picked", "no_price", "no_price"],
+          [0.033329135186067615, -0.0076777693610816655, -0.002266434396263395, 3133.28694, 95399.155634, 0.998863, false, false, false, true, "not_due", "picked", "not_due"],
+          [0.0200642030604552, 0.03219113505345872, null, 3133.28694, 95399.155634, 0.998863, false, false, false, null, "picked", "not_due", "no_price"],
+          [null, null, null, 3133.28694, 95399.155634, 0.998863, false, false, false, null, "complete", "no_price", "no_price"],
+          [-0.04894805896462673, -0.06471718196526821, -0.02391819498770098, 3133.28694, 95399.155634, 0.998863, false, false, false, true, "complete", "picked", "picked"],
+          [0.055113790060131285, -0.0019497392432819005, 0.025670480793294592, 3133.28694, 95399.155634, 0.998863, false, false, false, true, "complete", "complete", "picked"],
+          [-0.06270170980926748, 0.06944751531669602, 0.0, 3133.28694, 95399.155634, 0.998863, false, false, false, true, "complete", "complete", "picked"],
+          [0.06108133608289412, -0.012844235498936984, 0.0, 3133.28694, 95399.155634, 0.998863, false, false, false, true, "complete", "complete", "complete"],
+          [-0.039153403581170365, -0.44238462388277733, 0.0, 3133.28694, 95399.155634, 0.998863, false, true, false, true, "complete", "complete", "complete"],
+          [0.033749531579768455, 0.7754808280641954, 0.0, 3133.28694, 95399.155634, 0.998863, false, false, false, true, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-15-rigid",
-      "notes": "seeded mix (seed \"mixed/15\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "notes": "seeded mix (seed \"mixed/15\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; rigid",
       "input": {
         "weights": [
           [1, 3],
@@ -981,6 +1256,7 @@
         "stableLeg": 2,
         "band": 0.02,
         "bandAdd": [0.003, 0.003, 0.003, 0.0, 0.003, 0.0, 0.0, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0, 0.003, 0.0, 0.003, 0.0, 0.0, 0.003, 0.003, 0.003, 0.0, 0.0, 0.0, 0.003, 0.0, 0.003, 0.003, 0.003],
+        "reference": [3216.190578, 91846.829667, 1.001097],
         "prices": [
           [3250.080184, 92722.932172, 1.001787],
           [3274.326784, 94874.689633, 0.997771],
@@ -1017,15 +1293,15 @@
         "n": [9, 9, 8],
         "kSoft": null,
         "fills": [
-          [0, 0, "select"],
-          [1, 2, "select"],
-          [2, 0, "select"],
+          [0, 2, "select"],
+          [1, 0, "select"],
+          [2, 2, "select"],
           [3, 1, "select"],
           [5, 0, "select"],
           [5, 1, "catchup"],
           [6, 1, "select"],
           [8, 2, "select"],
-          [8, 2, "catchup"],
+          [8, 0, "catchup"],
           [9, 1, "select"],
           [10, 2, "select"],
           [11, 1, "select"],
@@ -1054,12 +1330,43 @@
         ],
         "done": [9, 9, 8],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [0.010537188384238672, 0.009538734305543306, 0.00068924389944236, 3250.080184, 92722.932172, 1.001787, false, false, false, true, "not_due", "not_due", "picked"],
+          [0.0074603082469673065, 0.02320631380604432, -0.004008836209693278, 3250.080184, 92722.932172, 1.001787, false, false, false, true, "picked", "not_due", "cooldown"],
+          [-0.03276816703949359, 0.0225265824559453, 0.0003738332743685735, 3250.080184, 92722.932172, 1.001787, false, false, false, true, "cooldown", "not_due", "picked"],
+          [0.027070305669117056, -0.03610775863964821, 0.0028052064631958196, 3250.080184, 92722.932172, 1.001787, false, false, false, true, "not_due", "picked", "not_due"],
+          [null, null, null, 3250.080184, 92722.932172, 1.001787, false, false, false, null, "no_price", "no_price", "no_price"],
+          [-0.22017059629851587, 0.04245712340441399, -0.0028902715836250925, 3250.080184, 92722.932172, 1.001787, false, false, false, true, "picked", "picked", "not_due"],
+          [null, -0.056634100762683826, 0.003957713583774725, 3250.080184, 92722.932172, 1.001787, false, false, false, true, "no_price", "picked", "not_due"],
+          [null, null, null, 3250.080184, 92722.932172, 1.001787, false, false, false, null, "no_price", "no_price", "no_price"],
+          [0.2315505518792209, 0.022914635535434158, 0.0004750494260985505, 3250.080184, 92722.932172, 1.001787, false, false, false, true, "picked", "not_due", "picked"],
+          [0.023230516175725135, 0.0026088827236523393, null, 3250.080184, 92722.932172, 1.001787, false, false, false, null, "not_due", "picked", "no_price"],
+          [0.02018023370249078, 0.04033441555970252, -0.0029157776188381, 3250.080184, 92722.932172, 1.001787, false, false, false, true, "not_due", "not_due", "picked"],
+          [0.007548638185631562, -0.020570561160201284, 0.02620068550573551, 3250.080184, 92722.932172, 1.001787, false, false, false, false, "not_due", "picked", "band"],
+          [-0.05705426399887625, 0.022628518115998197, -0.024863927903968075, 3250.080184, 92722.932172, 1.001787, false, false, false, true, "picked", "not_due", "not_due"],
+          [0.037180905980370715, -0.03845560095221323, -0.00012197084896725663, 3250.080184, 92722.932172, 1.001787, false, false, false, true, "not_due", "picked", "not_due"],
+          [-0.006102441889781818, -0.017486425651925264, -0.036925679695475555, 3250.080184, 92722.932172, 1.001787, false, false, false, false, "picked", "cooldown", "band"],
+          [-0.03644766256604981, 0.002653183093308975, 0.03641037514002976, 3250.080184, 92722.932172, 1.001787, false, false, false, true, "cooldown", "picked", "not_due"],
+          [0.009610291726973585, 0.004953383102454634, 0.00410515528566302, 3250.080184, 92722.932172, 1.001787, false, false, false, true, "not_due", "not_due", "picked"],
+          [0.06884715060631752, 0.032015452778801023, -0.0013857365903298113, 3250.080184, 92722.932172, 1.001787, false, false, false, true, "not_due", "picked", "cooldown"],
+          [null, null, null, 3250.080184, 92722.932172, 1.001787, false, false, false, null, "no_price", "no_price", "no_price"],
+          [-0.01859513449723138, -0.037276388010448414, null, 3250.080184, 92722.932172, 1.001787, false, false, false, null, "picked", "picked", "no_price"],
+          [0.009418740900760225, 0.0001966395034262991, 0.00014186296038043444, 3250.080184, 92722.932172, 1.001787, false, false, false, true, "not_due", "complete", "picked"],
+          [0.0033291639663952655, 0.024176311561109776, 0.00038457389212731563, 3250.080184, 92722.932172, 1.001787, false, false, false, true, "picked", "complete", "cooldown"],
+          [-0.06173721096615381, 0.00878074479059232, 0.014746982754747284, 3250.080184, 92722.932172, 1.001787, false, false, false, true, "cooldown", "complete", "picked"],
+          [0.05690678819500539, -1.109705633828284e-06, -0.01366183129940901, 3250.080184, 92722.932172, 1.001787, false, false, false, true, "picked", "complete", "cooldown"],
+          [null, null, null, 3250.080184, 92722.932172, 1.001787, false, false, false, null, "no_price", "complete", "no_price"],
+          [-0.022799480660262827, -0.009532088235732816, -0.04625301034140816, 3250.080184, 92722.932172, 1.001787, false, false, false, false, "picked", "complete", "band"],
+          [-0.019802553005841772, -0.024915101290280295, 0.045525436316375956, 3250.080184, 92722.932172, 1.001787, false, false, false, true, "complete", "complete", "picked"],
+          [0.0583250092184977, 0.04558934403592807, -0.0007553489712247563, 3250.080184, 92722.932172, 1.001787, false, false, false, true, "complete", "complete", "complete"],
+          [null, null, null, 3250.080184, 92722.932172, 1.001787, false, false, false, null, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-16-soft",
-      "notes": "seeded mix (seed \"mixed/16\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "notes": "seeded mix (seed \"mixed/16\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; soft",
       "input": {
         "weights": [
           [1, 3],
@@ -1074,6 +1381,7 @@
         "stableLeg": 2,
         "band": 0.02,
         "bandAdd": [0.003, 0.0, 0.0, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "reference": [3154.656302, 92128.723999, 0.997688],
         "prices": [
           [null, null, null],
           [3270.942349, null, 1.001566],
@@ -1091,12 +1399,12 @@
         "n": [3, 2, 2],
         "kSoft": 2,
         "fills": [
-          [1, 0, "select"],
-          [1, 2, "catchup"],
-          [2, 1, "select"],
-          [3, 2, "select"],
-          [4, 1, "select"],
-          [5, 0, "select"],
+          [1, 2, "select"],
+          [1, 0, "catchup"],
+          [2, 0, "select"],
+          [3, 1, "select"],
+          [4, 2, "select"],
+          [5, 1, "select"],
           [6, 0, "select"]
         ],
         "idle": [
@@ -1107,12 +1415,24 @@
         ],
         "done": [3, 2, 2],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, null, null, null, null, null, false, false, false, null, "no_price", "no_price", "no_price"],
+          [0.03686171673480776, null, 0.0038869867132811375, 3270.942349, null, 1.001566, false, false, false, true, "picked", "no_price", "picked"],
+          [0.008291186791565153, 0.01897080719384525, 0.0009395286980589113, 3270.942349, 93876.480259, 1.001566, false, false, false, true, "picked", "not_due", "cooldown"],
+          [0.0071852883710028514, -0.025004034189649582, -0.0021356459356393076, 3270.942349, 93876.480259, 1.001566, false, false, false, true, "not_due", "picked", "not_due"],
+          [-0.2972551963563488, 0.009667304916343822, 0.00013994877874679013, 3270.942349, 93876.480259, 1.001566, true, false, false, true, "rule9", "not_due", "picked"],
+          [0.016329493582526666, 0.011390185512111017, -0.0005057440934885804, 3270.942349, 93876.480259, 1.001566, true, false, false, true, "not_due", "picked", "complete"],
+          [0.011522190100691443, -0.012619923154208568, 0.0, 3270.942349, 93876.480259, 1.001566, true, false, false, true, "picked", "complete", "complete"],
+          [-0.006749781739699423, 0.011503565861568532, 0.0, 3270.942349, 93876.480259, 1.001566, true, false, false, true, "complete", "complete", "complete"],
+          [-0.002508748814420758, 0.02985705380695003, 0.0, 3270.942349, 93876.480259, 1.001566, true, false, false, true, "complete", "complete", "complete"],
+          [-0.02876857466041438, -0.02662215563708359, 0.0, 3270.942349, 93876.480259, 1.001566, true, false, false, true, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-17-rigid",
-      "notes": "seeded mix (seed \"mixed/17\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "notes": "seeded mix (seed \"mixed/17\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; rigid",
       "input": {
         "weights": [
           [3, 10],
@@ -1127,6 +1447,7 @@
         "stableLeg": 2,
         "band": 0.1,
         "bandAdd": [0.003, 0.0, 0.0, 0.003, 0.003, 0.0, 0.0, 0.0, 0.003, 0.0],
+        "reference": [3218.051332, null, 1.002022],
         "prices": [
           [null, null, null],
           [null, 97354.311725, 0.99784],
@@ -1144,10 +1465,10 @@
         "n": [2, 2, 3],
         "kSoft": null,
         "fills": [
-          [1, 1, "select"],
-          [1, 2, "catchup"],
-          [2, 2, "select"],
-          [3, 1, "select"],
+          [1, 2, "select"],
+          [1, 1, "catchup"],
+          [2, 1, "select"],
+          [3, 2, "select"],
           [4, 0, "select"],
           [5, 2, "select"],
           [6, 0, "select"]
@@ -1160,12 +1481,24 @@
         ],
         "done": [2, 2, 3],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, null, null, null, null, null, false, false, false, null, "no_price", "no_price", "no_price"],
+          [null, null, -0.004173561059537589, null, 97354.311725, 0.99784, false, false, false, true, "no_price", "picked", "picked"],
+          [null, -0.007530756871569899, 0.00256253507576365, null, 97354.311725, 0.99784, false, false, false, true, "no_price", "picked", "not_due"],
+          [null, -0.0221886012275182, 0.0008276714144486164, null, 97354.311725, 0.99784, false, false, false, true, "no_price", "complete", "picked"],
+          [-0.25538321555897414, -0.0008560058579191177, null, 2396.215035, 97354.311725, 0.99784, false, false, false, null, "picked", "complete", "no_price"],
+          [-0.008789365183162645, -0.017696370656699267, -0.0582696197158481, 2396.215035, 97354.311725, 0.99784, false, false, false, true, "not_due", "complete", "picked"],
+          [-0.009925361356363904, null, 0.06338637626685784, 2396.215035, 97354.311725, 0.99784, false, false, false, true, "picked", "complete", "complete"],
+          [0.02394776762573736, 0.03200512607847661, 0.0010053358599708684, 2396.215035, 97354.311725, 0.99784, false, false, false, true, "complete", "complete", "complete"],
+          [0.31588095805920857, -0.03992428942478399, null, 2396.215035, 97354.311725, 0.99784, false, false, false, null, "complete", "complete", "complete"],
+          [0.0200159793771868, 0.06881240143563305, -0.004780512883870824, 2396.215035, 97354.311725, 0.99784, false, false, false, true, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-18-soft",
-      "notes": "seeded mix (seed \"mixed/18\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "notes": "seeded mix (seed \"mixed/18\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; soft",
       "input": {
         "weights": [
           [2, 5],
@@ -1180,6 +1513,7 @@
         "stableLeg": null,
         "band": null,
         "bandAdd": null,
+        "reference": [3130.303951, 93846.183508, null],
         "prices": [
           [3177.414727, 91704.845056, 1.285164],
           [3094.22649, 98177.750285, 1.234091],
@@ -1199,13 +1533,13 @@
         "n": [4, 3, 2],
         "kSoft": 3,
         "fills": [
-          [0, 0, "select"],
+          [0, 1, "select"],
           [1, 2, "select"],
           [2, 1, "select"],
           [3, 2, "select"],
           [5, 1, "select"],
-          [5, 1, "catchup"],
           [6, 0, "select"],
+          [6, 0, "catchup"],
           [7, 0, "select"],
           [8, 0, "select"]
         ],
@@ -1217,12 +1551,26 @@
         ],
         "done": [4, 3, 2],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [0.01504990465381173, -0.022817533670055457, null, 3177.414727, 91704.845056, 1.285164, false, false, false, null, "not_due", "picked", "not_due"],
+          [-0.02618110764487558, 0.07058411390420316, -0.039740453358481864, 3177.414727, 91704.845056, 1.285164, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.36563203749186446, -0.07009081615767443, -0.01221708933944099, 3177.414727, 91704.845056, 1.285164, true, false, false, null, "rule9", "picked", "not_due"],
+          [-0.0038055041698731307, 0.050226970318081765, -0.0006234546937115004, 3177.414727, 91704.845056, 1.285164, true, false, false, null, "rule9", "not_due", "picked"],
+          [null, null, null, 3177.414727, 91704.845056, 1.285164, false, false, false, null, "no_price", "no_price", "complete"],
+          [-0.0034350440324100173, 0.0297335198194697, 0.012419413357148912, 3177.414727, 91704.845056, 1.285164, true, false, false, null, "rule9", "picked", "complete"],
+          [0.6158584058153167, -0.065278445204207, 0.020403215867888624, 3177.414727, 91704.845056, 1.285164, false, false, false, null, "picked", "complete", "complete"],
+          [0.008746388010735906, 0.006655665141136469, -0.01007112158525414, 3177.414727, 91704.845056, 1.285164, false, false, false, null, "picked", "complete", "complete"],
+          [-0.016197091934744057, 0.0026937677851928132, 0.017656681173216615, 3177.414727, 91704.845056, 1.285164, false, false, false, null, "picked", "complete", "complete"],
+          [0.002483190666551449, 0.057218901921916476, -0.0006775131874512397, 3177.414727, 91704.845056, 1.285164, false, false, false, null, "complete", "complete", "complete"],
+          [-0.016910501430897895, -0.011308648011704392, -0.007241441090186096, 3177.414727, 91704.845056, 1.285164, false, false, false, null, "complete", "complete", "complete"],
+          [0.04874698664632349, 0.001266923922924157, 0.010441726200035362, 3177.414727, 91704.845056, 1.285164, false, false, false, null, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-19-rigid",
-      "notes": "seeded mix (seed \"mixed/19\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "notes": "seeded mix (seed \"mixed/19\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; rigid",
       "input": {
         "weights": [
           [3, 10],
@@ -1237,6 +1585,7 @@
         "stableLeg": 0,
         "band": 0.05,
         "bandAdd": [0.003, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "reference": [0.997283, 98009.344871, 1.22719],
         "prices": [
           [null, null, null],
           [0.999982, 92141.01444, 1.280972],
@@ -1253,8 +1602,8 @@
         "n": [1, 1, 2],
         "kSoft": null,
         "fills": [
-          [1, 0, "select"],
-          [1, 1, "catchup"],
+          [1, 1, "select"],
+          [1, 0, "catchup"],
           [3, 2, "select"],
           [4, 2, "select"]
         ],
@@ -1268,12 +1617,23 @@
         ],
         "done": [1, 1, 2],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, null, null, null, null, null, false, false, false, null, "no_price", "no_price", "no_price"],
+          [0.0027063531615398873, -0.059875213314851794, 0.04382532452187515, 0.999982, 92141.01444, 1.280972, false, false, false, true, "picked", "picked", "not_due"],
+          [-0.0008150146702641248, -0.005232418993107002, -0.059229241544701994, 0.999982, 92141.01444, 1.280972, false, false, false, true, "complete", "complete", "not_due"],
+          [0.003478897921968871, 0.03239903226968499, 0.06741924535785793, 0.999982, 92141.01444, 1.280972, false, false, false, true, "complete", "complete", "picked"],
+          [-0.0035187000756998765, 0.03081181838661684, -0.025470556956593393, 0.999982, 92141.01444, 1.280972, false, false, false, true, "complete", "complete", "picked"],
+          [-0.0006826041046326115, -0.0062988390979603626, 0.019976323884159264, 0.999982, 92141.01444, 1.280972, false, false, false, true, "complete", "complete", "complete"],
+          [-0.026307223419097747, -0.04131030684276071, -0.0560476636639643, 0.999982, 92141.01444, 1.280972, false, false, false, true, "complete", "complete", "complete"],
+          [null, 0.04458211130916978, 0.07462621027008298, 0.999982, 92141.01444, 1.280972, false, false, false, null, "complete", "complete", "complete"],
+          [0.026922329188297844, -0.03277665779334604, -0.03702604328494341, 0.999982, 92141.01444, 1.280972, false, false, false, true, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-20-soft",
-      "notes": "seeded mix (seed \"mixed/20\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "notes": "seeded mix (seed \"mixed/20\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; soft",
       "input": {
         "weights": [
           [2, 5],
@@ -1288,6 +1648,7 @@
         "stableLeg": 2,
         "band": 0.05,
         "bandAdd": [0.0, 0.0, 0.003, 0.0, 0.0, 0.003, 0.0, 0.003, 0.003, 0.0, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "reference": [null, 92806.60899, 1.000001],
         "prices": [
           [null, 96650.850056, 0.999621],
           [3326.129415, 98576.574302, 0.95721],
@@ -1313,21 +1674,21 @@
         "n": [6, 6, 3],
         "kSoft": 4,
         "fills": [
-          [0, 1, "select"],
-          [1, 2, "select"],
-          [2, 0, "select"],
+          [0, 2, "select"],
+          [1, 0, "select"],
+          [2, 2, "select"],
           [3, 1, "select"],
           [4, 0, "select"],
           [5, 1, "select"],
           [6, 2, "select"],
           [8, 0, "select"],
-          [8, 0, "catchup"],
-          [9, 2, "select"],
+          [8, 1, "catchup"],
+          [9, 1, "select"],
           [10, 0, "select"],
           [11, 1, "select"],
           [12, 0, "select"],
           [13, 1, "select"],
-          [14, 1, "select"]
+          [14, 0, "select"]
         ],
         "idle": [
           [7, "no_price"],
@@ -1337,12 +1698,32 @@
         ],
         "done": [6, 6, 3],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, 0.041422061508725294, -0.0003799996200003486, null, 96650.850056, 0.999621, false, false, false, true, "no_price", "not_due", "picked"],
+          [null, 0.019924545359758516, -0.0424270798632681, 3326.129415, 96650.850056, 0.999621, false, false, false, true, "picked", "not_due", "cooldown"],
+          [-0.017748752869857776, null, 0.044944160633507924, 3326.129415, 96650.850056, 0.999621, false, false, false, true, "cooldown", "no_price", "picked"],
+          [null, -0.06534606461638115, -0.050444347355760866, 3326.129415, 96650.850056, 0.999621, false, false, false, false, "no_price", "picked", "band"],
+          [-0.01483263249793354, 0.030953487164121274, 0.029615435234660703, 3326.129415, 96650.850056, 0.999621, false, false, false, true, "picked", "not_due", "not_due"],
+          [-0.011803763157188008, -0.024103967229780254, 0.025261196662654806, 3326.129415, 96650.850056, 0.999621, false, false, false, true, "not_due", "picked", "not_due"],
+          [0.036871360202133774, -0.29930316643131827, -0.003679411453751613, 3326.129415, 96650.850056, 0.999621, false, false, false, true, "not_due", "cooldown", "picked"],
+          [null, null, null, 3326.129415, 96650.850056, 0.999621, false, false, false, null, "no_price", "no_price", "complete"],
+          [-0.0027901180709301032, -0.0019821490428573174, 0.0005155583496927463, 3326.129415, 96650.850056, 0.999621, false, false, false, true, "picked", "picked", "complete"],
+          [-0.006662938561458831, 0.002448139632585944, 0.0020821826797621235, 3326.129415, 96650.850056, 0.999621, false, false, false, true, "cooldown", "picked", "complete"],
+          [-0.03181879198368276, -0.0019449409749974222, -0.002748841003561764, 3326.129415, 96650.850056, 0.999621, false, false, false, true, "picked", "not_due", "complete"],
+          [0.047267830167779135, 0.4851445496733149, 0.0012415395089910852, 3326.129415, 96650.850056, 0.999621, false, false, false, true, "cooldown", "picked", "complete"],
+          [-0.05387656437724331, -0.030143580333684583, 0.0, 3326.129415, 96650.850056, 0.999621, false, false, false, true, "picked", "not_due", "complete"],
+          [0.03757741370520651, 0.03194461123551018, 0.0, 3326.129415, 96650.850056, 0.999621, false, false, false, true, "not_due", "picked", "complete"],
+          [-0.0491294607084396, -0.029541130716248865, 0.0, 3326.129415, 96650.850056, 0.999621, false, false, false, true, "picked", "complete", "complete"],
+          [0.02740521785789496, -0.01148806932241131, 0.0, 3326.129415, 96650.850056, 0.999621, false, false, false, true, "complete", "complete", "complete"],
+          [-0.022794484117248714, 0.04866310219443282, 0.0, 3326.129415, 96650.850056, 0.999621, false, false, false, true, "complete", "complete", "complete"],
+          [0.033311335891279104, -0.03954793338676077, 0.0, 3326.129415, 96650.850056, 0.999621, false, false, false, true, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-21-rigid",
-      "notes": "seeded mix (seed \"mixed/21\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "notes": "seeded mix (seed \"mixed/21\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; rigid",
       "input": {
         "weights": [
           [1, 3],
@@ -1357,6 +1738,7 @@
         "stableLeg": 2,
         "band": 0.02,
         "bandAdd": [0.0, 0.0, 0.0, 0.003, 0.0, 0.0, 0.0, 0.003, 0.0, 0.0, 0.003, 0.003, 0.003, 0.003, 0.0, 0.0, 0.003, 0.003],
+        "reference": [3314.189065, 98759.015097, 1.002481],
         "prices": [
           [3169.108838, 92807.587829, null],
           [3220.51203, 93248.774666, 0.998948],
@@ -1382,7 +1764,7 @@
         "n": [5, 5, 5],
         "kSoft": null,
         "fills": [
-          [0, 0, "select"],
+          [0, 1, "select"],
           [1, 2, "select"],
           [2, 0, "select"],
           [3, 1, "select"],
@@ -1396,21 +1778,41 @@
           [11, 0, "select"],
           [12, 1, "select"],
           [13, 2, "select"],
-          [15, 1, "select"]
+          [14, 0, "select"]
         ],
         "idle": [
-          [14, "no_price"],
+          [15, "complete"],
           [16, "complete"],
           [17, "complete"]
         ],
         "done": [5, 5, 5],
         "unbought": [0, 0, 0],
-        "deviationPp": 5.551115123125783e-15
+        "deviationPp": 5.551115123125783e-15,
+        "perLeg": [
+          [-0.043775482977764235, -0.06026211644733981, null, 3169.108838, 92807.587829, null, false, false, false, null, "not_due", "picked", "no_price"],
+          [0.016220077828705826, 0.004753779807453951, -0.0035242563200699184, 3169.108838, 92807.587829, 0.998948, false, false, false, true, "not_due", "not_due", "picked"],
+          [-0.010284084857152376, 0.02276100271131898, -2.2023168373075386e-05, 3169.108838, 92807.587829, 0.998948, false, false, false, true, "picked", "not_due", "not_due"],
+          [0.0382426957774038, 0.013061395984761637, 0.04402227992864338, 3169.108838, 92807.587829, 0.998948, false, false, false, false, "not_due", "picked", "band"],
+          [-0.04892458276792866, -0.04169911165329243, -0.040062287791458706, 3169.108838, 92807.587829, 0.998948, false, false, false, true, "picked", "not_due", "not_due"],
+          [0.04350514456016863, 0.012808265668463825, -0.0027289435831867603, 3169.108838, 92807.587829, 0.998948, false, false, false, true, "not_due", "not_due", "picked"],
+          [-0.0640008556078665, 0.002985605364365318, 0.00457637711991743, 3169.108838, 92807.587829, 0.998948, false, false, false, true, "picked", "not_due", "not_due"],
+          [0.008490804885839864, -0.005283937357637658, -0.0028994263961467093, 3169.108838, 92807.587829, 0.998948, false, false, false, true, "not_due", "picked", "not_due"],
+          [0.017052168732005546, 0.022162470183882066, -0.0017599137642255736, 3169.108838, 92807.587829, 0.998948, false, false, false, true, "not_due", "not_due", "picked"],
+          [0.03431635799828259, 0.028623131741940977, null, 3169.108838, 92807.587829, 0.998948, false, false, false, null, "not_due", "picked", "no_price"],
+          [0.011389878258444286, -0.004485749076681755, 0.002845869282342095, 3169.108838, 92807.587829, 0.998948, false, false, false, true, "not_due", "cooldown", "picked"],
+          [-0.02257928261338038, null, 0.00025171556141545537, 3169.108838, 92807.587829, 0.998948, false, false, false, true, "picked", "no_price", "not_due"],
+          [-0.013257750522105427, 0.001286762236945238, 0.004619615691114909, 3169.108838, 92807.587829, 0.998948, false, false, false, true, "cooldown", "picked", "not_due"],
+          [-0.001809859501106681, 0.0014342363719459517, -0.005281270129064652, 3169.108838, 92807.587829, 0.998948, false, false, false, true, "not_due", "complete", "picked"],
+          [-0.004787954179891307, null, -0.00214950609326503, 3169.108838, 92807.587829, 0.998948, false, false, false, true, "picked", "complete", "complete"],
+          [0.02147484269979527, -0.3990348662364358, 0.0025897707061481867, 3169.108838, 92807.587829, 0.998948, false, false, false, true, "complete", "complete", "complete"],
+          [-0.010572007793348215, -0.02956255973412336, -0.02076653381678717, 3169.108838, 92807.587829, 0.998948, false, false, false, false, "complete", "complete", "complete"],
+          [-0.020216173596175446, 0.6459388004787829, 0.018811840789930034, 3169.108838, 92807.587829, 0.998948, false, false, false, true, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-22-soft",
-      "notes": "seeded mix (seed \"mixed/22\"): missing prices, ticks with no price at all, up to two falls, stable excursions; soft",
+      "notes": "seeded mix (seed \"mixed/22\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; soft",
       "input": {
         "weights": [
           [3, 10],
@@ -1425,6 +1827,7 @@
         "stableLeg": 0,
         "band": 0.01,
         "bandAdd": [0.003, 0.003, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "reference": [1.001946, 93339.876247, 1.208783],
         "prices": [
           [null, 96575.460301, 1.287503],
           [0.997206, null, 1.247568],
@@ -1462,12 +1865,26 @@
         ],
         "done": [3, 3, 3],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, 0.03466454193101631, 0.06512335133766789, null, 96575.460301, 1.287503, false, false, false, null, "no_price", "picked", "not_due"],
+          [-0.004730793875118988, null, -0.031017403454593917, 0.997206, 96575.460301, 1.287503, false, false, false, true, "not_due", "no_price", "picked"],
+          [null, -0.0441111708473616, 0.03576077616610873, 0.997206, 96575.460301, 1.287503, false, false, false, null, "no_price", "picked", "not_due"],
+          [0.003848753417047268, 0.00365430685000967, -0.04415786630675855, 0.997206, 96575.460301, 1.287503, false, false, false, true, "not_due", "not_due", "picked"],
+          [null, null, null, 0.997206, 96575.460301, 1.287503, false, false, false, null, "no_price", "no_price", "no_price"],
+          [null, 0.043888777990726435, -0.27111167965593685, 0.997206, 96575.460301, 1.287503, false, false, false, null, "no_price", "picked", "picked"],
+          [-0.0010429112007065422, -0.020908730554049404, -0.014059178065149669, 0.997206, 96575.460301, 1.287503, false, false, false, true, "picked", "complete", "complete"],
+          [0.0, 0.039464605190007385, -0.005241046451759712, 0.997206, 96575.460301, 1.287503, false, false, false, true, "picked", "complete", "complete"],
+          [0.0, -0.013477718566521801, 0.3738845719553727, 0.997206, 96575.460301, 1.287503, false, false, false, true, "picked", "complete", "complete"],
+          [0.0, -0.037626892047999405, -0.001424472067405369, 0.997206, 96575.460301, 1.287503, false, false, false, true, "complete", "complete", "complete"],
+          [0.0, 0.0431337205473763, 0.049995335793942886, 0.997206, 96575.460301, 1.287503, false, false, false, true, "complete", "complete", "complete"],
+          [0.0, -0.0486810176217527, -0.02726675917808974, 0.997206, 96575.460301, 1.287503, false, false, false, true, "complete", "complete", "complete"]
+        ]
       }
     },
     {
       "id": "mixed-23-rigid",
-      "notes": "seeded mix (seed \"mixed/23\"): missing prices, ticks with no price at all, up to two falls, stable excursions; rigid",
+      "notes": "seeded mix (seed \"mixed/23\"): missing prices, ticks with no price at all, up to two falls, stable excursions, a leg without a reference now and then; rigid",
       "input": {
         "weights": [
           [3, 10],
@@ -1482,6 +1899,7 @@
         "stableLeg": 1,
         "band": 0.1,
         "bandAdd": [0.0, 0.003, 0.0, 0.003, 0.0, 0.0, 0.0, 0.003, 0.003, 0.003, 0.003, 0.003, 0.0, 0.0, 0.0, 0.0, 0.003, 0.003, 0.0, 0.003, 0.0, 0.0, 0.0, 0.0, 0.003, 0.003, 0.0, 0.0, 0.003],
+        "reference": [3172.026313, null, 1.277996],
         "prices": [
           [3126.962766, 0.998204, 1.271722],
           [3191.140069, 1.00139, 1.210663],
@@ -1555,7 +1973,38 @@
         ],
         "done": [8, 8, 10],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [-0.014206548922786277, null, -0.004909248542248834, 3126.962766, 0.998204, 1.271722, false, false, false, true, "picked", "not_due", "not_due"],
+          [0.020523846237572974, 0.0031917323513028784, -0.04801285186542337, 3126.962766, 0.998204, 1.271722, false, false, false, true, "not_due", "not_due", "picked"],
+          [0.0073383961511090945, -0.0035979987816934234, -0.0033312325560457268, 3126.962766, 0.998204, 1.271722, false, false, false, true, "not_due", "picked", "not_due"],
+          [-0.019665648774393696, 0.017437589385309593, 0.010383464690916, 3126.962766, 0.998204, 1.271722, false, false, false, true, "picked", "not_due", "not_due"],
+          [-0.0020722342825250095, -0.01691020167732804, 0.0013066384286215538, 3126.962766, 0.998204, 1.271722, false, false, false, true, "not_due", "picked", "not_due"],
+          [null, null, null, 3126.962766, 0.998204, 1.271722, false, false, false, null, "no_price", "no_price", "no_price"],
+          [-0.009385494328210564, -0.00047694482770366253, null, 3126.962766, 0.998204, 1.271722, false, false, false, true, "picked", "picked", "no_price"],
+          [0.05023582150402306, null, 0.049442474802416925, 3126.962766, 0.998204, 1.271722, false, false, false, null, "not_due", "no_price", "picked"],
+          [-0.0037230892439444885, 0.00483487929843629, -0.053125065860906484, 3126.962766, 0.998204, 1.271722, false, false, false, true, "picked", "not_due", "cooldown"],
+          [0.02040912958734742, -0.005157796653118885, 0.0031960760067599736, 3126.962766, 0.998204, 1.271722, false, false, false, true, "not_due", "picked", "not_due"],
+          [-0.013045038440023249, 0.0036041059129801045, 0.01566404558367096, 3126.962766, 0.998204, 1.271722, false, false, false, true, "picked", "not_due", "not_due"],
+          [-0.006218573801859861, 0.0017975799118694624, 0.024827081794417172, 3126.962766, 0.998204, 1.271722, false, false, false, true, "cooldown", "picked", "not_due"],
+          [-0.03594172640052551, -0.001961920587598809, null, 3126.962766, 0.998204, 1.271722, false, false, false, true, "picked", "not_due", "no_price"],
+          [0.0074348672309279, 4.397264901245812e-05, -0.021056703574318658, 3126.962766, 0.998204, 1.271722, false, false, false, true, "not_due", "not_due", "picked"],
+          [null, null, null, 3126.962766, 0.998204, 1.271722, false, false, false, null, "no_price", "no_price", "no_price"],
+          [-0.0021743040097321753, -0.0033777504182215257, 0.003926603403378914, 3126.962766, 0.998204, 1.271722, false, false, false, true, "not_due", "picked", "picked"],
+          [null, null, null, 3126.962766, 0.998204, 1.271722, false, false, false, null, "no_price", "no_price", "no_price"],
+          [0.012579802829498998, 0.0011370860515438341, -0.0259448360955985, 3126.962766, 0.998204, 1.271722, false, false, false, true, "not_due", "not_due", "picked"],
+          [-0.016035367289462532, 0.0001312073075458997, 0.0217339312899667, 3126.962766, 0.998204, 1.271722, false, false, false, true, "picked", "not_due", "not_due"],
+          [-0.019126681852809635, -0.000559811166380042, 0.022203873025712584, 3126.962766, 0.998204, 1.271722, false, false, false, true, "cooldown", "picked", "not_due"],
+          [0.0407279913207641, 0.0011723540870067772, null, 3126.962766, 0.998204, 1.271722, false, false, false, true, "picked", "cooldown", "no_price"],
+          [-0.040385790989820536, -0.0015533016667967914, -0.003066082244912338, 3126.962766, 0.998204, 1.271722, false, false, false, true, "complete", "not_due", "picked"],
+          [0.047571086031979126, 0.0017411613756879163, -0.01797784490801968, 3126.962766, 0.998204, 1.271722, false, false, false, true, "complete", "picked", "cooldown"],
+          [null, 0.0011757677763579721, -0.0018252119600986605, 3126.962766, 0.998204, 1.271722, false, false, false, true, "complete", "complete", "picked"],
+          [0.025865528590196973, 0.0018410389776537528, 0.01776836165039719, 3126.962766, 0.998204, 1.271722, false, false, false, true, "complete", "complete", "picked"],
+          [null, null, null, 3126.962766, 0.998204, 1.271722, false, false, false, null, "complete", "complete", "no_price"],
+          [-0.024559010179358243, -0.0038329389323639163, 0.007315119368870526, 3126.962766, 0.998204, 1.271722, false, false, false, true, "complete", "complete", "picked"],
+          [-0.011085268445848562, 0.0038276572774560425, 0.020952918394353093, 3126.962766, 0.998204, 1.271722, false, false, false, true, "complete", "complete", "complete"],
+          [null, null, null, 3126.962766, 0.998204, 1.271722, false, false, false, null, "complete", "complete", "complete"]
+        ]
       }
     }
   ]

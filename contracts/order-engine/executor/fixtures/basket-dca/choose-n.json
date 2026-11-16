@@ -6,7 +6,8 @@
     "engine": {
       "file": "engine_discrete.py",
       "sha256": "282581bab72abf16b19096ab0f1be15e50fe0f2b5cdd3a3a7e165d9f2f281685",
-      "package": "analyst package basket-dca-v2, docs-Reports-basket-dca/src (v3.2)"
+      "package": "analyst package basket-dca-v2, docs-Reports-basket-dca/src (v3.2)",
+      "copy": "contracts/order-engine/executor/fixtures/basket-dca/engine_discrete.py (byte for byte)"
     },
     "run": {
       "function": "run_discrete",
@@ -14,7 +15,7 @@
       "rule": "hamilton",
       "kSoft": "max(1, ceil(N / 4))",
       "graceTicks": 3,
-      "pd0": [null, null, null],
+      "pd0": "input.reference of each vector: the decision prices one cycle before tick 0 (null = nan: the leg has no reference). It gives `last`; `entry` is the first tick price",
       "Pe": "the decision prices (Pe values fills only; no decision reads it)"
     },
     "idleReasons": {

@@ -8,21 +8,33 @@
 //
 // Reference: `engine_discrete.run_discrete` of the analyst package (v3.2) with L = 2, rule = 'hamilton' and
 // k_soft = max(1, ceil(N / 4)). Where the spec's prose and the engine differ, this module follows the engine; the
-// differences are listed in docs/feedback/feat-basket-selection-module.md. The vectors in fixtures/basket-dca/
-// (written by scripts/basket-dca/export_vectors.py) pin it pick for pick, down to the engine's floating point: the
-// weights num / den as doubles, its +1e-9 / -1e-9 guards, and numpy's round(v, 12) in the first-chunk sort, which is
-// rint(v * 1e12) / 1e12, half to even (Python's round() on a float differs from it).
+// differences are listed in docs/feedback/feat-basket-selection-module.md and feat-basket-selection-reference.md. The
+// vectors in fixtures/basket-dca/ (written by scripts/basket-dca/export_vectors.py from the engine copy kept beside
+// them) pin it pick for pick, down to the engine's floating point: the weights num / den as doubles, its +1e-9 / -1e-9
+// guards, and numpy's round(v, 12) in the first-chunk sort, which is rint(v * 1e12) / 1e12, half to even (Python's
+// round() on a float differs from it).
 //
 // State belongs to the caller: per leg { n, done, last, entry }, per basket the cooldown. `done` counts EXECUTED
 // chunks (the order row), so decideTick never adds its own picks to it: a chunk that was picked and did not execute
 // stays due, and the next tick picks it up (spec §4, last paragraph). Feed `next` back on the following tick with
-// `done` refreshed from the orders. Invalid input throws (TypeError: wrong type or shape; RangeError: a value out of
-// range). A throw means "decide nothing, execute nothing", never a default.
+// `done` refreshed from the orders. `peak` (spec §4, reporting only) is not kept here: it is the wiring's.
+//
+// The price reference (owner decision 2026-11-16, spec §4 "Reference"). In the default mode the keeper records each
+// leg's price when the basket is created and buys nothing; the first purchase is one cycle later. That price is the
+// engine's `pd0`: it is the leg's `last` at tick 0, so the first variation compares against it, as in every analyst
+// run. It is NOT rule 9's entry: the engine sets `entry` at the leg's first TICK with a price whatever pd0 is
+// (engine_discrete.py:64 and :71), and the owner chose to follow the engine. So the state at tick 0 is
+// { last: reference, entry: null }. A leg with no reference ("buy the first one now" mode, or no price at creation)
+// starts { last: null, entry: null }: it has no previous price, its variation counts as 0, and when no leg has one
+// the ties give tick 0's first chunk to leg 0, which is what that mode relies on.
+//
+// Invalid input throws (TypeError: wrong type or shape; RangeError: a value out of range). A throw means "decide
+// nothing, execute nothing", never a default.
 
 const LEGS = 3
 const LEG_INDEXES = [0, 1, 2]
 
-/** Grace ticks after the N nominal ones: ticks are t = 0 … N + 2 (spec §4; expiry = t0 + (N + 3) × T + 3 600 s). */
+/** Grace ticks after the N nominal ones: ticks are t = 0 … N + 2 (spec §4). */
 export const GRACE_TICKS = 3
 
 /** L: at most 2 chunks of one leg per tick, because dcaInterval = T / 2 (spec §3.4, §4.7-4.8). */
@@ -43,6 +55,20 @@ export const IDLE_REASONS = Object.freeze({
   RULE5: "rule5",
 })
 
+/** Why one leg did or did not buy at a tick (`perLeg[i].reason`). The first match wins, in this order: picked (at
+ *  least one chunk); complete (done = n); no_price; band (the stable leg, out of band); rule9 (protected and still
+ *  blocking); cooldown (eligible, first in the rule 4 order, sent to the back of the line by rule 5 and not picked);
+ *  not_due (eligible and not picked for any other reason: nothing was due, or the chunks due went to legs ahead). */
+export const LEG_REASONS = Object.freeze({
+  PICKED: "picked",
+  COMPLETE: "complete",
+  NO_PRICE: "no_price",
+  BAND: "band",
+  RULE9: "rule9",
+  COOLDOWN: "cooldown",
+  NOT_DUE: "not_due",
+})
+
 // ------------------------------------------------------------------------------------------------ input checks
 function fail(Type, message) {
   throw new Type(`basket-scheduler: ${message}`)
@@ -50,6 +76,15 @@ function fail(Type, message) {
 
 function show(x) {
   return typeof x === "number" || typeof x === "bigint" || typeof x === "boolean" ? String(x) : typeof x
+}
+
+/** An array of exactly `length` items, each read BY INDEX: a hole in a sparse array reaches `read` as undefined and
+ *  is refused there, where map and forEach would skip it in silence. */
+function arrayOf(name, x, length, what, read) {
+  if (!Array.isArray(x) || x.length !== length) fail(TypeError, `${name} must be an array of ${length}${what}`)
+  const out = []
+  for (let i = 0; i < length; i += 1) out[i] = read(x[i], i)
+  return out
 }
 
 function integerIn(name, x, min, max) {
@@ -78,10 +113,7 @@ function fractionIn(name, x, { open }) {
 /** [[num, den] × 3] → the same pairs as bigints, after the checks: positive safe integers, no leg above 50%, sum
  *  exactly 1 (integer arithmetic, so thirds are thirds). */
 function weightFractions(weights) {
-  if (!Array.isArray(weights) || weights.length !== LEGS) {
-    fail(TypeError, `weights must be an array of ${LEGS} [numerator, denominator] pairs`)
-  }
-  const fr = weights.map((pair, i) => {
+  const fr = arrayOf("weights", weights, LEGS, " [numerator, denominator] pairs", (pair, i) => {
     if (!Array.isArray(pair) || pair.length !== 2) fail(TypeError, `weights[${i}] must be a [numerator, denominator] pair`)
     integerIn(`weights[${i}][0]`, pair[0], 1, Number.MAX_SAFE_INTEGER)
     integerIn(`weights[${i}][1]`, pair[1], 1, Number.MAX_SAFE_INTEGER)
@@ -132,9 +164,11 @@ export function chooseN(weights, capitalUsd, cycles, minFillUsd) {
 
 /**
  * amountIn of each leg order (spec §3.1): legs 1 and 2 floor(w_i × C), leg 3 the rest, so the three sum to C exactly.
+ * Throws when a leg would get nothing: a basket needs a capital that gives every leg at least one unit (spec §4,
+ * rules for the wiring), and an order of amount 0 must never be signed.
  * @param {bigint} capitalUnits C in units of the token sold, > 0
  * @param {Array<[number, number]>} weights three [numerator, denominator] pairs
- * @returns {bigint[]}
+ * @returns {bigint[]} three amounts, each > 0
  */
 export function legAmounts(capitalUnits, weights) {
   if (typeof capitalUnits !== "bigint") fail(TypeError, `capitalUnits must be a bigint (token units), got ${show(capitalUnits)}`)
@@ -142,7 +176,11 @@ export function legAmounts(capitalUnits, weights) {
   const fr = weightFractions(weights)
   const first = (capitalUnits * fr[0][0]) / fr[0][1]
   const second = (capitalUnits * fr[1][0]) / fr[1][1]
-  return [first, second, capitalUnits - first - second]
+  const amounts = [first, second, capitalUnits - first - second]
+  for (const i of LEG_INDEXES) {
+    if (amounts[i] <= 0n) fail(RangeError, `capitalUnits ${capitalUnits} leaves leg ${i} with amount ${amounts[i]}; every leg needs at least one unit`)
+  }
+  return amounts
 }
 
 /**
@@ -183,9 +221,8 @@ function readParams(params) {
   return { cycles, mode, threshold, stableLeg, band }
 }
 
-function readLegs(legs) {
-  if (!Array.isArray(legs) || legs.length !== LEGS) fail(TypeError, `legs must be an array of ${LEGS}`)
-  return legs.map((leg, i) => {
+function readLegs(legs, tick) {
+  return arrayOf("legs", legs, LEGS, "", (leg, i) => {
     if (leg === null || typeof leg !== "object") fail(TypeError, `legs[${i}] must be an object`)
     const { n, done, last, entry } = leg
     integerIn(`legs[${i}].n`, n, 1, MAX_CYCLES)
@@ -193,17 +230,23 @@ function readLegs(legs) {
     if (done > n) fail(RangeError, `legs[${i}].done is ${done}, above n ${n}`)
     priceOrNull(`legs[${i}].last`, last)
     priceOrNull(`legs[${i}].entry`, entry)
-    if ((last === null) !== (entry === null)) {
-      fail(RangeError, `legs[${i}]: last and entry are set together, by the leg's first tick with a price`)
+    // `last` alone is the reference (or a leg that has not had a price at a tick yet). `entry` alone cannot happen:
+    // the tick that sets a leg's entry sets its last too.
+    if (entry !== null && last === null) fail(RangeError, `legs[${i}]: entry is set without last; a leg's first tick with a price sets both`)
+    // Nor can any leg have an entry before tick 0. This is the mistake the spec's wording invites: the reference is
+    // `last`, never `entry` (the engine's entry starts empty whatever pd0 is).
+    if (entry !== null && tick === 0) {
+      fail(RangeError, `legs[${i}].entry must be null at tick 0: the reference goes in last, and entry is the leg's first tick with a price`)
     }
     return { n, done, last, entry }
   })
 }
 
 function readPrices(prices) {
-  if (!Array.isArray(prices) || prices.length !== LEGS) fail(TypeError, `prices must be an array of ${LEGS} (a price or null)`)
-  prices.forEach((x, i) => priceOrNull(`prices[${i}]`, x))
-  return prices.slice()
+  return arrayOf("prices", prices, LEGS, " (a price or null)", (x, i) => {
+    priceOrNull(`prices[${i}]`, x)
+    return x
+  })
 }
 
 function readBandAdd(bandAdd, stableLeg) {
@@ -221,37 +264,58 @@ function readBandAdd(bandAdd, stableLeg) {
  * @param {object} input
  * @param {{ cycles: number, mode: "soft"|"rigid", threshold: number, stableLeg: 0|1|2|null, band?: number|null }} input.params
  *   N; rule 9 mode and threshold (0.25 = 25%); the stable leg and its band (required with a stable leg), or null
- * @param {number} input.tick t, 0 … N + 2
+ * @param {number} input.tick t, 0 … N + 2; tick 0 is the first tick that may buy (one cycle after creation in the
+ *   default mode, at creation in "buy the first one now" mode)
  * @param {Array<{ n: number, done: number, last: number|null, entry: number|null }>} input.legs
- *   n = the order's dcaTotal; done = chunks EXECUTED (order row); last = the decision price at the leg's previous tick
- *   with a price; entry = its decision price at its first tick with a price (null, null before it)
- * @param {0|1|2|null} input.cooldown the leg of the previous tick's first chunk (null if it picked nothing)
- * @param {Array<number|null>} input.prices the ADR-024 resolved decision price per leg; null = no usable price
- * @param {number} [input.bandAdd] with a stable leg (required then): the feed's deviation threshold when the feed
- *   decides the stable's price, else 0 (spec §4a)
+ *   n = the order's dcaTotal; done = chunks EXECUTED (order row); last = the leg's previous price: the REFERENCE
+ *   recorded at creation until the leg has had a price at a tick, then its decision price at its previous tick with a
+ *   price; null = no previous price at all (no reference); entry = rule 9's base, the leg's decision price at its
+ *   first TICK with a price; null before that, so always null at tick 0. The reference never sets entry
+ * @param {0|1|2|null} input.cooldown the leg PICKED for the first chunk of the previous tick, whether or not that
+ *   chunk executed (null if that tick picked nothing, or was missed)
+ * @param {Array<number|null>} input.prices the decision price per leg; null = no usable price. A volatile leg: its
+ *   ADR-024 resolved price. The stable leg: its §4a price, which comes PAIRED with `bandAdd`: its own USD feed while
+ *   that feed is within its maxStaleness, with bandAdd = the feed's deviation threshold; otherwise the quorum price,
+ *   with bandAdd = 0
+ * @param {number} [input.bandAdd] the other half of that pair; required with a stable leg (spec §4a)
  * @returns {{
  *   picks: Array<{ leg: number, kind: "select"|"catchup", slot: 1|2 }>,
  *   idleReason: string|null,
+ *   perLeg: Array<{ variation: number|null, protected: boolean, inBand: boolean|null, reason: string }>,
  *   next: { legs: Array<{ n: number, done: number, last: number|null, entry: number|null }>, cooldown: number|null },
  * }} picks in decision order; slot 1 = the leg's first chunk of the tick (first slot), 2 = its second (+ T ÷ 2);
- *   idleReason (one of IDLE_REASONS) only when nothing was picked; next.legs keeps n and done as given (done comes
- *   from the orders) and updates last and entry
+ *   idleReason (one of IDLE_REASONS) only when nothing was picked.
+ *   perLeg[i] = the values this decision used for leg i, for the journal to store as they are and never recompute:
+ *   variation = price ÷ last − 1, unrounded (null: no price, or no previous price, where the leg ranks as 0);
+ *   protected = price ≤ entry × (1 − threshold), false without a price, reported in the soft window too, where it
+ *   no longer blocks; inBand = the stable leg's band verdict (null for the other legs and when it has no price);
+ *   reason = one of LEG_REASONS.
+ *   next.legs keeps n and done as given (done comes from the orders) and updates last and entry; next.cooldown is
+ *   the first PICKED leg (picks[0].leg), null when nothing was picked
  */
 export function decideTick(input) {
   if (input === null || typeof input !== "object") fail(TypeError, "decideTick needs an object")
   const { params, tick, legs, cooldown, prices, bandAdd } = input
   const { cycles: N, mode, threshold, stableLeg: s, band } = readParams(params)
   integerIn("tick", tick, 0, N + GRACE_TICKS - 1)
-  const state = readLegs(legs)
+  const state = readLegs(legs, tick)
   if (cooldown !== null) integerIn("cooldown", cooldown, 0, LEGS - 1)
   const px = readPrices(prices)
   const add = readBandAdd(bandAdd, s)
 
   // §4.1-4.4: price, variation, protection, eligibility. A leg's first tick with a price sets its entry before the
-  // protection check, and a leg with no previous price varies by 0 (tick 0 for every leg).
+  // protection check. The variation is against `last`: the reference at the leg's first tick, null (ranked as 0)
+  // for a leg that has no previous price.
   const usable = px.map((x) => x !== null)
   const entry = state.map((leg, i) => (leg.entry === null && usable[i] ? px[i] : leg.entry))
-  const variation = state.map((leg, i) => (usable[i] && leg.last !== null ? px[i] / leg.last - 1 : null))
+  const variation = state.map((leg, i) => {
+    if (!usable[i] || leg.last === null) return null
+    const v = px[i] / leg.last - 1
+    // Two valid prices can be 300 orders of magnitude apart, and then the quotient overflows: not a number to rank
+    // a leg by or to write in the journal.
+    if (!Number.isFinite(v)) fail(RangeError, `legs[${i}]: the variation of price ${px[i]} against last ${leg.last} is not finite`)
+    return v
+  })
   const isProtected = state.map((_, i) => usable[i] && px[i] <= entry[i] * (1 - threshold))
   const softWindow = mode === "soft" && tick >= N - kSoft(N)
   const outOfBand = s !== null && usable[s] && Math.abs(px[s] - 1) + add > band
@@ -271,6 +335,8 @@ export function decideTick(input) {
   const due = dueTotal - executed
 
   const picks = []
+  const taken = [0, 0, 0]
+  let displaced = null // the leg rule 5 sent to the back of the line
   if (due > 0 && eligible.length > 0) {
     // §4.6 rule 4: lowest variation (rounded to 12 decimals), then furthest behind its own count, then lower leg.
     const firstKey = (i) => [
@@ -279,8 +345,8 @@ export function decideTick(input) {
     ]
     const order = eligible.slice().sort((a, b) => compareKeys(firstKey(a), firstKey(b)) || a - b)
     // Rule 5: the previous tick's first leg goes to the back of the line when another leg is eligible.
-    const first = cooldown !== null && order.length > 1 && order[0] === cooldown ? order[1] : order[0]
-    const taken = [0, 0, 0]
+    if (cooldown !== null && order.length > 1 && order[0] === cooldown) displaced = cooldown
+    const first = displaced === null ? order[0] : order[1]
     picks.push(first)
     taken[first] += 1
     // §4.7 catch-up: furthest behind its own count once this tick's picks are counted, then the lowest RAW variation
@@ -313,6 +379,12 @@ export function decideTick(input) {
     }
   }
 
+  // Why each leg did or did not buy (LEG_REASONS). whyNot's four codes are the same strings in both tables.
+  const reasonOf = (i) => {
+    if (taken[i] > 0) return LEG_REASONS.PICKED
+    return whyNot(i) ?? (i === displaced ? LEG_REASONS.COOLDOWN : LEG_REASONS.NOT_DUE)
+  }
+
   const slotsUsed = [0, 0, 0]
   return {
     picks: picks.map((leg, j) => {
@@ -320,6 +392,12 @@ export function decideTick(input) {
       return { leg, kind: j === 0 ? "select" : "catchup", slot: slotsUsed[leg] }
     }),
     idleReason,
+    perLeg: LEG_INDEXES.map((i) => ({
+      variation: variation[i],
+      protected: isProtected[i],
+      inBand: i === s && usable[i] ? !outOfBand : null,
+      reason: reasonOf(i),
+    })),
     next: {
       // §4.9: last = this tick's price for every leg that had one; done is the caller's to refresh from the orders.
       legs: state.map((leg, i) => ({ n: leg.n, done: leg.done, last: usable[i] ? px[i] : leg.last, entry: entry[i] })),
