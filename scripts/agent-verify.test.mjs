@@ -130,6 +130,16 @@ describe('agent-verify --keeper (CI Node majors, fake installs)', () => {
     writeFileSync(file, `#!/bin/sh\ncase "$1" in -p) echo ${major};; --test) printf '# pass ${pass}\\n# fail ${fail}\\n# cancelled 0\\n';; esac\nexit ${fail ? 1 : 0}\n`)
     chmodSync(file, 0o755)
   }
+  // find_node_major also tries absolute Homebrew prefixes (/opt/homebrew/opt, /usr/local/opt) that a fake HOME/PATH cannot
+  // hide: on a machine with brew node@20/node@22 installed the "fake install" runs found the REAL binaries (0-pass, no
+  // MISSING). Re-root those two prefixes under the fake home, in the test's copy of the function only; the script's own
+  // lookup is untouched. The asserts make this fail loudly if the script stops listing them, instead of silently going
+  // back to reading the machine.
+  const ABS_PREFIXES = ['/opt/homebrew/opt/', '/usr/local/opt/']
+  const isolateAbsoluteCandidates = (fn, home) => {
+    for (const p of ABS_PREFIXES) expect(fn, `find_node_major no longer lists ${p}: update the test isolation`).toContain(p)
+    return ABS_PREFIXES.reduce((acc, p) => acc.split(p).join(path.join(home, 'abs', p)), fn)
+  }
   const wf = (v) => `jobs:\n  keeper-suite:\n    steps:\n      - with:\n          node-version: "${v}"\n`
   function keeper(home, { ci = '22', kt = '20' } = {}) {
     const root = path.join(home, 'repo')
@@ -147,7 +157,7 @@ describe('agent-verify --keeper (CI Node majors, fake installs)', () => {
       'KEEPER_DIR="contracts/order-engine/executor"; KEEPER_WORKFLOW=".github/workflows/keeper-tests.yml"',
       'KEEPER_CI_WORKFLOW=".github/workflows/ci.yml"; KEEPER_CI_JOB="keeper-suite"',
       cut('record()', '# ---------- checks'),
-      cut('find_node_major()', '# ---------- formatter'),
+      isolateAbsoluteCandidates(cut('find_node_major()', '# ---------- formatter'), home),
       'check_keeper',
       'cat "$RESULTS"',
     ].join('\n')
@@ -190,6 +200,16 @@ describe('agent-verify --keeper (CI Node majors, fake installs)', () => {
     expect(line).toMatch(/install: brew install node@20$/)
     const both = keeper(mk()).stdout.split('\n').find((l) => l.startsWith('keeper\t'))
     expect(both).toMatch(/install: brew install node@20 node@22$/)
+  })
+
+  it('the machine-wide Homebrew prefixes are still candidates (re-rooted under the fake home here), and nothing real leaks in', () => {
+    const h = mk()
+    fakeNode(path.join(h, 'abs/opt/homebrew/opt/node@22/bin/node'), 22)
+    fakeNode(path.join(h, 'abs/usr/local/opt/node@20/bin/node'), 20)
+    expect(keeper(h).stdout).toMatch(/^keeper\tPASS\tnode20:5-pass\/0-fail\/0-cancelled node22:5-pass\/0-fail\/0-cancelled$/m)
+    // with no fake install at all, both majors are MISSING whatever brew/nvm/fnm installs the real machine has
+    const none = keeper(mk()).stdout.split('\n').find((l) => l.startsWith('keeper\t'))
+    expect(none).toMatch(/^keeper\tFAIL\tnode20:MISSING node22:MISSING/)
   })
 
   it('a failing or cancelled test on one major is FAIL', () => {
