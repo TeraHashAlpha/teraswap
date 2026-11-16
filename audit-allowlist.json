@@ -28,8 +28,8 @@
       "vulnerableRange": "<4.6.6 (3.x line)",
       "fixedIn": "none for 3.x (4.6.6 only)",
       "added": "2026-10-23",
-      "expires": "2026-11-22",
-      "reason": "Two transitive 3.x copies under @coinbase/cdp-sdk (^3.25.76) and @reown/appkit-wallet (3.22.4, exact) have no patched 3.x release; moving them to zod 4 is a breaking major for those packages. Reachability: both validate wallet/SDK messages with fixed-shape schemas, not attacker-sized collections; the root app copy is 4.6.6. Re-check weekly for a 3.x patch or upstream bumps of cdp-sdk/appkit; delete on first fix."
+      "expires": "2026-12-22",
+      "reason": "Renewed 2026-11-16 (owner decision). Two transitive 3.x copies, 3.25.76 under @coinbase/cdp-sdk (^3.25.76) and 3.22.4 under @reown/appkit-wallet (exact), have no patched 3.x release. The only fix is zod 4.6.6, reachable only through a parent major: wagmi 3 (npm audit fixAvailable 3.7.11), which this repo forbids; the root app copy is already 4.6.6. Measured on `npm run build` (docs/feedback/chore-dependabot-alerts-2026-11.evidence.md, section C): neither vulnerable copy is in the browser output (258 chunks) or the server output, and neither is traced into a Vercel function. 3.22.4 has no handleArrayResult, the function the advisory names; 3.25.76 has it only in its v4 subtree, and cdp-sdk imports bare \"zod\", the v3 API. The advisory is an uncontrolled-memory bug for an array schema with no length cap parsing an oversized array. Delete on a 3.x patch or when wagmi 3 is allowed."
     },
     {
       "id": "GHSA-g3hv-75wg-m249",
@@ -56,7 +56,7 @@
       "fixedIn": "11.1.1 (major for all copies; advisory lists no 8.x/9.x fix)",
       "added": "2026-11-06",
       "expires": "2026-12-06",
-      "reason": "Moderate, runtime via wallet connectors. Only fix is a major bump that @metamask/utils@9 (^9.0.1), @metamask/sdk (^8.3.2) and xcode (^7.0.3) cannot take. Bug is missing buffer bounds check when buf is passed to v3/v5/v6. Reachability in the app is NOT yet verified (grep for uuid v3/v5/v6 with a buf argument before renewal). Owner decision. Delete when fixed."
+      "reason": "Moderate, runtime via wallet connectors. Only fix is a major bump that @metamask/utils@9 (^9.0.1), @metamask/sdk (^8.3.2) and xcode (^7.0.3) cannot take. Bug is missing buffer bounds check when buf is passed to v3/v5/v6. Reachability measured 2026-11-14 (docs/feedback/chore-dependabot-alerts-2026-11.md, evidence 3): the three copies are called only as v4() and validate() by @metamask/utils, @metamask/sdk, @metamask/sdk-communication-layer and xcode; 0 references to v3/v5/v6, and the bundled MetaMask chunk has no v3/v5 code, so the buf path is not reachable. Owner decision. Delete when fixed."
     },
     {
       "id": "GHSA-848j-6mx2-7j84",

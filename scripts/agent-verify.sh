@@ -246,7 +246,7 @@ check_keeper() {
   local major bin log p f c rc parts="" bad=0 missing=""
   for major in $majors; do
     if ! bin="$(find_node_major "$major")"; then
-      parts="$parts node$major:MISSING"; bad=1; missing="$missing node@$major"
+      parts="$parts node$major:MISSING"; bad=1; missing="${missing:+$missing, }$major"
       continue
     fi
     log="$OUT/keeper-node$major.log"
@@ -263,7 +263,7 @@ check_keeper() {
   if [ "$bad" -eq 0 ]; then record keeper PASS "$parts"
   else
     case "$parts" in
-      *MISSING*) record keeper FAIL "$parts — not substituting another version; install: brew install${missing}" ;;
+      *MISSING*) record keeper FAIL "$parts — not substituting another version. Missing Node major(s): ${missing}; ask the owner to install them; do not install anything yourself" ;;
       *) record keeper FAIL "$parts (logs: $OUT/keeper-node*.log)" ;;
     esac
   fi

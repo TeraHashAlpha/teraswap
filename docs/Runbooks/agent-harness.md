@@ -141,7 +141,7 @@ scripts/agent-verify.sh
 scripts/agent-verify.sh --codeql --keeper
 ```
 
-`--keeper` runs the keeper suite on every Node major CI uses (22 in `ci.yml`'s `keeper-suite` job, 20 in `keeper-tests.yml`), looked up via PATH, brew, nvm, fnm and volta. A missing major is FAIL with the line `install: brew install node@20 node@22` (only the missing ones); it never substitutes another version. `--codeql` needs `gh extension install github/gh-codeql`.
+`--keeper` runs the keeper suite on every Node major CI uses (22 in `ci.yml`'s `keeper-suite` job, 20 in `keeper-tests.yml`), looked up via PATH, brew, nvm, fnm and volta. A missing major is FAIL naming only the missing majors (`Missing Node major(s): 20, 22; ask the owner to install them; do not install anything yourself`); it never substitutes another version and never prints an install command. **An agent installs nothing on the machine: no `brew`, `nvm install`, `fnm install` or `volta install`. If a Node major is missing, stop and ask the owner.** On 2026-11-14 an agent followed the old hint (`brew install node@20 node@22`); brew upgraded a library the default Node links against (`simdjson`), the default Node stopped starting, and every agent session was then blocked by its own guard hooks, which run on `node`, until the owner relinked Node. `--codeql` needs `gh extension install github/gh-codeql`.
 
 ## What this cannot stop
 
