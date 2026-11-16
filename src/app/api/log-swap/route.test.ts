@@ -61,6 +61,7 @@ vi.mock('@/lib/kv-rate-limiter', async () => {
   return {
     ...actual,
     checkRateLimit: vi.fn(async () => ({ allowed: true, remaining: 99, resetAt: Date.now() + 60_000 })),
+    checkRateLimitWithin: vi.fn(async () => ({ allowed: true, remaining: 99, resetAt: Date.now() + 60_000 })),
   }
 })
 

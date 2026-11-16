@@ -1,0 +1,211 @@
+{
+  "header": {
+    "family": "band",
+    "about": "the stable leg out of band, band_add pushing 0.992 out at band 1%; the idle-reason priority",
+    "generator": "scripts/basket-dca/export_vectors.py",
+    "engine": {
+      "file": "engine_discrete.py",
+      "sha256": "282581bab72abf16b19096ab0f1be15e50fe0f2b5cdd3a3a7e165d9f2f281685",
+      "package": "analyst package basket-dca-v2, docs-Reports-basket-dca/src (v3.2)"
+    },
+    "run": {
+      "function": "run_discrete",
+      "L": 2,
+      "rule": "hamilton",
+      "kSoft": "max(1, ceil(N / 4))",
+      "graceTicks": 3,
+      "pd0": [null, null, null],
+      "Pe": "the decision prices (Pe values fills only; no decision reads it)"
+    },
+    "idleReasons": {
+      "calendário": "calendar",
+      "regra 6": "complete",
+      "sem preço": "no_price",
+      "banda": "band",
+      "regra 9": "rule9",
+      "regra 5": "rule5"
+    },
+    "generatedWith": {
+      "python": "3.14.2",
+      "numpy": "2.5.4"
+    }
+  },
+  "vectors": [
+    {
+      "id": "band-n12-stable2-b100-soft",
+      "notes": "stable leg 2, band 1%: 0.971 out; 0.992 out only with band_add 0.003; 0.99 and 1.01 out (float); out on the last nominal tick and on a grace tick; the stable has the lowest variation at ticks 4-7; soft",
+      "input": {
+        "weights": [
+          [1, 4],
+          [1, 4],
+          [1, 2]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 12,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": 2,
+        "band": 0.01,
+        "bandAdd": [0.003, 0.003, 0.0, 0.003, 0.003, 0.0, 0.0, 0.0, 0.0, 0.003, 0.003, 0.0, 0.0, 0.003, 0.0],
+        "prices": [
+          [3200.0, 95000.0, 1.0],
+          [3168.0, 95950.0, 0.999],
+          [3136.0, 94050.0, 0.971],
+          [3072.0, 92150.0, 0.971],
+          [3200.0, 95950.0, 0.992],
+          [3264.0, 97850.0, 0.99],
+          [3296.0, 98800.0, 0.992],
+          [3392.0, 101650.0, 1.01],
+          [3360.0, 99750.0, 1.009],
+          [3328.0, 99750.0, 0.995],
+          [3360.0, 98800.0, 1.0],
+          [3296.0, 96900.0, 0.98],
+          [3264.0, 97850.0, 1.0],
+          [3296.0, 96900.0, 0.97],
+          [3296.0, 96900.0, 1.0]
+        ]
+      },
+      "expected": {
+        "n": [3, 3, 6],
+        "kSoft": 3,
+        "fills": [
+          [0, 0, "select"],
+          [1, 2, "select"],
+          [2, 1, "select"],
+          [3, 0, "select"],
+          [4, 1, "select"],
+          [5, 0, "select"],
+          [6, 2, "select"],
+          [7, 1, "select"],
+          [8, 2, "select"],
+          [9, 2, "select"],
+          [10, 2, "select"],
+          [12, 2, "select"]
+        ],
+        "idle": [
+          [11, "band"],
+          [13, "complete"],
+          [14, "complete"]
+        ],
+        "done": [3, 3, 6],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "band-n9-stable0-b500-soft",
+      "notes": "stable leg 0 (40%), band 5%: 0.96 and 1.047 in, 0.948, 1.06, 0.94 out, 0.95 out (float), out on the last nominal tick; soft",
+      "input": {
+        "weights": [
+          [2, 5],
+          [2, 5],
+          [1, 5]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 9,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": 0,
+        "band": 0.05,
+        "bandAdd": [0.003, 0.003, 0.0, 0.003, 0.0, 0.0, 0.0, 0.003, 0.0, 0.0, 0.003, 0.0],
+        "prices": [
+          [1.0, 97008.343242, 1.216459],
+          [0.96, 92586.203857, 1.254314],
+          [0.948, 96196.412011, 1.255999],
+          [1.047, 94274.050483, 1.221062],
+          [1.06, 98482.782637, 1.219974],
+          [1.0, 96595.133967, 1.223243],
+          [0.95, 98377.473196, 1.252238],
+          [1.0, 96372.577751, 1.206156],
+          [0.94, 95937.35767, 1.237527],
+          [1.0, 97391.768574, 1.255471],
+          [1.02, 95640.703821, 1.275772],
+          [1.0, 98380.84695, 1.263967]
+        ]
+      },
+      "expected": {
+        "n": [4, 3, 2],
+        "kSoft": 3,
+        "fills": [
+          [0, 0, "select"],
+          [1, 1, "select"],
+          [2, 2, "select"],
+          [3, 1, "select"],
+          [4, 2, "select"],
+          [5, 0, "select"],
+          [6, 1, "select"],
+          [7, 0, "select"],
+          [9, 0, "select"]
+        ],
+        "idle": [
+          [8, "band"],
+          [10, "complete"],
+          [11, "complete"]
+        ],
+        "done": [4, 3, 2],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "band-n9-priority-rigid",
+      "notes": "idle priority: leg 0 rule 9 from tick 1 (rigid), leg 1 no price at 2-3, stable leg 2 out at 2-3, 5, 9 and no price at 7",
+      "input": {
+        "weights": [
+          [1, 4],
+          [1, 4],
+          [1, 2]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 9,
+        "minFillUsd": 16,
+        "mode": "rigid",
+        "threshold": 0.25,
+        "stableLeg": 2,
+        "band": 0.01,
+        "bandAdd": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "prices": [
+          [3283.96969, 91377.586549, 1.0],
+          [2298.778783, 94801.579007, 1.0],
+          [2298.778783, null, 0.97],
+          [2298.778783, null, 0.97],
+          [2298.778783, 97308.072945, 1.0],
+          [2298.778783, 94213.450325, 0.97],
+          [2298.778783, 91899.223149, 1.0],
+          [2298.778783, 93651.885699, null],
+          [2298.778783, 92427.993719, 1.0],
+          [2298.778783, 95874.288479, 0.97],
+          [2298.778783, 91630.895048, 1.0],
+          [2298.778783, 98594.380386, 1.0]
+        ]
+      },
+      "expected": {
+        "n": [2, 2, 5],
+        "kSoft": null,
+        "fills": [
+          [0, 0, "select"],
+          [1, 2, "select"],
+          [4, 1, "select"],
+          [4, 2, "catchup"],
+          [4, 2, "catchup"],
+          [5, 1, "select"],
+          [6, 2, "select"],
+          [8, 2, "select"]
+        ],
+        "idle": [
+          [2, "no_price"],
+          [3, "no_price"],
+          [7, "no_price"],
+          [9, "rule9"],
+          [10, "rule9"],
+          [11, "rule9"]
+        ],
+        "done": [1, 2, 5],
+        "unbought": [1, 0, 0],
+        "deviationPp": 12.5
+      }
+    }
+  ]
+}

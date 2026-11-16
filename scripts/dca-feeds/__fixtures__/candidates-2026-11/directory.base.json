@@ -1,0 +1,189 @@
+[
+  {
+    "name": "USDC / USD",
+    "path": "usdc-usd-svr",
+    "ens": null,
+    "proxyAddress": "0x458138Fc0D67027E9A6778ef40a6ffC318c69061",
+    "secondaryProxyAddress": "0x1550207eAeB590D1557a6E6C066D3d57B5A4Dc65",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "low",
+    "docs": {
+      "baseAsset": "USDC",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "RSR / USD",
+    "path": "rsr-usd",
+    "ens": "rsr-usd",
+    "proxyAddress": "0xAa98aE504658766Dfe11F31c5D95a0bdcABDe0b1",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "medium",
+    "docs": {
+      "baseAsset": "RSR",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "SOL / USD",
+    "path": "sol-usd-shared-svr",
+    "ens": null,
+    "proxyAddress": "0xDa5Fd22F9382e57534fEdA4fF544878aa1cf401f",
+    "secondaryProxyAddress": "0xB221fFf161c23C6473a6316294E2d510cfb667b0",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "low",
+    "docs": {
+      "baseAsset": "SOL",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "SNX / USD",
+    "path": "snx-usd",
+    "ens": "snx-usd",
+    "proxyAddress": "0xe3971Ed6F1A5903321479Ef3148B5950c0612075",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "medium",
+    "docs": {
+      "baseAsset": "SNX",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "SOL / USD",
+    "path": "sol-usd-shared-svr-2",
+    "ens": null,
+    "proxyAddress": "0x5D424D5a664a9f3c820F422297077d49877F9C93",
+    "secondaryProxyAddress": "0x975043adBb80fc32276CbF9Bbcfd4A601a12462D",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "low",
+    "docs": {
+      "baseAsset": "SOL",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "GHO / USD",
+    "path": "gho-usd-svr",
+    "ens": null,
+    "proxyAddress": "0x1B5FEF61Ff9B690364359b03cC07E060b12Bd3C1",
+    "secondaryProxyAddress": "0xd8CA171B6f0F6B2a01B6B2dB7424dd72AA07a6F1",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "medium",
+    "docs": {
+      "baseAsset": "GHO",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "USDC / USD",
+    "path": "usdc-usd",
+    "ens": "usdc-usd",
+    "proxyAddress": "0x7e860098F58bBFC8648a4311b374B1D669a2bc6B",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "low",
+    "docs": {
+      "baseAsset": "USDC",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "MAMO / USD",
+    "path": "mamo-usd",
+    "ens": "mamo-usd",
+    "proxyAddress": "0xeF7541b388a77C1709a3d44BfBfC5c1ED3F0Ac94",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "high",
+    "docs": {
+      "baseAsset": "MAMO",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "DEGEN / USD",
+    "path": "degen-usd",
+    "ens": "degen-usd",
+    "proxyAddress": "0xE62BcE5D7CB9d16AB8b4D622538bc0A50A5799c2",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "medium",
+    "docs": {
+      "baseAsset": "DEGEN",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "WBTC / USD",
+    "path": "wbtc-usd",
+    "ens": "wbtc-usd",
+    "proxyAddress": "0xCCADC697c55bbB68dc5bCdf8d3CBe83CdD4E071E",
+    "heartbeat": 1200,
+    "decimals": 8,
+    "feedCategory": "low",
+    "docs": {
+      "baseAsset": "WBTC",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "GHO / USD",
+    "path": "gho-usd",
+    "ens": "gho-usd",
+    "proxyAddress": "0x42868EFcee13C0E71af89c04fF7d96f5bec479b0",
+    "heartbeat": 86400,
+    "decimals": 8,
+    "feedCategory": "medium",
+    "docs": {
+      "baseAsset": "GHO",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "MOG / USD",
+    "path": "mog-usd",
+    "ens": "mog-usd",
+    "proxyAddress": "0x4aeb6D15769EaD32D0c5Be2940F40c7CFf53801d",
+    "heartbeat": 86400,
+    "decimals": 18,
+    "feedCategory": "medium",
+    "docs": {
+      "baseAsset": "MOG",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "USDC / USD",
+    "path": "usdc-usd-shared-svr",
+    "ens": null,
+    "proxyAddress": "0xd0Dc8c910565D94D408729D16bE5467B5d7633Ad",
+    "secondaryProxyAddress": "0x1401Fd60F9ba4F718a2fE6149aadf3d1F0dB1b0A",
+    "heartbeat": 86400,
+    "decimals": 18,
+    "feedCategory": "low",
+    "docs": {
+      "baseAsset": "USDC",
+      "quoteAsset": "USD"
+    }
+  },
+  {
+    "name": "VVV / USD",
+    "path": "vvv-usd",
+    "ens": "vvv-usd",
+    "proxyAddress": "0xaABc55Ca55D70B034e4daA2551A224239890282F",
+    "heartbeat": 86400,
+    "decimals": 18,
+    "feedCategory": "new",
+    "docs": {
+      "baseAsset": "VVV",
+      "quoteAsset": "USD"
+    }
+  }
+]
