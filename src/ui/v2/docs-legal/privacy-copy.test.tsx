@@ -148,6 +148,8 @@ describe.each(LEGAL)('Privacy Policy §3.3 — %s', (_ui, mount) => {
       'whether the intro has played',
       'the signature that authorises reads of your orders, which is sent to our server with those reads',
       'Slippage settings, swap history, and active approvals are held in memory only',
+      // [S-17] The worker caches pages (network-first navigations, sw.js:112-121) as well as static assets, and never the API (sw.js:51).
+      "A service worker keeps the site's own pages and static files in your browser's cache and does not cache requests to our API.",
       'those entries are theirs',
     ]) expect(collect, phrase).toContain(phrase)
     // The old list named three things the app does not store.

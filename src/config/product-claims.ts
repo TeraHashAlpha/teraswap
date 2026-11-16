@@ -158,7 +158,7 @@ export const PRIVACY_LOCAL_STORAGE_NOTE =
   "Depending on the parts of the Interface you use, it writes these entries to your browser's local storage: your theme, the tokens you import (one entry per chain), your currency choice (dollars or euros), whether you have seen the Permit2 explainer, whether you turned on order notifications and whether you dismissed the notification prompt, the ids of orders you dismissed, and encrypted copies of your orders and of your order activity (the key is derived from your wallet address). " +
   "It writes these to session storage, which the browser clears when the session ends: the direction in which you read the exchange rate, whether the intro has played, the time of your last click, key press, scroll or touch while a wallet is connected (for the one-hour idle timeout), and the signature that authorises reads of your orders, which is sent to our server with those reads. " +
   "Slippage settings, swap history, and active approvals are held in memory only and are not written to your browser's storage. " +
-  "A service worker keeps the site's own static files in your browser's cache and does not cache requests to our API. " +
+  "A service worker keeps the site's own pages and static files in your browser's cache and does not cache requests to our API. " +
   'The wallet libraries the Interface uses keep their own entries in your browser\'s storage, such as the wallet you last connected; those entries are theirs.'
 // [fix/privacy-leftovers-a78b S-8] Privacy §8. Vercel hosts the site (vercel.json); Cloudflare sits in front of it (owner fact,
 // 2026-11-11; the repo's own statement is cloudflare-ips.ts:4). "We do not ask them for analytics": no analytics package or
