@@ -71,6 +71,28 @@ Before execute: `cancelTimelockAction(actionId)` (admin). After execute: queue a
 ## 9. Monthly batch (owner decision 2026-11-13)
 One named list of symbols, one chain, one PR per month. Batch 1 is `2026-11` on Base: MORPHO, AAVE, LINK, USDS, AERO, cbETH, ZRO, YFI.
 
+**0. Choose the symbols from the weekly candidates PR.** `.github/workflows/dca-feed-candidates.yml` runs every Monday 06:30 UTC (or by hand:
+Actions, "DCA feed candidates", Run workflow), one job per chain. It runs `scripts/dca-feeds/candidates.ts`, which uses the same directory, catalog and
+live checks as `batch.ts` (plus `tokenUsdFeeds()` on both RPCs), and when it finds feeds that are not in the config yet it opens ONE PR per chain, titled
+`DCA feed candidates: CHAIN, DATE`, whose body is the table. The PR only appends rows with `enabled: false`, `action: "none"`, `phase: 2`; an
+existing row is never modified. No new rows means no PR (the run summary still shows the table). The job never merges, enables or registers
+anything and holds no wallet key; a failed directory fetch fails the job, so a red run is the signal and there is no empty PR. The same list on
+demand: `node --no-warnings scripts/dca-feeds/candidates.ts --chain base` (table on stderr, JSON report on stdout; add `--write-config` to append the rows).
+
+Before you pick a symbol, check what the table cannot prove:
+1. **The token.** The directory carries no token address, so a feed is joined to a catalog token on the exact symbol, and only when exactly one verified
+   token has it; anything else prints `needs manual match` and is never a candidate. A lookalike can still carry a real symbol: open the token address
+   in the explorer and confirm it is the asset the feed prices, on this chain (bridged or native, e.g. Base WBTC).
+2. **The volume.** `24h volume` is the catalog's asset-wide CoinGecko figure, not liquidity on this chain. A tiny figure (Base SHIB, PEPE) means a thin token:
+   look at a DEX pool on this chain before choosing it.
+3. **The verdict and its reasons.** Only `CANDIDATE` rows can be chosen; every other row names why (already registered on-chain, already enabled,
+   category not low/medium, the two RPCs disagree, a stablecoin outside 0.98 to 1.02, a config row that differs from the directory, ...).
+4. **Heartbeat.** Short heartbeats are fine (they set `maxStaleness` by the §0 rule), but a feed that updates every few minutes is a different risk
+   profile from one that updates daily: pick knowingly.
+
+Merge the candidates PR first (disabled rows change nothing at runtime), then run **a.** with the symbols you chose: it turns an existing row on,
+re-checks everything live, and fills `maxStaleness`, `action: "register"` and `batch`.
+
 **a. Build the batch** (read-only: one HTTPS GET of Chainlink's feed directory, then `eth_call` on two RPCs; no key, no transaction):
 ```
 node --no-warnings scripts/dca-feeds/batch.ts --chain base --batch 2026-12 --symbols SYM1,SYM2 > "$TMPDIR/dca-batch.json" \

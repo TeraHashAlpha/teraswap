@@ -1,0 +1,82 @@
+[
+  {
+    "address": "0x0555E30da8f98308EdB960aa94C0Db47230d2B9c",
+    "symbol": "WBTC",
+    "decimals": 8,
+    "category": "Wrapped BTC",
+    "verified": true,
+    "volume24hUsd": 307939954
+  },
+  {
+    "address": "0xaB36452DbAC151bE02b16Ca17d8919826072f64a",
+    "symbol": "RSR",
+    "decimals": 18,
+    "category": "Other",
+    "verified": true,
+    "volume24hUsd": 62661537
+  },
+  {
+    "address": "0x22e6966B799c4D5B13BE962E1D117b56327FDa66",
+    "symbol": "SNX",
+    "decimals": 18,
+    "category": "Other",
+    "verified": true,
+    "volume24hUsd": 3884609
+  },
+  {
+    "address": "0x6Bb7a212910682DCFdbd5BCBb3e28FB4E8da10Ee",
+    "symbol": "GHO",
+    "decimals": 18,
+    "category": "Stablecoin",
+    "verified": true,
+    "volume24hUsd": 17759898
+  },
+  {
+    "address": "0x2Da56AcB9Ea78330f947bD57C54119Debda7AF71",
+    "symbol": "MOG",
+    "decimals": 18,
+    "category": "Other",
+    "verified": true,
+    "volume24hUsd": 6999488
+  },
+  {
+    "address": "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed",
+    "symbol": "DEGEN",
+    "decimals": 18,
+    "category": "Other",
+    "verified": true,
+    "volume24hUsd": 4628531
+  },
+  {
+    "address": "0xacfE6019Ed1A7Dc6f7B508C02d1b04ec88cC21bf",
+    "symbol": "VVV",
+    "decimals": 18,
+    "category": "Other",
+    "verified": true,
+    "volume24hUsd": 21186750
+  },
+  {
+    "address": "0x311935Cd80B76769bF2ecC9D8Ab7635b2139cf82",
+    "symbol": "SOL",
+    "decimals": 9,
+    "category": "Other",
+    "verified": true,
+    "volume24hUsd": 23577934
+  },
+  {
+    "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "symbol": "USDC",
+    "decimals": 6,
+    "category": "Stablecoin",
+    "verified": true,
+    "volume24hUsd": 11944286101
+  },
+  {
+    "address": "0x7300B37DfdfAb110d83290A29DfB31B1740219fE",
+    "symbol": "MAMO",
+    "decimals": 18,
+    "category": "Other",
+    "verified": true,
+    "volume24hUsd": 871544
+  }
+]
