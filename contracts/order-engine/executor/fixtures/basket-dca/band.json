@@ -1,12 +1,13 @@
 {
   "header": {
     "family": "band",
-    "about": "the stable leg out of band, band_add pushing 0.992 out at band 1%; the idle-reason priority",
+    "about": "the stable leg out of band, band_add pushing 0.992 out at band 1%; the idle-reason priority; the sum exactly on the band edge",
     "generator": "scripts/basket-dca/export_vectors.py",
     "engine": {
       "file": "engine_discrete.py",
       "sha256": "282581bab72abf16b19096ab0f1be15e50fe0f2b5cdd3a3a7e165d9f2f281685",
-      "package": "analyst package basket-dca-v2, docs-Reports-basket-dca/src (v3.2)"
+      "package": "analyst package basket-dca-v2, docs-Reports-basket-dca/src (v3.2)",
+      "copy": "contracts/order-engine/executor/fixtures/basket-dca/engine_discrete.py (byte for byte)"
     },
     "run": {
       "function": "run_discrete",
@@ -14,7 +15,7 @@
       "rule": "hamilton",
       "kSoft": "max(1, ceil(N / 4))",
       "graceTicks": 3,
-      "pd0": [null, null, null],
+      "pd0": "input.reference of each vector: the decision prices one cycle before tick 0 (null = nan: the leg has no reference). It gives `last`; `entry` is the first tick price",
       "Pe": "the decision prices (Pe values fills only; no decision reads it)"
     },
     "idleReasons": {
@@ -24,6 +25,14 @@
       "banda": "band",
       "regra 9": "rule9",
       "regra 5": "rule5"
+    },
+    "perLegColumns": ["variation0", "variation1", "variation2", "entry0", "entry1", "entry2", "protected0", "protected1", "protected2", "inBand", "reason0", "reason1", "reason2"],
+    "perLeg": {
+      "variation": "v = price / last - 1, unrounded; null when the leg has no price or no previous price (nan in the engine)",
+      "entry": "rule 9's base price: the leg's first tick with a price; null before it. Never the reference",
+      "protected": "price <= entry x (1 - threshold); false without a price. Reported in the soft window too, where it no longer blocks",
+      "inBand": "the stable leg only: not(|price - 1| + band_add > band); null without a stable leg or without its price",
+      "reason": "picked = at least one fill on the tick; complete / no_price / band / rule9 = the engine's why_not; cooldown = eligible, not picked, and first in the rule 4 order until rule 5 sent it to the back of the line; not_due = eligible and not picked for any other reason (nothing due, or the chunks due went to legs ahead of it)"
     },
     "generatedWith": {
       "python": "3.14.2",
@@ -48,6 +57,7 @@
         "stableLeg": 2,
         "band": 0.01,
         "bandAdd": [0.003, 0.003, 0.0, 0.003, 0.003, 0.0, 0.0, 0.0, 0.0, 0.003, 0.003, 0.0, 0.0, 0.003, 0.0],
+        "reference": [3232.0, 95000.0, 1.0],
         "prices": [
           [3200.0, 95000.0, 1.0],
           [3168.0, 95950.0, 0.999],
@@ -90,7 +100,24 @@
         ],
         "done": [3, 3, 6],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [-0.00990099009900991, 0.0, 0.0, 3200.0, 95000.0, 1.0, false, false, false, true, "picked", "not_due", "not_due"],
+          [-0.010000000000000009, 0.010000000000000009, -0.0010000000000000009, 3200.0, 95000.0, 1.0, false, false, false, true, "cooldown", "not_due", "picked"],
+          [-0.010101010101010055, -0.01980198019801982, -0.028028028028028062, 3200.0, 95000.0, 1.0, false, false, false, false, "not_due", "picked", "band"],
+          [-0.020408163265306145, -0.02020202020202022, 0.0, 3200.0, 95000.0, 1.0, false, false, false, false, "picked", "not_due", "band"],
+          [0.04166666666666674, 0.04123711340206193, 0.02162718846549949, 3200.0, 95000.0, 1.0, false, false, false, false, "not_due", "picked", "band"],
+          [0.020000000000000018, 0.01980198019801982, -0.0020161290322581182, 3200.0, 95000.0, 1.0, false, false, false, false, "picked", "cooldown", "band"],
+          [0.009803921568627416, 0.009708737864077666, 0.002020202020202033, 3200.0, 95000.0, 1.0, false, false, false, true, "complete", "not_due", "picked"],
+          [0.029126213592232997, 0.028846153846153744, 0.01814516129032251, 3200.0, 95000.0, 1.0, false, false, false, false, "complete", "picked", "band"],
+          [-0.009433962264150941, -0.01869158878504673, -0.000990099009901102, 3200.0, 95000.0, 1.0, false, false, false, true, "complete", "complete", "picked"],
+          [-0.00952380952380949, 0.0, -0.013875123885034646, 3200.0, 95000.0, 1.0, false, false, false, true, "complete", "complete", "picked"],
+          [0.009615384615384581, -0.00952380952380949, 0.005025125628140614, 3200.0, 95000.0, 1.0, false, false, false, true, "complete", "complete", "picked"],
+          [-0.01904761904761909, -0.019230769230769273, -0.020000000000000018, 3200.0, 95000.0, 1.0, false, false, false, false, "complete", "complete", "band"],
+          [-0.009708737864077666, 0.009803921568627416, 0.020408163265306145, 3200.0, 95000.0, 1.0, false, false, false, true, "complete", "complete", "picked"],
+          [0.009803921568627416, -0.009708737864077666, -0.030000000000000027, 3200.0, 95000.0, 1.0, false, false, false, false, "complete", "complete", "complete"],
+          [0.0, 0.0, 0.030927835051546504, 3200.0, 95000.0, 1.0, false, false, false, true, "complete", "complete", "complete"]
+        ]
       }
     },
     {
@@ -110,6 +137,7 @@
         "stableLeg": 0,
         "band": 0.05,
         "bandAdd": [0.003, 0.003, 0.0, 0.003, 0.0, 0.0, 0.0, 0.003, 0.0, 0.0, 0.003, 0.0],
+        "reference": [1.0, 98180.45324, 1.26111],
         "prices": [
           [1.0, 97008.343242, 1.216459],
           [0.96, 92586.203857, 1.254314],
@@ -129,24 +157,39 @@
         "n": [4, 3, 2],
         "kSoft": 3,
         "fills": [
-          [0, 0, "select"],
+          [0, 2, "select"],
           [1, 1, "select"],
           [2, 2, "select"],
           [3, 1, "select"],
-          [4, 2, "select"],
+          [4, 1, "select"],
           [5, 0, "select"],
-          [6, 1, "select"],
           [7, 0, "select"],
+          [7, 0, "catchup"],
           [9, 0, "select"]
         ],
         "idle": [
+          [6, "band"],
           [8, "band"],
           [10, "complete"],
           [11, "complete"]
         ],
         "done": [4, 3, 2],
         "unbought": [0, 0, 0],
-        "deviationPp": 0.0
+        "deviationPp": 0.0,
+        "perLeg": [
+          [0.0, -0.011938323355819125, -0.035406110489965226, 1.0, 97008.343242, 1.216459, false, false, false, true, "not_due", "not_due", "picked"],
+          [-0.040000000000000036, -0.04558514491860144, 0.03111901017625751, 1.0, 97008.343242, 1.216459, false, false, false, true, "not_due", "picked", "not_due"],
+          [-0.012500000000000067, 0.03899293851140051, 0.0013433637829125544, 1.0, 97008.343242, 1.216459, false, false, false, false, "band", "not_due", "picked"],
+          [0.10443037974683533, -0.019983713402742853, -0.027816104949128118, 1.0, 97008.343242, 1.216459, false, false, false, true, "not_due", "picked", "complete"],
+          [0.012416427889207382, 0.04464359102464721, -0.0008910276464260125, 1.0, 97008.343242, 1.216459, false, false, false, false, "band", "picked", "complete"],
+          [-0.05660377358490576, -0.019167296246672128, 0.002679565302211584, 1.0, 97008.343242, 1.216459, false, false, false, true, "picked", "complete", "complete"],
+          [-0.050000000000000044, 0.018451646121314003, 0.023703385181848446, 1.0, 97008.343242, 1.216459, false, false, false, false, "band", "complete", "complete"],
+          [0.05263157894736836, -0.02037961923463516, -0.03679971379242597, 1.0, 97008.343242, 1.216459, false, false, false, true, "picked", "complete", "complete"],
+          [-0.06000000000000005, -0.004516015770839821, 0.02600907345318526, 1.0, 97008.343242, 1.216459, false, false, false, false, "band", "complete", "complete"],
+          [0.06382978723404253, 0.0151600058550998, 0.014499885659060352, 1.0, 97008.343242, 1.216459, false, false, false, true, "picked", "complete", "complete"],
+          [0.020000000000000018, -0.017979597030004735, 0.016170027025713685, 1.0, 97008.343242, 1.216459, false, false, false, true, "complete", "complete", "complete"],
+          [-0.019607843137254943, 0.028650386493688007, -0.009253220794938177, 1.0, 97008.343242, 1.216459, false, false, false, true, "complete", "complete", "complete"]
+        ]
       }
     },
     {
@@ -166,6 +209,7 @@
         "stableLeg": 2,
         "band": 0.01,
         "bandAdd": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "reference": [3221.695931, 93161.798126, 1.0],
         "prices": [
           [3283.96969, 91377.586549, 1.0],
           [2298.778783, 94801.579007, 1.0],
@@ -185,26 +229,112 @@
         "n": [2, 2, 5],
         "kSoft": null,
         "fills": [
-          [0, 0, "select"],
+          [0, 1, "select"],
           [1, 2, "select"],
           [4, 1, "select"],
           [4, 2, "catchup"],
           [4, 2, "catchup"],
-          [5, 1, "select"],
           [6, 2, "select"],
-          [8, 2, "select"]
+          [6, 2, "catchup"]
         ],
         "idle": [
           [2, "no_price"],
           [3, "no_price"],
-          [7, "no_price"],
+          [5, "band"],
+          [7, "rule9"],
+          [8, "rule9"],
           [9, "rule9"],
           [10, "rule9"],
           [11, "rule9"]
         ],
-        "done": [1, 2, 5],
-        "unbought": [1, 0, 0],
-        "deviationPp": 12.5
+        "done": [0, 2, 5],
+        "unbought": [2, 0, 0],
+        "deviationPp": 25.0,
+        "perLeg": [
+          [0.019329496120594536, -0.019151751177954646, 0.0, 3283.96969, 91377.586549, 1.0, false, false, false, true, "not_due", "picked", "not_due"],
+          [-0.29999999999999993, 0.037470813000340275, 0.0, 3283.96969, 91377.586549, 1.0, true, false, false, true, "rule9", "not_due", "picked"],
+          [0.0, null, -0.030000000000000027, 3283.96969, 91377.586549, 1.0, true, false, false, false, "rule9", "no_price", "band"],
+          [0.0, null, 0.0, 3283.96969, 91377.586549, 1.0, true, false, false, false, "rule9", "no_price", "band"],
+          [0.0, 0.026439369093366416, 0.030927835051546504, 3283.96969, 91377.586549, 1.0, true, false, false, true, "rule9", "picked", "picked"],
+          [0.0, -0.03180232149648199, -0.030000000000000027, 3283.96969, 91377.586549, 1.0, true, false, false, false, "rule9", "complete", "band"],
+          [0.0, -0.02456366015698197, 0.030927835051546504, 3283.96969, 91377.586549, 1.0, true, false, false, true, "rule9", "complete", "picked"],
+          [0.0, 0.019071570900641266, null, 3283.96969, 91377.586549, 1.0, true, false, false, null, "rule9", "complete", "complete"],
+          [0.0, -0.013068524684421434, 0.0, 3283.96969, 91377.586549, 1.0, true, false, false, true, "rule9", "complete", "complete"],
+          [0.0, 0.03728626600375451, -0.030000000000000027, 3283.96969, 91377.586549, 1.0, true, false, false, false, "rule9", "complete", "complete"],
+          [0.0, -0.044259973120212015, 0.030927835051546504, 3283.96969, 91377.586549, 1.0, true, false, false, true, "rule9", "complete", "complete"],
+          [0.0, 0.07599495054972705, 0.0, 3283.96969, 91377.586549, 1.0, true, false, false, true, "rule9", "complete", "complete"]
+        ]
+      }
+    },
+    {
+      "id": "band-edge-n9-stable2-b171-soft",
+      "notes": "stable leg 2, band 171 bps, band_add 0.003: at 0.9859 and 1.0141 the sum |p - 1| + band_add equals the band exactly, which is IN band (the engine compares with >), and the stable buys at ticks 1 and 7; 0.9858 is out; soft",
+      "input": {
+        "weights": [
+          [1, 4],
+          [1, 4],
+          [1, 2]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 9,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": 2,
+        "band": 0.0171,
+        "bandAdd": [0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003],
+        "reference": [3232.0, 95000.0, 1.0],
+        "prices": [
+          [3200.0, 95000.0, 1.0],
+          [3232.0, 95950.0, 0.9859],
+          [3264.32, 96909.5, 1.0],
+          [3296.9632, 97878.595, 1.0141],
+          [3329.932832, 98857.38095, 1.0],
+          [3363.23216, 99845.95476, 0.9858],
+          [3396.864482, 100844.414307, 1.0],
+          [3430.833127, 101852.85845, 0.9859],
+          [3465.141458, 102871.387035, 1.0],
+          [3499.792873, 103900.100905, 1.0],
+          [3534.790801, 104939.101914, 1.0],
+          [3570.138709, 105988.492933, 1.0]
+        ]
+      },
+      "expected": {
+        "n": [2, 2, 5],
+        "kSoft": 3,
+        "fills": [
+          [0, 0, "select"],
+          [1, 2, "select"],
+          [2, 1, "select"],
+          [3, 0, "select"],
+          [4, 2, "select"],
+          [5, 1, "select"],
+          [6, 2, "select"],
+          [7, 2, "select"],
+          [8, 2, "select"]
+        ],
+        "idle": [
+          [9, "complete"],
+          [10, "complete"],
+          [11, "complete"]
+        ],
+        "done": [2, 2, 5],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0,
+        "perLeg": [
+          [-0.00990099009900991, 0.0, 0.0, 3200.0, 95000.0, 1.0, false, false, false, true, "picked", "not_due", "not_due"],
+          [0.010000000000000009, 0.010000000000000009, -0.014100000000000001, 3200.0, 95000.0, 1.0, false, false, false, true, "not_due", "not_due", "picked"],
+          [0.010000000000000009, 0.010000000000000009, 0.014301653311694862, 3200.0, 95000.0, 1.0, false, false, false, true, "not_due", "picked", "not_due"],
+          [0.010000000000000009, 0.010000000000000009, 0.014100000000000001, 3200.0, 95000.0, 1.0, false, false, false, true, "picked", "not_due", "not_due"],
+          [0.010000000000000009, 0.010000000000000009, -0.013903954245143457, 3200.0, 95000.0, 1.0, false, false, false, true, "complete", "not_due", "picked"],
+          [0.00999999990390199, 0.010000000005057741, -0.01419999999999999, 3200.0, 95000.0, 1.0, false, false, false, false, "complete", "picked", "band"],
+          [0.010000000118933094, 0.009999999993990816, 0.014404544532359509, 3200.0, 95000.0, 1.0, false, false, false, true, "complete", "complete", "picked"],
+          [0.010000000052990066, 0.009999999999305897, -0.014100000000000001, 3200.0, 95000.0, 1.0, false, false, false, true, "complete", "complete", "picked"],
+          [0.009999999921302072, 0.010000000004909193, 0.014301653311694862, 3200.0, 95000.0, 1.0, false, false, false, true, "complete", "complete", "picked"],
+          [0.010000000121207053, 0.00999999999659762, 0.0, 3200.0, 95000.0, 1.0, false, false, false, true, "complete", "complete", "complete"],
+          [0.009999999791416192, 0.009999999999518838, 0.0, 3200.0, 95000.0, 1.0, false, false, false, true, "complete", "complete", "complete"],
+          [0.009999999997170939, 0.009999999998665965, 0.0, 3200.0, 95000.0, 1.0, false, false, false, true, "complete", "complete", "complete"]
+        ]
       }
     }
   ]

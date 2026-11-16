@@ -1,0 +1,1650 @@
+{
+  "header": {
+    "family": "no-reference",
+    "about": "a leg with no reference: none at all (\"buy the first one now\", the calm prices), one leg, two legs; with the others rising, falling, and with no price at first",
+    "generator": "scripts/basket-dca/export_vectors.py",
+    "engine": {
+      "file": "engine_discrete.py",
+      "sha256": "282581bab72abf16b19096ab0f1be15e50fe0f2b5cdd3a3a7e165d9f2f281685",
+      "package": "analyst package basket-dca-v2, docs-Reports-basket-dca/src (v3.2)",
+      "copy": "contracts/order-engine/executor/fixtures/basket-dca/engine_discrete.py (byte for byte)"
+    },
+    "run": {
+      "function": "run_discrete",
+      "L": 2,
+      "rule": "hamilton",
+      "kSoft": "max(1, ceil(N / 4))",
+      "graceTicks": 3,
+      "pd0": "input.reference of each vector: the decision prices one cycle before tick 0 (null = nan: the leg has no reference). It gives `last`; `entry` is the first tick price",
+      "Pe": "the decision prices (Pe values fills only; no decision reads it)"
+    },
+    "idleReasons": {
+      "calendário": "calendar",
+      "regra 6": "complete",
+      "sem preço": "no_price",
+      "banda": "band",
+      "regra 9": "rule9",
+      "regra 5": "rule5"
+    },
+    "perLegColumns": ["variation0", "variation1", "variation2", "entry0", "entry1", "entry2", "protected0", "protected1", "protected2", "inBand", "reason0", "reason1", "reason2"],
+    "perLeg": {
+      "variation": "v = price / last - 1, unrounded; null when the leg has no price or no previous price (nan in the engine)",
+      "entry": "rule 9's base price: the leg's first tick with a price; null before it. Never the reference",
+      "protected": "price <= entry x (1 - threshold); false without a price. Reported in the soft window too, where it no longer blocks",
+      "inBand": "the stable leg only: not(|price - 1| + band_add > band); null without a stable leg or without its price",
+      "reason": "picked = at least one fill on the tick; complete / no_price / band / rule9 = the engine's why_not; cooldown = eligible, not picked, and first in the rule 4 order until rule 5 sent it to the back of the line; not_due = eligible and not picked for any other reason (nothing due, or the chunks due went to legs ahead of it)"
+    },
+    "generatedWith": {
+      "python": "3.14.2",
+      "numpy": "2.5.4"
+    }
+  },
+  "vectors": [
+    {
+      "id": "noref-all-25-25-50-n6",
+      "notes": "no reference on any leg (\"buy the first one now\"): leg 0 takes the first chunk; the prices of calm-25-25-50-n6; soft",
+      "input": {
+        "weights": [
+          [1, 4],
+          [1, 4],
+          [1, 2]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 6,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "reference": [null, null, null],
+        "prices": [
+          [3169.876917, 96861.303674, 1.213592],
+          [3131.566318, 93277.273074, 1.268187],
+          [3239.757567, 94405.537378, 1.215631],
+          [3305.003684, 96960.701437, 1.215875],
+          [3084.360367, 95877.01788, 1.260897],
+          [3144.695282, 93131.79623, 1.200307],
+          [3144.521811, 97261.409083, 1.269991],
+          [3310.440122, 92467.729155, 1.251714],
+          [3314.671172, 93907.931851, 1.251823]
+        ]
+      },
+      "expected": {
+        "n": [2, 1, 3],
+        "kSoft": 2,
+        "fills": [
+          [0, 0, "select"],
+          [1, 1, "select"],
+          [2, 2, "select"],
+          [3, 0, "select"],
+          [4, 2, "select"],
+          [5, 2, "select"]
+        ],
+        "idle": [
+          [6, "complete"],
+          [7, "complete"],
+          [8, "complete"]
+        ],
+        "done": [2, 1, 3],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, null, null, 3169.876917, 96861.303674, 1.213592, false, false, false, null, "picked", "not_due", "not_due"],
+          [-0.012085831722531748, -0.0370016762531149, 0.04498628863736731, 3169.876917, 96861.303674, 1.213592, false, false, false, null, "not_due", "picked", "not_due"],
+          [0.03454860539855886, 0.012095811410619994, -0.04144183783621824, 3169.876917, 96861.303674, 1.213592, false, false, false, null, "not_due", "complete", "picked"],
+          [0.020139197347540216, 0.027065828233879152, 0.00020071880365013506, 3169.876917, 96861.303674, 1.213592, false, false, false, null, "picked", "complete", "cooldown"],
+          [-0.06676038458539868, -0.011176523487756662, 0.03702847743394666, 3169.876917, 96861.303674, 1.213592, false, false, false, null, "complete", "complete", "picked"],
+          [0.019561564739818182, -0.02863273921844256, -0.04805309236202471, 3169.876917, 96861.303674, 1.213592, false, false, false, null, "complete", "complete", "picked"],
+          [-5.516305538189048e-05, 0.044341599970878054, 0.05805514755808305, 3169.876917, 96861.303674, 1.213592, false, false, false, null, "complete", "complete", "complete"],
+          [0.052764242378473325, -0.0492865564379108, -0.014391440569264002, 3169.876917, 96861.303674, 1.213592, false, false, false, null, "complete", "complete", "complete"],
+          [0.0012780928952260684, 0.015575192655438164, 8.708059508788502e-05, 3169.876917, 96861.303674, 1.213592, false, false, false, null, "complete", "complete", "complete"]
+        ]
+      }
+    },
+    {
+      "id": "noref-all-25-25-50-n9",
+      "notes": "no reference on any leg (\"buy the first one now\"): leg 0 takes the first chunk; the prices of calm-25-25-50-n9; soft",
+      "input": {
+        "weights": [
+          [1, 4],
+          [1, 4],
+          [1, 2]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 9,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "reference": [null, null, null],
+        "prices": [
+          [3077.61626, 92105.348507, 1.202941],
+          [3245.082361, 95708.356283, 1.205115],
+          [3240.336524, 97326.040346, 1.223964],
+          [3300.791732, 91831.58667, 1.23529],
+          [3224.00296, 96163.445793, 1.221383],
+          [3138.457157, 93980.611687, 1.280152],
+          [3241.297685, 97742.201787, 1.29459],
+          [3133.438971, 98244.153045, 1.237532],
+          [3124.96025, 96472.085436, 1.290213],
+          [3310.667814, 94116.245465, 1.285997],
+          [3142.362746, 96869.033698, 1.23914],
+          [3102.993003, 91491.307937, 1.256328]
+        ]
+      },
+      "expected": {
+        "n": [2, 2, 5],
+        "kSoft": 3,
+        "fills": [
+          [0, 0, "select"],
+          [1, 2, "select"],
+          [2, 0, "select"],
+          [3, 1, "select"],
+          [4, 2, "select"],
+          [5, 1, "select"],
+          [6, 2, "select"],
+          [7, 2, "select"],
+          [8, 2, "select"]
+        ],
+        "idle": [
+          [9, "complete"],
+          [10, "complete"],
+          [11, "complete"]
+        ],
+        "done": [2, 2, 5],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, null, null, 3077.61626, 92105.348507, 1.202941, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.0544142241437211, 0.03911833389052499, 0.001807237428934405, 3077.61626, 92105.348507, 1.202941, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.0014624704312706793, 0.01690222385824569, 0.015640830958041363, 3077.61626, 92105.348507, 1.202941, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.018657076989451626, -0.056454096524084174, 0.009253540136801464, 3077.61626, 92105.348507, 1.202941, false, false, false, null, "complete", "picked", "not_due"],
+          [-0.023263743439357443, 0.047171776946059785, -0.01125808514599802, 3077.61626, 92105.348507, 1.202941, false, false, false, null, "complete", "not_due", "picked"],
+          [-0.026534033641209764, -0.02269920849860918, 0.0481167659939592, 3077.61626, 92105.348507, 1.202941, false, false, false, null, "complete", "picked", "not_due"],
+          [0.03276786103981855, 0.04002517149524287, 0.011278348196151589, 3077.61626, 92105.348507, 1.202941, false, false, false, null, "complete", "complete", "picked"],
+          [-0.033276398677957286, 0.00513546092499384, -0.04407418564951049, 3077.61626, 92105.348507, 1.202941, false, false, false, null, "complete", "complete", "picked"],
+          [-0.002705883560672695, -0.018037384964663783, 0.04256940426590994, 3077.61626, 92105.348507, 1.202941, false, false, false, null, "complete", "complete", "picked"],
+          [0.05942717639368378, -0.02441991339103855, -0.0032676775075123343, 3077.61626, 92105.348507, 1.202941, false, false, false, null, "complete", "complete", "complete"],
+          [-0.0508371958335051, 0.029248810546992132, -0.03643632139110753, 3077.61626, 92105.348507, 1.202941, false, false, false, null, "complete", "complete", "complete"],
+          [-0.012528707276113993, -0.05551542691925315, 0.013870910470164866, 3077.61626, 92105.348507, 1.202941, false, false, false, null, "complete", "complete", "complete"]
+        ]
+      }
+    },
+    {
+      "id": "noref-all-25-25-50-n26",
+      "notes": "no reference on any leg (\"buy the first one now\"): leg 0 takes the first chunk; the prices of calm-25-25-50-n26; soft",
+      "input": {
+        "weights": [
+          [1, 4],
+          [1, 4],
+          [1, 2]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 26,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "reference": [null, null, null],
+        "prices": [
+          [3252.411646, 96671.093072, 1.269282],
+          [3126.942669, 93052.220702, 1.207696],
+          [3211.304677, 95611.643689, 1.210573],
+          [3138.969068, 98102.603318, 1.236615],
+          [3313.007683, 91283.503552, 1.269173],
+          [3280.761726, 96410.248894, 1.250262],
+          [3266.453425, 97256.82508, 1.257211],
+          [3159.24252, 98497.846922, 1.209615],
+          [3309.891656, 92987.405699, 1.265919],
+          [3075.881056, 98053.006874, 1.219944],
+          [3164.063507, 97554.977812, 1.289216],
+          [3072.151708, 94876.049273, 1.279442],
+          [3209.851051, 96281.738946, 1.253314],
+          [3104.965094, 93630.37593, 1.285553],
+          [3265.648686, 93608.385671, 1.21506],
+          [3205.803905, 97777.511082, 1.211505],
+          [3120.583351, 95777.233812, 1.26304],
+          [3163.2373, 97529.314289, 1.289348],
+          [3316.3546, 96334.919679, 1.268363],
+          [3257.09982, 98700.148785, 1.202479],
+          [3087.196255, 92225.933936, 1.275864],
+          [3104.596337, 95803.381824, 1.201483],
+          [3278.417691, 94158.76016, 1.29298],
+          [3130.913238, 91703.726577, 1.263978],
+          [3192.651326, 98205.924326, 1.221544],
+          [3138.307784, 91881.405165, 1.267615],
+          [3165.335874, 92373.549705, 1.297849],
+          [3120.228339, 95212.875497, 1.288565],
+          [3264.375007, 94944.637871, 1.267423]
+        ]
+      },
+      "expected": {
+        "n": [7, 6, 13],
+        "kSoft": 7,
+        "fills": [
+          [0, 0, "select"],
+          [1, 2, "select"],
+          [2, 0, "select"],
+          [3, 2, "select"],
+          [4, 1, "select"],
+          [5, 2, "select"],
+          [6, 0, "select"],
+          [7, 2, "select"],
+          [8, 1, "select"],
+          [9, 0, "select"],
+          [10, 1, "select"],
+          [11, 0, "select"],
+          [12, 2, "select"],
+          [13, 0, "select"],
+          [14, 2, "select"],
+          [15, 0, "select"],
+          [16, 1, "select"],
+          [17, 2, "select"],
+          [18, 1, "select"],
+          [19, 2, "select"],
+          [20, 1, "select"],
+          [21, 2, "select"],
+          [22, 2, "select"],
+          [23, 2, "select"],
+          [24, 2, "select"],
+          [25, 2, "select"]
+        ],
+        "idle": [
+          [26, "complete"],
+          [27, "complete"],
+          [28, "complete"]
+        ],
+        "done": [7, 6, 13],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, null, null, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "picked", "not_due", "not_due"],
+          [-0.03857721305183148, -0.03743489656525023, -0.048520344572758445, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "not_due", "not_due", "picked"],
+          [0.026979070910494007, 0.027505232735890894, 0.0023822220161362484, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "picked", "not_due", "cooldown"],
+          [-0.02252530241620554, 0.026052889929415235, 0.02151212690188875, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "cooldown", "not_due", "picked"],
+          [0.055444514179583404, -0.06950987573587486, 0.02632832369007332, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "not_due", "picked", "not_due"],
+          [-0.009733136800576414, 0.056162889706347974, -0.014900253944891806, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.004361274056145836, 0.008780977081915609, 0.005558035035856612, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "picked", "not_due", "not_due"],
+          [-0.032821807339867504, 0.01276025452176932, -0.03785840244795824, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "not_due", "not_due", "picked"],
+          [0.047685207782022454, -0.055944788593843, 0.04654704182735814, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "not_due", "picked", "not_due"],
+          [-0.07070038065318462, 0.054476207147851285, -0.03631748950762259, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.028669005528671354, -0.005079181943292932, 0.056782934298623466, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "not_due", "picked", "not_due"],
+          [-0.029048658093195456, -0.02746070573828241, -0.00758135176727559, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.044821791398330424, 0.014816064578692778, -0.020421402455132687, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.032676269189289564, -0.027537548085696972, 0.025723003173985015, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.05175053088696657, -0.00023486244481640828, -0.05483476760584738, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.01832554164707223, 0.04453794797458621, -0.002925781442891684, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "picked", "not_due", "not_due"],
+          [-0.02658320861955532, -0.020457436969555154, 0.04253800025587995, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "complete", "picked", "not_due"],
+          [0.013668581865096119, 0.01829328753051196, 0.02082911071700022, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "complete", "cooldown", "picked"],
+          [0.04840525242921245, -0.012246519097435238, -0.016275668012049493, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "complete", "picked", "cooldown"],
+          [-0.017867443969954322, 0.024552146966865473, -0.05194412009811056, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "complete", "not_due", "picked"],
+          [-0.052164064471318605, -0.06559478307477407, 0.06102809279829424, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "complete", "picked", "not_due"],
+          [0.005636208573335466, 0.038790042402634395, -0.05829853338600355, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "complete", "complete", "picked"],
+          [0.05598839112461418, -0.017166634754306687, 0.07615338710576847, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "complete", "complete", "picked"],
+          [-0.04499257474266727, -0.026073342287305734, -0.022430354684527143, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "complete", "complete", "picked"],
+          [0.01971887539095074, 0.07090440041758139, -0.0335717868507206, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "complete", "complete", "picked"],
+          [-0.017021445955417214, -0.06440058687300165, 0.03771538315443412, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "complete", "complete", "picked"],
+          [0.008612313342176492, 0.005356301844929412, 0.023851090433609556, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "complete", "complete", "complete"],
+          [-0.014250473502831817, 0.03073743296720277, -0.007153374545112778, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "complete", "complete", "complete"],
+          [0.046197474139408, -0.0028172410989567576, -0.01640739892826515, 3252.411646, 96671.093072, 1.269282, false, false, false, null, "complete", "complete", "complete"]
+        ]
+      }
+    },
+    {
+      "id": "noref-all-40-40-20-n6",
+      "notes": "no reference on any leg (\"buy the first one now\"): leg 0 takes the first chunk; the prices of calm-40-40-20-n6; soft",
+      "input": {
+        "weights": [
+          [2, 5],
+          [2, 5],
+          [1, 5]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 6,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "reference": [null, null, null],
+        "prices": [
+          [3116.318403, 98792.238312, 1.285197],
+          [3234.359864, 95581.100086, 1.297767],
+          [3283.090985, 97925.042304, 1.248581],
+          [3324.87193, 91854.583227, 1.244857],
+          [3149.298751, 91693.455468, 1.250038],
+          [3127.19696, 95919.735962, 1.257174],
+          [3093.937996, 95304.223798, 1.270256],
+          [3188.960588, 96057.138369, 1.236425],
+          [3178.26877, 96118.295675, 1.275779]
+        ]
+      },
+      "expected": {
+        "n": [3, 2, 1],
+        "kSoft": 2,
+        "fills": [
+          [0, 0, "select"],
+          [1, 1, "select"],
+          [2, 2, "select"],
+          [3, 1, "select"],
+          [4, 0, "select"],
+          [5, 0, "select"]
+        ],
+        "idle": [
+          [6, "complete"],
+          [7, "complete"],
+          [8, "complete"]
+        ],
+        "done": [3, 2, 1],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, null, null, 3116.318403, 98792.238312, 1.285197, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.037878498194011234, -0.03250395254593541, 0.009780601728762273, 3116.318403, 98792.238312, 1.285197, false, false, false, null, "not_due", "picked", "not_due"],
+          [0.01506669729067589, 0.024523072196187545, -0.037900485988625054, 3116.318403, 98792.238312, 1.285197, false, false, false, null, "not_due", "not_due", "picked"],
+          [0.012726100248482641, -0.06199087520590274, -0.0029825858314357356, 3116.318403, 98792.238312, 1.285197, false, false, false, null, "not_due", "picked", "complete"],
+          [-0.05280599755311477, -0.0017541613421924174, 0.004161923819362201, 3116.318403, 98792.238312, 1.285197, false, false, false, null, "picked", "complete", "complete"],
+          [-0.007018003926423821, 0.046091408295490854, 0.005708626457755717, 3116.318403, 98792.238312, 1.285197, false, false, false, null, "picked", "complete", "complete"],
+          [-0.010635391510485537, -0.006416950149277345, 0.010405878581644323, 3116.318403, 98792.238312, 1.285197, false, false, false, null, "complete", "complete", "complete"],
+          [0.03071250688373528, 0.007900117549834995, -0.02663321409227737, 3116.318403, 98792.238312, 1.285197, false, false, false, null, "complete", "complete", "complete"],
+          [-0.0033527595293064705, 0.0006366763265950315, 0.03182886143518604, 3116.318403, 98792.238312, 1.285197, false, false, false, null, "complete", "complete", "complete"]
+        ]
+      }
+    },
+    {
+      "id": "noref-all-40-40-20-n9",
+      "notes": "no reference on any leg (\"buy the first one now\"): leg 0 takes the first chunk; the prices of calm-40-40-20-n9; soft",
+      "input": {
+        "weights": [
+          [2, 5],
+          [2, 5],
+          [1, 5]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 9,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "reference": [null, null, null],
+        "prices": [
+          [3305.955845, 95740.305774, 1.298101],
+          [3119.829668, 94742.834537, 1.248897],
+          [3272.737707, 97954.450365, 1.282028],
+          [3263.934275, 94050.376153, 1.21727],
+          [3135.604661, 93407.602777, 1.251966],
+          [3231.006719, 96021.435955, 1.243687],
+          [3140.225928, 96197.878846, 1.23516],
+          [3106.751516, 93706.207887, 1.227274],
+          [3077.830299, 93967.427571, 1.255109],
+          [3162.895951, 96239.988117, 1.203146],
+          [3169.665757, 92596.893813, 1.249819],
+          [3229.958392, 96878.502318, 1.224708]
+        ]
+      },
+      "expected": {
+        "n": [4, 3, 2],
+        "kSoft": 3,
+        "fills": [
+          [0, 0, "select"],
+          [1, 2, "select"],
+          [2, 1, "select"],
+          [3, 2, "select"],
+          [4, 0, "select"],
+          [5, 1, "select"],
+          [6, 0, "select"],
+          [7, 1, "select"],
+          [8, 0, "select"]
+        ],
+        "idle": [
+          [9, "complete"],
+          [10, "complete"],
+          [11, "complete"]
+        ],
+        "done": [4, 3, 2],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, null, null, 3305.955845, 95740.305774, 1.298101, false, false, false, null, "picked", "not_due", "not_due"],
+          [-0.05630026102178631, -0.010418508996143938, -0.0379046006435555, 3305.955845, 95740.305774, 1.298101, false, false, false, null, "cooldown", "not_due", "picked"],
+          [0.04901166258157397, 0.03389824511473494, 0.026528208491172656, 3305.955845, 95740.305774, 1.298101, false, false, false, null, "not_due", "picked", "cooldown"],
+          [-0.0026899289793893555, -0.039856016724636234, -0.05051215730077652, 3305.955845, 95740.305774, 1.298101, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.03931746266551284, -0.006834351996151011, 0.028503125847182398, 3305.955845, 95740.305774, 1.298101, false, false, false, null, "picked", "not_due", "complete"],
+          [0.030425410188532842, 0.027983088103012754, -0.006612799389120738, 3305.955845, 95740.305774, 1.298101, false, false, false, null, "not_due", "picked", "complete"],
+          [-0.02809675091857966, 0.0018375364755292, -0.006856226687261269, 3305.955845, 95740.305774, 1.298101, false, false, false, null, "picked", "not_due", "complete"],
+          [-0.010659873769439221, -0.025901516633114574, -0.006384597946824777, 3305.955845, 95740.305774, 1.298101, false, false, false, null, "not_due", "picked", "complete"],
+          [-0.00930915036205926, 0.0027876454494348835, 0.022680346850010746, 3305.955845, 95740.305774, 1.298101, false, false, false, null, "picked", "complete", "complete"],
+          [0.027638187858387786, 0.024184556337704333, -0.04140118507635593, 3305.955845, 95740.305774, 1.298101, false, false, false, null, "complete", "complete", "complete"],
+          [0.002140382138672514, -0.03785426801560954, 0.03879246575228601, 3305.955845, 95740.305774, 1.298101, false, false, false, null, "complete", "complete", "complete"],
+          [0.019021764319107515, 0.04623922389499091, -0.020091709279503767, 3305.955845, 95740.305774, 1.298101, false, false, false, null, "complete", "complete", "complete"]
+        ]
+      }
+    },
+    {
+      "id": "noref-all-40-40-20-n26",
+      "notes": "no reference on any leg (\"buy the first one now\"): leg 0 takes the first chunk; the prices of calm-40-40-20-n26; soft",
+      "input": {
+        "weights": [
+          [2, 5],
+          [2, 5],
+          [1, 5]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 26,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "reference": [null, null, null],
+        "prices": [
+          [3079.908415, 91341.756044, 1.248757],
+          [3288.549007, 98239.67533, 1.28916],
+          [3206.251588, 91721.260875, 1.246139],
+          [3145.422465, 95586.388559, 1.25843],
+          [3094.935857, 96157.102406, 1.20817],
+          [3140.070381, 93318.634269, 1.211776],
+          [3141.959962, 93092.571294, 1.267207],
+          [3257.605942, 92454.711728, 1.268096],
+          [3323.144856, 98564.398679, 1.250106],
+          [3094.097674, 98429.83274, 1.276827],
+          [3176.4839, 92510.528251, 1.208145],
+          [3304.867211, 91893.862407, 1.28333],
+          [3201.671684, 97007.144925, 1.21569],
+          [3103.521884, 95775.856541, 1.254403],
+          [3143.394829, 96260.99045, 1.227263],
+          [3073.64909, 94838.876561, 1.264892],
+          [3267.141853, 96153.121055, 1.247974],
+          [3327.903946, 91382.047173, 1.27374],
+          [3109.54503, 96314.40961, 1.285162],
+          [3252.27438, 97474.436362, 1.230622],
+          [3162.278959, 93785.276831, 1.291522],
+          [3207.681894, 94974.003858, 1.220973],
+          [3165.571673, 97464.12452, 1.237923],
+          [3288.449139, 96932.460527, 1.207198],
+          [3258.514708, 95637.081819, 1.20625],
+          [3146.073234, 91545.284799, 1.217182],
+          [3225.618042, 97966.846207, 1.258054],
+          [3188.055693, 93777.338753, 1.279842],
+          [3111.736127, 93443.498838, 1.273985]
+        ]
+      },
+      "expected": {
+        "n": [11, 10, 5],
+        "kSoft": 7,
+        "fills": [
+          [0, 0, "select"],
+          [1, 2, "select"],
+          [2, 1, "select"],
+          [3, 0, "select"],
+          [4, 2, "select"],
+          [5, 1, "select"],
+          [6, 0, "select"],
+          [7, 1, "select"],
+          [8, 2, "select"],
+          [9, 0, "select"],
+          [10, 1, "select"],
+          [11, 0, "select"],
+          [12, 2, "select"],
+          [13, 0, "select"],
+          [14, 2, "select"],
+          [15, 0, "select"],
+          [16, 1, "select"],
+          [17, 0, "select"],
+          [18, 1, "select"],
+          [19, 0, "select"],
+          [20, 1, "select"],
+          [21, 0, "select"],
+          [22, 1, "select"],
+          [23, 0, "select"],
+          [24, 1, "select"],
+          [25, 1, "select"]
+        ],
+        "idle": [
+          [26, "complete"],
+          [27, "complete"],
+          [28, "complete"]
+        ],
+        "done": [11, 10, 5],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, null, null, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.06774246629668057, 0.07551769951387, 0.03235457338777703, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.025025450076864297, -0.06635215795556915, -0.03337134257966423, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "not_due", "picked", "not_due"],
+          [-0.018972036763323374, 0.0421399318666964, 0.009863265654954878, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "picked", "not_due", "not_due"],
+          [-0.01605081942466513, 0.00597066021223025, -0.03993865371931693, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "not_due", "not_due", "picked"],
+          [0.014583347146893688, -0.029519068960868422, 0.0029846793083754264, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "not_due", "picked", "not_due"],
+          [0.0006017639003996766, -0.002422484820645332, 0.0457436027780711, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "picked", "cooldown", "not_due"],
+          [0.036806955339553804, -0.006851884711461476, 0.0007015428418559733, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "not_due", "picked", "not_due"],
+          [0.020118736018685635, 0.06608302418350065, -0.01418662309478147, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.06892482630916641, -0.0013652590672039722, 0.021374987401068468, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.026626898915409036, -0.060137301102966445, -0.053791155732139107, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "not_due", "picked", "not_due"],
+          [0.04041679890145211, -0.0066658990674755, 0.06223176853771695, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "picked", "cooldown", "not_due"],
+          [-0.0312253172098782, 0.0556433518416406, -0.05270663040683232, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.030655797872871537, -0.01269275974416062, 0.031844466928246495, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.0128476442217349, 0.005065304832772011, -0.021635790092976448, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.02218803007390202, -0.01477352229965545, 0.03066090968276547, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "picked", "not_due", "complete"],
+          [0.06295213192342652, 0.013857655654057499, -0.013375054945402476, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "not_due", "picked", "complete"],
+          [0.01859793536182286, -0.04961954255515977, 0.020646263463822256, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "picked", "cooldown", "complete"],
+          [-0.06561454884010631, 0.05397517991320866, 0.00896729316815037, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "cooldown", "picked", "complete"],
+          [0.0459003965605862, 0.012044166150186886, -0.042438229577282716, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "picked", "cooldown", "complete"],
+          [-0.027671533974325868, -0.03784745691987612, 0.049487169902699524, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "not_due", "picked", "complete"],
+          [0.014357662808583305, 0.012674985532559413, -0.05462469861140573, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "picked", "cooldown", "complete"],
+          [-0.013127929262177651, 0.026218971095744115, 0.013882370863237847, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "cooldown", "picked", "complete"],
+          [0.038816832690301784, -0.005454971207286552, -0.02481979896972597, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "picked", "cooldown", "complete"],
+          [-0.009102902229803811, -0.013363724607394878, -0.0007852895713875707, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "complete", "picked", "complete"],
+          [-0.03450697145050308, -0.042784628537119285, 0.00906279792746112, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "complete", "picked", "complete"],
+          [0.02528383864061068, 0.07014628248849086, 0.033579201795623126, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "complete", "complete", "complete"],
+          [-0.011645008339769336, -0.04276454347777747, 0.017318811434167358, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "complete", "complete", "complete"],
+          [-0.023939219809608114, -0.003559920972798225, -0.00457634614272695, 3079.908415, 91341.756044, 1.248757, false, false, false, null, "complete", "complete", "complete"]
+        ]
+      }
+    },
+    {
+      "id": "noref-all-33-33-33-n6",
+      "notes": "no reference on any leg (\"buy the first one now\"): leg 0 takes the first chunk; the prices of calm-33-33-33-n6; soft",
+      "input": {
+        "weights": [
+          [1, 3],
+          [1, 3],
+          [1, 3]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 6,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "reference": [null, null, null],
+        "prices": [
+          [3154.404505, 92310.327775, 1.298634],
+          [3131.343731, 93706.122659, 1.200942],
+          [3126.971583, 96520.834963, 1.261727],
+          [3266.3871, 93219.927769, 1.27319],
+          [3240.68449, 93095.86028, 1.243542],
+          [3207.987862, 97673.650977, 1.22088],
+          [3323.609512, 92861.447064, 1.203559],
+          [3210.548983, 94937.975882, 1.245976],
+          [3138.074367, 98573.098996, 1.274907]
+        ]
+      },
+      "expected": {
+        "n": [2, 2, 2],
+        "kSoft": 2,
+        "fills": [
+          [0, 0, "select"],
+          [1, 2, "select"],
+          [2, 0, "select"],
+          [3, 1, "select"],
+          [4, 2, "select"],
+          [5, 1, "select"]
+        ],
+        "idle": [
+          [6, "complete"],
+          [7, "complete"],
+          [8, "complete"]
+        ],
+        "done": [2, 2, 2],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, null, null, 3154.404505, 92310.327775, 1.298634, false, false, false, null, "picked", "not_due", "not_due"],
+          [-0.0073106584661056795, 0.015120679534387005, -0.07522673824957615, 3154.404505, 92310.327775, 1.298634, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.0013962529749500519, 0.030037656282533964, 0.05061443433571311, 3154.404505, 92310.327775, 1.298634, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.04458483657412882, -0.034198908404235784, 0.009085166601015882, 3154.404505, 92310.327775, 1.298634, false, false, false, null, "complete", "picked", "not_due"],
+          [-0.007868819344773903, -0.0013309116620154882, -0.023286390876460006, 3154.404505, 92310.327775, 1.298634, false, false, false, null, "complete", "not_due", "picked"],
+          [-0.010089420337244914, 0.04917287066505005, -0.01822375118813835, 3154.404505, 92310.327775, 1.298634, false, false, false, null, "complete", "picked", "complete"],
+          [0.036041797841440903, -0.04926818916734421, -0.014187307515890146, 3154.404505, 92310.327775, 1.298634, false, false, false, null, "complete", "complete", "complete"],
+          [-0.03401739241381729, 0.02236158151368084, 0.03524297520935815, 3154.404505, 92310.327775, 1.298634, false, false, false, null, "complete", "complete", "complete"],
+          [-0.02257390134327686, 0.03828945245807813, 0.023219548370113197, 3154.404505, 92310.327775, 1.298634, false, false, false, null, "complete", "complete", "complete"]
+        ]
+      }
+    },
+    {
+      "id": "noref-all-33-33-33-n9",
+      "notes": "no reference on any leg (\"buy the first one now\"): leg 0 takes the first chunk; the prices of calm-33-33-33-n9; soft",
+      "input": {
+        "weights": [
+          [1, 3],
+          [1, 3],
+          [1, 3]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 9,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "reference": [null, null, null],
+        "prices": [
+          [3227.992251, 91651.660921, 1.237165],
+          [3153.556141, 95034.519454, 1.20352],
+          [3140.526912, 98631.00255, 1.203585],
+          [3246.687436, 98720.572327, 1.286216],
+          [3137.524548, 97768.28206, 1.217913],
+          [3291.758462, 96420.727359, 1.203194],
+          [3244.946705, 92539.807704, 1.278406],
+          [3160.656496, 98350.550171, 1.243749],
+          [3234.97171, 92169.975678, 1.205814],
+          [3266.182539, 93359.352203, 1.263329],
+          [3180.914133, 95221.878977, 1.208562],
+          [3131.701819, 95550.223944, 1.274661]
+        ]
+      },
+      "expected": {
+        "n": [3, 3, 3],
+        "kSoft": 3,
+        "fills": [
+          [0, 0, "select"],
+          [1, 2, "select"],
+          [2, 0, "select"],
+          [3, 1, "select"],
+          [4, 2, "select"],
+          [5, 1, "select"],
+          [6, 0, "select"],
+          [7, 2, "select"],
+          [8, 1, "select"]
+        ],
+        "idle": [
+          [9, "complete"],
+          [10, "complete"],
+          [11, "complete"]
+        ],
+        "done": [3, 3, 3],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, null, null, 3227.992251, 91651.660921, 1.237165, false, false, false, null, "picked", "not_due", "not_due"],
+          [-0.023059568986555146, 0.03690995339316183, -0.027195240731834547, 3227.992251, 91651.660921, 1.237165, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.004131598873603259, 0.037843965715435024, 5.400824248869007e-05, 3227.992251, 91651.660921, 1.237165, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.033803411648650306, 0.0009081300471887044, 0.06865406265448648, 3227.992251, 91651.660921, 1.237165, false, false, false, null, "not_due", "picked", "not_due"],
+          [-0.03362285102950713, -0.009646320362139527, -0.05310383325973245, 3227.992251, 91651.660921, 1.237165, false, false, false, null, "not_due", "not_due", "picked"],
+          [0.04915783498755899, -0.01378314799653546, -0.012085428105291562, 3227.992251, 91651.660921, 1.237165, false, false, false, null, "not_due", "picked", "not_due"],
+          [-0.014220896684976725, -0.040249848360408014, 0.06251028512442702, 3227.992251, 91651.660921, 1.237165, false, false, false, null, "picked", "cooldown", "not_due"],
+          [-0.025975837714105054, 0.06279181480024643, -0.027109541100401535, 3227.992251, 91651.660921, 1.237165, false, false, false, null, "complete", "not_due", "picked"],
+          [0.023512588000008883, -0.06284229709192235, -0.03050052703559969, 3227.992251, 91651.660921, 1.237165, false, false, false, null, "complete", "picked", "complete"],
+          [0.00964794495838106, 0.01290416446625886, 0.04769806951984301, 3227.992251, 91651.660921, 1.237165, false, false, false, null, "complete", "complete", "complete"],
+          [-0.026106442301325306, 0.01995008245076657, -0.043351336033606414, 3227.992251, 91651.660921, 1.237165, false, false, false, null, "complete", "complete", "complete"],
+          [-0.01547112306159204, 0.0034482092826513266, 0.05469227064892013, 3227.992251, 91651.660921, 1.237165, false, false, false, null, "complete", "complete", "complete"]
+        ]
+      }
+    },
+    {
+      "id": "noref-all-33-33-33-n26",
+      "notes": "no reference on any leg (\"buy the first one now\"): leg 0 takes the first chunk; the prices of calm-33-33-33-n26; soft",
+      "input": {
+        "weights": [
+          [1, 3],
+          [1, 3],
+          [1, 3]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 26,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "reference": [null, null, null],
+        "prices": [
+          [3286.82842, 92930.623066, 1.232571],
+          [3102.046903, 92916.177473, 1.269327],
+          [3218.834669, 96425.776209, 1.242156],
+          [3245.442876, 98685.026834, 1.278221],
+          [3158.618995, 94553.140852, 1.289393],
+          [3152.166222, 96320.972526, 1.26235],
+          [3244.983332, 95401.327521, 1.222905],
+          [3090.447791, 98558.677139, 1.253823],
+          [3262.118577, 98768.89543, 1.274824],
+          [3175.194208, 91259.920821, 1.299996],
+          [3089.603461, 93810.639619, 1.29123],
+          [3297.868612, 91751.630491, 1.297934],
+          [3218.054632, 92148.339387, 1.278991],
+          [3263.694898, 94380.31874, 1.223573],
+          [3194.568981, 98721.629775, 1.20331],
+          [3197.898154, 93381.489865, 1.288347],
+          [3208.592691, 94119.03765, 1.24458],
+          [3080.585513, 98327.519401, 1.207194],
+          [3108.183925, 96091.169452, 1.278239],
+          [3144.941669, 94589.855892, 1.203613],
+          [3151.429897, 92210.629558, 1.250659],
+          [3258.309378, 95765.47026, 1.234013],
+          [3250.30664, 93615.374296, 1.209363],
+          [3145.381294, 96016.524005, 1.270042],
+          [3082.815609, 94806.982333, 1.295041],
+          [3243.659632, 94660.640777, 1.218492],
+          [3308.98859, 97404.528343, 1.286199],
+          [3207.791088, 96526.808059, 1.222075],
+          [3284.233894, 96502.478255, 1.253334]
+        ]
+      },
+      "expected": {
+        "n": [9, 9, 8],
+        "kSoft": 7,
+        "fills": [
+          [0, 0, "select"],
+          [1, 1, "select"],
+          [2, 2, "select"],
+          [3, 0, "select"],
+          [4, 1, "select"],
+          [5, 2, "select"],
+          [6, 1, "select"],
+          [7, 0, "select"],
+          [8, 1, "select"],
+          [9, 0, "select"],
+          [10, 2, "select"],
+          [11, 1, "select"],
+          [12, 0, "select"],
+          [13, 2, "select"],
+          [14, 0, "select"],
+          [15, 1, "select"],
+          [16, 2, "select"],
+          [17, 0, "select"],
+          [18, 1, "select"],
+          [19, 2, "select"],
+          [20, 1, "select"],
+          [21, 2, "select"],
+          [22, 1, "select"],
+          [23, 0, "select"],
+          [24, 2, "select"],
+          [25, 0, "select"]
+        ],
+        "idle": [
+          [26, "complete"],
+          [27, "complete"],
+          [28, "complete"]
+        ],
+        "done": [9, 9, 8],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, null, null, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "picked", "not_due", "not_due"],
+          [-0.05621879008822728, -0.00015544491711561026, 0.029820594513419563, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "cooldown", "picked", "not_due"],
+          [0.03764861385140694, 0.03777166507974172, -0.021405831594222824, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "not_due", "not_due", "picked"],
+          [0.00826640997012329, 0.02342994491538386, 0.029034195382866557, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "picked", "not_due", "not_due"],
+          [-0.026752552522819495, -0.041869431610433994, 0.008740272613264821, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "not_due", "picked", "not_due"],
+          [-0.0020429095785894358, 0.018696699634411118, -0.020973434786756173, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "not_due", "not_due", "picked"],
+          [0.02944549984458278, -0.009547713035722882, -0.031247276904186827, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "not_due", "picked", "cooldown"],
+          [-0.047622907481855714, 0.03309544741193471, 0.025282421774381447, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.05554883874755623, 0.0021329252492250372, 0.016749573105613758, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "not_due", "picked", "not_due"],
+          [-0.026646600038659596, -0.07602570198146841, 0.01974547074733457, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "picked", "cooldown", "not_due"],
+          [-0.026956066745256413, 0.027950043951967096, -0.00674309767106962, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "cooldown", "not_due", "picked"],
+          [0.06740837574430714, -0.021948567202637048, 0.005191948762032883, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "not_due", "picked", "not_due"],
+          [-0.024201685812946017, 0.0043237258441843895, -0.014594732860068294, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.014182564070279735, 0.02422159062059981, -0.04332946830743922, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.021180263217116524, 0.04599805439266946, -0.01656051580085527, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.0010421352676373008, -0.05409290671325928, 0.07066923735363262, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "not_due", "picked", "not_due"],
+          [0.0033442393988134533, 0.007898222507118469, -0.0339714378191589, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.039895116123357055, 0.04471445794686146, -0.03003904931784207, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.008958820290342562, -0.022743886580517736, 0.05885135280659104, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "not_due", "picked", "not_due"],
+          [0.011826116113768936, -0.01562384523533078, -0.05838188320024651, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "not_due", "not_due", "picked"],
+          [0.0020630678349158327, -0.025153081285127832, 0.039087314610260826, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "not_due", "picked", "not_due"],
+          [0.03391459892594906, 0.038551311481547, -0.013309783082358972, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.002456101330964522, -0.022451682826415076, -0.019975478378266742, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "not_due", "picked", "not_due"],
+          [-0.03228167604518695, 0.025649095856924875, 0.05017434798319442, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "picked", "complete", "not_due"],
+          [-0.019891287939985958, -0.012597224118809036, 0.019683601014769847, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "cooldown", "complete", "picked"],
+          [0.05217438971388044, -0.0015435736102854536, -0.05910932549625858, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "picked", "complete", "complete"],
+          [0.020140509613124635, 0.028986572914333042, 0.05556622448075177, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "complete", "complete", "complete"],
+          [-0.030582608325041116, -0.009011082943794935, -0.04985542672634646, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "complete", "complete", "complete"],
+          [0.023830356747970294, -0.00025205230017688596, 0.02557862651637577, 3286.82842, 92930.623066, 1.232571, false, false, false, null, "complete", "complete", "complete"]
+        ]
+      }
+    },
+    {
+      "id": "noref-all-30-30-40-n6",
+      "notes": "no reference on any leg (\"buy the first one now\"): leg 0 takes the first chunk; the prices of calm-30-30-40-n6; soft",
+      "input": {
+        "weights": [
+          [3, 10],
+          [3, 10],
+          [2, 5]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 6,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "reference": [null, null, null],
+        "prices": [
+          [3215.199646, 93605.750591, 1.235032],
+          [3308.079634, 94636.299567, 1.299744],
+          [3123.45975, 93884.286524, 1.237189],
+          [3145.22226, 96576.052339, 1.272372],
+          [3265.794207, 96279.793134, 1.287431],
+          [3262.500629, 97646.05004, 1.204433],
+          [3087.382781, 98101.742867, 1.297369],
+          [3090.932758, 95602.652708, 1.231232],
+          [3249.736656, 92192.425105, 1.241461]
+        ]
+      },
+      "expected": {
+        "n": [2, 2, 2],
+        "kSoft": 2,
+        "fills": [
+          [0, 0, "select"],
+          [1, 1, "select"],
+          [2, 0, "select"],
+          [3, 2, "select"],
+          [4, 1, "select"],
+          [5, 2, "select"]
+        ],
+        "idle": [
+          [6, "complete"],
+          [7, "complete"],
+          [8, "complete"]
+        ],
+        "done": [2, 2, 2],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, null, null, 3215.199646, 93605.750591, 1.235032, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.028887782478935975, 0.011009462233819933, 0.05239702291114723, 3215.199646, 93605.750591, 1.235032, false, false, false, null, "not_due", "picked", "not_due"],
+          [-0.05580877863474076, -0.007946348773576029, -0.048128708422581656, 3215.199646, 93605.750591, 1.235032, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.006967437310501534, 0.028671100507451808, 0.028437853876812635, 3215.199646, 93605.750591, 1.235032, false, false, false, null, "complete", "not_due", "picked"],
+          [0.038334952837323355, -0.0030676259572101072, 0.011835375189017006, 3215.199646, 93605.750591, 1.235032, false, false, false, null, "complete", "picked", "not_due"],
+          [-0.001008507514937751, 0.01419048443631854, -0.06446792099926124, 3215.199646, 93605.750591, 1.235032, false, false, false, null, "complete", "complete", "picked"],
+          [-0.053675958387072065, 0.004666781982612944, 0.0771616187865991, 3215.199646, 93605.750591, 1.235032, false, false, false, null, "complete", "complete", "complete"],
+          [0.0011498337756650212, -0.025474472582899033, -0.05097778658192076, 3215.199646, 93605.750591, 1.235032, false, false, false, null, "complete", "complete", "complete"],
+          [0.051377338309603005, -0.035670847057098665, 0.008307938715043095, 3215.199646, 93605.750591, 1.235032, false, false, false, null, "complete", "complete", "complete"]
+        ]
+      }
+    },
+    {
+      "id": "noref-all-30-30-40-n9",
+      "notes": "no reference on any leg (\"buy the first one now\"): leg 0 takes the first chunk; the prices of calm-30-30-40-n9; soft",
+      "input": {
+        "weights": [
+          [3, 10],
+          [3, 10],
+          [2, 5]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 9,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "reference": [null, null, null],
+        "prices": [
+          [3147.711004, 97580.719116, 1.231869],
+          [3310.913447, 93306.281377, 1.226042],
+          [3261.51042, 98326.673948, 1.283094],
+          [3284.331088, 94247.551905, 1.203888],
+          [3181.353285, 97341.094537, 1.291349],
+          [3175.87245, 96802.249529, 1.207796],
+          [3113.119616, 92667.01824, 1.271986],
+          [3203.890949, 96999.991121, 1.239759],
+          [3121.794487, 94820.901687, 1.27985],
+          [3303.661276, 95977.458725, 1.20005],
+          [3130.765365, 92672.667385, 1.214646],
+          [3095.861341, 96558.808122, 1.296115]
+        ]
+      },
+      "expected": {
+        "n": [3, 3, 3],
+        "kSoft": 3,
+        "fills": [
+          [0, 0, "select"],
+          [1, 1, "select"],
+          [2, 0, "select"],
+          [3, 2, "select"],
+          [4, 0, "select"],
+          [5, 2, "select"],
+          [6, 1, "select"],
+          [7, 2, "select"],
+          [8, 1, "select"]
+        ],
+        "idle": [
+          [9, "complete"],
+          [10, "complete"],
+          [11, "complete"]
+        ],
+        "done": [3, 3, 3],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, null, null, 3147.711004, 97580.719116, 1.231869, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.05184797549476694, -0.043804122143419666, -0.004730210761046849, 3147.711004, 97580.719116, 1.231869, false, false, false, null, "not_due", "picked", "not_due"],
+          [-0.014921268040021918, 0.05380551552274726, 0.04653347927721874, 3147.711004, 97580.719116, 1.231869, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.006996963081908447, -0.04148540654550403, -0.061730473371397476, 3147.711004, 97580.719116, 1.231869, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.03135426978609157, 0.03282358607169167, 0.07264878460454804, 3147.711004, 97580.719116, 1.231869, false, false, false, null, "picked", "not_due", "not_due"],
+          [-0.001722799861883395, -0.005535637446476227, -0.06470210609215632, 3147.711004, 97580.719116, 1.231869, false, false, false, null, "complete", "not_due", "picked"],
+          [-0.019759242535070887, -0.042718338769195174, 0.0531463922715425, 3147.711004, 97580.719116, 1.231869, false, false, false, null, "complete", "picked", "not_due"],
+          [0.029157675963839447, 0.046758522754859255, -0.02533597067892257, 3147.711004, 97580.719116, 1.231869, false, false, false, null, "complete", "not_due", "picked"],
+          [-0.025623987615940536, -0.0224648415821167, 0.03233773660848582, 3147.711004, 97580.719116, 1.231869, false, false, false, null, "complete", "picked", "complete"],
+          [0.05825713055658932, 0.012197279475550049, -0.06235105676446451, 3147.711004, 97580.719116, 1.231869, false, false, false, null, "complete", "complete", "complete"],
+          [-0.052334636197733375, -0.03443299482922424, 0.012162826548893557, 3147.711004, 97580.719116, 1.231869, false, false, false, null, "complete", "complete", "complete"],
+          [-0.011148719220611558, 0.04193405506345682, 0.06707221692575449, 3147.711004, 97580.719116, 1.231869, false, false, false, null, "complete", "complete", "complete"]
+        ]
+      }
+    },
+    {
+      "id": "noref-all-30-30-40-n26",
+      "notes": "no reference on any leg (\"buy the first one now\"): leg 0 takes the first chunk; the prices of calm-30-30-40-n26; soft",
+      "input": {
+        "weights": [
+          [3, 10],
+          [3, 10],
+          [2, 5]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 26,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "reference": [null, null, null],
+        "prices": [
+          [3244.534421, 95082.090022, 1.211076],
+          [3202.350477, 97736.060286, 1.278831],
+          [3234.088075, 92324.721124, 1.287271],
+          [3185.576673, 96162.830372, 1.259147],
+          [3261.819829, 96997.460703, 1.26888],
+          [3126.451996, 93855.059148, 1.228923],
+          [3126.924796, 96599.691206, 1.277402],
+          [3187.000303, 91319.877465, 1.20276],
+          [3178.110096, 91564.565242, 1.297146],
+          [3113.790215, 95739.475231, 1.220067],
+          [3077.468934, 97808.823049, 1.26279],
+          [3208.982608, 92038.456091, 1.264653],
+          [3234.29413, 92079.11601, 1.23794],
+          [3225.778826, 97523.827857, 1.20331],
+          [3188.474575, 92931.205234, 1.218328],
+          [3228.031411, 92083.090074, 1.258358],
+          [3172.482868, 96403.97779, 1.284771],
+          [3174.940146, 93768.826968, 1.222241],
+          [3136.396587, 94546.631555, 1.21768],
+          [3242.805639, 96842.932109, 1.25132],
+          [3083.483799, 91859.470824, 1.260456],
+          [3101.152611, 97152.750827, 1.248784],
+          [3196.243238, 93615.625807, 1.221445],
+          [3238.620036, 97935.864504, 1.254284],
+          [3145.660119, 94494.966541, 1.25373],
+          [3269.650887, 95323.769331, 1.259374],
+          [3097.442122, 94173.731218, 1.242754],
+          [3224.467024, 94635.520932, 1.235591],
+          [3130.734781, 94722.385295, 1.229614]
+        ]
+      },
+      "expected": {
+        "n": [8, 8, 10],
+        "kSoft": 7,
+        "fills": [
+          [0, 0, "select"],
+          [1, 1, "select"],
+          [2, 2, "select"],
+          [3, 0, "select"],
+          [4, 2, "select"],
+          [5, 0, "select"],
+          [6, 1, "select"],
+          [7, 2, "select"],
+          [8, 0, "select"],
+          [9, 2, "select"],
+          [10, 0, "select"],
+          [11, 1, "select"],
+          [12, 2, "select"],
+          [13, 0, "select"],
+          [14, 1, "select"],
+          [15, 0, "select"],
+          [16, 2, "select"],
+          [17, 1, "select"],
+          [18, 0, "select"],
+          [19, 1, "select"],
+          [20, 2, "select"],
+          [21, 1, "select"],
+          [22, 2, "select"],
+          [23, 1, "select"],
+          [24, 2, "select"],
+          [25, 2, "select"]
+        ],
+        "idle": [
+          [26, "complete"],
+          [27, "complete"],
+          [28, "complete"]
+        ],
+        "done": [8, 8, 10],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, null, null, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "picked", "not_due", "not_due"],
+          [-0.013001539982737564, 0.027912409828033224, 0.05594611733697974, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "cooldown", "picked", "not_due"],
+          [0.009910719712894256, -0.05536686404347668, 0.006599777453001998, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "not_due", "cooldown", "picked"],
+          [-0.015000025007049334, 0.04157184772694933, -0.021847769428504193, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "picked", "not_due", "cooldown"],
+          [0.023933863104352193, 0.008679344480307938, 0.0077298361509816615, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.04150070822320706, -0.03239674041181173, -0.03148997541138643, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.00015122573466830325, 0.029243304334527043, 0.039448362509286516, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "cooldown", "picked", "not_due"],
+          [0.019212328699701908, -0.054656631662939215, -0.05843266254475876, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.0027895218559067514, 0.0026794580084033015, 0.0784745086301506, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "picked", "not_due", "not_due"],
+          [-0.020238405548301697, 0.045595258143430906, -0.059421992589885675, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.011664652559132072, 0.021614363490159993, 0.03501692939813972, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.04273436282232823, -0.05899638476489155, 0.0014753046824886873, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "not_due", "picked", "not_due"],
+          [0.007887709312259572, 0.0004417709805975001, -0.02112279020411134, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.0026328168242385486, 0.05913080058684206, -0.027973892111087695, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "picked", "not_due", "cooldown"],
+          [-0.01156441684697207, -0.04709231296513716, 0.012480574415570267, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "not_due", "picked", "not_due"],
+          [0.012406194582875063, -0.009126268812122307, 0.032856504980596446, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "picked", "cooldown", "not_due"],
+          [-0.01720817920504425, 0.04692379146407477, 0.02099005211553462, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "cooldown", "not_due", "picked"],
+          [0.0007745598959054689, -0.0273344615275134, -0.04867015211271131, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "not_due", "picked", "cooldown"],
+          [-0.012139932479848348, 0.008294916467979752, -0.003731669940707172, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.03392716738726631, 0.02428749196278024, 0.027626305761776493, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "complete", "picked", "not_due"],
+          [-0.04913086312787185, -0.051459215210367115, 0.007301090048908332, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "complete", "cooldown", "picked"],
+          [0.005730145884252691, 0.057623671849163616, -0.009260140774450032, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "complete", "picked", "cooldown"],
+          [0.03066299499828129, -0.03640787306474269, -0.021892497021102186, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "complete", "cooldown", "picked"],
+          [0.013258314478755473, 0.046148692162852, 0.026885369378072843, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "complete", "picked", "cooldown"],
+          [-0.028703557677860148, -0.03513419706280796, -0.00044168625287410723, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "complete", "complete", "picked"],
+          [0.03941645419703388, 0.00877086706666419, 0.004501766728083334, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "complete", "complete", "picked"],
+          [-0.05266885393932885, -0.012064547185567487, -0.013197032811539722, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "complete", "complete", "complete"],
+          [0.041009612769771664, 0.004903593688254881, -0.005763811663450524, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "complete", "complete", "complete"],
+          [-0.029069065461777788, 0.0009178832867884346, -0.004837361230374926, 3244.534421, 95082.090022, 1.211076, false, false, false, null, "complete", "complete", "complete"]
+        ]
+      }
+    },
+    {
+      "id": "noref-leg0-n9",
+      "notes": "leg 0 has no reference, the other two do; calm, soft",
+      "input": {
+        "weights": [
+          [1, 4],
+          [1, 4],
+          [1, 2]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 9,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "reference": [null, 92590.331041, 1.229511],
+        "prices": [
+          [3140.160697, 93789.656406, 1.267105],
+          [3142.797855, 96274.689677, 1.267531],
+          [3296.111221, 96076.885925, 1.252316],
+          [3076.909332, 94600.179782, 1.215945],
+          [3164.042619, 97269.678341, 1.283723],
+          [3288.190401, 92510.227322, 1.291216],
+          [3164.066949, 95720.572983, 1.231465],
+          [3203.451649, 96832.82182, 1.234621],
+          [3211.322419, 98266.00643, 1.252907],
+          [3111.996093, 94873.554438, 1.221334],
+          [3159.508243, 98335.647755, 1.298407],
+          [3103.82822, 91677.288069, 1.223213]
+        ]
+      },
+      "expected": {
+        "n": [2, 2, 5],
+        "kSoft": 3,
+        "fills": [
+          [0, 0, "select"],
+          [1, 2, "select"],
+          [2, 1, "select"],
+          [3, 0, "select"],
+          [4, 1, "select"],
+          [5, 2, "select"],
+          [6, 2, "select"],
+          [7, 2, "select"],
+          [8, 2, "select"]
+        ],
+        "idle": [
+          [9, "complete"],
+          [10, "complete"],
+          [11, "complete"]
+        ],
+        "done": [2, 2, 5],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, 0.01295303031662054, 0.030576383619178582, 3140.160697, 93789.656406, 1.267105, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.000839816256065884, 0.026495813784013666, 0.00033619944677032443, 3140.160697, 93789.656406, 1.267105, false, false, false, null, "not_due", "not_due", "picked"],
+          [0.0487824457930337, -0.0020545768847828327, -0.01200365119275193, 3140.160697, 93789.656406, 1.267105, false, false, false, null, "not_due", "picked", "cooldown"],
+          [-0.06650318338878647, -0.015370045862568293, -0.02904298914970338, 3140.160697, 93789.656406, 1.267105, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.028318444776324503, 0.02821874720694706, 0.05574100802256665, 3140.160697, 93789.656406, 1.267105, false, false, false, null, "complete", "picked", "not_due"],
+          [0.03923707640804053, -0.04893046939370671, 0.0058369289948065894, 3140.160697, 93789.656406, 1.267105, false, false, false, null, "complete", "complete", "picked"],
+          [-0.037748255685635335, 0.03470260266279279, -0.04627498420093923, 3140.160697, 93789.656406, 1.267105, false, false, false, null, "complete", "complete", "picked"],
+          [0.01244749262099143, 0.011619746960745081, 0.0025628012164373715, 3140.160697, 93789.656406, 1.267105, false, false, false, null, "complete", "complete", "picked"],
+          [0.0024569654430266485, 0.014800607718156833, 0.014811022977901711, 3140.160697, 93789.656406, 1.267105, false, false, false, null, "complete", "complete", "picked"],
+          [-0.03093003848269149, -0.03452314910565346, -0.025199795355920318, 3140.160697, 93789.656406, 1.267105, false, false, false, null, "complete", "complete", "complete"],
+          [0.01526741955328026, 0.03649165816025657, 0.06310558782446085, 3140.160697, 93789.656406, 1.267105, false, false, false, null, "complete", "complete", "complete"],
+          [-0.017623002922483755, -0.06771053873147892, -0.05791250355243005, 3140.160697, 93789.656406, 1.267105, false, false, false, null, "complete", "complete", "complete"]
+        ]
+      }
+    },
+    {
+      "id": "noref-leg1-n12",
+      "notes": "leg 1 has no reference, the other two do; calm, soft",
+      "input": {
+        "weights": [
+          [2, 5],
+          [2, 5],
+          [1, 5]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 12,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "reference": [3087.351104, null, 1.232557],
+        "prices": [
+          [3218.195265, 95912.869457, 1.211393],
+          [3219.30934, 95009.524915, 1.248228],
+          [3094.424418, 98350.125248, 1.222559],
+          [3239.606512, 91256.64644, 1.265056],
+          [3253.345484, 97041.678741, 1.265621],
+          [3321.325965, 95740.626786, 1.220655],
+          [3150.667296, 93373.863323, 1.296285],
+          [3081.543897, 95089.899559, 1.201483],
+          [3314.771037, 97969.009915, 1.20286],
+          [3253.649931, 97581.27495, 1.25892],
+          [3081.59833, 97167.45123, 1.24245],
+          [3261.027902, 94998.952544, 1.268254],
+          [3293.058233, 93964.75337, 1.24664],
+          [3319.590759, 98778.571015, 1.264738],
+          [3143.581807, 98577.27155, 1.210109]
+        ]
+      },
+      "expected": {
+        "n": [5, 5, 2],
+        "kSoft": 3,
+        "fills": [
+          [0, 2, "select"],
+          [1, 1, "select"],
+          [2, 0, "select"],
+          [3, 1, "select"],
+          [4, 2, "select"],
+          [5, 1, "select"],
+          [6, 0, "select"],
+          [7, 1, "select"],
+          [8, 0, "select"],
+          [9, 1, "select"],
+          [10, 0, "select"],
+          [11, 0, "select"]
+        ],
+        "idle": [
+          [12, "complete"],
+          [13, "complete"],
+          [14, "complete"]
+        ],
+        "done": [5, 5, 2],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0,
+        "perLeg": [
+          [0.04238071945574218, null, -0.017170808327728437, 3218.195265, 95912.869457, 1.211393, false, false, false, null, "not_due", "not_due", "picked"],
+          [0.00034618005069986246, -0.009418387199905287, 0.03040714285124646, 3218.195265, 95912.869457, 1.211393, false, false, false, null, "not_due", "picked", "not_due"],
+          [-0.03879245788787722, 0.03516068874135159, -0.020564352025431165, 3218.195265, 95912.869457, 1.211393, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.04691731785578224, -0.07212475622286252, 0.0347606945758856, 3218.195265, 95912.869457, 1.211393, false, false, false, null, "not_due", "picked", "not_due"],
+          [0.004240938505682301, 0.06339299685753397, 0.0004466205448614424, 3218.195265, 95912.869457, 1.211393, false, false, false, null, "not_due", "not_due", "picked"],
+          [0.020895561610142277, -0.013407146000353642, -0.03552880364658939, 3218.195265, 95912.869457, 1.211393, false, false, false, null, "not_due", "picked", "complete"],
+          [-0.05138269197254175, -0.02472057623238877, 0.06195853865342782, 3218.195265, 95912.869457, 1.211393, false, false, false, null, "picked", "not_due", "complete"],
+          [-0.021939288571585225, 0.01837812183120091, -0.07313360873573316, 3218.195265, 95912.869457, 1.211393, false, false, false, null, "cooldown", "picked", "complete"],
+          [0.07568515906168183, 0.030277772606265296, 0.001146083631645256, 3218.195265, 95912.869457, 1.211393, false, false, false, null, "picked", "cooldown", "complete"],
+          [-0.01843901292661143, -0.003957730769519885, 0.04660559001047493, 3218.195265, 95912.869457, 1.211393, false, false, false, null, "cooldown", "picked", "complete"],
+          [-0.05287956745460953, -0.004240810751981239, -0.013082642264798383, 3218.195265, 95912.869457, 1.211393, false, false, false, null, "picked", "complete", "complete"],
+          [0.05822613877130434, -0.022317130464470702, 0.020768642601311837, 3218.195265, 95912.869457, 1.211393, false, false, false, null, "picked", "complete", "complete"],
+          [0.009822157909276319, -0.010886427126877929, -0.017042327483295927, 3218.195265, 95912.869457, 1.211393, false, false, false, null, "complete", "complete", "complete"],
+          [0.008057108050539608, 0.05123003543727589, 0.014517422832573956, 3218.195265, 95912.869457, 1.211393, false, false, false, null, "complete", "complete", "complete"],
+          [-0.0530212802655895, -0.0020378859800413984, -0.043193926330986954, 3218.195265, 95912.869457, 1.211393, false, false, false, null, "complete", "complete", "complete"]
+        ]
+      }
+    },
+    {
+      "id": "noref-leg2-n9",
+      "notes": "leg 2 has no reference, the other two do; calm, soft",
+      "input": {
+        "weights": [
+          [3, 10],
+          [3, 10],
+          [2, 5]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 9,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "reference": [3294.195617, 94538.545734, null],
+        "prices": [
+          [3318.073352, 93075.580058, 1.268112],
+          [3195.450849, 95928.916746, 1.209572],
+          [3198.326385, 91300.492704, 1.233054],
+          [3220.886913, 94105.762821, 1.211779],
+          [3167.630624, 95714.844015, 1.246125],
+          [3149.869401, 95871.289577, 1.289974],
+          [3301.409699, 96596.677224, 1.254226],
+          [3251.737346, 95381.809885, 1.203328],
+          [3110.157939, 95977.284807, 1.205328],
+          [3157.403438, 92980.244999, 1.241603],
+          [3228.566595, 97397.721061, 1.286413],
+          [3096.931125, 97645.976511, 1.282677]
+        ]
+      },
+      "expected": {
+        "n": [3, 3, 3],
+        "kSoft": 3,
+        "fills": [
+          [0, 1, "select"],
+          [1, 2, "select"],
+          [2, 1, "select"],
+          [3, 2, "select"],
+          [4, 0, "select"],
+          [5, 1, "select"],
+          [6, 2, "select"],
+          [7, 0, "select"],
+          [8, 0, "select"]
+        ],
+        "idle": [
+          [9, "complete"],
+          [10, "complete"],
+          [11, "complete"]
+        ],
+        "done": [3, 3, 3],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0,
+        "perLeg": [
+          [0.007248426558755794, -0.015474806224714865, null, 3318.073352, 93075.580058, 1.268112, false, false, false, null, "not_due", "picked", "not_due"],
+          [-0.036955934963308845, 0.03065612576598431, -0.04616311492991143, 3318.073352, 93075.580058, 1.268112, false, false, false, null, "not_due", "not_due", "picked"],
+          [0.000899884284216057, -0.04824847604873006, 0.01941347848660513, 3318.073352, 93075.580058, 1.268112, false, false, false, null, "not_due", "picked", "not_due"],
+          [0.007053854198810994, 0.030725684319084623, -0.017253907776950683, 3318.073352, 93075.580058, 1.268112, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.016534665897473544, 0.017098646732832457, 0.028343452065104247, 3318.073352, 93075.580058, 1.268112, false, false, false, null, "picked", "not_due", "not_due"],
+          [-0.005607100419294353, 0.0016344963376369037, 0.035188283679406185, 3318.073352, 93075.580058, 1.268112, false, false, false, null, "cooldown", "picked", "not_due"],
+          [0.048110025752778895, 0.0075662656693211705, -0.027712186447168663, 3318.073352, 93075.580058, 1.268112, false, false, false, null, "not_due", "complete", "picked"],
+          [-0.015045800893795702, -0.012576699053351681, -0.04058120306866553, 3318.073352, 93075.580058, 1.268112, false, false, false, null, "picked", "complete", "complete"],
+          [-0.04353961957418184, 0.006243065870924047, 0.0016620572279544277, 3318.073352, 93075.580058, 1.268112, false, false, false, null, "picked", "complete", "complete"],
+          [0.015190707329541642, -0.031226553387363798, 0.030095542458152602, 3318.073352, 93075.580058, 1.268112, false, false, false, null, "complete", "complete", "complete"],
+          [0.02253850621163478, 0.04750983461107805, 0.03609044114745208, 3318.073352, 93075.580058, 1.268112, false, false, false, null, "complete", "complete", "complete"],
+          [-0.0407721092709874, 0.002548883560063109, -0.002904199506690297, 3318.073352, 93075.580058, 1.268112, false, false, false, null, "complete", "complete", "complete"]
+        ]
+      }
+    },
+    {
+      "id": "noref-leg2-others-rise-n9",
+      "notes": "leg 2 has no reference (variation 0); legs 0 and 1 are 3.1% over theirs at tick 0: leg 2 takes the first chunk; soft",
+      "input": {
+        "weights": [
+          [1, 3],
+          [1, 3],
+          [1, 3]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 9,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "reference": [3042.245257, 92440.90475, null],
+        "prices": [
+          [3136.335316, 95299.901804, 1.283828],
+          [3168.909099, 92811.0053, 1.205736],
+          [3099.27689, 97371.520824, 1.246762],
+          [3104.62787, 91427.629692, 1.298589],
+          [3162.443087, 94283.768119, 1.26179],
+          [3297.941891, 98162.598907, 1.220973],
+          [3252.551732, 94137.981493, 1.252757],
+          [3094.182792, 94570.933773, 1.292867],
+          [3131.683957, 95123.611153, 1.209559],
+          [3121.3639, 98634.110737, 1.267608],
+          [3213.307134, 93025.602639, 1.275037],
+          [3101.553762, 92013.483488, 1.233517]
+        ]
+      },
+      "expected": {
+        "n": [3, 3, 3],
+        "kSoft": 3,
+        "fills": [
+          [0, 2, "select"],
+          [1, 1, "select"],
+          [2, 0, "select"],
+          [3, 1, "select"],
+          [4, 2, "select"],
+          [5, 1, "select"],
+          [6, 0, "select"],
+          [7, 2, "select"],
+          [8, 0, "select"]
+        ],
+        "idle": [
+          [9, "complete"],
+          [10, "complete"],
+          [11, "complete"]
+        ],
+        "done": [3, 3, 3],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0,
+        "perLeg": [
+          [0.030927834888888395, 0.03092783505020802, null, 3136.335316, 95299.901804, 1.283828, false, false, false, null, "not_due", "not_due", "picked"],
+          [0.010385937636777864, -0.026116464517653037, -0.06082746286885787, 3136.335316, 95299.901804, 1.283828, false, false, false, null, "not_due", "picked", "cooldown"],
+          [-0.02197355835229653, 0.049137658936660555, 0.03402569053258753, 3136.335316, 95299.901804, 1.283828, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.0017265253121672153, -0.06104342503537197, 0.04156928106567248, 3136.335316, 95299.901804, 1.283828, false, false, false, null, "not_due", "picked", "not_due"],
+          [0.01862226953467383, 0.031239335818086023, -0.028337680359220685, 3136.335316, 95299.901804, 1.283828, false, false, false, null, "not_due", "not_due", "picked"],
+          [0.042846242690343095, 0.04113996359484018, -0.0323484890512683, 3136.335316, 95299.901804, 1.283828, false, false, false, null, "not_due", "picked", "cooldown"],
+          [-0.01376317730881449, -0.04099949938991487, 0.026031697670628073, 3136.335316, 95299.901804, 1.283828, false, false, false, null, "picked", "complete", "not_due"],
+          [-0.048690675214139834, 0.0045991243187235575, 0.032017382461243526, 3136.335316, 95299.901804, 1.283828, false, false, false, null, "cooldown", "complete", "picked"],
+          [0.012119893206361088, 0.005844051210561307, -0.06443663578697567, 3136.335316, 95299.901804, 1.283828, false, false, false, null, "picked", "complete", "complete"],
+          [-0.003295369884605659, 0.03690460803000417, 0.04799187141759931, 3136.335316, 95299.901804, 1.283828, false, false, false, null, "complete", "complete", "complete"],
+          [0.029456108594067, -0.05686174951132916, 0.005860644615685473, 3136.335316, 95299.901804, 1.283828, false, false, false, null, "complete", "complete", "complete"],
+          [-0.03477830389057357, -0.010880006388431451, -0.03256376089478186, 3136.335316, 95299.901804, 1.283828, false, false, false, null, "complete", "complete", "complete"]
+        ]
+      }
+    },
+    {
+      "id": "noref-leg0-others-fall-n9",
+      "notes": "leg 0 has no reference (variation 0); legs 1 and 2 are 2.9% under theirs at tick 0: leg 0 does not take the first chunk; soft",
+      "input": {
+        "weights": [
+          [1, 3],
+          [1, 3],
+          [1, 3]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 9,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "reference": [null, 95188.134949, 1.27443],
+        "prices": [
+          [3139.807536, 92415.664999, 1.237311],
+          [3166.623966, 95687.098499, 1.203989],
+          [3169.72863, 96239.274989, 1.270246],
+          [3129.334064, 95618.405417, 1.269312],
+          [3154.167343, 97184.382557, 1.275784],
+          [3293.880998, 94460.092677, 1.200551],
+          [3073.405509, 92383.178153, 1.220027],
+          [3240.314165, 93147.763563, 1.27784],
+          [3158.656642, 97877.07702, 1.228797],
+          [3081.994267, 95394.158071, 1.219509],
+          [3191.61073, 92165.538543, 1.205426],
+          [3322.401263, 96330.603575, 1.289673]
+        ]
+      },
+      "expected": {
+        "n": [3, 3, 3],
+        "kSoft": 3,
+        "fills": [
+          [0, 1, "select"],
+          [1, 2, "select"],
+          [2, 0, "select"],
+          [3, 1, "select"],
+          [4, 2, "select"],
+          [5, 1, "select"],
+          [6, 0, "select"],
+          [7, 2, "select"],
+          [8, 0, "select"]
+        ],
+        "idle": [
+          [9, "complete"],
+          [10, "complete"],
+          [11, "complete"]
+        ],
+        "done": [3, 3, 3],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, -0.029126213592538974, -0.02912596219486352, 3139.807536, 92415.664999, 1.237311, false, false, false, null, "not_due", "picked", "not_due"],
+          [0.008540787832544527, 0.03539912308195148, -0.02693098178226827, 3139.807536, 92415.664999, 1.237311, false, false, false, null, "not_due", "not_due", "picked"],
+          [0.0009804334311034335, 0.005770647231045034, 0.05503123367406171, 3139.807536, 92415.664999, 1.237311, false, false, false, null, "picked", "not_due", "not_due"],
+          [-0.012743856246141827, -0.006451311817041061, -0.0007352906444892948, 3139.807536, 92415.664999, 1.237311, false, false, false, null, "cooldown", "picked", "not_due"],
+          [0.007935643332453113, 0.01637736096069209, 0.00509882519033944, 3139.807536, 92415.664999, 1.237311, false, false, false, null, "not_due", "not_due", "picked"],
+          [0.04429494056809147, -0.028032177684538695, -0.05897001373273225, 3139.807536, 92415.664999, 1.237311, false, false, false, null, "not_due", "picked", "cooldown"],
+          [-0.06693486775444213, -0.021987216666215503, 0.01622255114526583, 3139.807536, 92415.664999, 1.237311, false, false, false, null, "picked", "complete", "not_due"],
+          [0.054307397937315205, 0.008276240602306695, 0.04738665619695315, 3139.807536, 92415.664999, 1.237311, false, false, false, null, "not_due", "complete", "picked"],
+          [-0.025200495643915355, 0.050772163239338974, -0.03837960934076268, 3139.807536, 92415.664999, 1.237311, false, false, false, null, "picked", "complete", "complete"],
+          [-0.02427056299207586, -0.02536772679156163, -0.007558612203643067, 3139.807536, 92415.664999, 1.237311, false, false, false, null, "complete", "complete", "complete"],
+          [0.03556673163662305, -0.033845044531940816, -0.011548090255996346, 3139.807536, 92415.664999, 1.237311, false, false, false, null, "complete", "complete", "complete"],
+          [0.04097947527579593, 0.04519113215029691, 0.06988981488701906, 3139.807536, 92415.664999, 1.237311, false, false, false, null, "complete", "complete", "complete"]
+        ]
+      }
+    },
+    {
+      "id": "noref-leg1-late-n9",
+      "notes": "leg 1 has no reference and no price at ticks 0-1: at tick 2 its variation counts as 0 and its entry is set; soft",
+      "input": {
+        "weights": [
+          [2, 5],
+          [2, 5],
+          [1, 5]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 9,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "reference": [3310.003084, null, 1.278129],
+        "prices": [
+          [3255.358153, null, 1.211168],
+          [3298.820707, null, 1.289298],
+          [3315.857944, 92116.737218, 1.273203],
+          [3280.550423, 96761.764838, 1.207984],
+          [3239.376684, 91462.456473, 1.213631],
+          [3175.192888, 94326.512787, 1.278551],
+          [3297.20996, 95629.546635, 1.276011],
+          [3087.591376, 97264.862298, 1.222218],
+          [3138.836935, 94871.386861, 1.284683],
+          [3170.416698, 97941.705194, 1.277925],
+          [3219.041941, 98253.259374, 1.201301],
+          [3155.099569, 96797.268255, 1.223458]
+        ]
+      },
+      "expected": {
+        "n": [4, 3, 2],
+        "kSoft": 3,
+        "fills": [
+          [0, 2, "select"],
+          [1, 0, "select"],
+          [2, 2, "select"],
+          [3, 0, "select"],
+          [4, 1, "select"],
+          [5, 0, "select"],
+          [6, 1, "select"],
+          [7, 0, "select"],
+          [8, 1, "select"]
+        ],
+        "idle": [
+          [9, "complete"],
+          [10, "complete"],
+          [11, "complete"]
+        ],
+        "done": [4, 3, 2],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0,
+        "perLeg": [
+          [-0.016509027216362493, null, -0.05238986049139016, 3255.358153, null, 1.211168, false, false, false, null, "not_due", "no_price", "picked"],
+          [0.013351082110564905, null, 0.06450797907474448, 3255.358153, null, 1.211168, false, false, false, null, "picked", "no_price", "not_due"],
+          [0.005164644736177282, null, -0.012483537552993917, 3255.358153, 92116.737218, 1.211168, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.010648080103639046, 0.050425446669992935, -0.051224353068599515, 3255.358153, 92116.737218, 1.211168, false, false, false, null, "picked", "not_due", "complete"],
+          [-0.012550863023269021, -0.05476655344052672, 0.004674730791136339, 3255.358153, 92116.737218, 1.211168, false, false, false, null, "not_due", "picked", "complete"],
+          [-0.0198136253548461, 0.031314010408691306, 0.053492371239693304, 3255.358153, 92116.737218, 1.211168, false, false, false, null, "picked", "not_due", "complete"],
+          [0.03842823926103489, 0.01381407845472249, -0.0019866239203598646, 3255.358153, 92116.737218, 1.211168, false, false, false, null, "not_due", "picked", "complete"],
+          [-0.06357453317895478, 0.017100527196282522, -0.04215716008717796, 3255.358153, 92116.737218, 1.211168, false, false, false, null, "picked", "not_due", "complete"],
+          [0.01659726069917622, -0.024607811911220967, 0.051107903827304124, 3255.358153, 92116.737218, 1.211168, false, false, false, null, "complete", "picked", "complete"],
+          [0.010060975977396636, 0.03236295404322953, -0.0052604416809438614, 3255.358153, 92116.737218, 1.211168, false, false, false, null, "complete", "complete", "complete"],
+          [0.015337177296181448, 0.0031810164973429256, -0.059959700295400764, 3255.358153, 92116.737218, 1.211168, false, false, false, null, "complete", "complete", "complete"],
+          [-0.019863789652935115, -0.014818756428810032, 0.018444170112236646, 3255.358153, 92116.737218, 1.211168, false, false, false, null, "complete", "complete", "complete"]
+        ]
+      }
+    },
+    {
+      "id": "noref-legs01-n12",
+      "notes": "legs 0 and 1 have no reference, leg 2 does; calm, soft",
+      "input": {
+        "weights": [
+          [3, 10],
+          [3, 10],
+          [2, 5]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 12,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "reference": [null, null, 1.271393],
+        "prices": [
+          [3177.530671, 94428.766838, 1.215444],
+          [3322.211517, 95902.019057, 1.231731],
+          [3197.285653, 95163.616929, 1.263546],
+          [3212.966469, 95844.902754, 1.212271],
+          [3297.544804, 96997.000462, 1.295572],
+          [3273.849695, 91916.632271, 1.203094],
+          [3141.285193, 94860.867573, 1.283624],
+          [3147.200279, 98404.008833, 1.238374],
+          [3194.086592, 97923.040366, 1.299729],
+          [3299.725159, 94395.783245, 1.273173],
+          [3254.632627, 98192.578461, 1.217499],
+          [3124.670025, 92033.97885, 1.254656],
+          [3139.183426, 97755.436199, 1.200017],
+          [3258.295775, 96113.738358, 1.201313],
+          [3203.153639, 95565.090032, 1.284447]
+        ]
+      },
+      "expected": {
+        "n": [4, 3, 5],
+        "kSoft": 3,
+        "fills": [
+          [0, 2, "select"],
+          [1, 1, "select"],
+          [2, 0, "select"],
+          [3, 2, "select"],
+          [4, 1, "select"],
+          [5, 2, "select"],
+          [6, 0, "select"],
+          [7, 2, "select"],
+          [8, 1, "select"],
+          [9, 2, "select"],
+          [10, 0, "select"],
+          [11, 0, "select"]
+        ],
+        "idle": [
+          [12, "complete"],
+          [13, "complete"],
+          [14, "complete"]
+        ],
+        "done": [4, 3, 5],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0,
+        "perLeg": [
+          [null, null, -0.04400606264152784, 3177.530671, 94428.766838, 1.215444, false, false, false, null, "not_due", "not_due", "picked"],
+          [0.0455324781977533, 0.015601731001395835, 0.013400041466328227, 3177.530671, 94428.766838, 1.215444, false, false, false, null, "not_due", "picked", "cooldown"],
+          [-0.03760322404541239, -0.00769954725938693, 0.02582950335747025, 3177.530671, 94428.766838, 1.215444, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.00490441508886974, 0.007159099737752639, -0.0405802400545765, 3177.530671, 94428.766838, 1.215444, false, false, false, null, "not_due", "not_due", "picked"],
+          [0.02632406401250864, 0.01202043796692065, 0.06871483356444208, 3177.530671, 94428.766838, 1.215444, false, false, false, null, "not_due", "picked", "not_due"],
+          [-0.007185682199452592, -0.05237654944794201, -0.07138005452417917, 3177.530671, 94428.766838, 1.215444, false, false, false, null, "not_due", "not_due", "picked"],
+          [-0.04049193284666042, 0.03203158372164294, 0.0669357506562247, 3177.530671, 94428.766838, 1.215444, false, false, false, null, "picked", "not_due", "not_due"],
+          [0.001883014637824365, 0.03735092615796898, -0.03525175596592145, 3177.530671, 94428.766838, 1.215444, false, false, false, null, "not_due", "not_due", "picked"],
+          [0.014897784965530514, -0.004887691799388416, 0.04954480633475811, 3177.530671, 94428.766838, 1.215444, false, false, false, null, "not_due", "picked", "not_due"],
+          [0.033073169420198445, -0.03602070674905955, -0.020431951583753105, 3177.530671, 94428.766838, 1.215444, false, false, false, null, "not_due", "complete", "picked"],
+          [-0.01366554177308077, 0.040222084985995554, -0.04372854278248128, 3177.530671, 94428.766838, 1.215444, false, false, false, null, "picked", "complete", "complete"],
+          [-0.03993157351212162, -0.06271960373712016, 0.03051912157628056, 3177.530671, 94428.766838, 1.215444, false, false, false, null, "picked", "complete", "complete"],
+          [0.004644778771480063, 0.062166793400565856, -0.04354898872679058, 3177.530671, 94428.766838, 1.215444, false, false, false, null, "complete", "complete", "complete"],
+          [0.03794373658240646, -0.016793928857910312, 0.0010799847002169738, 3177.530671, 94428.766838, 1.215444, false, false, false, null, "complete", "complete", "complete"],
+          [-0.016923612774227048, -0.005708323652508729, 0.0692026141396953, 3177.530671, 94428.766838, 1.215444, false, false, false, null, "complete", "complete", "complete"]
+        ]
+      }
+    },
+    {
+      "id": "noref-leg0-fall-n9-rigid",
+      "notes": "leg 0 has no reference and sits at 0.679-0.700 x its tick 0 price from tick 1: protected, never recovers; rigid",
+      "input": {
+        "weights": [
+          [2, 5],
+          [2, 5],
+          [1, 5]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 9,
+        "minFillUsd": 16,
+        "mode": "rigid",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "reference": [null, 94681.233538, 1.221524],
+        "prices": [
+          [3144.05166, 94680.49173, 1.298719],
+          [2149.837085, 95428.814906, 1.246309],
+          [2139.543188, 91305.148652, 1.271672],
+          [2137.550973, 91834.703326, 1.271915],
+          [2138.470198, 94326.560717, 1.218269],
+          [2178.430329, 98732.922148, 1.222679],
+          [2195.073432, 95036.841939, 1.278964],
+          [2163.392766, 91915.850939, 1.273764],
+          [2148.832499, 95536.153478, 1.22513],
+          [2167.511108, 95393.428495, 1.268369],
+          [2152.858404, 96848.061761, 1.266297],
+          [2190.018966, 95138.645493, 1.235665]
+        ]
+      },
+      "expected": {
+        "n": [4, 3, 2],
+        "kSoft": null,
+        "fills": [
+          [0, 1, "select"],
+          [1, 2, "select"],
+          [2, 1, "select"],
+          [3, 2, "select"],
+          [4, 1, "select"]
+        ],
+        "idle": [
+          [5, "rule9"],
+          [6, "rule9"],
+          [7, "rule9"],
+          [8, "rule9"],
+          [9, "rule9"],
+          [10, "rule9"],
+          [11, "rule9"]
+        ],
+        "done": [0, 3, 2],
+        "unbought": [4, 0, 0],
+        "deviationPp": 40.0,
+        "perLeg": [
+          [null, -7.834794417904689e-06, 0.06319564740438977, 3144.05166, 94680.49173, 1.298719, false, false, false, null, "not_due", "picked", "not_due"],
+          [-0.316220813941715, 0.007903668034741518, -0.040355149959306114, 3144.05166, 94680.49173, 1.298719, true, false, false, null, "rule9", "not_due", "picked"],
+          [-0.0047882218944976795, -0.04321196127251414, 0.02035049092961705, 3144.05166, 94680.49173, 1.298719, true, false, false, null, "rule9", "picked", "not_due"],
+          [-0.0009311403533117657, 0.005799833654708042, 0.00019108700985781546, 3144.05166, 94680.49173, 1.298719, true, false, false, null, "rule9", "not_due", "picked"],
+          [0.0004300365285372365, 0.02713415844720779, -0.04217734675666207, 3144.05166, 94680.49173, 1.298719, true, false, false, null, "rule9", "picked", "complete"],
+          [0.018686316525417412, 0.04671389900687717, 0.0036198901884558765, 3144.05166, 94680.49173, 1.298719, true, false, false, null, "rule9", "complete", "complete"],
+          [0.007639951931646349, -0.03743513438668, 0.04603415941551292, 3144.05166, 94680.49173, 1.298719, true, false, false, null, "rule9", "complete", "complete"],
+          [-0.014432622407139717, -0.03283980124258801, -0.004065790749387843, 3144.05166, 94680.49173, 1.298719, true, false, false, null, "rule9", "complete", "complete"],
+          [-0.006730292912516811, 0.03938714054230541, -0.03818132715322453, 3144.05166, 94680.49173, 1.298719, true, false, false, null, "rule9", "complete", "complete"],
+          [0.008692445320280795, -0.001493936879433444, 0.035293397435374185, 3144.05166, 94680.49173, 1.298719, true, false, false, null, "rule9", "complete", "complete"],
+          [-0.006760151745436871, 0.015248778547426234, -0.0016335940093143986, 3144.05166, 94680.49173, 1.298719, true, false, false, null, "rule9", "complete", "complete"],
+          [0.017261033949541593, -0.01765049539368657, -0.02419021761877349, 3144.05166, 94680.49173, 1.298719, true, false, false, null, "rule9", "complete", "complete"]
+        ]
+      }
+    }
+  ]
+}
