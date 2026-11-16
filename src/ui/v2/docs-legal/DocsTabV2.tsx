@@ -18,7 +18,9 @@ import {
   PRIVACY_BADGE,
   PRIVACY_DIRECT_NOTE,
   PRIVACY_IP_STORAGE_NOTE,
+  PRIVACY_PROVIDERS_NOTE,
   PRIVACY_PROXY_CLAIM,
+  PRIVACY_PUBLIC_ANALYTICS_NOTE,
   PRIVACY_WALLET_ADVICE,
   PRIVACY_WALLET_STORAGE_NOTE,
   PRICE_DEVIATION_BLOCK_PCT,
@@ -471,7 +473,7 @@ export function DocsTabV2() {
             />
 
             <div className="mt-4 text-xs text-v2-muted">
-              <span className="font-semibold text-v2-text">Note:</span> {PRIVACY_DIRECT_NOTE} {PRIVACY_WALLET_ADVICE} {PRIVACY_WALLET_STORAGE_NOTE}
+              <span className="font-semibold text-v2-text">Note:</span> {PRIVACY_DIRECT_NOTE} {PRIVACY_WALLET_ADVICE} {PRIVACY_WALLET_STORAGE_NOTE} {PRIVACY_PUBLIC_ANALYTICS_NOTE} {PRIVACY_PROVIDERS_NOTE}
             </div>
           </section>
 

@@ -1,0 +1,186 @@
+# [feat/dca-feed-candidates-weekly] Weekly list of token USD feeds that COULD be registered in the DCA
+# executors: ONE CHAIN PER JOB (matrix), so one chain's failure never blocks the other's PR.
+#
+# Runs scripts/dca-feeds/candidates.ts for one chain: READ-ONLY on the network (one HTTPS GET of Chainlink's
+# public feed directory, then eth_call on two public RPCs). When that appends new rows to
+# src/config/dca-feed-registrations.json (always `enabled: false`, `action: "none"`, `phase: 2`; an existing
+# row is never modified) it opens ONE PR per chain whose body is the candidate table. Nothing changed = nothing
+# opened. The owner reads the table, chooses symbols, and enables them in the monthly batch
+# (docs/Runbooks/dca-feed-registration.md, section 9: batch.ts, Auditor-read).
+#
+# What this workflow NEVER does: auto-merge, enable or register a row, hold a wallet key, send a transaction,
+# read a secret other than the optional PR token below. A failed directory fetch, sentinel or RPC check exits
+# non-zero, so the job fails and no empty PR is opened.
+#
+# The chain matrix is NOT a second hand-maintained list: the `chains` job reads it from the chain registry
+# (scripts/dca-feeds/list-chains.ts → src/lib/chains/registry.ts getSupportedChainIds(), narrowed to the chains
+# the DCA scripts know), the same source the token-catalog refresh uses.
+#
+# NOTE: scheduled workflows only run from the DEFAULT branch: this activates once merged to main.
+# Triggers are schedule/workflow_dispatch only. No ${{ }} expression is spliced into a run: script; every value
+# a script uses reaches it through env: (the PR body embeds strings from Chainlink's directory and our token
+# catalog, so it is written to a file by the script, which strips markup, and passed with --body-file).
+#
+# The PR branch commit is created by GitHub's own createCommitOnBranch (verified, no signing key here); merge
+# via the GitHub UI. PR token: as token-catalog-refresh.yml, the optional CATALOG_PR_TOKEN secret (fine-grained
+# PAT, this repo, pull requests only) is used ONLY by `gh pr create`, so the PR's CI starts; missing or expired it
+# falls back to GITHUB_TOKEN with a ::warning:: (the PR still opens, close and reopen it by hand to start CI).
+
+name: "DCA feed candidates"
+
+on:
+  schedule:
+    - cron: "30 6 * * 1" # Mondays 06:30 UTC, after the token catalog refresh (06:00)
+  workflow_dispatch: {}
+
+# Least privilege: read-only by default; the one job that pushes a branch and opens/closes PRs declares its own scopes.
+permissions:
+  contents: read
+
+concurrency:
+  group: dca-feed-candidates
+  cancel-in-progress: false
+
+jobs:
+  chains:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - id: list
+        run: echo "matrix=$(npx tsx --tsconfig tsconfig.json scripts/dca-feeds/list-chains.ts)" >> "$GITHUB_OUTPUT"
+
+  candidates:
+    needs: chains
+    permissions:
+      contents: write # push the candidates branch, createCommitOnBranch, delete superseded branches
+      pull-requests: write # open and close PRs
+    strategy:
+      fail-fast: false # one chain's failure must never cancel the other chain's job
+      matrix:
+        chain: ${{ fromJson(needs.chains.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+
+      - name: Build the candidate list (read-only; appends disabled rows only)
+        id: build
+        env:
+          CHAIN: ${{ matrix.chain }}
+        run: |
+          set -o pipefail
+          # stderr = the table (kept in the job log), stdout = the machine-readable report, --md = the PR body table.
+          node --no-warnings scripts/dca-feeds/candidates.ts --chain "$CHAIN" --write-config \
+            --md "$RUNNER_TEMP/dca-candidates.md" > "$RUNNER_TEMP/dca-candidates.json"
+          cat "$RUNNER_TEMP/dca-candidates.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push the candidates branch + verified commit (chain ${{ matrix.chain }})
+        id: commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHAIN: ${{ matrix.chain }}
+        run: |
+          FILE="src/config/dca-feed-registrations.json"
+          if git diff --quiet -- "$FILE"; then
+            echo "chain ${CHAIN}: no new candidate rows - nothing to do"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          TODAY="$(date -u +%Y-%m-%d)"
+          # The run id keeps two runs on the same UTC day (a retry, or workflow_dispatch next to the cron) off the same
+          # branch name, so no force-push is ever needed. GITHUB_RUN_ID / GITHUB_REPOSITORY are runner defaults.
+          BRANCH="chore/dca-feed-candidates-${CHAIN}-${TODAY}-${GITHUB_RUN_ID}"
+          EXPECTED_HEAD_OID="$(git rev-parse HEAD)"
+          # shellcheck disable=SC2016 # literal GraphQL variable syntax, not a shell expansion
+          QUERY='mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }'
+          # File contents never go through argv (MAX_ARG_STRLEN): base64 to a temp file that jq reads with --rawfile.
+          CONTENTS_FILE=$(mktemp)
+          base64 -w0 "$FILE" > "$CONTENTS_FILE"
+          if [ ! -s "$CONTENTS_FILE" ]; then echo "::error::chain ${CHAIN}: encoded config is empty - refusing to push the branch"; exit 1; fi
+          PAYLOAD_FILE=$(mktemp)
+          jq -n \
+            --arg query "$QUERY" \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg branch "$BRANCH" \
+            --arg headline "feat(dca-feeds): weekly candidates as disabled phase-2 rows - chain ${CHAIN}" \
+            --arg oid "$EXPECTED_HEAD_OID" \
+            --arg path "$FILE" \
+            --rawfile contents "$CONTENTS_FILE" \
+            '{
+              query: $query,
+              variables: { input: {
+                branch: { repositoryNameWithOwner: $repo, branchName: $branch },
+                message: { headline: $headline },
+                fileChanges: { additions: [ { path: $path, contents: $contents } ] },
+                expectedHeadOid: $oid
+              } }
+            }' > "$PAYLOAD_FILE"
+          git push origin "HEAD:refs/heads/${BRANCH}"
+          gh api graphql --input "$PAYLOAD_FILE"
+          {
+            echo "changed=true"
+            echo "branch=${BRANCH}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open the PR (chain ${{ matrix.chain }})
+        if: steps.commit.outputs.changed == 'true'
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Step-level on purpose: used ONLY as GH_TOKEN for `gh pr create`, never echoed.
+          CATALOG_PR_TOKEN: ${{ secrets.CATALOG_PR_TOKEN }}
+          CHAIN: ${{ matrix.chain }}
+          BRANCH: ${{ steps.commit.outputs.branch }}
+        run: |
+          TODAY="$(date -u +%Y-%m-%d)"
+          BODY_FILE=$(mktemp)
+          {
+            cat "$RUNNER_TEMP/dca-candidates.md"
+            echo ""
+            echo "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo ""
+            echo "This PR only appends rows with \`enabled: false\`. It enables and registers nothing, and nothing merges it automatically."
+            echo "Read the table, choose symbols, then run the monthly batch (docs/Runbooks/dca-feed-registration.md, section 9)."
+          } > "$BODY_FILE"
+          PR_ARGS=(--title "DCA feed candidates: ${CHAIN}, ${TODAY}" --body-file "$BODY_FILE" --base main --head "$BRANCH")
+          PR_TOKEN_WARNING="::warning::CATALOG_PR_TOKEN missing or expired - PR will not trigger CI; close/reopen it manually"
+          if [ -z "$CATALOG_PR_TOKEN" ]; then
+            echo "$PR_TOKEN_WARNING"
+            PR_URL="$(gh pr create "${PR_ARGS[@]}")"
+          elif ! PR_URL="$(GH_TOKEN="$CATALOG_PR_TOKEN" gh pr create "${PR_ARGS[@]}")"; then
+            echo "$PR_TOKEN_WARNING"
+            PR_URL="$(gh pr create "${PR_ARGS[@]}")"
+          fi
+          echo "chain ${CHAIN}: opened ${PR_URL}"
+          echo "url=${PR_URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Close superseded candidate PRs for this chain (after the new PR exists)
+        if: steps.pr.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHAIN: ${{ matrix.chain }}
+          BRANCH: ${{ steps.commit.outputs.branch }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+        run: |
+          # One open candidates PR per chain: last week's unmerged PR carries the same rows plus older readings.
+          # The branches are regenerable bot branches with no human work. pipefail: a failed `gh pr list` fails the step.
+          set -o pipefail
+          PREFIX="chore/dca-feed-candidates-${CHAIN}-"
+          gh pr list --repo "$GITHUB_REPOSITORY" --state open --json number,headRefName \
+            --jq ".[] | select(.headRefName | startswith(\"${PREFIX}\")) | select(.headRefName != \"${BRANCH}\") | [.number, .headRefName] | @tsv" |
+            while IFS=$'\t' read -r SUPERSEDED_NUM SUPERSEDED_BRANCH; do
+              echo "closing superseded PR #${SUPERSEDED_NUM} for chain ${CHAIN} (deleting branch ${SUPERSEDED_BRANCH})"
+              gh pr close "$SUPERSEDED_NUM" --repo "$GITHUB_REPOSITORY" --comment "Superseded by ${PR_URL} (candidates for chain ${CHAIN})"
+              git push origin --delete "$SUPERSEDED_BRANCH" || true
+            done

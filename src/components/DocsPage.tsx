@@ -21,7 +21,9 @@ import {
   PRIVACY_BADGE,
   PRIVACY_DIRECT_NOTE,
   PRIVACY_IP_STORAGE_NOTE,
+  PRIVACY_PROVIDERS_NOTE,
   PRIVACY_PROXY_CLAIM,
+  PRIVACY_PUBLIC_ANALYTICS_NOTE,
   PRIVACY_WALLET_ADVICE,
   PRIVACY_WALLET_STORAGE_NOTE,
   PRICE_DEVIATION_BLOCK_PCT,
@@ -546,7 +548,7 @@ export default function DocsPage() {
           </div>
 
           <div className="mt-4 rounded-lg border border-cream-08 bg-surface-secondary p-3 text-xs text-cream-50">
-            <span className="font-semibold text-cream-65">Note:</span> {PRIVACY_DIRECT_NOTE} {PRIVACY_WALLET_ADVICE} {PRIVACY_WALLET_STORAGE_NOTE}
+            <span className="font-semibold text-cream-65">Note:</span> {PRIVACY_DIRECT_NOTE} {PRIVACY_WALLET_ADVICE} {PRIVACY_WALLET_STORAGE_NOTE} {PRIVACY_PUBLIC_ANALYTICS_NOTE} {PRIVACY_PROVIDERS_NOTE}
           </div>
         </AnimatedSection>
 

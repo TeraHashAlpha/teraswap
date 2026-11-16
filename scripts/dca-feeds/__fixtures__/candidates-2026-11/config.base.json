@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "source": "chainlink-directory 2026-10-11",
+  "chains": {
+    "8453": {
+      "name": "Base",
+      "rows": [
+        {
+          "symbol": "USDC",
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "feed": "0x7e860098F58bBFC8648a4311b374B1D669a2bc6B",
+          "description": "USDC / USD",
+          "decimals": 8,
+          "tokenDecimals": 6,
+          "heartbeat": 86400,
+          "maxStaleness": 90000,
+          "tier": "low",
+          "phase": 1,
+          "enabled": true,
+          "action": "replace",
+          "source": "chainlink-directory 2026-10-11"
+        },
+        {
+          "symbol": "DEGEN",
+          "token": "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed",
+          "feed": "0xE62BcE5D7CB9d16AB8b4D622538bc0A50A5799c2",
+          "description": "DEGEN / USD",
+          "decimals": 8,
+          "tokenDecimals": 18,
+          "heartbeat": 86400,
+          "maxStaleness": 90000,
+          "tier": "medium",
+          "phase": 2,
+          "enabled": false,
+          "action": "none",
+          "source": "chainlink-directory 2026-10-11"
+        },
+        {
+          "symbol": "MOG",
+          "token": "0x2Da56AcB9Ea78330f947bD57C54119Debda7AF71",
+          "feed": "0x4aeb6D15769EaD32D0c5Be2940F40c7CFf53801d",
+          "description": "MOG / USD",
+          "decimals": 18,
+          "tokenDecimals": 18,
+          "heartbeat": 86400,
+          "maxStaleness": 90000,
+          "tier": "medium",
+          "phase": 2,
+          "enabled": false,
+          "action": "none",
+          "source": "chainlink-directory 2026-10-11"
+        }
+      ]
+    }
+  }
+}
