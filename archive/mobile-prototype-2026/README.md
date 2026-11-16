@@ -54,3 +54,50 @@ they were not removed in this change.
 Not supported as-is. Reviving it would require restoring `ios/` and `capacitor.config.ts` to the
 repository root (or pointing `cap` at this folder), re-adding the removed `cap:*:ios` scripts,
 running `npx cap sync ios`, and resolving the Dependabot alert #142 Capacitor upgrade first.
+
+## Removed from the root on 2026-11-16
+
+Owner decision 2026-11-16: the mobile app is not needed for now. The root `package.json` no longer
+installs Capacitor, and the sections above that say the `@capacitor/*` packages and the
+`cap:init:android`, `cap:open:android` and `cap:sync` scripts are "still present" describe the
+repository as it was on 2026-11-06, not today.
+
+**Packages removed** (all were `dependencies`, exact pins, `.npmrc` has `save-exact=true`):
+
+| Package | Version removed |
+|---|---|
+| `@capacitor/android` | 8.5.3 |
+| `@capacitor/browser` | 8.0.5 |
+| `@capacitor/cli` | 8.5.3 |
+| `@capacitor/core` | 8.5.3 |
+| `@capacitor/ios` | 8.5.3 |
+| `@capacitor/splash-screen` | 8.0.2 |
+| `@capacitor/status-bar` | 8.0.4 |
+
+**Scripts removed**, verbatim from the `scripts` block of the root `package.json`:
+
+```json
+"cap:init:android": "npx cap add android",
+"cap:sync": "npx cap sync",
+"cap:open:android": "npx cap open android",
+```
+
+**Also removed or changed in the same change** (restore them with the packages):
+
+- the `overrides` entry `"tar": "^7.5.21"` (its only consumer was `@capacitor/cli`);
+- `tsconfig.json` now lists `"archive"` in `exclude`, because `capacitor.config.ts` in this folder imports
+  a type from `@capacitor/cli` and the root type-check would fail without the package. If the packages come
+  back, the exclusion can stay (the archive is never built).
+
+**The one command that restores the packages** (run from the repository root; the versions are the
+exact ones above):
+
+```sh
+npm install --save-exact @capacitor/android@8.5.3 @capacitor/browser@8.0.5 @capacitor/cli@8.5.3 @capacitor/core@8.5.3 @capacitor/ios@8.5.3 @capacitor/splash-screen@8.0.2 @capacitor/status-bar@8.0.4
+```
+
+Then paste the three script lines above back into `scripts`, restore the `ios/` folder and
+`capacitor.config.ts` from this archive to the root (see "Reviving this prototype"), and re-check
+Dependabot alert #142 before running `npx cap sync`. Restoring the packages also brings back the
+`rimraf`, `xcode` and `uuid@7.0.3` copies, which only `@capacitor/cli` needed (and the Dependabot
+alerts that go with them).
