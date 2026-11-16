@@ -173,7 +173,7 @@ always qualify by chain. Operational status and the checks behind each row are i
 
 **Workflows** (11, `.github/workflows/`): CI (`ci.yml`), CodeQL (`codeql.yml`), Daily health report (`daily-health-report.yml`), DCA feed candidates (`dca-feed-candidates.yml`), Dependabot auto-merge (`dependabot-auto-merge.yml`), E2E (real-render) (`e2e.yml`), Gitleaks (`gitleaks.yml`), Keeper Tests (`keeper-tests.yml`), Monitoring Watchdog (`monitoring-watchdog.yml`), Security Audit (`security-audit.yml`), Token catalog refresh (`token-catalog-refresh.yml`)
 
-**ADRs** (`docs/ADR/`): 27 files, ADR-001 to ADR-027; latest `ADR-027-basket-dca-three-orders`, Status: Proposed
+**ADRs** (`docs/ADR/`): 27 files, ADR-001 to ADR-027; latest `ADR-027-basket-dca-three-orders`, Status: Accepted
 
 **Test suites** (no counts here, they change on every PR; `node scripts/gen-claude-state.mjs --counts` prints them): vitest, `npx vitest run`, config `vitest.config.ts` · keeper node:test, `node --test` in `contracts/order-engine/executor/` · Foundry, `forge test`, configs `contracts/foundry.toml`, `contracts/order-engine/foundry.toml`
 <!-- state:end -->

@@ -1,6 +1,6 @@
 # ADR-027: Basket DCA on the V3 executor, three orders per basket
 
-- **Status:** Proposed (Architect, 2026-11-13). The three points of §7 are closed; becomes Accepted on the owner's sign-off.
+- **Status:** Accepted (owner, 2026-11-13). Proposed by the Architect the same day; the three points of §7 were closed before acceptance.
 - **Fund-flow:** yes. The keeper change decides which order fills and when. Auditor pass with 0C/0H before any merge of the keeper and API work.
 - **Contract change:** none. No deploy, no timelock (phase 1).
 - **Follows:** ADR-013 (on-chain floor), ADR-024 (price quorum: skip the cycle, never the order), ADR-026 (infra misses never burn an order).
@@ -26,7 +26,7 @@ For leg *i* with weight `w_i`, capital `C`, `N` cycles and cadence `T`:
 | `amountIn` | `w_i × C` (the three sum to `C` exactly; rounding dust goes to the last leg) |
 | `dcaTotal` | `n_i`: largest-remainder (Hamilton) split of `N` by weight, at least 1, at most `⌊w_i × C ÷ minFill⌋` |
 | `dcaInterval` | `T ÷ 2` (at most 2 chunks of one leg per cycle) |
-| `expiry` | `start + (N + 3) × T + margin` |
+| `expiry` | `start + (N + 4) × T + margin` |
 
 The keeper applies the selection rules of the analyst's discrete engine (spec §4): a calendar of chunks due, the worst-performing eligible leg first (rule 4, on the ADR-024 resolved price), a one-cycle cooldown (rule 5), catch-up for legs behind their own count, the drawdown protection (rule 9, soft mode by default, threshold 25%, soft window the last quarter of the order), and "no price, no purchase for that leg this cycle".
 
@@ -57,7 +57,9 @@ The split of what is bought is exact by construction. What is not bought by `exp
 - The user signs three orders (three signatures, one approval for `C`). Cancelling on-chain is three `cancelOrder` calls; DCA orders do not consume the nonce bitmap, so `invalidateUnorderedNonces` does not cancel them.
 - **An old keeper would execute the three legs as three independent DCAs**, each as fast as its `dcaInterval` allows. Basket creation must therefore be impossible until the keeper of that chain has published that it understands baskets (spec §6). Deploy order: keeper first, then API, then UI.
 - The API rule "DCA must have 2-365 executions" (`src/app/api/orders/route.ts`) does not fit a leg with `n_i = 1`; basket legs get their own validation path.
-- `MAX_EXPIRY_DAYS = 90` caps the weekly cadence at 9 cycles, the 3-day cadence at 26 and the daily at 86.
+- `MAX_EXPIRY_DAYS = 90` caps the weekly cadence at 8 cycles, the 3-day cadence at 25 and the daily at 85.
+- First purchase, two modes (owner, 2026-11-16). Default: the three prices are recorded at creation as the reference and the first purchase is one cycle later, so "the one that did worst since the previous cycle" is true from the first purchase, as in the analyst's runs. Optional "buy the first one now": the first purchase is at creation and the user chooses the token (stored as leg index 0, which is what the engine picks when no leg has a previous price).
+- User-facing name: **Split DCA** (owner, 2026-11-16). "Basket" remains the internal name only.
 - A decision journal per cycle becomes part of the product (it feeds the closing report and makes the keeper restart-safe).
 - Phase 1 opens only for legs registered in `tokenUsdFeeds` on Base (read on-chain 2026-11-13): WETH, cbBTC, VIRTUAL, COMP, and a stable leg, USDT or DAI; USDC is the token sold. EURC is registered but pegged to the euro and stays out. Every further token (AERO, cbETH, wstETH, LINK, AAVE, USDS) needs a feed registration by the owner's timelock.
 
@@ -65,7 +67,7 @@ The split of what is bought is exact by construction. What is not bought by `exp
 
 Gas per order with three orders; the real submission order inside a cycle; the second chunk of a leg half a cycle later (modelled in the same tick); the real quorum price against the feed price used in the model.
 
-## 7. Open points for the owner
+## 7. Points closed before acceptance
 
 1. **Soft mode on short baskets.** Closed 2026-11-13 (analyst v3.2): the soft-mode window is `k_soft = max(1, ceil(N ÷ 4))`, no cap. The fixed 10 of v3.1 never blocked a basket of 10 cycles or fewer (0 of 475 136 positions, 112 796 of which had a leg down 25% or more) and, capped at 10, left long baskets incomplete. With the new rule: 0 incomplete positions in 855 428. Cost to state honestly: in short weekly baskets the largest single-cycle spend rises (41.7% to 66.7% of capital at N = 6).
 2. **Stable leg. Owner, 2026-11-13: phase 1 must offer at least one stable leg**, and the interface says which tokens exist today and that more are being added. Closed: USDT and DAI have registered feeds on Base, so the stable leg and the peg band are in phase 1 (spec §4a). v3.2 confirmed the feed parameters (0.3%, 86 400 s) and 0 incomplete positions for WETH + cbBTC + USDT or DAI at every band.
