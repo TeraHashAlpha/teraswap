@@ -1,4 +1,4 @@
-<!-- claude-md-sha256: f43d7e84ec849ffae184a06a58e0ea9e65891d2c4c62586d84601f2a317f0f06 -->
+<!-- claude-md-sha256: faa4b681a6fe3f16f15801f467ff5becb07260da3e0f36a1a60bc19b93345b7e -->
 # AGENTS.md — TeraSwap for Grok Build and other non-Claude coding agents
 
 Grok Build reads this file, not `CLAUDE.md`. This file exists so a second coding agent gets the same
@@ -67,10 +67,14 @@ mode; see the dispatcher's own refusal checks for the exact patterns.
 ## Drift guard
 
 This file carries a `<!-- claude-md-sha256: ... -->` comment on its first line. `scripts/check-agents-parity.mjs`
-recomputes the sha256 of `CLAUDE.md` and fails if it no longer matches the embedded hash — that means
-`CLAUDE.md` changed and this file needs a human review to see whether the parity content above still holds.
-The hash is never hand-typed: regenerate it with `node scripts/check-agents-parity.mjs --write` after
-reviewing and updating this file, then commit both files together.
+recomputes the sha256 of `CLAUDE.md` **with its generated state block removed** (everything from
+`<!-- state:begin -->` through `<!-- state:end -->`, markers included) and fails if it no longer matches the
+embedded hash — that means a hand-written rule of `CLAUDE.md` changed and this file needs a human review to see
+whether the parity content above still holds. Regenerating the state block (`node scripts/gen-claude-state.mjs
+--write`) never moves the pin, so two open PRs no longer conflict on line 1; a missing, duplicated or reversed
+marker fails the check loudly. The hash is never hand-typed: regenerate it with
+`node scripts/check-agents-parity.mjs --write` after reviewing and updating this file, then commit both files
+together.
 
 ## Pointers
 
