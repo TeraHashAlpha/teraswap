@@ -189,7 +189,7 @@ describe('agent-verify --keeper (CI Node majors, fake installs)', () => {
     expect(keeper(h).stdout).toMatch(/^keeper\tPASS\t/m)
   })
 
-  it('a missing major is FAIL, never substituted, and prints ONE install line naming only the missing majors', () => {
+  it('a missing major is FAIL, never substituted, and names only the missing majors; it never tells an agent to install anything', () => {
     const h = mk()
     fakeNode(path.join(h, '.nvm/versions/node/v22.3.0/bin/node'), 22)
     const r = keeper(h)
@@ -197,9 +197,18 @@ describe('agent-verify --keeper (CI Node majors, fake installs)', () => {
     expect(line).toMatch(/^keeper\tFAIL\t/)
     expect(line).toContain('node20:MISSING')
     expect(line).toContain('node22:5-pass')
-    expect(line).toMatch(/install: brew install node@20$/)
+    expect(line).toContain('Missing Node major(s): 20; ask the owner to install them; do not install anything yourself')
+    expect(line).not.toContain('22;') // node22 was found: it is not listed as missing
     const both = keeper(mk()).stdout.split('\n').find((l) => l.startsWith('keeper\t'))
-    expect(both).toMatch(/install: brew install node@20 node@22$/)
+    expect(both).toContain('Missing Node major(s): 20, 22; ask the owner to install them; do not install anything yourself')
+    // 2026-11-14: an agent followed a `brew install node@20 node@22` hint and broke the shared Node. No install command, ever.
+    for (const l of [line, both]) expect(l).not.toMatch(/brew|install:|install node|npm i|nvm install|fnm install|volta install/i)
+  })
+
+  it('the script source has no install command for an agent to copy (the lookup may still call `brew --prefix`)', () => {
+    const src = readFileSync(SCRIPT, 'utf8')
+    expect(src).not.toMatch(/brew\s+(install|upgrade|reinstall)/)
+    expect(src).toContain('ask the owner to install them; do not install anything yourself')
   })
 
   it('the machine-wide Homebrew prefixes are still candidates (re-rooted under the fake home here), and nothing real leaks in', () => {
