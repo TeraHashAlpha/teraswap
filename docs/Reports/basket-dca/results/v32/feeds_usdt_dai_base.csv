@@ -1,0 +1,4 @@
+token,feed,directory_threshold_pct,directory_heartbeat_s,max_staleness_s,rounds,first_round,median_gap_h,heartbeat_rounds_pct,deviation_rounds,dev_step_median_pct,hours,median_age_h,max_age_h,hours_over_max_staleness,min_price,max_price,description_onchain,directory_path
+USDT,USDT/USD · Base,0.3,86400.0,90000.0,1236,2023-08-03,24.005,96.35627530364373,45,0.004677201475723967,28601,11.955277777777777,24.00583333333333,0,0.99773,1.00409265,USDT / USD,usdt-usd
+DAI,DAI/USD · Base,0.3,86400.0,90000.0,1235,2023-08-03,24.005,96.43435980551054,44,0.3285144153666211,28601,11.951944444444445,24.004722222222224,0,0.99789,1.00207694,DAI / USD,dai-usd
+USDC,USDC/USD · Base,0.3,86400.0,90000.0,1223,2023-08-03,24.005,97.13584288052373,35,0.0044290186742958525,28601,11.946944444444444,24.0025,0,0.99936,1.00126161,USDC / USD,

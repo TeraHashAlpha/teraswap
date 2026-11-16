@@ -1,0 +1,20 @@
+band_pct,N_stables,R_stables,days,text,problems,USDT_in_N,USDT_in_R,DAI_in_N,DAI_in_R,text_depends_on_leg
+10,20,7,2137,"Das 20 stables que caíram mais de 10%, só 7 recuperaram. Nenhuma stable, nos últimos 2137 dias, recuperou de uma queda de 80%. Ainda assim, quer avançar?",,False,False,True,True,False
+15,17,3,2137,"Das 17 stables que caíram mais de 15%, só 3 recuperaram. Nenhuma stable, nos últimos 2137 dias, recuperou de uma queda de 80%. Ainda assim, quer avançar?",,False,False,False,False,False
+20,16,3,2137,"Das 16 stables que caíram mais de 20%, só 3 recuperaram. Nenhuma stable, nos últimos 2137 dias, recuperou de uma queda de 80%. Ainda assim, quer avançar?",,False,False,False,False,False
+25,16,3,2137,"Das 16 stables que caíram mais de 25%, só 3 recuperaram. Nenhuma stable, nos últimos 2137 dias, recuperou de uma queda de 80%. Ainda assim, quer avançar?",,False,False,False,False,False
+30,13,1,2137,"Das 13 stables que caíram mais de 30%, só 1 recuperou. Nenhuma stable, nos últimos 2137 dias, recuperou de uma queda de 80%. Ainda assim, quer avançar?",,False,False,False,False,False
+35,13,1,2137,"Das 13 stables que caíram mais de 35%, só 1 recuperou. Nenhuma stable, nos últimos 2137 dias, recuperou de uma queda de 80%. Ainda assim, quer avançar?",,False,False,False,False,False
+40,13,1,2137,"Das 13 stables que caíram mais de 40%, só 1 recuperou. Nenhuma stable, nos últimos 2137 dias, recuperou de uma queda de 80%. Ainda assim, quer avançar?",,False,False,False,False,False
+45,13,1,2137,"Das 13 stables que caíram mais de 45%, só 1 recuperou. Nenhuma stable, nos últimos 2137 dias, recuperou de uma queda de 80%. Ainda assim, quer avançar?",,False,False,False,False,False
+50,13,1,2137,"Das 13 stables que caíram mais de 50%, só 1 recuperou. Nenhuma stable, nos últimos 2137 dias, recuperou de uma queda de 80%. Ainda assim, quer avançar?",,False,False,False,False,False
+55,13,1,2137,"Das 13 stables que caíram mais de 55%, só 1 recuperou. Nenhuma stable, nos últimos 2137 dias, recuperou de uma queda de 80%. Ainda assim, quer avançar?",,False,False,False,False,False
+60,13,1,2137,"Das 13 stables que caíram mais de 60%, só 1 recuperou. Nenhuma stable, nos últimos 2137 dias, recuperou de uma queda de 80%. Ainda assim, quer avançar?",,False,False,False,False,False
+65,12,1,2137,"Das 12 stables que caíram mais de 65%, só 1 recuperou. Nenhuma stable, nos últimos 2137 dias, recuperou de uma queda de 80%. Ainda assim, quer avançar?",,False,False,False,False,False
+70,12,1,2137,"Das 12 stables que caíram mais de 70%, só 1 recuperou. Nenhuma stable, nos últimos 2137 dias, recuperou de uma queda de 80%. Ainda assim, quer avançar?",,False,False,False,False,False
+75,12,1,2137,"Das 12 stables que caíram mais de 75%, só 1 recuperou. Nenhuma stable, nos últimos 2137 dias, recuperou de uma queda de 80%. Ainda assim, quer avançar?",,False,False,False,False,False
+80,10,0,2137,"Das 10 stables que caíram mais de 80%, nenhuma recuperou. Nenhuma stable, nos últimos 2137 dias, recuperou de uma queda de 80%. Ainda assim, quer avançar?",,False,False,False,False,False
+85,10,0,2137,"Das 10 stables que caíram mais de 85%, nenhuma recuperou. Nenhuma stable, nos últimos 2137 dias, recuperou de uma queda de 80%. Ainda assim, quer avançar?",,False,False,False,False,False
+90,8,0,2137,"Das 8 stables que caíram mais de 90%, nenhuma recuperou. Nenhuma stable, nos últimos 2137 dias, recuperou de uma queda de 80%. Ainda assim, quer avançar?",,False,False,False,False,False
+95,8,0,2137,"Das 8 stables que caíram mais de 95%, nenhuma recuperou. Nenhuma stable, nos últimos 2137 dias, recuperou de uma queda de 80%. Ainda assim, quer avançar?",,False,False,False,False,False
+100,0,0,2137,"Nenhuma stable, nos últimos 2137 dias, recuperou de uma queda de 80%. Ainda assim, quer avançar?",ninguém caiu tanto: a 1.ª frase não se pode dizer,False,False,False,False,False

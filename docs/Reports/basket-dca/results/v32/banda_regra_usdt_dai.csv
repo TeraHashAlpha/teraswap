@@ -1,0 +1,25 @@
+scope,token,feed,threshold_pct,max_staleness_s,band_pct,hours,hours_with_2nd_series,feed_decides_arch,changed_vs_quorum,stricter_vs_quorum,looser_vs_quorum,changed_vs_v31,out_quorum,out_v31,out_arch,skip_quorum,skip_v31,skip_arch,false_out_quorum,false_out_v31,false_out_arch,missed_out_quorum,missed_out_v31,missed_out_arch,true_out,eliminated_vs_quorum,created_vs_quorum,first_out_arch,min_feed,min_quorum
+USDT · Base · Ago 2023 – Nov 2026,USDT,Chainlink USDT/USD · Base,0.3,90000.0,1.0,28601,28590,28601,5,0,1,5,1,1,0,4,4,0,1,1,0,0,0,0,0,1,0,,0.99773,0.98644
+USDT · Base · Ago 2023 – Nov 2026,USDT,Chainlink USDT/USD · Base,0.3,90000.0,2.0,28601,28590,28601,4,0,0,4,0,0,0,4,4,0,0,0,0,0,0,0,0,0,0,,0.99773,0.98644
+USDT · Base · Ago 2023 – Nov 2026,USDT,Chainlink USDT/USD · Base,0.3,90000.0,5.0,28601,28590,28601,4,0,0,4,0,0,0,4,4,0,0,0,0,0,0,0,0,0,0,,0.99773,0.98644
+USDT · Base · Ago 2023 – Nov 2026,USDT,Chainlink USDT/USD · Base,0.3,90000.0,10.0,28601,28590,28601,4,0,0,4,0,0,0,4,4,0,0,0,0,0,0,0,0,0,0,,0.99773,0.98644
+USDT · Ethereum · Jan 2021 – Nov 2026,USDT,Chainlink USDT/USD · Ethereum,0.25,90000.0,1.0,51264,48296,50113,594,37,192,582,209,211,54,466,464,100,160,156,17,22,16,2,26,159,16,2021-01-02 21:00:00,0.9756,0.9577204406590965
+USDT · Ethereum · Jan 2021 – Nov 2026,USDT,Chainlink USDT/USD · Ethereum,0.25,90000.0,2.0,51264,48296,50113,405,2,37,400,40,39,5,466,464,100,31,29,0,1,0,0,1,31,0,2021-01-05 00:00:00,0.9756,0.9577204406590965
+USDT · Ethereum · Jan 2021 – Nov 2026,USDT,Chainlink USDT/USD · Ethereum,0.25,90000.0,5.0,51264,48296,50113,369,0,3,366,3,2,0,466,464,100,3,2,0,0,0,0,0,3,0,,0.9756,0.9577204406590965
+USDT · Ethereum · Jan 2021 – Nov 2026,USDT,Chainlink USDT/USD · Ethereum,0.25,90000.0,10.0,51264,48296,50113,366,0,0,364,0,0,0,466,464,100,0,0,0,0,0,0,0,0,0,,0.9756,0.9577204406590965
+"USDT · Mai 2022 · descolamento de 2,4% (Ethereum)",USDT,Chainlink USDT/USD · Ethereum,0.25,90000.0,1.0,182,182,182,7,7,0,3,0,4,7,0,0,0,0,0,1,7,3,1,7,0,1,2022-05-12 07:00:00,0.9756,0.9926410612684696
+"USDT · Mai 2022 · descolamento de 2,4% (Ethereum)",USDT,Chainlink USDT/USD · Ethereum,0.25,90000.0,2.0,182,182,182,1,1,0,0,0,1,1,0,0,0,0,0,0,1,0,0,1,0,0,2022-05-12 07:00:00,0.9756,0.9926410612684696
+"USDT · Mai 2022 · descolamento de 2,4% (Ethereum)",USDT,Chainlink USDT/USD · Ethereum,0.25,90000.0,5.0,182,182,182,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,0.9756,0.9926410612684696
+"USDT · Mai 2022 · descolamento de 2,4% (Ethereum)",USDT,Chainlink USDT/USD · Ethereum,0.25,90000.0,10.0,182,182,182,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,0.9756,0.9926410612684696
+DAI · Base · Ago 2023 – Nov 2026,DAI,Chainlink DAI/USD · Base,0.3,90000.0,1.0,28601,24066,28601,13,0,2,12,2,1,0,11,11,0,1,1,0,0,0,0,0,1,0,,0.99789,0.989176
+DAI · Base · Ago 2023 – Nov 2026,DAI,Chainlink DAI/USD · Base,0.3,90000.0,2.0,28601,24066,28601,11,0,0,11,0,0,0,11,11,0,0,0,0,0,0,0,0,0,0,,0.99789,0.989176
+DAI · Base · Ago 2023 – Nov 2026,DAI,Chainlink DAI/USD · Base,0.3,90000.0,5.0,28601,24066,28601,11,0,0,11,0,0,0,11,11,0,0,0,0,0,0,0,0,0,0,,0.99789,0.989176
+DAI · Base · Ago 2023 – Nov 2026,DAI,Chainlink DAI/USD · Base,0.3,90000.0,10.0,28601,24066,28601,11,0,0,11,0,0,0,11,11,0,0,0,0,0,0,0,0,0,0,,0.99789,0.989176
+DAI · Ethereum · Jan 2021 – Nov 2026,DAI,Chainlink DAI/USD · Ethereum,0.25,3750.0,1.0,51264,46722,48154,773,7,108,649,193,178,92,1239,1132,581,146,131,43,5,5,3,52,106,3,2021-01-04 09:00:00,0.89462668,0.885938
+DAI · Ethereum · Jan 2021 – Nov 2026,DAI,Chainlink DAI/USD · Ethereum,0.25,3750.0,2.0,51264,46722,48154,678,1,19,569,64,64,46,1239,1132,581,22,22,4,2,2,3,45,19,1,2021-03-17 20:00:00,0.89462668,0.885938
+DAI · Ethereum · Jan 2021 – Nov 2026,DAI,Chainlink DAI/USD · Ethereum,0.25,3750.0,5.0,51264,46722,48154,660,0,2,552,15,14,13,1239,1132,581,3,2,1,0,0,0,12,2,0,2023-03-11 06:00:00,0.89462668,0.885938
+DAI · Ethereum · Jan 2021 – Nov 2026,DAI,Chainlink DAI/USD · Ethereum,0.25,3750.0,10.0,51264,46722,48154,658,0,0,551,1,1,1,1239,1132,581,0,0,0,0,0,0,1,0,0,2023-03-11 08:00:00,0.89462668,0.885938
+"DAI · Mar 2023 · descolamento de 10,5% (Ethereum)",DAI,Chainlink DAI/USD · Ethereum,0.25,3750.0,1.0,200,200,200,4,4,0,4,51,51,55,0,0,0,7,7,8,3,3,0,47,0,1,2023-03-11 02:00:00,0.89462668,0.885938
+"DAI · Mar 2023 · descolamento de 10,5% (Ethereum)",DAI,Chainlink DAI/USD · Ethereum,0.25,3750.0,2.0,200,200,200,0,0,0,0,42,42,42,0,0,0,0,0,0,0,0,0,42,0,0,2023-03-11 04:00:00,0.89462668,0.885938
+"DAI · Mar 2023 · descolamento de 10,5% (Ethereum)",DAI,Chainlink DAI/USD · Ethereum,0.25,3750.0,5.0,200,200,200,1,0,1,0,14,13,13,0,0,0,2,1,1,0,0,0,12,1,0,2023-03-11 06:00:00,0.89462668,0.885938
+"DAI · Mar 2023 · descolamento de 10,5% (Ethereum)",DAI,Chainlink DAI/USD · Ethereum,0.25,3750.0,10.0,200,200,200,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,1,0,0,2023-03-11 08:00:00,0.89462668,0.885938
