@@ -1,0 +1,307 @@
+{
+  "header": {
+    "family": "no-price",
+    "about": "a leg without a price on several ticks, the last nominal tick and a grace tick included; a tick where no leg has a price",
+    "generator": "scripts/basket-dca/export_vectors.py",
+    "engine": {
+      "file": "engine_discrete.py",
+      "sha256": "282581bab72abf16b19096ab0f1be15e50fe0f2b5cdd3a3a7e165d9f2f281685",
+      "package": "analyst package basket-dca-v2, docs-Reports-basket-dca/src (v3.2)"
+    },
+    "run": {
+      "function": "run_discrete",
+      "L": 2,
+      "rule": "hamilton",
+      "kSoft": "max(1, ceil(N / 4))",
+      "graceTicks": 3,
+      "pd0": [null, null, null],
+      "Pe": "the decision prices (Pe values fills only; no decision reads it)"
+    },
+    "idleReasons": {
+      "calendário": "calendar",
+      "regra 6": "complete",
+      "sem preço": "no_price",
+      "banda": "band",
+      "regra 9": "rule9",
+      "regra 5": "rule5"
+    },
+    "generatedWith": {
+      "python": "3.14.2",
+      "numpy": "2.5.4"
+    }
+  },
+  "vectors": [
+    {
+      "id": "noprice-n12-leg1-soft",
+      "notes": "leg 1 has no price at ticks 3-5, 11 (last nominal) and 13 (grace); soft",
+      "input": {
+        "weights": [
+          [3, 10],
+          [3, 10],
+          [2, 5]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 12,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "prices": [
+          [3325.116072, 96037.866037, 1.26462],
+          [3224.453907, 95059.375292, 1.28732],
+          [3086.816228, 98195.288174, 1.281539],
+          [3279.921046, null, 1.237398],
+          [3312.521984, null, 1.211316],
+          [3107.961888, null, 1.226339],
+          [3085.836326, 98412.589389, 1.291693],
+          [3097.84928, 94868.664019, 1.263316],
+          [3270.17009, 92546.562662, 1.236069],
+          [3247.871468, 94802.064194, 1.267787],
+          [3129.38242, 91341.175317, 1.266519],
+          [3074.606053, null, 1.28233],
+          [3215.928018, 97990.698977, 1.234742],
+          [3279.147784, null, 1.236881],
+          [3112.277335, 93204.878818, 1.287575]
+        ]
+      },
+      "expected": {
+        "n": [4, 3, 5],
+        "kSoft": 3,
+        "fills": [
+          [0, 0, "select"],
+          [1, 1, "select"],
+          [2, 0, "select"],
+          [3, 2, "select"],
+          [4, 0, "select"],
+          [5, 2, "select"],
+          [6, 0, "select"],
+          [7, 1, "select"],
+          [8, 2, "select"],
+          [9, 1, "select"],
+          [10, 2, "select"],
+          [11, 2, "select"]
+        ],
+        "idle": [
+          [12, "complete"],
+          [13, "complete"],
+          [14, "complete"]
+        ],
+        "done": [4, 3, 5],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "noprice-n9-leg0-start-soft",
+      "notes": "leg 0 has no price at ticks 0-1 (its entry and first variation come later), 8 (last nominal) and 9 (grace); soft",
+      "input": {
+        "weights": [
+          [1, 3],
+          [1, 3],
+          [1, 3]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 9,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "prices": [
+          [null, 93558.440265, 1.247596],
+          [null, 96177.724973, 1.210898],
+          [3187.366027, 97678.44564, 1.233969],
+          [3282.180028, 97127.163047, 1.249635],
+          [3100.685147, 92055.94004, 1.210186],
+          [3179.049831, 93530.655084, 1.235173],
+          [3165.583755, 91344.867472, 1.272484],
+          [3267.406692, 97966.853526, 1.210191],
+          [null, 96101.82573, 1.245335],
+          [null, 93295.681679, 1.272491],
+          [3300.145403, 96777.036959, 1.29229],
+          [3298.977281, 92771.464459, 1.209966]
+        ]
+      },
+      "expected": {
+        "n": [3, 3, 3],
+        "kSoft": 3,
+        "fills": [
+          [0, 1, "select"],
+          [1, 2, "select"],
+          [2, 0, "select"],
+          [3, 1, "select"],
+          [4, 0, "select"],
+          [5, 1, "select"],
+          [6, 0, "select"],
+          [7, 2, "select"],
+          [8, 2, "select"]
+        ],
+        "idle": [
+          [9, "complete"],
+          [10, "complete"],
+          [11, "complete"]
+        ],
+        "done": [3, 3, 3],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "noprice-n26-all-soft",
+      "notes": "no leg has a price at ticks 10-11; leg 2 none at 25 (last nominal) and 27 (grace); soft",
+      "input": {
+        "weights": [
+          [2, 5],
+          [2, 5],
+          [1, 5]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 26,
+        "minFillUsd": 16,
+        "mode": "soft",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "prices": [
+          [3122.973064, 95487.309266, 1.221308],
+          [3314.623073, 96217.616802, 1.207259],
+          [3245.893009, 93078.520199, 1.295751],
+          [3228.084114, 92838.409766, 1.297544],
+          [3258.079922, 94401.605358, 1.29839],
+          [3262.672058, 97515.383357, 1.218213],
+          [3124.52012, 92250.369856, 1.263567],
+          [3253.625652, 97791.48632, 1.277393],
+          [3216.326884, 92420.659004, 1.26675],
+          [3232.870549, 91888.755982, 1.280355],
+          [null, null, null],
+          [null, null, null],
+          [3298.813626, 98670.982918, 1.222873],
+          [3193.141159, 91915.278675, 1.289707],
+          [3209.638989, 96101.732625, 1.287574],
+          [3235.762728, 91447.777565, 1.256489],
+          [3153.146003, 94725.603691, 1.202999],
+          [3116.0637, 91299.506669, 1.200585],
+          [3171.094296, 93711.681336, 1.240881],
+          [3251.649223, 92888.77935, 1.206154],
+          [3246.286648, 92554.087933, 1.211449],
+          [3136.84142, 98645.037243, 1.246487],
+          [3248.890665, 92997.706581, 1.243602],
+          [3250.915436, 97489.394, 1.271483],
+          [3312.507467, 97126.502324, 1.279048],
+          [3109.576363, 96019.55461, null],
+          [3122.869193, 96402.564154, 1.290912],
+          [3184.31113, 97102.396822, null],
+          [3267.389165, 97559.581904, 1.293214]
+        ]
+      },
+      "expected": {
+        "n": [11, 10, 5],
+        "kSoft": 7,
+        "fills": [
+          [0, 0, "select"],
+          [1, 2, "select"],
+          [2, 1, "select"],
+          [3, 0, "select"],
+          [4, 2, "select"],
+          [5, 0, "select"],
+          [6, 1, "select"],
+          [7, 2, "select"],
+          [8, 1, "select"],
+          [9, 0, "select"],
+          [12, 2, "select"],
+          [12, 1, "catchup"],
+          [12, 0, "catchup"],
+          [13, 1, "select"],
+          [14, 2, "select"],
+          [15, 1, "select"],
+          [16, 0, "select"],
+          [17, 1, "select"],
+          [18, 0, "select"],
+          [19, 1, "select"],
+          [20, 0, "select"],
+          [21, 1, "select"],
+          [22, 0, "select"],
+          [23, 1, "select"],
+          [24, 0, "select"],
+          [25, 0, "select"]
+        ],
+        "idle": [
+          [10, "no_price"],
+          [11, "no_price"],
+          [26, "complete"],
+          [27, "complete"],
+          [28, "complete"]
+        ],
+        "done": [11, 10, 5],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    },
+    {
+      "id": "noprice-n12-leg2-rigid",
+      "notes": "leg 2 has no price at ticks 0, 5-7, 11 (last nominal), 12 and 14 (grace); rigid",
+      "input": {
+        "weights": [
+          [1, 4],
+          [1, 4],
+          [1, 2]
+        ],
+        "capitalUsd": 1000,
+        "cycles": 12,
+        "minFillUsd": 16,
+        "mode": "rigid",
+        "threshold": 0.25,
+        "stableLeg": null,
+        "band": null,
+        "bandAdd": null,
+        "prices": [
+          [3091.983178, 91426.139228, null],
+          [3135.47148, 95741.736436, 1.208326],
+          [3171.462981, 94657.50254, 1.229069],
+          [3243.172738, 95639.285264, 1.255972],
+          [3231.691604, 92604.140283, 1.201926],
+          [3145.882425, 97418.983562, null],
+          [3323.832611, 97512.653054, null],
+          [3195.329703, 94116.53692, null],
+          [3278.635073, 93971.601746, 1.274283],
+          [3179.969255, 96314.005424, 1.227697],
+          [3079.600424, 91403.488705, 1.217253],
+          [3202.771065, 91572.294968, null],
+          [3095.329717, 98641.050966, null],
+          [3086.93065, 95401.400687, 1.282771],
+          [3150.059112, 97041.191479, null]
+        ]
+      },
+      "expected": {
+        "n": [3, 3, 6],
+        "kSoft": null,
+        "fills": [
+          [0, 0, "select"],
+          [1, 2, "select"],
+          [2, 1, "select"],
+          [3, 2, "select"],
+          [4, 1, "select"],
+          [5, 0, "select"],
+          [6, 1, "select"],
+          [7, 0, "select"],
+          [8, 2, "select"],
+          [9, 2, "select"],
+          [10, 2, "select"],
+          [13, 2, "select"]
+        ],
+        "idle": [
+          [11, "no_price"],
+          [12, "no_price"],
+          [14, "complete"]
+        ],
+        "done": [3, 3, 6],
+        "unbought": [0, 0, 0],
+        "deviationPp": 0.0
+      }
+    }
+  ]
+}
