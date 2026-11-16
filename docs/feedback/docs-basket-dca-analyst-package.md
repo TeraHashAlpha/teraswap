@@ -4,7 +4,7 @@ Goal: narrow analyst package + ADR-027 Accepted + two DEPLOYMENTS fixes. DOCS ON
 
 - [x] C1 narrow package + NOT-COPIED.md + this file (first commit)
 - [x] C2 ADR-027 + SPEC re-copied (Accepted), ARCHITECT-INDEX row, state block regenerated
-- [ ] C3 DEPLOYMENTS: address check + "Keeper polling today?" note
+- [x] C3 DEPLOYMENTS: address check (identical, no correction) + "Keeper polling today?" note
 - [ ] verify: gen-claude-state --check, diff --stat, push, compare link
 
 ## 1. Premise check
@@ -26,3 +26,10 @@ Goal: narrow analyst package + ADR-027 Accepted + two DEPLOYMENTS fixes. DOCS ON
 - ADR status line: `- **Status:** Accepted (owner, 2026-11-13). Proposed by the Architect the same day; the three points of §7 were closed before acceptance.`
 - `ARCHITECT-INDEX.md`: ADR-027 row added after ADR-026, same columns as its neighbours (status `Accepted (2026-11-13)`). ADR-025 is not in that table on main; not touched.
 - State block: `node scripts/gen-claude-state.mjs --write` changed one line of `CLAUDE.md` (latest ADR-027, Status: Accepted); AGENTS.md pin rewritten by `check-agents-parity.mjs --write` (no tracked diff).
+
+## 4. DEPLOYMENTS address check
+- Note (`docs/DEPLOYMENTS.md` line 11, Arbitrum V3 note of 2026-11-13): `0x5f47F6301ceD087D5e24FD15C7ff8fBF82CE39ab`. Keeper registry, Arbitrum row, Signer address: `0x5f47F6301ceD087D5e24FD15C7ff8fBF82CE39ab`. Compared as extracted strings (`[ "$NOTE" = "$REG" ]`): IDENTICAL, all 42 characters. The abbreviation with a different ending was in a report, not in the note, so the note address is unchanged.
+- Call, public Arbitrum RPC (`cast chain-id` printed `42161`):
+  `cast call 0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459 'whitelistedExecutors(address)(bool)' 0x5f47F6301ceD087D5e24FD15C7ff8fBF82CE39ab --rpc-url https://arb1.arbitrum.io/rpc`
+  Result: `true` (2026-11-16, 15:1x WET).
+- Keeper registry, Arbitrum row, column "Keeper polling today?": old text kept, appended `2026-11-13: owner confirmed on the host that the process teraswap-keeper-arbitrum is online.` The row still says **No** for 2026-08-26; the added sentence is the owner's report, not something this session measured.
