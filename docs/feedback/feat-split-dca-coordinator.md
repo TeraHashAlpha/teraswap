@@ -4,8 +4,24 @@ Goal: the Split DCA ("basket") data model and a COORDINATOR module with injected
 order rows and the journal into "the picks executable now". `executor.js` is not changed and nothing calls the
 coordinator yet: the keeper behaves as today. Long tables: `feat-split-dca-coordinator.evidence.md`.
 
-Model: CONTROL says Opus; the session runs on Fable 5.2 and the owner's standing answer of 2026-11-16 for
-implementation goals is "run here" (asked once on `feat/basket-selection-reference`). Run in-session.
+Model: CONTROL says Opus, effort high. **This goal was NOT run on Opus**: the whole of it ran in the owner's session,
+which is set to Fable 5.2. I did not ask about it for this goal; I relied on the owner's answer to the same question
+earlier the same day, recorded in `docs/feedback/feat-basket-selection-reference.md` ("Model. CONTROL says Opus; the
+session was set to Fable 5.2 just before the goal. Owner: run here, on Fable 5.2", merged with PR #701). The stop
+check named this as unmet; I reported it to the owner as open ("if you want this one run on Opus, that is your call")
+and the owner's reply was "continue", with no request to run it again. That it covers the model line is my reading.
+
+Required reading, and what the code took from it: spec §2 to §6 and ADR-027 (the pack's copies, §1); the
+`decideTick` contract of `basket-scheduler.js` (the state it takes, `perLeg`, `next`, its throws); `price-sources.js`
+(`createCycleQuoteContext`, `legQuotes`: quotes as `{ price, ts, source }`, a source that fails is absent, the injected
+`now` is unix SECONDS, which `deps.now` follows) and `order-floor.js` (`resolveFloorPrice`: quorum, single, skip), for
+the shape of `resolvePrice`; the last three migrations and `contracts/order-engine/CLAUDE.md`; and in `executor.js`:
+`supabaseFetch` (`:652-664`, it returns the response and does NOT throw on a non-2xx), `fetchActiveOrders`
+(`:666-685`, `status = active` only, at most `MAX_BATCH × 3` rows), the lock (`:687-705`, `:1494`) and the DCA
+due-time check. That check is not in the keeper at all: every active DCA order is locked each cycle and the CONTRACT
+is asked (`canExecute`, `:1616-1627`); "not yet" unlocks the order and skips it, with no retry count. `dcaDueSec`
+(`deviation-guard.js:113-130`) is only the scheduled time the deviation guard's defer window starts from
+(`executor.js:1890-1929`).
 
 Base: `origin/main` `4a4129ef` (PR #705). Main moved twice during the work (`b47ca15e` → `ace16fa7` with PR #704, →
 `4a4129ef` with PR #705); the commits, not yet pushed then, were rebased each time with no conflict.
@@ -246,7 +262,14 @@ evidence file as the only uncommitted changes: **RESULT: PASS**, 8 of 8 (the blo
 - **The second slot and the contract's own interval.** The coordinator offers slot 2 from tick time `+ T/2`, as the
   rule says. If slot 1 executed late (say at `+ 0.3 T`), the contract refuses the leg's next chunk until `+ 0.8 T`;
   likewise a slot 2 executed late in tick `t` delays that leg's slot 1 in tick `t + 1`. The wiring must treat "the
-  order's `dcaInterval` has not elapsed" as "not yet": no miss, no retry count (ADR-026).
+  order's `dcaInterval` has not elapsed" as "not yet": no miss, no retry count (ADR-026). That is what the ordinary
+  path already does with a `canExecute` refusal (`executor.js:1623-1628`: log, unlock, skip).
+- **Nothing off-chain holds a DCA order back today.** The keeper has no due-time gate of its own: it locks every
+  active DCA order each cycle and lets the contract's `canExecute` decide (`executor.js:1494`, `:1616-1627`). The
+  contract knows nothing about baskets, so a leg order that reaches the lock executes as a plain DCA whenever its
+  `dcaInterval` has elapsed (ADR-027 §5, the "old keeper" case). The wiring's journal check therefore has to sit
+  before `lockOrder`, as spec §6 says, and until it ships no basket may exist: applying this migration is safe only
+  because nothing creates a basket yet.
 - **What the `T/2` decision deadline costs (owner's answer 2).** Anything that keeps a tick from being decided for
   the first half of its cycle loses that tick: a keeper outage, price sources that fail, a journal that cannot be
   written, a transaction in flight. That is 12 hours for a daily basket and 3.5 days for a weekly one; the calendar
