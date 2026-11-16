@@ -33,3 +33,11 @@ Goal: narrow analyst package + ADR-027 Accepted + two DEPLOYMENTS fixes. DOCS ON
   `cast call 0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459 'whitelistedExecutors(address)(bool)' 0x5f47F6301ceD087D5e24FD15C7ff8fBF82CE39ab --rpc-url https://arb1.arbitrum.io/rpc`
   Result: `true` (2026-11-16, 15:1x WET).
 - Keeper registry, Arbitrum row, column "Keeper polling today?": old text kept, appended `2026-11-13: owner confirmed on the host that the process teraswap-keeper-arbitrum is online.` The row still says **No** for 2026-08-26; the added sentence is the owner's report, not something this session measured.
+- `git diff --stat origin/main..HEAD`: 107 files changed, 27779 insertions, 14 deletions. Only these paths: `docs/Reports/basket-dca/**` (101 files: the 100 copied plus NOT-COPIED.md), `docs/feedback/docs-basket-dca-analyst-package.md`, `docs/ADR/ADR-027-basket-dca-three-orders.md`, `docs/Prompts/SPEC-BASKET-DCA.md`, `docs/DEPLOYMENTS.md`, `ARCHITECT-INDEX.md`, `CLAUDE.md` (generated state block, one line). No code, config, workflow or test file.
+- `node scripts/gen-claude-state.mjs --check`: "CLAUDE.md state block is current". `check-agents-parity.mjs`: OK.
+- Compare link: https://github.com/TeraHashAlpha/teraswap/compare/main...docs/basket-dca-analyst-package
+- Python not run. No PR opened, no CI polled.
+
+## Concern
+- The goal says gitleaks reports 45 hits in the six files; that holds only for the default ruleset. Anyone who re-runs gitleaks on the full package with the repo config will see 0 and may conclude the six files are safe to copy. They contain 40-hex public addresses that the repo config allow-lists by shape, so the decision to keep them out is a choice, not a gitleaks requirement.
+- `docs/Reports/basket-dca/**` now holds 41 Python files under `docs/`. No workflow or test glob picks them up (checked: the diff touches no config), but a future `docs/**` linter would.
