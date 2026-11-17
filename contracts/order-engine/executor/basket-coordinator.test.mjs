@@ -32,6 +32,7 @@ import {
 
 // ------------------------------------------------------------------------------------------------ fixtures
 const T0 = 1_800_000_000 // 2027-01-15T08:00:00Z, unix seconds
+const CHAIN = 8453 // the keeper's chain in these tests, and every test basket's
 const DAY = 86_400
 const HALF = DAY / 2
 // Synthetic addresses and hashes: nothing here is a real token (SPEC §11: never type one by hand).
@@ -64,7 +65,7 @@ function makeBasket({
     id,
     created_at: "2027-01-15T08:00:00+00:00",
     wallet: WALLET,
-    chain_id: 8453,
+    chain_id: CHAIN,
     token_in: TOKEN_IN,
     capital: "1000000000",
     cadence_s: cadence,
@@ -86,6 +87,11 @@ function makeBasket({
     row[`leg${i}_order_hash`] = LEG_HASHES[i]
   }
   return row
+}
+
+/** The signed expiry of SPEC §3 item 5: t0 + (N + 4) × T + 3 600 s ('reference'), t0 + (N + 3) × T + 3 600 s ('now'). */
+function signedExpiry(basket) {
+  return basket.t0 + (basket.cycles + (basket.first_buy === FIRST_BUY.NOW ? 3 : 4)) * basket.cadence_s + 3_600
 }
 
 /** The three leg orders as `orders` rows. order_data is the signed struct the executor builds the transaction from;
@@ -112,6 +118,7 @@ function makeOrders(basket, done = [0, 0, 0]) {
       tokenOut: mixedCase(basket[`leg${i}_token_out`]),
       dcaInterval: String(basket.cadence_s / 2),
       dcaTotal: String(basket[`leg${i}_n`]),
+      expiry: String(signedExpiry(basket)),
     },
   }))
 }
@@ -201,7 +208,7 @@ function makeWorld(opts = {}) {
     w.clock = now
     return coordinateBasket(
       { basket: through(w.basket), orders: through([w.orders[2], w.orders[0], w.orders[1]]), inFlight: [], ...input },
-      { now: () => now, db: w.store.api, resolvePrice: w.resolvePrice, ...deps },
+      { now: () => now, db: w.store.api, resolvePrice: w.resolvePrice, chainId: CHAIN, ...deps },
     )
   }
   w.poll = (now, { inFlight = [] } = {}) => w.call(now, { inFlight })
@@ -1199,7 +1206,7 @@ describe("rule: the stable leg's price and bandAdd come as a pair (SPEC §4a)", 
       answer: (leg, tick) => ({ price: tick === null ? [100, 100, 1][leg] : [100, 100, 0.992][leg], source: "test", bandAdd: leg === 2 ? 0.003 : 0.5 }),
     })
     await w.poll(T0 + 1)
-    assert.deepEqual(w.calls, LEG_TOKENS.map((token, i) => [token, { stable: i === 2 }]))
+    assert.deepEqual(w.calls, LEG_TOKENS.map((token, i) => [token, { stable: i === 2, chainId: CHAIN }]))
     assert.equal(w.row(REFERENCE_TICK).band_add, 0.003)
     await w.poll(w.at(0, 1))
     assert.equal(w.row(0).band_add, 0.003, "the 0.5 of the other legs is not a band_add")
@@ -1506,7 +1513,7 @@ describe("rule: fail closed", () => {
 
   test("it never throws and never returns a pick, whatever it is given", async () => {
     const w = makeWorld()
-    const good = { now: () => w.at(0, 1), db: w.store.api, resolvePrice: w.resolvePrice }
+    const good = { now: () => w.at(0, 1), db: w.store.api, resolvePrice: w.resolvePrice, chainId: CHAIN }
     const input = { basket: through(w.basket), orders: through(w.orders), inFlight: [] }
     const boom = () => {
       throw new TypeError("boom")
@@ -1547,7 +1554,7 @@ describe("rule: fail closed", () => {
           throw new TypeError("boom https://rpc.example/v2/SECRET-KEY")
         },
       })
-    const deps = { now: () => w.at(0, 1), db: w.store.api, resolvePrice: w.resolvePrice }
+    const deps = { now: () => w.at(0, 1), db: w.store.api, resolvePrice: w.resolvePrice, chainId: CHAIN }
     const input = { basket: through(w.basket), orders: through(w.orders), inFlight: [] }
     const attempts = [
       ["a basket row whose id throws", { ...input, basket: trap(input.basket, "id") }, deps],
@@ -1569,7 +1576,7 @@ describe("rule: fail closed", () => {
     assert.equal(new Set(all).size, all.length)
     assert.deepEqual(
       all.filter((reason) => !FAIL_CLOSED_REASONS.includes(reason)).sort(),
-      ["basket_not_active", "before_first_tick", "completed", "expired", "in_flight", "picks_executed", "reference_recorded", "slot_not_reached", "tick_idle", "tick_missed"],
+      ["basket_not_active", "before_first_tick", "completed", "expired", "in_flight", "picks_executed", "reference_recorded", "slot_not_reached", "tick_ended", "tick_idle", "tick_missed"],
     )
     assert.ok(FAIL_CLOSED_REASONS.every((reason) => all.includes(reason)))
   })
@@ -1667,6 +1674,315 @@ describe("rule: status", () => {
     const unconfirmed = await w.call(w.at(0, 2), {}, { db: { ...w.store.api, setBasketStatus: async () => undefined } })
     assertFailClosed(unconfirmed, R.STATUS_WRITE_FAILED, "not confirmed")
     assert.equal((await w.poll(w.at(0, 16))).reason, R.COMPLETED)
+  })
+})
+
+// ------------------------------------------------------------------------------------------------ audit of 2026-11-16
+// The three High of the audit of 6023579a (blocked 0C/3H), SPEC §4 "Added after the audit of 2026-11-16". Each test is
+// named after its finding; each fails on 6023579a (feedback, round 2).
+
+const iso = (seconds) => new Date(seconds * 1000).toISOString()
+
+/**
+ * One poll on a clock that MOVES while the injected calls are pending. The poll starts at `start`; when an injected
+ * call answers, the clock jumps to `moves[call]` if that is later ("readTicks", "resolvePrice", "insertTick",
+ * "setBasketStatus"). `seen.calls` is every injected call with the clock it was made at; `seen.inserted` every row the
+ * database was asked to store, with the clock at that moment.
+ */
+async function movingPoll(w, start, moves = {}, { inFlight = [], chainId = CHAIN } = {}) {
+  w.clock = start
+  const seen = { calls: [], inserted: [] }
+  const answerAt = (call) => {
+    if (moves[call] !== undefined && moves[call] > w.clock) w.clock = moves[call]
+  }
+  const db = {
+    async readTicks(basketId) {
+      seen.calls.push(["readTicks", w.clock])
+      const rows = await w.store.api.readTicks(basketId)
+      answerAt("readTicks")
+      return rows
+    },
+    async insertTick(row) {
+      seen.calls.push([`insertTick ${row.tick}`, w.clock])
+      seen.inserted.push({ row: through(row), clock: w.clock })
+      const stored = await w.store.api.insertTick(row)
+      answerAt("insertTick")
+      return stored
+    },
+    async setBasketStatus(basketId, status) {
+      seen.calls.push([`setBasketStatus ${status}`, w.clock])
+      const confirmed = await w.store.api.setBasketStatus(basketId, status)
+      answerAt("setBasketStatus")
+      return confirmed
+    },
+  }
+  const resolvePrice = async (token, hint) => {
+    seen.calls.push(["resolvePrice", w.clock])
+    const answer = await w.resolvePrice(token, hint)
+    answerAt("resolvePrice")
+    return answer
+  }
+  const result = await coordinateBasket(
+    { basket: through(w.basket), orders: through([w.orders[1], w.orders[2], w.orders[0]]), inFlight },
+    { now: () => w.clock, db, resolvePrice, chainId },
+  )
+  return { result, seen }
+}
+
+describe("audit S-1 (H): the clock is read again after every await, and before the journal write", () => {
+  test("S-1: prices that answer after the tick's time + T / 2 end as a missed tick: no row, no pick; the next tick is decided as after a missed one", async () => {
+    const w = makeWorld()
+    await w.poll(T0 + 1)
+    // The audit's path: the poll starts at tick 1 + T / 2 - 1 s, and the prices answer 60 s into tick 2.
+    const { result, seen } = await movingPoll(w, w.at(1, HALF - 1), { resolvePrice: w.at(2, 60) })
+    assert.deepEqual(result.picks, [], "no pick of tick 1 comes out 60 s into tick 2")
+    assert.deepEqual(seen.inserted, [], "no row is written for tick 1 after its deadline")
+    assert.equal(w.row(1), undefined)
+    assert.equal(result.reason, R.TICK_MISSED, result.detail)
+    assert.equal(result.failClosed, false)
+    assert.equal(result.tick, 1)
+    assert.deepEqual(result.wrote, [])
+    assert.match(result.detail, /T \/ 2/)
+    // Five seconds later the next poll decides tick 2, with ticks 0 and 1 as ticks with no prices.
+    const next = await w.poll(w.at(2, 65))
+    assert.equal(next.tick, 2)
+    assert.deepEqual(w.rows().map((row) => row.tick), [-1, 2])
+    assertRowIsDecision(w.row(2), decide(w.basket, 2, [[0, 100, null], [0, 200, null], [0, 300, null]], null, FLAT), "tick 2")
+    assert.ok(next.picks.length > 0 && next.picks.every((pick) => pick.tick === 2))
+  })
+
+  test("S-1: prices that answer one second before the deadline are in time; at the deadline they are not", async () => {
+    for (const [answer, decided] of [[HALF - 1, true], [HALF, false], [HALF + 1, false]]) {
+      const w = makeWorld()
+      await w.poll(T0 + 1)
+      const { result, seen } = await movingPoll(w, w.at(1, 5), { resolvePrice: w.at(1, answer) })
+      assert.equal(seen.inserted.length, decided ? 1 : 0, `prices at + ${answer} s`)
+      assert.equal(result.reason === R.TICK_MISSED, !decided, `prices at + ${answer} s: ${result.reason}`)
+      assert.equal(result.picks.length > 0, decided, `prices at + ${answer} s`)
+    }
+  })
+
+  test("S-1: decided_at is the clock read once the prices are in, not the clock the poll started with", async () => {
+    const w = makeWorld()
+    await w.poll(T0 + 1)
+    const { result, seen } = await movingPoll(w, w.at(1, 1), { resolvePrice: w.at(1, 100) })
+    assert.equal(w.row(1).decided_at, iso(w.at(1, 100)))
+    assert.equal(seen.inserted[0].row.decided_at, iso(seen.inserted[0].clock), "the reading the write was made with")
+    assert.ok(result.picks.length > 0)
+  })
+
+  test("S-1: a journal read that answers after the deadline: tick_missed, and no price is resolved", async () => {
+    const w = makeWorld()
+    await w.poll(T0 + 1)
+    const { result, seen } = await movingPoll(w, w.at(1, HALF - 1), { readTicks: w.at(1, HALF + 5) })
+    assert.deepEqual(result.picks, [])
+    assert.deepEqual(seen.inserted, [])
+    assert.equal(seen.calls.filter(([call]) => call === "resolvePrice").length, 0, "no price is read for a tick that can no longer be decided")
+    assert.equal(result.reason, R.TICK_MISSED)
+    assert.equal(w.row(1), undefined)
+  })
+
+  test("S-1: a pick is returned only while its tick is current: a write that answers in the next tick returns no pick", async () => {
+    const w = makeWorld()
+    await w.poll(T0 + 1)
+    const { result } = await movingPoll(w, w.at(1, HALF - 1), { insertTick: w.at(2, 5) })
+    assert.deepEqual(result.picks, [], "tick 1's pick is not executable 5 s into tick 2")
+    assert.equal(result.reason, R.TICK_ENDED, result.detail)
+    assert.equal(result.failClosed, false)
+    // The row itself was written in time: decided one second before the deadline, and it stays.
+    assert.equal(w.row(1).decided_at, iso(w.at(1, HALF - 1)))
+    assert.equal(result.wrote.length, 1)
+    const next = await w.poll(w.at(2, 6))
+    assert.equal(next.tick, 2)
+    assert.ok(next.picks.length > 0 && next.picks.every((pick) => pick.tick === 2), "the next poll serves tick 2 only")
+    // A write that answers inside the same tick still returns its picks.
+    const inTime = makeWorld()
+    await inTime.poll(T0 + 1)
+    const same = await movingPoll(inTime, inTime.at(1, 5), { insertTick: inTime.at(1, 600) })
+    assert.ok(same.result.picks.length > 0, same.result.reason)
+    assert.ok(same.result.picks.every((pick) => pick.tick === 1))
+  })
+
+  test("S-1: the reference row is written only if the clock read once the prices are in is still before t0 + T / 2", async () => {
+    // The audit's path: first sight at t0 + T / 2 - 1 s, the prices answer an hour after the deadline.
+    const w = makeWorld({ prices: { ref: [100, 100, 100], 0: [101, 95, 99] } })
+    const { result, seen } = await movingPoll(w, T0 + HALF - 1, { resolvePrice: T0 + HALF + 3_600 })
+    assert.deepEqual(seen.inserted, [], "no reference row an hour after its deadline")
+    assert.equal(w.row(REFERENCE_TICK), undefined)
+    assert.equal(result.reason, R.TICK_MISSED, result.detail)
+    assert.deepEqual(result.picks, [])
+    // Then the first tick runs with last null, exactly as after a first sight that came too late.
+    const first = await w.poll(w.at(0, 1))
+    assert.deepEqual(w.row(0).per_leg.map((leg) => leg.variation), [null, null, null])
+    assert.equal(first.picks[0].leg, 0)
+    // In time, its decided_at is the second reading too; at the deadline second it is not written.
+    for (const [answer, written] of [[600, true], [HALF - 1, true], [HALF, false]]) {
+      const other = makeWorld()
+      const run = await movingPoll(other, T0 + 1, { resolvePrice: T0 + answer })
+      assert.equal(other.rows().length, written ? 1 : 0, `prices at t0 + ${answer} s`)
+      if (written) assert.equal(other.row(REFERENCE_TICK).decided_at, iso(T0 + answer))
+      assert.equal(run.result.reason, written ? R.REFERENCE_RECORDED : R.TICK_MISSED)
+    }
+  })
+
+  test("S-1: readings within one call never go back: a clock that steps back during the call refuses it, and nothing is written", async () => {
+    const w = makeWorld()
+    await w.poll(T0 + 1)
+    // First reading past tick 1's deadline, then, after the journal read, one second before it.
+    const readings = [w.at(1, HALF + 1), w.at(1, HALF - 1)]
+    const result = await w.call(w.at(1, HALF + 1), {}, { now: () => (readings.length > 1 ? readings.shift() : readings[0]) })
+    assertFailClosed(result, R.CLOCK_INVALID)
+    assert.match(result.detail, /went back/)
+    assert.equal(w.row(1), undefined, "tick 1 is not decided by the reading that went back")
+    assert.deepEqual(result.wrote, [])
+  })
+})
+
+describe("audit S-2 (H): a leg with chunks left must be executable, or the whole basket is refused", () => {
+  test("S-2: a leg with chunks left whose order is cancelled, expired, failed or executed: no decision, no pick for any leg, a reason", async () => {
+    for (const status of ["cancelled", "expired", "failed", "executed", "paused-by-something-new"]) {
+      // Before the tick is decided.
+      const w = makeWorld()
+      await w.poll(T0 + 1)
+      w.orders[1].status = status
+      const calls = w.calls.length
+      w.store.state.log.length = 0
+      const result = await w.poll(w.at(0, 1))
+      assert.deepEqual(result.picks, [], `${status}: no pick, for leg 1 or any other`)
+      assert.equal(w.row(0), undefined, `${status}: no decision`)
+      assertFailClosed(result, R.LEG_NOT_EXECUTABLE, status)
+      assert.deepEqual(w.store.state.log, [], `${status}: no journal read, no write`)
+      assert.equal(w.calls.length, calls, `${status}: no price resolved`)
+      assert.match(result.detail, /leg 1/)
+      assert.ok(!result.detail.includes("something-new"), "an unknown status string is not echoed")
+      // After the tick was decided: its stored picks are not returned either.
+      const decided = makeWorld()
+      await decided.poll(T0 + 1)
+      const first = await decided.poll(decided.at(0, 1))
+      assert.deepEqual(first.picks.map((pick) => pick.leg), [0])
+      decided.orders[0].status = status
+      const after = await decided.poll(decided.at(0, 2))
+      assert.deepEqual(after.picks, [], `${status}: the stored pick of leg 0 is not executable`)
+      assertFailClosed(after, R.LEG_NOT_EXECUTABLE, `${status}, after the decision`)
+    }
+    // The audit's path over a whole basket: leg 1 cancelled from the start never gets a pick, nor does any other leg.
+    const w = makeWorld()
+    w.orders[1].status = "cancelled"
+    for (let t = -1; t <= w.tl.lastTick; t += 1) {
+      for (const offset of [1, HALF]) {
+        const result = await w.poll(t < 0 ? T0 + offset : w.at(t, offset))
+        assert.deepEqual(result.picks, [], `tick ${t} + ${offset} s`)
+      }
+    }
+    assert.deepEqual(w.rows(), [], "nothing was ever journaled")
+  })
+
+  test("S-2: a leg whose signed expiry has come is refused from its expiry second on, also when it comes during the call", async () => {
+    for (const [offset, refused] of [[99, false], [100, true], [101, true]]) {
+      const w = makeWorld()
+      await w.poll(T0 + 1)
+      w.orders[1].order_data.expiry = String(w.at(2, 100))
+      const result = await w.poll(w.at(2, offset))
+      if (refused) {
+        assertFailClosed(result, R.LEG_NOT_EXECUTABLE, `expiry at + 100 s, poll at + ${offset} s`)
+        assert.match(result.detail, /leg 1 .*expiry/)
+        assert.equal(w.row(2), undefined)
+      } else {
+        assert.equal(result.failClosed, false, result.detail)
+        assert.ok(w.row(2), "one second before the expiry the tick is decided")
+        assert.ok(result.picks.length > 0)
+      }
+    }
+    // The expiry comes while the prices are read: nothing is written.
+    const during = makeWorld()
+    await during.poll(T0 + 1)
+    during.orders[1].order_data.expiry = String(during.at(2, 100))
+    const { result, seen } = await movingPoll(during, during.at(2, 50), { resolvePrice: during.at(2, 150) })
+    assertFailClosed(result, R.LEG_NOT_EXECUTABLE, "expiry during the price read")
+    assert.deepEqual(seen.inserted, [])
+    // ... or while the row is written: the row stays, its picks are not returned.
+    const write = makeWorld()
+    await write.poll(T0 + 1)
+    write.orders[1].order_data.expiry = String(write.at(2, 100))
+    const late = await movingPoll(write, write.at(2, 50), { insertTick: write.at(2, 150) })
+    assertFailClosed(late.result, R.LEG_NOT_EXECUTABLE, "expiry during the write")
+    assert.ok(write.row(2))
+  })
+
+  test("S-2: a complete leg is not looked at: its status and its expiry do not refuse the basket", async () => {
+    const w = makeWorld({ done: [0, 0, 2] })
+    await w.poll(T0 + 1)
+    w.orders[2].status = "executed"
+    w.orders[2].order_data.expiry = "0"
+    // By tick 3 four chunks are due and two are done (leg 2's): two picks, on legs 0 and 1.
+    const result = await w.poll(w.at(3, 1))
+    assert.equal(result.failClosed, false, result.detail)
+    assert.ok(w.row(3), "decided")
+    assert.deepEqual(result.picks.map((pick) => pick.leg).sort(), [0, 1])
+    // 'executing' is a leg in flight, not a refusal: that leg waits, the other is still offered.
+    w.orders[0].status = "executing"
+    const flying = await w.poll(w.at(3, 2))
+    assert.equal(flying.failClosed, false, flying.detail)
+    assert.deepEqual(flying.picks.map((pick) => pick.leg), [1])
+  })
+
+  test("S-2: a signed expiry that is not a unix time is a leg order that does not match", async () => {
+    for (const expiry of [undefined, null, "soon", "-1", "1e10", 1.5, "99999999999999999999"]) {
+      const w = makeWorld()
+      const orders = through(w.orders)
+      if (expiry === undefined) delete orders[0].order_data.expiry
+      else orders[0].order_data.expiry = expiry
+      const result = await w.call(w.at(0, 1), { orders })
+      assertFailClosed(result, R.ORDERS_MISMATCH, String(expiry))
+      assert.deepEqual(w.store.state.log, [], String(expiry))
+    }
+  })
+})
+
+describe("audit S-3 (H): the coordinator is told its chain", () => {
+  test("S-3: a basket of another chain is refused before anything is read or written, at every moment of its life", async () => {
+    for (const chainId of [1, 42161]) {
+      const w = makeWorld()
+      for (const now of [T0 + 1, w.at(0, 1), w.at(0, HALF), w.at(8, 1), w.tl.end]) {
+        const result = await w.call(now, {}, { chainId })
+        assert.deepEqual(result.picks, [], `keeper of chain ${chainId} @${now - T0}`)
+        assertFailClosed(result, R.CHAIN_MISMATCH, `keeper of chain ${chainId} @${now - T0}`)
+        assert.deepEqual(result.wrote, [])
+      }
+      assert.deepEqual(w.store.state.log, [], `keeper of chain ${chainId}: no journal read, no row, no status`)
+      assert.equal(w.calls.length, 0, `keeper of chain ${chainId}: no price resolved`)
+      assert.equal(w.basket.status, BASKET_STATUS.ACTIVE)
+    }
+    // The audit's path: a Base basket decided by a chain-1 keeper would be executed by the Base keeper. It is not.
+    const w = makeWorld()
+    await w.call(T0 + 1, {}, { chainId: 1 })
+    await w.call(w.at(0, 1), {}, { chainId: 1 })
+    assert.deepEqual(w.rows(), [])
+  })
+
+  test("S-3: the keeper's chain is required, as a number: missing, text, zero or not an integer refuses the call", async () => {
+    for (const [name, chainId] of [["missing", undefined], ["null", null], ["text", "8453"], ["zero", 0], ["negative", -8453], ["fractional", 8453.5], ["a bigint", 8453n]]) {
+      const w = makeWorld()
+      const result = await w.call(T0 + 1, {}, { chainId })
+      assertFailClosed(result, R.INTERNAL_ERROR, name)
+      assert.match(result.detail, /chainId/, name)
+      assert.deepEqual(w.store.state.log, [], name)
+      assert.equal(w.calls.length, 0, name)
+    }
+  })
+
+  test("S-3: every price request carries the keeper's chain", async () => {
+    const w = makeWorld({ stableLeg: 2, bandBps: 100 })
+    const hints = []
+    const resolvePrice = async (token, hint) => {
+      hints.push(hint)
+      return w.resolvePrice(token, hint)
+    }
+    await w.call(T0 + 1, {}, { resolvePrice })
+    await w.call(w.at(0, 1), {}, { resolvePrice })
+    assert.equal(hints.length, 6)
+    assert.deepEqual(hints.map((hint) => hint.chainId), Array(6).fill(CHAIN))
+    assert.deepEqual(hints.map((hint) => hint.stable), [false, false, true, false, false, true])
   })
 })
 

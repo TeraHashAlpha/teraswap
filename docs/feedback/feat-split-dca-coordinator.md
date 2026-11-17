@@ -4,6 +4,10 @@ Goal: the Split DCA ("basket") data model and a COORDINATOR module with injected
 order rows and the journal into "the picks executable now". `executor.js` is not changed and nothing calls the
 coordinator yet: the keeper behaves as today. Long tables: `feat-split-dca-coordinator.evidence.md`.
 
+**Round 2 (2026-11-17): the fixes for the audit of `6023579a` (blocked 0C/3H) are the LAST section of this file**
+("Round 2"), with their tables in the evidence file's section R2. Statements below that round 2 changed are marked
+"[superseded by round 2]" where they stand.
+
 Model: CONTROL says Opus, effort high. **This goal was NOT run on Opus**: the whole of it ran in the owner's session,
 which is set to Fable 5.2. I did not ask about it for this goal; I relied on the owner's answer to the same question
 earlier the same day, recorded in `docs/feedback/feat-basket-selection-reference.md` ("Model. CONTROL says Opus; the
@@ -361,3 +365,14 @@ evidence file as the only uncommitted changes: **RESULT: PASS**, 8 of 8 (the blo
 - **Performance: one journal read per active basket per poll** (at most `N + 4` rows, 90 for the longest basket).
   The wiring can read the journals of all active baskets of the chain in one query per cycle and hand each basket
   its rows through `db.readTicks`.
+
+## Round 2 — the fixes for the audit of `6023579a` (goal 117b, 2026-11-17)
+Audit of `6023579a` on `origin/main` `4a4129ef`: blocked 0C/3H (S-1 clock, S-2 leg state, S-3 chain), 2 M, 5 L. The
+fix per finding is the goal's details file (binding); S-5 is a separate API goal. Run in this session on Opus 5.5.
+
+Checklist:
+- [ ] Commit 1: S-1, S-2, S-3, each with a test named after it that fails on `6023579a` and passes now
+- [ ] Commit 2: S-4, S-6, S-7, S-8, S-9, S-10 and the uncovered states; spec copied byte for byte (sha256 pair)
+- [ ] Commit 3: seeded property test (four invariants); mutation proof for the three High
+- [ ] Verify: `scripts/agent-verify.sh --keeper --codeql`; `node scripts/gen-claude-state.mjs --check`; keeper suite on Node 20 and 22
+- [ ] Push `feat/split-dca-coordinator` (fast-forward, no force), compare link, evidence 1-4

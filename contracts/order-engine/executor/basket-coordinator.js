@@ -37,6 +37,18 @@
 //                    the ordinary DCA path: the result of this function is the only thing that lets a leg execute.
 //   Status           'completed' when every leg is complete; 'expired' once the last grace tick's window has ended.
 //
+// Added after the audit of 2026-11-16 (blocked 0C/3H; SPEC §4, the block "Added after the audit"):
+//   Clock (S-1)      the clock is read again after every await: after the journal read, after the price reads (that
+//                    reading is checked against the deadline and is the row's decided_at), and after the journal
+//                    write (a pick is returned only while its tick is still the current one). Readings within one
+//                    call never go back; one that does refuses the call. A read that straddles a deadline ends as a
+//                    missed tick, for a tick and for the reference row alike.
+//   Leg (S-2)        a leg with chunks left whose order is not 'active' or 'executing', or whose signed expiry has
+//                    come, refuses the whole basket for the poll: no decision, no pick, a reason. Checked at every
+//                    reading of the clock.
+//   Chain (S-3)      deps.chainId is the keeper's chain and is required. A basket of another chain is refused before
+//                    anything is read or written, and every price request carries the chain.
+//
 // What this module does NOT decide: whether a returned pick's order can execute (router, floor, freeze flag, retry
 // ladder, the contract's own dcaInterval): every existing gate of a DCA order still applies to a leg (SPEC §6).
 //
@@ -67,7 +79,9 @@ export const COORDINATOR_REASONS = Object.freeze({
   // Fail closed: nothing executes for this basket in this poll.
   BASKET_MISSING: "basket_missing",
   BASKET_UNREADABLE: "basket_unreadable",
+  CHAIN_MISMATCH: "chain_mismatch",
   ORDERS_MISMATCH: "orders_mismatch",
+  LEG_NOT_EXECUTABLE: "leg_not_executable",
   IN_FLIGHT_UNREADABLE: "in_flight_unreadable",
   CLOCK_INVALID: "clock_invalid",
   JOURNAL_UNREADABLE: "journal_unreadable",
@@ -85,6 +99,7 @@ export const COORDINATOR_REASONS = Object.freeze({
   REFERENCE_RECORDED: "reference_recorded",
   IN_FLIGHT: "in_flight",
   TICK_MISSED: "tick_missed",
+  TICK_ENDED: "tick_ended",
   TICK_IDLE: "tick_idle",
   SLOT_NOT_REACHED: "slot_not_reached",
   PICKS_EXECUTED: "picks_executed",
@@ -95,7 +110,9 @@ const R = COORDINATOR_REASONS
 export const FAIL_CLOSED_REASONS = Object.freeze([
   R.BASKET_MISSING,
   R.BASKET_UNREADABLE,
+  R.CHAIN_MISMATCH,
   R.ORDERS_MISMATCH,
+  R.LEG_NOT_EXECUTABLE,
   R.IN_FLIGHT_UNREADABLE,
   R.CLOCK_INVALID,
   R.JOURNAL_UNREADABLE,
@@ -106,6 +123,11 @@ export const FAIL_CLOSED_REASONS = Object.freeze([
   R.STATUS_WRITE_FAILED,
   R.INTERNAL_ERROR,
 ])
+
+/** `orders.status` with which a leg that still has chunks to buy may be decided on and executed (S-2). */
+export const EXECUTABLE_LEG_STATUSES = Object.freeze(["active", "executing"])
+/** Every `orders.status` the schema allows (schema.sql CHECK). Only these are echoed in a detail. */
+const ORDER_STATUSES = Object.freeze(["active", "executing", "executed", "cancelled", "expired", "failed"])
 
 /** Unix SECONDS never get this large; a clock in milliseconds does (2001 in ms is already 1e12). */
 const MAX_UNIX_SECONDS = 99_999_999_999
@@ -306,10 +328,30 @@ function readOrders(basket, rows) {
     if (lowered(signed.tokenIn, ADDRESS) !== basket.tokenIn) no("order_data.tokenIn")
     if (lowered(signed.tokenOut, ADDRESS) !== leg.tokenOut) no("order_data.tokenOut")
     if (uintOf(signed.dcaTotal) !== leg.n) no("order_data.dcaTotal")
-    return { id: row.id, done: row.dca_executed, status: row.status }
+    // The signed expiry (uint256, kept as text): read only to refuse a leg whose expiry has come (S-2).
+    const expiry = uintOf(signed.expiry) ?? bad(`leg ${i}: order_data.expiry is not a unix time`)
+    return { id: row.id, done: row.dca_executed, status: row.status, expiry }
   })
   if (new Set(orders.map((order) => order.id)).size !== 3) bad("two order rows with the same id")
   return orders
+}
+
+/**
+ * S-2: a leg that still has chunks to buy must be able to execute: its order 'active' (or 'executing', a transaction
+ * in flight) and its signed expiry not yet come. Otherwise the whole basket is refused for this poll: no decision, no
+ * pick, a reason. A complete leg is not looked at: whatever its status, it has nothing left to execute.
+ * "Come" is `now >= expiry`: a transaction sent in the expiry second is mined after it, and the contract refuses
+ * `block.timestamp > expiry`.
+ */
+function checkLegsExecutable(basket, orders, now) {
+  orders.forEach((order, i) => {
+    if (order.done >= basket.legs[i].n) return
+    if (!EXECUTABLE_LEG_STATUSES.includes(order.status)) {
+      const status = ORDER_STATUSES.includes(order.status) ? `'${order.status}'` : "in a status this keeper does not know"
+      refuse(R.LEG_NOT_EXECUTABLE, `leg ${i} has chunks left and its order is ${status}`)
+    }
+    if (now >= order.expiry) refuse(R.LEG_NOT_EXECUTABLE, `leg ${i} has chunks left and its signed expiry has come`)
+  })
 }
 
 /**
@@ -402,12 +444,12 @@ async function readJournal(basket, db) {
  * { price: null }; that is a normal answer ("no price", the leg is out of this tick). A resolver that throws, or
  * returns anything else, is not: nothing is decided in this poll.
  */
-async function resolvePrices(basket, resolvePrice) {
+async function resolvePrices(basket, resolvePrice, chainId) {
   const bad = (what) => refuse(R.PRICE_ERROR, what)
   let answers
   try {
     answers = await Promise.all(
-      basket.legs.map(async (leg, i) => resolvePrice(leg.tokenOut, { stable: i === basket.stableLeg })),
+      basket.legs.map(async (leg, i) => resolvePrice(leg.tokenOut, { stable: i === basket.stableLeg, chainId })),
     )
   } catch (err) {
     bad(`resolvePrice failed (${errorName(err)})`)
@@ -493,10 +535,19 @@ function rebuildState(basket, rows, orders, tick) {
   return { legs, cooldown: previous === undefined ? null : previous.cooldown }
 }
 
-/** Decide `tick` (it has no row), store the decision and return the row as stored. */
-async function decideAndStore(basket, rows, orders, tick, now, deps, wrote) {
+/**
+ * Decide `tick` (it has no row), store the decision and return the row as stored. `observe` reads the clock (S-1):
+ * the reading taken once the prices are in must still be before the tick's time + T / 2, or the tick is missed and
+ * nothing is written; that reading is the row's decided_at.
+ */
+async function decideAndStore(basket, rows, orders, tick, observe, deps, wrote) {
   const state = rebuildState(basket, rows, orders, tick)
-  const resolved = await resolvePrices(basket, deps.resolvePrice)
+  const resolved = await resolvePrices(basket, deps.resolvePrice, deps.chainId)
+  const now = observe()
+  if (now >= basket.timeline.decisionDeadline(tick)) {
+    refuse(R.TICK_MISSED, `the prices of tick ${tick} came at or after its time + T / 2: it is missed, the next tick catches up`)
+  }
+  checkLegsExecutable(basket, orders, now)
   let decision
   try {
     decision = decideTick({
@@ -578,7 +629,10 @@ async function writeStatus(basket, status, db, wrote) {
  *   and whose outcome is not yet in the order row. Required; [] when there is none. A leg whose order row is
  *   'executing' counts as in flight as well
  * @param {object} deps
- * @param {() => number} deps.now unix SECONDS
+ * @param {number} deps.chainId the chain this keeper serves, as a number (required). A basket of another chain is
+ *   refused before anything is read or written (`chain_mismatch`), and every price request carries it
+ * @param {() => number} deps.now unix SECONDS. Read again after every await; the readings of one call must never go
+ *   back (one that does refuses the call: `clock_invalid`)
  * @param {object} deps.db
  * @param {(basketId: string) => Promise<object[]>} deps.db.readTicks EVERY `basket_ticks` row of the basket; rejects
  *   when the read failed (an empty array means "no row yet")
@@ -586,8 +640,9 @@ async function writeStatus(basket, status, db, wrote) {
  *   only once the database has confirmed it; rejects otherwise, a duplicate (basket_id, tick) included
  * @param {(basketId: string, status: "completed"|"expired") => Promise<boolean>} deps.db.setBasketStatus resolves
  *   `true` once stored (it should only move an 'active' basket); anything else is a failure
- * @param {(token: string, hint: { stable: boolean }) => Promise<null | { price: number|null, source?: string, bandAdd?: number }>} deps.resolvePrice
- *   the decision price of one leg token (lowercase address). null or { price: null } = no usable price. Otherwise a
+ * @param {(token: string, hint: { stable: boolean, chainId: number }) => Promise<null | { price: number|null, source?: string, bandAdd?: number }>} deps.resolvePrice
+ *   the decision price of one leg token (lowercase address) on `hint.chainId`, the keeper's chain (a resolver for
+ *   another chain must refuse). null or { price: null } = no usable price. Otherwise a
  *   positive finite price and a short source label. For the stable leg (`hint.stable`) the price comes PAIRED with
  *   bandAdd (SPEC §4a): its own USD feed while within its maxStaleness, with bandAdd = the feed's deviation
  *   threshold; otherwise the quorum price, with bandAdd = 0
@@ -620,13 +675,21 @@ export async function coordinateBasket(input, deps) {
     if (!isObject(deps) || typeof deps.now !== "function" || typeof deps.resolvePrice !== "function") {
       refuse(R.INTERNAL_ERROR, "coordinateBasket needs deps.now and deps.resolvePrice")
     }
-    const { db } = deps
+    // S-3: the keeper's chain, as a number. A missing one is a wiring mistake, not "any chain".
+    if (!isInt(deps.chainId, 1, Number.MAX_SAFE_INTEGER)) {
+      refuse(R.INTERNAL_ERROR, "coordinateBasket needs deps.chainId, the keeper's chain id as a number")
+    }
+    const { db, chainId } = deps
     if (!isObject(db) || typeof db.readTicks !== "function" || typeof db.insertTick !== "function" || typeof db.setBasketStatus !== "function") {
       refuse(R.INTERNAL_ERROR, "coordinateBasket needs deps.db.readTicks, insertTick and setBasketStatus")
     }
 
     const basket = readBasket(input.basket)
     basketId = basket.id
+    // S-3: another chain's basket is not this keeper's to decide, journal or close: nothing is read or written.
+    if (basket.chainId !== chainId) {
+      refuse(R.CHAIN_MISMATCH, `the basket is on chain ${basket.chainId}, this keeper serves chain ${chainId}`)
+    }
     if (basket.status !== BASKET_STATUS.ACTIVE) {
       // Only a status this module knows is echoed; any other string from the row stays out of the log line.
       const known = Object.values(BASKET_STATUS).includes(basket.status)
@@ -634,7 +697,16 @@ export async function coordinateBasket(input, deps) {
     }
     const orders = readOrders(basket, input.orders)
     const inFlight = readInFlight(input.inFlight, orders)
-    const now = readClock(deps.now)
+    // S-1: every reading of the clock in this call. A reading is taken again after every await, and it never goes
+    // back: a clock that did could turn a tick already past its deadline back into one that may still be decided.
+    let previous = null
+    const observe = () => {
+      const value = readClock(deps.now)
+      if (previous !== null && value < previous) refuse(R.CLOCK_INVALID, "deps.now() went back during the call")
+      previous = value
+      return value
+    }
+    let now = observe()
     const { timeline } = basket
 
     // Status. Complete comes first: a basket that finished is completed even when it is looked at after its end.
@@ -642,14 +714,21 @@ export async function coordinateBasket(input, deps) {
       await writeStatus(basket, BASKET_STATUS.COMPLETED, db, wrote)
       return result([], R.COMPLETED, "every leg is complete")
     }
-    if (now >= timeline.end) {
+    // After the end. It comes before the leg check: a basket whose legs' signed expiry has also passed (one hour after
+    // the end) must still be closed. Closing writes a status only: no decision, no pick.
+    const closeAtEnd = async () => {
       // A transaction still in flight may complete the basket: wait for its outcome before closing.
       if (inFlight.size > 0) return result([], R.IN_FLIGHT, "past the last grace tick, waiting for a transaction in flight")
       await writeStatus(basket, BASKET_STATUS.EXPIRED, db, wrote)
       return result([], R.EXPIRED, "the last grace tick's window has ended")
     }
+    if (now >= timeline.end) return await closeAtEnd()
+    checkLegsExecutable(basket, orders, now)
 
     const rows = await readJournal(basket, db)
+    now = observe() // S-1: the journal read may have taken the clock past a deadline, or past the end
+    if (now >= timeline.end) return await closeAtEnd()
+    checkLegsExecutable(basket, orders, now)
     tick = timeline.tickAt(now)
     // A row for a tick that has not come yet: this clock is behind the one that wrote it. Decide nothing.
     const newest = Math.max(REFERENCE_TICK, ...rows.keys())
@@ -663,9 +742,17 @@ export async function coordinateBasket(input, deps) {
       if (referenceDeadline === null || rows.has(REFERENCE_TICK) || now >= referenceDeadline) {
         return result([], R.BEFORE_FIRST_TICK, "the first tick has not come")
       }
-      const resolved = await resolvePrices(basket, deps.resolvePrice)
+      const resolved = await resolvePrices(basket, deps.resolvePrice, chainId)
+      // S-1: the reference row is written only if the clock, read again once the prices are in, is still before
+      // t0 + T / 2. Seen later, it never gets one (the first tick then runs with last null), like a late first sight.
+      now = observe()
+      if (now >= referenceDeadline) {
+        return result([], R.TICK_MISSED, "the reference prices came at or after t0 + T / 2: no reference row is written, the first tick runs with last null")
+      }
+      checkLegsExecutable(basket, orders, now)
       const { stored } = await writeTick(basket, journalRow(basket, REFERENCE_TICK, now, resolved, null), db)
       wrote.push({ table: "basket_ticks", row: stored })
+      // No clock reading after this write: a reference row has no pick, so nothing returned depends on the time.
       return result([], R.REFERENCE_RECORDED, "the reference prices are recorded; the first purchase is one cycle after t0")
     }
 
@@ -678,7 +765,13 @@ export async function coordinateBasket(input, deps) {
         return result([], R.TICK_MISSED, `tick ${tick} was not decided before its time + T / 2: it is missed, the next tick catches up`)
       }
       if (inFlight.size > 0) return result([], R.IN_FLIGHT, `no decision for tick ${tick} while a transaction is in flight`)
-      row = await decideAndStore(basket, rows, orders, tick, now, deps, wrote)
+      row = await decideAndStore(basket, rows, orders, tick, observe, deps, wrote)
+      // S-1: the write may have taken the clock into the next tick. Its picks are executable only until then.
+      now = observe()
+      checkLegsExecutable(basket, orders, now)
+      if (timeline.tickAt(now) !== tick) {
+        return result([], R.TICK_ENDED, `tick ${tick} ended while its row was being written: its picks are no longer executable`)
+      }
     }
     const { picks, reason, detail } = executablePicks(basket, row, orders, inFlight, now)
     return result(picks, reason, detail)
