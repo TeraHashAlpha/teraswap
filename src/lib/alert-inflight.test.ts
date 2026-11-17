@@ -17,13 +17,13 @@ import { trackAlert, runWithAlertsSettled, ALERT_SETTLE_MAX_MS } from './alert-i
 
 // [fix/flaky-tests-root-cause] `after` is loaded lazily (alert-inflight.ts: `import('next/server')` at module evaluation). Here that
 // import is the factory above loading the real next/server, so on a loaded runner it can still be pending when a test expects a
-// synchronous hand-over (same cause as source-state-machine.alert-handoff.test.ts). Wait for the module's own load, as production
-// does, and prove the hook in place is this file's mock.
+// synchronous hand-over (same cause as source-state-machine.alert-handoff.test.ts). Wait until the hook is in place, as it is in
+// production before a request: a probe is handed over and the wait ends when THIS file's mock receives it (at once if loaded, else
+// when the load completes). Event-driven; if the module were bound to any other `after` the probe never arrives and this hook fails.
 beforeAll(async () => {
-  await vi.dynamicImportSettled()
-  afterMock.mockReset()
+  const received = new Promise<void>((resolve) => { afterMock.mockImplementationOnce(() => { resolve() }) })
   trackAlert(Promise.resolve())
-  expect(afterMock, 'trackAlert did not reach this file\'s `after` mock synchronously').toHaveBeenCalledTimes(1)
+  await received
   afterMock.mockReset()
 })
 

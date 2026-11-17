@@ -10,8 +10,10 @@
  * is this file's mock factory, which loads the real next/server from disk: ~15 ms idle, more on a loaded runner, while the first
  * test raises its alert ~10 ms after that import starts. Until it finishes, trackAlert hands the alert over on its late path
  * (alert-inflight.ts handToAfter), i.e. after the synchronous assertions below: CI 2026-11-17 18:28 UTC, `afterMock` 0 calls in
- * the 5 tests that read it. So the tests first wait for the module's own load to finish, as production does, then prove the hook
- * in place is THIS file's mock; the last block pins the other order (alert first, hook later) on every alert site.
+ * the 5 tests that read it. So the tests first wait until the hook is in place, as it is in production before a request, and the
+ * last block pins both orders (hook first / alert first) on every alert site. The waits are event-driven: a probe alert is handed
+ * over and the wait ends when THIS file's mock receives it (at once if the hook is loaded, else when the load completes).
+ * `vi.dynamicImportSettled()` was tried first and is not enough: under load it returned before the hook was in place (2/40 runs).
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest'
 
@@ -47,15 +49,20 @@ vi.mock('next/server', async (importActual) => ({
 import { forceDisable, recordHealthCheck, recordRateLimited, getStatus, beginTick } from './source-state-machine'
 import { trackAlert } from './alert-inflight' // the same instance the state machine imports
 
-beforeAll(async () => {
-  await vi.dynamicImportSettled() // the module's own `import('next/server')` (started at evaluation) has finished
+/** Resolves with the task when this file's `after` mock receives its next hand-over. */
+function nextHandOver(): Promise<unknown> {
+  return new Promise((resolve) => { afterMock.mockImplementationOnce((task: unknown) => { resolve(task) }) })
+}
+
+/** Wait until `track` reaches this file's hook: a probe goes in, the wait ends when the mock receives it. */
+async function hookInPlace(track: (p: Promise<unknown>) => void): Promise<void> {
+  const received = nextHandOver()
+  track(Promise.resolve())
+  await received // never resolves if the module is bound to any other `after`: the hook then fails, which is the point
   afterMock.mockReset()
-  trackAlert(Promise.resolve())
-  // Fails if the keep-alive hook the module under test calls is not this file's mock (still loading, failed, or bound to another
-  // file's `after` by a shared module registry): every hand-over assertion below would then read 0 calls.
-  expect(afterMock, 'trackAlert did not reach this file\'s `after` mock synchronously').toHaveBeenCalledTimes(1)
-  afterMock.mockReset()
-})
+}
+
+beforeAll(() => hookInPlace(trackAlert))
 
 /** An alert whose delivery completes when the test says so. */
 function controllable() {
@@ -193,19 +200,22 @@ describe('the hand-over does not depend on when the keep-alive hook finishes loa
         vi.resetModules()
         vi.doMock('next/server', async () => { await gate; return { after: afterMock } })
         const m = await import('./source-state-machine') // fresh alert-inflight: its hook load now waits on `gate`
+        const inflight = await import('./alert-inflight') // that same fresh instance
         m.beginTick()
         if (order === 'hook loaded first') {
           release()
-          await vi.dynamicImportSettled()
-        }
-        await raise(m)
-        expect(emit).toHaveBeenCalledTimes(1)
-        if (order === 'alert raised first') {
+          await hookInPlace(inflight.trackAlert)
+          await raise(m)
+          expect(afterMock).toHaveBeenCalledTimes(1) // handed over on the synchronous path, before the caller resumed
+        } else {
+          const handed = nextHandOver()
+          await raise(m)
           expect(afterMock).not.toHaveBeenCalled() // nothing to hand it to yet...
           release()
-          await vi.dynamicImportSettled() // ...so it is handed over as soon as the hook is there
+          await handed // ...so it is handed over as soon as the hook is there
+          expect(afterMock).toHaveBeenCalledTimes(1)
         }
-        expect(afterMock).toHaveBeenCalledTimes(1)
+        expect(emit).toHaveBeenCalledTimes(1)
         expect(afterMock.mock.calls[0][0]).toBeInstanceOf(Promise)
       })
     }
