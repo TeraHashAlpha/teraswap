@@ -11,13 +11,32 @@
  *
  * Marker values only (the `.invalid` TLD never resolves); no real key anywhere.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest'
 import { NextRequest } from 'next/server'
 
-vi.mock('@/lib/kv-rate-limiter', async (orig) => {
-  const actual = await orig<typeof import('@/lib/kv-rate-limiter')>()
+// The route's limiter, as route.test.ts mocks it (the real module builds an Upstash client at import).
+vi.mock('@/lib/kv-rate-limiter', () => {
   const allow = async () => ({ allowed: true, remaining: 299, resetAt: Date.now() + 60_000 })
-  return { ...actual, checkRateLimit: allow, checkRateLimitWithin: allow }
+  return { checkRateLimit: allow, checkRateLimitWithin: allow, RPC_RATE_LIMIT: { limit: 300, windowMs: 60_000 } }
+})
+
+// One-time load of the module graph under test (the five server paths and everything they import). vitest keeps the
+// transformed modules across vi.resetModules(), which only drops their evaluation, so each case below re-evaluates the
+// graph with its own env (~20 ms) instead of transforming it. Without this the first case paid the whole cold load
+// (~1 s alone) inside its own budget and timed out under full-suite load (agent-verify, 2026-11-17: 5 033 ms); its
+// still-running reads then disturbed the next case.
+beforeAll(async () => {
+  vi.stubEnv('NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID', 'test_projectid_0123456789abcdef') // wagmiConfig builds its config at import
+  const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+  await Promise.all([
+    import('@/lib/rpc-env'),
+    import('@/lib/adapters/shared'),
+    import('@/lib/rpc'),
+    import('@/lib/wagmiConfig'),
+    import('@/app/api/rpc/route'),
+  ])
+  info.mockRestore()
+  vi.unstubAllEnvs()
 })
 
 const SERVER_URL = 'https://server-mainnet.invalid/v2/SERVER-MARKER-KEY'
@@ -31,7 +50,8 @@ const BROWSER_ERA = {
 const NAMES = ['RPC_URL_1', 'RPC_URL', ...Object.keys(BROWSER_ERA)]
 
 const BLOCK_HEX = '0x1b4'
-const dialled: string[] = []
+/** Every URL fetch was called with in the current case. Never truncated: each read takes the slice after its mark. */
+let dialled: string[] = []
 
 function rpcAnswer(body: unknown) {
   const one = (r: { id?: unknown; method?: string }) => ({ jsonrpc: '2.0', id: r?.id ?? 1, result: r?.method === 'eth_chainId' ? '0x1' : BLOCK_HEX })
@@ -41,12 +61,13 @@ function rpcAnswer(body: unknown) {
 beforeEach(() => {
   for (const n of NAMES) vi.stubEnv(n, '')
   vi.stubEnv('NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID', 'test_projectid_0123456789abcdef')
-  dialled.length = 0
+  const sink: string[] = []
+  dialled = sink
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-      dialled.push(new URL(url).href) // normalised: viem dials a bare origin as `https://host/`
+      sink.push(new URL(url).href) // normalised: viem dials a bare origin as `https://host/`
       const body = JSON.parse(String(init?.body ?? (input instanceof Request ? await input.text() : '{}')))
       return new Response(JSON.stringify(rpcAnswer(body)), { status: 200, headers: { 'content-type': 'application/json' } })
     }),
@@ -76,15 +97,18 @@ async function serverMainnet() {
     getRpcUrl: rpc.getRpcUrl(),
   }
 
-  dialled.length = 0
+  const sink = dialled
+  const since = (mark: number) => [...new Set(sink.slice(mark))]
+
+  let mark = sink.length
   const privateBlock = await rpc.getPrivateClient().getBlockNumber({ cacheTime: 0 })
-  const privateDialled = [...new Set(dialled)]
+  const privateDialled = since(mark)
 
-  dialled.length = 0
+  mark = sink.length
   const wagmiBlock = await config.getClient({ chainId: 1 }).request({ method: 'eth_blockNumber' })
-  const wagmiDialled = [...new Set(dialled)]
+  const wagmiDialled = since(mark)
 
-  dialled.length = 0
+  mark = sink.length
   const res = await POST(
     new NextRequest('http://localhost/api/rpc', {
       method: 'POST',
@@ -93,7 +117,7 @@ async function serverMainnet() {
     }),
   )
   const proxied = { status: res.status, result: (await res.json()).result }
-  const proxyDialled = [...new Set(dialled)]
+  const proxyDialled = since(mark)
 
   return { resolved, privateBlock, privateDialled, wagmiBlock, wagmiDialled, proxied, proxyDialled }
 }
