@@ -26,6 +26,7 @@ import {
   ORDERS_READ_HEADER_SIGNATURE,
   ORDER_POLL_MAX_HASHES,
 } from '@/lib/order-engine/read-auth'
+import { withOrderReadColumns } from './order-read-columns'
 import { getDcaFreezeState } from '@/lib/dca-freeze'
 import { checkRateLimit, ORDER_CREATE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { bodySizeGuard, clientIp } from '@/lib/body-limit'
@@ -831,21 +832,24 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ orders: [] })
   }
 
-  let query = supabase
-    .from('orders')
-    .select('*')
-    .eq('wallet', wallet.toLowerCase())
-    .order('created_at', { ascending: false })
-  // [A76 S-6] By hash: exactly the tracked rows (at most one per hash). Otherwise: the 50 newest, as before.
-  query = hashes ? query.in('order_hash', hashes).limit(hashes.length) : query.limit(50)
+  // [fix/order-signature-not-returned] An explicit column allow-list (order-read-columns.ts), never `*`: the order's
+  // EIP-712 `signature` stays on the server for every caller, with or without the read signature.
+  const { data, error } = await withOrderReadColumns((columns) => {
+    let query = supabase
+      .from('orders')
+      .select(columns)
+      .eq('wallet', wallet.toLowerCase())
+      .order('created_at', { ascending: false })
+    // [A76 S-6] By hash: exactly the tracked rows (at most one per hash). Otherwise: the 50 newest, as before.
+    query = hashes ? query.in('order_hash', hashes).limit(hashes.length) : query.limit(50)
 
-  if (statuses.length === 1) {
-    query = query.eq('status', statuses[0])
-  } else if (statuses.length > 1) {
-    query = query.in('status', statuses)
-  }
-
-  const { data, error } = await query
+    if (statuses.length === 1) {
+      query = query.eq('status', statuses[0])
+    } else if (statuses.length > 1) {
+      query = query.in('status', statuses)
+    }
+    return query
+  })
   if (error) return NextResponse.json({ orders: [], error: error.message })
   return NextResponse.json({ orders: data ?? [] })
 }
