@@ -274,14 +274,21 @@ export function compareTimestamps(a, b) {
   return pa.frac < pb.frac ? -1 : pa.frac > pb.frac ? 1 : 0
 }
 
+// Parsed once per distinct string: the fake sorts hundreds of rows per query, and re-parsing on every
+// comparison made the property tests CPU-heavy enough to disturb timing-sensitive tests running beside them.
+const splitTsCache = new Map()
 function splitTs(s) {
+  const hit = splitTsCache.get(s)
+  if (hit) return hit
   const m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}(?::?\d{2})?)?$/.exec(s)
   if (!m) throw new Error(`not a timestamp: ${JSON.stringify(s)}`)
   let zone = m[4] || "Z"
   if (/^[+-]\d{2}$/.test(zone)) zone += ":00"
   const secs = Date.parse(`${m[1]}T${m[2]}${zone}`) / 1000
   if (!Number.isFinite(secs)) throw new Error(`not a timestamp: ${JSON.stringify(s)}`)
-  return { secs, frac: (m[3] || "").padEnd(9, "0") }
+  const parsed = { secs, frac: (m[3] || "").padEnd(9, "0") }
+  splitTsCache.set(s, parsed)
+  return parsed
 }
 
 function orderComparator(order) {

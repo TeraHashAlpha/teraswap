@@ -328,29 +328,53 @@ describe("[SEC-4] shipped cycle — seeded property (random tables, churn, rando
       }
       // A row that answered balance/allowance can be legitimately slowed: its bound is 10 min (20 cycles) + one rotation.
       const slowable = (id) => ["unfunded", "no-allowance", "mixed"].includes(persona.get(id))
-      for (let s = 0; s < cycles; s++) {
+      // Index (cheap to check, so this test stays light beside timing-sensitive files): each row is present
+      // over one interval [first, last] (removed rows never come back — asserted), the distinct rows of
+      // cycles s..j are |present_s| plus the rows first present in s+1..j, and each row's examined cycles.
+      const first = new Map()
+      const last = new Map()
+      const newAt = new Array(cycles).fill(0)
+      const examinedAt = new Map()
+      for (let t = 0; t < cycles; t++) {
+        for (const id of present[t]) {
+          if (!first.has(id)) {
+            first.set(id, t)
+            if (t > 0) newAt[t]++
+          } else assert.equal(last.get(id), t - 1, `row ${id} came back after leaving`)
+          last.set(id, t)
+        }
+        for (const id of run.perCycle[t]) {
+          if (!examinedAt.has(id)) examinedAt.set(id, [])
+          examinedAt.get(id).push(t)
+        }
+      }
+      const boundK = (s) => {
+        let M = present[s].size
+        for (let j = s; j < cycles; j++) {
+          if (j > s) M += newAt[j]
+          if (j - s + 1 >= Math.ceil(M / WINDOW) + 1) return j - s + 1
+        }
+        return 0
+      }
+      const boundKBySets = (s) => {
         const seen = new Set()
-        let K = 0
         for (let j = s; j < cycles; j++) {
           for (const id of present[j]) seen.add(id)
-          if (j - s + 1 >= Math.ceil(seen.size / WINDOW) + 1) {
-            K = j - s + 1
-            break
-          }
+          if (j - s + 1 >= Math.ceil(seen.size / WINDOW) + 1) return j - s + 1
         }
+        return 0
+      }
+      for (let s = 0; s < cycles; s++) {
+        const K = boundK(s)
+        if (s % 13 === 0) assert.equal(K, boundKBySets(s), `seed ${seed} s=${s}: indexed K differs from the definition`)
         if (!K) break
         for (const id of present[s]) {
           const span = slowable(id) ? 20 + K : K
           if (s + span > cycles) continue
-          let throughout = true
-          let examined = false
-          for (let t = s; t < s + span; t++) {
-            if (!present[t].has(id)) throughout = false
-            if (run.perCycle[t].includes(id)) examined = true
-          }
-          if (!throughout) continue
+          if (last.get(id) < s + span - 1) continue // not present throughout
           if (slowable(id)) slowChecks++
           else checks++
+          const examined = (examinedAt.get(id) ?? []).some((t) => t >= s && t < s + span)
           assert.ok(examined, `seed ${seed}: ${persona.get(id)} row present in cycles ${s}..${s + span - 1} never examined`)
         }
       }

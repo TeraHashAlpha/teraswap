@@ -512,7 +512,8 @@ function simulate(seed, { cycles, initial, maxAdd = 3, maxRemove = 3, restartP =
 }
 
 /** Smallest K with K ≥ ceil(M/15) + 1 + E, where M = distinct rows present and E = early stops in [s, s+K−1]. */
-function boundFrom(trace, s) {
+/** The definition, set by set (slow): kept as the reference the fast index is checked against. */
+function boundFromSlow(trace, s) {
   const seen = new Set()
   let early = 0
   for (let K = 1; s + K - 1 < trace.length; K++) {
@@ -524,26 +525,80 @@ function boundFrom(trace, s) {
   return null
 }
 
+/**
+ * Per-trace index so the bound check costs O(rows × cycles), not O(rows × cycles × K): a row is present
+ * over ONE interval [born, end) (the simulation never brings a removed row back — asserted here), so the
+ * distinct rows of cycles s..e are |present_s| plus the rows born in s+1..e.
+ */
+function indexTrace(trace) {
+  const born = new Map()
+  const end = new Map()
+  const reachedAt = new Map()
+  const newAt = new Array(trace.length).fill(0)
+  const earlyPrefix = [0]
+  for (const t of trace) {
+    for (const id of t.present) {
+      if (!born.has(id)) {
+        born.set(id, t.c)
+        if (t.c > 0) newAt[t.c]++
+      } else assert.ok(!end.has(id), `row ${id.slice(0, 8)} came back after leaving: the index assumes it cannot`)
+    }
+    if (t.c > 0) for (const id of trace[t.c - 1].present) if (!t.present.has(id) && !end.has(id)) end.set(id, t.c)
+    for (const id of t.reached) {
+      if (!reachedAt.has(id)) reachedAt.set(id, [])
+      reachedAt.get(id).push(t.c)
+    }
+    earlyPrefix.push(earlyPrefix[earlyPrefix.length - 1] + (t.early ? 1 : 0))
+  }
+  return { born, end, reachedAt, newAt, earlyPrefix }
+}
+
+function boundFromIndexed(trace, ix, s) {
+  let M = trace[s].present.size
+  for (let K = 1; s + K - 1 < trace.length; K++) {
+    if (K > 1) M += ix.newAt[s + K - 1]
+    const E = ix.earlyPrefix[s + K] - ix.earlyPrefix[s]
+    if (K >= Math.ceil(M / W) + 1 + E) return { K, M, E }
+  }
+  return null
+}
+
+/** First element of a sorted array that is ≥ x, or undefined. */
+function firstAtOrAfter(sorted, x) {
+  let lo = 0
+  let hi = sorted.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (sorted[mid] < x) lo = mid + 1
+    else hi = mid
+  }
+  return sorted[lo]
+}
+
 function checkBound(seed, run) {
   const { trace, restarts } = run
+  const ix = indexTrace(trace)
+  run.boundFrom = (s) => boundFromIndexed(trace, ix, s)
   let checked = 0
   for (let s = 0; s < trace.length; s++) {
-    const b = boundFrom(trace, s)
+    const b = boundFromIndexed(trace, ix, s)
+    if (s % 17 === 0) assert.deepEqual(b, boundFromSlow(trace, s), `seed ${seed} s=${s}: the indexed bound differs from the definition`)
     if (!b) break
     if (restarts.some((r) => r > s && r <= s + b.K - 1)) continue // a restart begins at the oldest: measured from it
     for (const id of trace[s].present) {
-      let presentThroughout = true
-      let reached = false
-      for (let t = s; t < s + b.K; t++) {
-        if (!trace[t].present.has(id)) presentThroughout = false
-        if (trace[t].reached.has(id)) reached = true
-      }
+      const presentThroughout = (ix.end.get(id) ?? Infinity) >= s + b.K
       if (!presentThroughout) continue
       checked++
-      assert.ok(reached, `seed ${seed}: row ${id.slice(0, 8)} present in cycles ${s}..${s + b.K - 1} (M=${b.M}, early stops=${b.E}) was never reached`)
+      const r = firstAtOrAfter(ix.reachedAt.get(id) ?? [], s)
+      assert.ok(r !== undefined && r < s + b.K, `seed ${seed}: row ${id.slice(0, 8)} present in cycles ${s}..${s + b.K - 1} (M=${b.M}, early stops=${b.E}) was never reached`)
     }
   }
   return checked
+}
+
+/** boundFrom for the checks below: the indexed one once checkBound has built it, else the definition. */
+function boundFrom(trace, s, run = null) {
+  return run?.boundFrom ? run.boundFrom(s) : boundFromSlow(trace, s)
 }
 
 function checkSlowDown(seed, run) {
@@ -576,7 +631,7 @@ function checkSlowDown(seed, run) {
     if (lastThree.length === ACTIVE_WINDOW_SLOW_AFTER && lastThree.every((a) => !a.ok && isSlowReason(a.reason))) {
       const due = last.cycle + slowCycles
       if (due >= trace.length) continue
-      const b = boundFrom(trace, due)
+      const b = boundFrom(trace, due, run)
       if (!b) continue
       if (run.restarts.some((r) => r > last.cycle && r <= due + b.K - 1)) continue
       let present = true
@@ -648,12 +703,14 @@ describe("property (seeded): rotation bound, window size, chain, slow-down, prun
     let removedChecked = 0
     for (const seed of SEEDS.slice(0, 20)) {
       const run = simulate(seed, { cycles: 160, initial: 120, maxAdd: 2, maxRemove: 2, restartP: 0 })
+      const ix = indexTrace(run.trace)
+      run.boundFrom = (s) => boundFromIndexed(run.trace, ix, s)
       assert.deepEqual(run.droppedWhileActive, [])
       for (const [id, r] of run.removedAt) {
         if (r >= run.trace.length) continue
-        const b1 = boundFrom(run.trace, r)
+        const b1 = boundFrom(run.trace, r, run)
         if (!b1 || r + b1.K >= run.trace.length) continue
-        const b2 = boundFrom(run.trace, r + b1.K)
+        const b2 = boundFrom(run.trace, r + b1.K, run)
         if (!b2 || r + b1.K + b2.K >= run.trace.length) continue
         const wasTracked = run.trace.slice(0, r).some((t) => t.reached.has(id))
         if (!wasTracked) continue
