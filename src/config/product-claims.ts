@@ -174,12 +174,13 @@ export const PRIVACY_PROVIDERS_NOTE =
 // while /api/analytics returns each trade whole with only `wallet` shortened (analytics/route.ts:469-472): amountIn, amountOut, volumeUsd
 // (TradeEvent, analytics-types.ts:25-30) stay in the response.
 // [S-13] The last sentence, clause by clause: swap history = /api/history swaps (history/route.ts:86-98, signature only gates the
-// fills, :106-115); terminal orders, signatures included = /api/orders GET for executed|cancelled|expired|failed needs no proof
-// (orders/route.ts:810-827, PUBLIC_ORDER_STATUSES in read-auth.ts) and `select('*')` returns the stored `signature`
-// (insert :740); count by status = /api/orders/stats (no auth, wallet filter :31, buckets :39-57); open orders = 401
-// READ_AUTH_REQUIRED (orders/route.ts:818-825); DCA fills = history/route.ts:106-115.
+// fills, :106-115); terminal orders = /api/orders GET for executed|cancelled|expired|failed needs no proof (orders/route.ts:811-828,
+// PUBLIC_ORDER_STATUSES in read-auth.ts); "without the signature that authorised each order" = every orders read selects the
+// order-read-columns.ts allow-list, which leaves `signature` out with or without a read signature (fix/order-signature-not-returned,
+// owner decision 2026-11-17, pinned by orders-read-no-signature.test.ts); count by status = /api/orders/stats (no auth, wallet
+// filter :33, buckets :41-59); open orders = 401 READ_AUTH_REQUIRED (orders/route.ts:819-826); DCA fills = history/route.ts:106-115.
 export const PRIVACY_PUBLIC_ANALYTICS_NOTE =
-  "The data behind the Analytics tab is public: the tab lists recent swaps and order fills made through the site by all users, each with its token pair, route, time and a link to its transaction on a block explorer. The tab does not display wallet addresses or amounts; the data behind it holds each trade's amounts and dollar value and each address shortened to its first six and last four characters, and every swap or order fill it lists is a public blockchain transaction that shows the wallet behind it. Anyone who knows a wallet address can also request, with no signature from that wallet, the swap history, swap statistics and swap export the site holds for that address, the full records of its executed, cancelled, expired or failed orders (signatures included), and a count of its orders by status; open orders and DCA fills need a signature from that wallet."
+  "The data behind the Analytics tab is public: the tab lists recent swaps and order fills made through the site by all users, each with its token pair, route, time and a link to its transaction on a block explorer. The tab does not display wallet addresses or amounts; the data behind it holds each trade's amounts and dollar value and each address shortened to its first six and last four characters, and every swap or order fill it lists is a public blockchain transaction that shows the wallet behind it. Anyone who knows a wallet address can also request, with no signature from that wallet, the swap history, swap statistics and swap export the site holds for that address, the records of its executed, cancelled, expired or failed orders (without the signature that authorised each order), and a count of its orders by status; open orders and DCA fills need a signature from that wallet."
 export const PRIVACY_BADGE = 'Proxied RPC & quotes'
 
 export const SITE_META_DESCRIPTION =

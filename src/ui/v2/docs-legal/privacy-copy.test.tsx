@@ -114,8 +114,10 @@ describe.each(LEGAL)('Privacy Policy — %s', (_ui, mount) => {
     expect(PRIVACY_PUBLIC_ANALYTICS_NOTE).toContain('shortened to its first six and last four characters')
     // [S-13] What needs no signature and what does: each clause is proved against its route in product-claims.ts.
     expect(PRIVACY_PUBLIC_ANALYTICS_NOTE).toContain(
-      'Anyone who knows a wallet address can also request, with no signature from that wallet, the swap history, swap statistics and swap export the site holds for that address, the full records of its executed, cancelled, expired or failed orders (signatures included), and a count of its orders by status; open orders and DCA fills need a signature from that wallet.',
+      'Anyone who knows a wallet address can also request, with no signature from that wallet, the swap history, swap statistics and swap export the site holds for that address, the records of its executed, cancelled, expired or failed orders (without the signature that authorised each order), and a count of its orders by status; open orders and DCA fills need a signature from that wallet.',
     )
+    // [fix/order-signature-not-returned] No read route returns the order signature any more (orders-read-no-signature.test.ts).
+    expect(PRIVACY_PUBLIC_ANALYTICS_NOTE).not.toMatch(/signatures included/i)
     expect(PRIVACY_PUBLIC_ANALYTICS_NOTE).not.toMatch(/as they appear on-chain/i)
   })
 })
