@@ -5,6 +5,7 @@ Long output: [`chore-audit-gate-green-2026-11.evidence.md`](chore-audit-gate-gre
 ## Owner answers (asked once, 2026-11-17; they supersede the goal text)
 - Path: **time-boxed exception** (not "wait", not "remove Sentry + exception"). This overrides "`git diff` of the allow-list is empty".
 - Form: **`noPatch: true` + `reviewDate: 2026-12-17`**, no `expires`.
+- After verify (asked separately, red verify outside the diff): **push now**, the parity flake recorded here as main's.
 
 ## 1. Step 0 (origin/main `4a4129ef`, Node 22.23.5 / npm 10.9.9, `CI=true`, `npm ci`)
 Both jobs run the identical step (`node scripts/audit-gate.mjs`): **same failure, one cause**, **GHSA-fc5q-39xc-vjpf**
@@ -45,7 +46,7 @@ No package changed (no fixed version exists). `audit-allowlist.json` +1 entry, G
   suite step of the same run, same SHA; known flake (`chore-tooling-leftovers-2026-11.md:41`). **Not rerun** (goal rule);
   outside the diff (the test does not read the allow-list). All other checks PASS; CodeQL 13→13, 0 new.
 - `gen-claude-state.mjs --check`: current. gitleaks on the branch commits: no leaks.
-- `diff --stat origin/main...HEAD`: 3 files, +396 −0 (`audit-allowlist.json` +10, this file, the evidence file). Code head
+- `diff --stat origin/main...HEAD`: 3 files, +397 −0 (`audit-allowlist.json` +10, this file, the evidence file). Code head
   `d54bbc1a`; HEAD is the commit that adds this text. Compare:
   https://github.com/TeraHashAlpha/teraswap/compare/main...chore/audit-gate-green-2026-11
 - Not verified: CI itself (no polling; the owner reads it); the Security Audit daily cron; whether the test flakes on CI.
