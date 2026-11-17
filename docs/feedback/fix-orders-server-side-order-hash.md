@@ -10,7 +10,8 @@ Long output: [`fix-orders-server-side-order-hash.evidence.md`](fix-orders-server
 
 1. **Write paths (E1).** Only the POST insert writes `order_hash`: `src/app/api/orders/route.ts:772`, now
    `serverOrderHash` (computed `:393`), was `body.orderHash`. The others never write it: `[id]/route.ts:145` (cancel
-   status), keeper `executor.js:687/:707/:736/:908` (status, retry, execution fields), `backfill-execution.mjs:282`
+   status; it and its tests `orders-cancel{,.arbitrum-v3-only}.test.ts`, `route.hardening.test.ts:206`,
+   `orders-freeze.test.ts:243` key on id + wallet + chain_id, never `order_hash`; unchanged, all pass), keeper `executor.js:687/:707/:736/:908` (status, retry, execution fields), `backfill-execution.mjs:282`
    (execution fields; it looks rows up BY `order_hash` = the OrderExecuted topic, `:169`). `contracts/order-engine/api/orders.ts:165`
    still stores `body.orderHash` but cannot diverge: a reference file, not under `src/app`, imported nowhere. No SQL writer.
 2. **Hash (E2).** `computeOrderHash` = EIP-712 `hashStruct(Order)` over the route's own `types` + `message` = the

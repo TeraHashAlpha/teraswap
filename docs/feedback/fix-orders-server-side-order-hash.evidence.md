@@ -11,7 +11,7 @@ outside tests, over `src/`, `contracts/order-engine/{api,executor}`, `scripts/`,
 | Path | What it writes | `order_hash`? |
 |---|---|---|
 | `src/app/api/orders/route.ts:754-788` POST insert | the whole row | **was `body.orderHash`; now `serverOrderHash` (:772), computed at :393** |
-| `src/app/api/orders/[id]/route.ts:143-150` PATCH | `status: 'cancelled'` (wallet + active + chain_id gated) | no |
+| `src/app/api/orders/[id]/route.ts:143-150` PATCH | `status: 'cancelled'` (wallet + active + chain_id gated) | no; keyed on `id` |
 | `contracts/order-engine/executor/executor.js:687` `lockOrder` | `status: 'executing'`, `updated_at` | no |
 | `executor.js:707` `updateOrderStatus` | `status`, `updated_at` | no |
 | `executor.js:736` `patchOrderRow` (callers :866, :2070, :2073) | status, retry-state, infra-miss, execution fields | no (no keeper source names `order_hash`) |
@@ -22,6 +22,15 @@ outside tests, over `src/`, `contracts/order-engine/{api,executor}`, `scripts/`,
 
 The keeper never reads `order_hash`: it rebuilds the struct from `order_data` (`executor.js:1571`) and the contract
 recomputes `getOrderHash` itself.
+
+`[id]/route.ts` tests read: `orders-cancel.test.ts` (input ladder, 503, owner-only CancelOrder recovery under the
+per-chain domain, atomic UPDATE gated on id + wallet + `status='active'` + `chain_id`, 404/403/409/cross-chain 400,
+GET wallet scoping), `orders-cancel.arbitrum-v3-only.test.ts` (recovery under `getCancelOrderDomain` on 42161 / 8453 /
+1 / 10, real config), `route.hardening.test.ts:206-237` (GET of a live row needs the read signature) and
+`orders-freeze.test.ts:243-258` (the cancel route never imports the freeze flag). None reads or writes `order_hash`;
+the route keys on the row `id`. Unchanged by this branch, and all four files pass in the 206 pre-existing route tests.
+One consequence stays as the 2026-11-16 audit described: a cancel flips exactly one row by `id`, so an order stored
+twice before this fix (two texts) can have one row cancelled and the other still active; `check-order-hashes` finds such rows.
 
 ## E2. Hash definition and differential
 
