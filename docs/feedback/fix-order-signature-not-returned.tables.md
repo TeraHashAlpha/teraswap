@@ -69,3 +69,110 @@ Mutation proof (detached scratch worktree at the branch head, one mutant at a ti
 
 Known limit: guard layer 2 accepts a non-literal `select(x)` in a file that imports order-read-columns.ts; layer 1
 checks the value such a call sends (M1, M2 are caught there, not by layer 2).
+
+### Failing tests per mutant (pasted from the scratch run, vitest `FAIL` lines, file > describe > test)
+
+**M1-list-select** (25 failed):
+
+```
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 1: random tables and queries, no or invalid read signature
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 7: random tables and queries, no or invalid read signature
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 42: random tables and queries, no or invalid read signature
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 1117: random tables and queries, no or invalid read signature
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 20261117: random tables and queries, no or invalid read signature
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 1: the same, WITH a valid read signature (dropped there too)
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 7: the same, WITH a valid read signature (dropped there too)
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 42: the same, WITH a valid read signature (dropped there too)
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 1117: the same, WITH a valid read signature (dropped there too)
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 20261117: the same, WITH a valid read signature (dropped there too)
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > status=executed without a read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > status=cancelled without a read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > status=expired without a read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > status=failed without a read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > every terminal status at once, without a read signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > by hash with a terminal status filter (the one public by-hash shape), without a read signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > status=active WITH a valid read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > status=executing WITH a valid read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > status=executed WITH a valid read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > status=cancelled WITH a valid read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > status=expired WITH a valid read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > status=failed WITH a valid read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > no status filter and the by-hash poll, WITH a valid read signature: every own order, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > a database without the floor-tier columns (migration not applied): still every row, no signature
+orders-read-select-guard.test.ts > guard, layer 1: the unauthenticated read paths select an explicit orders column list > every orders select of every unauthenticated read path is explicit
+```
+
+**M2-by-id-select** (22 failed):
+
+```
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 1: random tables and queries, no or invalid read signature
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 7: random tables and queries, no or invalid read signature
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 42: random tables and queries, no or invalid read signature
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 1117: random tables and queries, no or invalid read signature
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 20261117: random tables and queries, no or invalid read signature
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 1: the same, WITH a valid read signature (dropped there too)
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 7: the same, WITH a valid read signature (dropped there too)
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 42: the same, WITH a valid read signature (dropped there too)
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 1117: the same, WITH a valid read signature (dropped there too)
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 20261117: the same, WITH a valid read signature (dropped there too)
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a executed order without a read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a cancelled order without a read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a expired order without a read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a failed order without a read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a active order WITH a valid read signature: the row, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a executing order WITH a valid read signature: the row, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a executed order WITH a valid read signature: the row, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a cancelled order WITH a valid read signature: the row, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a expired order WITH a valid read signature: the row, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a failed order WITH a valid read signature: the row, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a database without the floor-tier columns: the row, no signature
+orders-read-select-guard.test.ts > guard, layer 1: the unauthenticated read paths select an explicit orders column list > every orders select of every unauthenticated read path is explicit
+```
+
+**M3-allow-list** (36 failed):
+
+```
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 1: random tables and queries, no or invalid read signature
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 7: random tables and queries, no or invalid read signature
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 42: random tables and queries, no or invalid read signature
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 1117: random tables and queries, no or invalid read signature
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 20261117: random tables and queries, no or invalid read signature
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 1: the same, WITH a valid read signature (dropped there too)
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 7: the same, WITH a valid read signature (dropped there too)
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 42: the same, WITH a valid read signature (dropped there too)
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 1117: the same, WITH a valid read signature (dropped there too)
+orders-read-no-signature.property.test.ts > property: no stored order signature in any read response > seed 20261117: the same, WITH a valid read signature (dropped there too)
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > status=executed without a read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > status=cancelled without a read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > status=expired without a read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > status=failed without a read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > every terminal status at once, without a read signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > by hash with a terminal status filter (the one public by-hash shape), without a read signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > status=active WITH a valid read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > status=executing WITH a valid read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > status=executed WITH a valid read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > status=cancelled WITH a valid read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > status=expired WITH a valid read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > status=failed WITH a valid read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > no status filter and the by-hash poll, WITH a valid read signature: every own order, no signature
+orders-read-no-signature.test.ts > GET /api/orders: no signature in any response > a database without the floor-tier columns (migration not applied): still every row, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a executed order without a read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a cancelled order without a read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a expired order without a read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a failed order without a read signature: the row, allow-listed columns, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a active order WITH a valid read signature: the row, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a executing order WITH a valid read signature: the row, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a executed order WITH a valid read signature: the row, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a cancelled order WITH a valid read signature: the row, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a expired order WITH a valid read signature: the row, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a failed order WITH a valid read signature: the row, no signature
+orders-read-no-signature.test.ts > GET /api/orders/[id]: no signature in any response > a database without the floor-tier columns: the row, no signature
+orders-read-select-guard.test.ts > guard, layer 1: the unauthenticated read paths select an explicit orders column list > every orders select of every unauthenticated read path is explicit
+```
+
+**M4-stats-star** (2 failed):
+
+```
+orders-read-select-guard.test.ts > guard, layer 1: the unauthenticated read paths select an explicit orders column list > every orders select of every unauthenticated read path is explicit
+orders-read-select-guard.test.ts > guard, layer 2: no orders read chain in src/ selects * or signature > src/ has no orders read chain selecting * or signature, and no such embed
+```
