@@ -743,3 +743,44 @@ Failing test names (the same on both Nodes):
 - **S3c**: `the resolver is told which leg is the stable one, and only that leg's bandAdd is used`; `S-3: every price request carries the keeper's chain`
 - **S3d**: `I3: nothing at all for a basket of another chain: no read, no write, no price, no pick (S-3)`; `S-3: a basket of another chain is refused before anything is read or written, at every moment of its life`
 - **S3e**: `S-3: the keeper's chain is required, as a number: missing, text, zero or not an integer refuses the call`
+
+### R2.7 Verify: the EVIDENCE block as printed
+
+`AGENT_VERIFY_OUT=… scripts/agent-verify.sh --keeper --codeql` at `91b5c2bc`, with the two feedback files as the only
+later change (this commit). Exit 0.
+
+```
+=== EVIDENCE ===
+branch: feat/split-dca-coordinator @ 91b5c2bc (base origin/main @ 4a4129ef)
+suite:       PASS 10845 tests passed, 0 failed, 507 files
+lint-delta:  PASS errors +0, warnings +0 (3 changed files; head 0 err/0 warn, base 0 err/0 warn)
+tsc:         PASS 0 errors
+build:       PASS next build ok
+v1v2-parity: PASS 123 tests passed, 0 failed, 11 files
+rpc-budget:  PASS 36 tests passed, 0 failed, 3 files
+codeql:      PASS security-extended: head 13, base 13, new by rule+file+message 0
+keeper:      PASS node20:2051-pass/0-fail/0-cancelled node22:2051-pass/0-fail/0-cancelled
+diff --stat origin/main...HEAD:
+ contracts/order-engine/executor/basket-coordinator.js           |  834 ++++++++++
+ .../order-engine/executor/basket-coordinator.property.test.mjs  |  352 ++++
+ contracts/order-engine/executor/basket-coordinator.test.mjs     | 2315 +++++++++++++++++++++++++++
+ contracts/order-engine/schema.sql                               |  245 +++
+ docs/Prompts/SPEC-BASKET-DCA.md                                 |   12 +-
+ docs/feedback/feat-split-dca-coordinator.evidence.md            |  745 +++++++++
+ docs/feedback/feat-split-dca-coordinator.md                     |  392 +++++
+ supabase/migrations/20261116120000_baskets_split_dca.sql        |  295 ++++
+ 8 files changed, 5189 insertions(+), 1 deletion(-)
+compare: https://github.com/TeraHashAlpha/teraswap/compare/main...feat/split-dca-coordinator
+RESULT: PASS
+=== END EVIDENCE ===
+```
+
+- `node scripts/gen-claude-state.mjs --check`: "CLAUDE.md state block is current" (exit 0); `--counts`: vitest 507 · keeper
+  node:test 55 (the property test is the 55th file) · Foundry 3.
+- `gitleaks detect --log-opts="origin/main..HEAD"` (8.30.1, repo config) at `91b5c2bc`: 11 commits scanned, no leaks;
+  the new property test file alone (`--no-git`): no leaks.
+- `git diff --stat 6023579a..91b5c2bc`: 8 files, 1 244 insertions, 38 deletions (`basket-coordinator.js` 175,
+  `basket-coordinator.property.test.mjs` 352 new, `basket-coordinator.test.mjs` 478, `schema.sql` 15, the migration
+  26, `SPEC-BASKET-DCA.md` 12, the two feedback files 224).
+- Untouched: `executor.js` and every other keeper file, the selection module, the contracts, `src/` (API and UI),
+  `package.json` and the lockfiles; no dependency added; the migration not run.

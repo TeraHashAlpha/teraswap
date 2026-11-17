@@ -387,6 +387,54 @@ fix per finding is the goal's details file (binding); S-5 is a separate API goal
 Checklist:
 - [x] Commit 1 `2ae6d2e6`: S-1, S-2, S-3, each with a test named after it that fails on `6023579a` and passes now
 - [x] Commit 2 `5a26e267`: S-4, S-6, S-7, S-8, S-9, S-10 and the uncovered states; spec copied byte for byte (sha256 pair)
-- [ ] Commit 3: seeded property test (four invariants); mutation proof for the three High
-- [ ] Verify: `scripts/agent-verify.sh --keeper --codeql`; `node scripts/gen-claude-state.mjs --check`; keeper suite on Node 20 and 22
-- [ ] Push `feat/split-dca-coordinator` (fast-forward, no force), compare link, evidence 1-4
+- [x] Commit 3 `91b5c2bc`: seeded property test (four invariants); mutation proof for the three High
+- [x] Verify: `scripts/agent-verify.sh --keeper --codeql` **RESULT: PASS** 8 of 8; `gen-claude-state --check` current; keeper 2051/0/0 on Node 20 and 22
+- [x] Push `feat/split-dca-coordinator` (fast-forward, no force), compare link, evidence 1-4 (this file's commit, on top of `91b5c2bc`)
+
+**1. Per finding** (full table and every test name: evidence R2.1; lines are `basket-coordinator.js`):
+- **S-1 H fixed.** Clock read again after the journal read `:777`, after the prices `:587-588` (deadline check; that
+  reading is `decided_at` `:526`), for the reference row `:800-801`, after the write `:822-825` (`tick_ended`);
+  readings never go back `:751-757`. Seven `S-1: …` tests, all failed on `6023579a`.
+- **S-2 H fixed.** `:162`, `:373`, `:387-396`, at every reading, after the end check `:773`. Three `S-2: …` tests
+  failed before; a fourth (a complete leg is ignored) passes on both, as a guard against over-blocking.
+- **S-3 H fixed.** `:727` required, `:738` refused before any read or write, `:493` the chain in every price request.
+  Three `S-3: …` tests failed before.
+- **S-4 M** `:134-151`, `:681-683`; **S-6 L** `:159`, `:794` (60 s); **S-7 L** `:675-680`, `:753`; **S-9 L** `:335-341`;
+  **S-8 L** migration `:177-193`, `:42-47`, `schema.sql` `:439-455` (text, never run): fixed, one test each, each
+  failed before. **S-10 L** fixed (spec copied; stale lines marked "[superseded by round 2]"). **S-5 M not fixed**:
+  its own API goal.
+
+**2. Decision table**: evidence R2.2 (22 rows, 8 new). States left to others (R2.3): **wiring**: enforce
+`CALL_TIME_LIMITS_MS` (6); keep the clock monotonic between polls (5); alert on more executions than picks (7); list
+every sent pick with no outcome in `inFlight`, never trust `executing` (8); db adapter: plain INSERT returning the
+stored row, reject non-2xx (9), reject a partial journal (10), status write only where `active` (11). **API**: cancel
+the basket and its orders in one transaction (11); server-side order hashes, a leg never stored as an ordinary order (13, S-5).
+
+**3. Tests.** `basket-coordinator.test.mjs` 482 (462 + 20), `basket-coordinator.property.test.mjs` 6; keeper suite
+**2051 / 0 fail / 0 cancelled on Node 20.20.2 and on Node 22.23.5**. Property: seeds 1-300, 300 runs, 11 176 polls,
+887 with a deadline passing mid-call, 0 violations of I1-I4 (on `6023579a`: I1 1 203, I2 3 219, I3 1 789). Mutation:
+17 of 17 killed on both Nodes, same tests; the goal's three: S1a (second clock read removed) by six tests, among them
+`S-1: prices that answer after the tick's time + T / 2 …` and `I2: …` (R2.6), S2a (cancelled leg accepted) by `S-2: a leg with chunks left whose order is
+cancelled, …` and `I1: …`, S3a (chain check dropped) by `S-3: a basket of another chain is refused …` and `I3: …`.
+The engine-vector replay block is byte-identical to `6023579a` (sha256 `d8e9f28f…f9ae`, 205 lines) and green.
+TWO EXISTING TEST EXPECTATIONS CHANGED, BOTH STRICTER, NONE LOOSENED: "THE RESOLVER IS TOLD WHICH LEG IS THE STABLE ONE …"
+NOW EXPECTS THE HINT `{ stable, chainId: 8453 }` (S-3); "EVERY REASON IS NAMED ONCE …" NOW LISTS `tick_ended` AMONG THE
+NON-FAIL-CLOSED REASONS (S-1). Input only, expectations unchanged: two tests gained `chainId` in their deps; the
+fixture's leg orders gained `order_data.expiry` and `w.call` passes `chainId: 8453`.
+
+**4. Verify** (block: evidence R2.7): RESULT PASS 8 of 8 at `91b5c2bc` on `origin/main` `4a4129ef` (suite 10 845 / 0,
+lint +0 / +0, tsc 0, build ok, parity 123, rpc-budget 36, CodeQL 13 = 13, keeper 2051 × 2); `gen-claude-state --check`
+current; gitleaks 11 commits, no leaks. `git diff --stat 6023579a..91b5c2bc`: 8 files, +1 244 / -38. Spec sha256: pack
+`4c32488f57532ba600e09e5920cd3632e83c2d1c2716b20064cd0d2d4ce0dab9` = repo (was `daa33be5…1e0d`). Compare:
+https://github.com/TeraHashAlpha/teraswap/compare/main...feat/split-dca-coordinator. **Auditor required** (Draft PR
+#707, the owner's); no PR action, no CI polled, no database touched.
+
+### Feedback — round 2 (`2ae6d2e6`, `5a26e267`, `91b5c2bc`)
+- **Edge case:** a basket with a dead leg (cancelled with chunks left) is refused every poll until its end, then
+  closed `expired`: closing comes before the leg check, else a basket whose keeper is down past end + 1 h (the signed
+  expiry) would stay `active` forever. Whether the API cancels such a basket at once is the API goal's to decide.
+- **Edge case:** a write that answers in the next tick leaves a row decided in time and returns no pick
+  (`tick_ended`); the property runs reached it 22 times. A leg whose signed expiry comes during the write: the row
+  stays, no pick, `leg_not_executable`.
+- **Concern:** S-7 cannot be closed inside a module with no state: the wiring must clamp its clock (never hand out a
+  reading below the last one), or a 2 s step back decides a missed tick (test `S-7: …` shows it).
