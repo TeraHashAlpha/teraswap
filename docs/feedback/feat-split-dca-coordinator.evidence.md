@@ -614,3 +614,132 @@ keeps nothing, so it cannot tell; a poll at the deadline + 1 s answers `tick_mis
 | 11 | a status write racing an API cancel | WIRING (db adapter): `setBasketStatus` only where `status = 'active'`, `true` only if one row changed; API: cancel the basket and its three orders in one transaction |
 | 12 | a reference row with all prices null | coordinator, row 17: written, final; test `uncovered state 12: …` |
 | 13 | the same signed leg order stored again as an ordinary order | API (S-5, its own goal): compute order hashes on the server and refuse a leg's hash outside `POST /api/baskets`; keeper: recognise a leg from its signed order, not only `basket_id` |
+
+### R2.1 Per finding: the fix, where it is, the tests that failed on `6023579a` and pass now
+
+Lines are `contracts/order-engine/executor/basket-coordinator.js` at the round-2 head unless named. "Failed before" =
+the test run against the coordinator, migration and schema of `6023579a` (R2.4).
+
+| Finding | Status | Fix at | Tests (failed on `6023579a`, pass now) |
+|---|---|---|---|
+| S-1 H clock | FIXED (commit 1) | `:751-757` readings never go back; `:777` after the journal read; `:587-588` after the prices, the deadline check, and that reading is `decided_at` (`:526`); `:800-801` the same for the reference row; `:822-825` after the write, `tick_ended` | the seven `S-1: …` tests |
+| S-2 H leg state | FIXED (commit 1) | `:162` the executable statuses; `:373` the signed expiry; `:387-396` `checkLegsExecutable`, called at every reading (`:774`, `:779`, `:591`, `:804`, `:823`), after the end check (`:773`) | `S-2: a leg with chunks left whose order is cancelled, …`, `S-2: a leg whose signed expiry has come …`, `S-2: a signed expiry that is not a unix time …`; `S-2: a complete leg is not looked at …` passes on both (a guard against over-blocking) |
+| S-3 H chain | FIXED (commit 1) | `:727` `deps.chainId` required; `:738` foreign chain refused before any read or write; `:493` the chain in every price request | the three `S-3: …` tests |
+| S-4 M time limits | FIXED (commit 2) | `:134-151` `CALL_TIME_LIMITS_MS` and its contract; `:681-683` in the JSDoc of `coordinateBasket`; enforced by the wiring | `S-4: every injected call has a stated time limit, …` |
+| S-5 M order hash from the caller | NOT FIXED: its own API goal (goal's Do NOT) | - | - (state 13 in R2.3) |
+| S-6 L reference before t0 | FIXED (commit 2) | `:159` `REFERENCE_CLOCK_SKEW_S = 60`; `:794` | `S-6: no reference row from a first sight more than REFERENCE_CLOCK_SKEW_S before t0; …` |
+| S-7 L clock steps back | FIXED as the details ask (commit 2): documented, tested | `:675-680` the JSDoc of `deps.now`; `:753` within a call | `S-7: the clock must never step back; …` |
+| S-8 L migration | FIXED (commit 2), text only, never run | migration `:177-193` (no index on `orders`, owner step in a comment, `SET lock_timeout = '5s'` / `RESET`), header `:42-47`; `schema.sql` `:439-455` mirrors it | `S-8: no index is built on orders in this file …` |
+| S-9 L signed fields | FIXED as the details ask (commit 2): JSDoc | `:335-341` | `S-9: the contract names the signed fields …` |
+| S-10 L feedback / spec | FIXED (commit 2) | `docs/Prompts/SPEC-BASKET-DCA.md` = pack, byte for byte; stale feedback lines marked "[superseded by round 2]" | no test: `cmp` identical, sha256 pair in the feedback |
+
+### R2.4 The new tests on `6023579a`
+
+A scratch tree of `6023579a` (`git archive 6023579a` of the coordinator, the selection module, the fixtures,
+`executor.js`, `schema.sql` and the migration; `basket-coordinator.js` sha256 `7a74f5da…a0d6`, the same as
+`git show 6023579a:…`), with the round-2 `basket-coordinator.test.mjs` copied in. For the commit-2 run the two names
+`6023579a` does not export (`CALL_TIME_LIMITS_MS`, `REFERENCE_CLOCK_SKEW_S`) are taken from a namespace import, so the
+file loads; no other line differs. `node --test --test-name-pattern="^(S-[0-9]+|uncovered state 12)"`, Node 22.23.5:
+**20 tests, 2 pass, 18 fail.** The first failing assertion of each:
+
+| Test | On `6023579a` |
+|---|---|
+| S-1: prices that answer after the tick's time + T / 2 … | "no pick of tick 1 comes out 60 s into tick 2": a pick `{ leg: 0, kind: 'select', … }` came out |
+| S-1: prices that answer one second before the deadline … | "prices at + 43200 s": 1 row written, expected 0 |
+| S-1: decided_at is the clock read once the prices are in … | `decided_at` `2027-01-17T08:00:01.000Z` (the start), expected `…08:01:40.000Z` |
+| S-1: a journal read that answers after the deadline … | picks returned, expected none |
+| S-1: a pick is returned only while its tick is current … | "tick 1's pick is not executable 5 s into tick 2": a pick came out |
+| S-1: the reference row is written only if … | "no reference row an hour after its deadline": a row written at `1800046800` (t0 + T/2 + 3 600 s) |
+| S-1: readings within one call never go back … | `tick_missed`, expected `clock_invalid` (one reading only) |
+| S-2: a leg with chunks left whose order is cancelled, … | "cancelled: no pick, for leg 1 or any other": a pick came out |
+| S-2: a leg whose signed expiry has come … | at the expiry second: reason `null` with picks, expected a refusal |
+| S-2: a signed expiry that is not a unix time … | reason `null` (accepted), expected `orders_mismatch` |
+| S-2: a complete leg is not looked at … | passes (the guard) |
+| S-3: a basket of another chain is refused … | "keeper of chain 1 @1": `reference_recorded`, a row written by the wrong keeper |
+| S-3: the keeper's chain is required … | "missing": `reference_recorded`, expected `internal_error` |
+| S-3: every price request carries the keeper's chain | the six hints carry no `chainId` (`undefined`) |
+| S-4: every injected call has a stated time limit … | `TypeError`: no `CALL_TIME_LIMITS_MS` |
+| S-6: no reference row from a first sight more than … | no `REFERENCE_CLOCK_SKEW_S` (and a first sight 400 days early writes the reference, the audit's path) |
+| S-7: the clock must never step back; … | no clock rule in the contract |
+| S-8: no index is built on orders in this file … | "a CREATE INDEX on orders among the statements" |
+| S-9: the contract names the signed fields … | "the S-9 paragraph" missing |
+| uncovered state 12: a reference row with all three prices null … | passes: the behaviour was already this; the row and the test pin it |
+
+### R2.5 The seeded property test (commit 3)
+
+`contracts/order-engine/executor/basket-coordinator.property.test.mjs`, 6 tests. Seeds 1 to 300: one random basket per
+seed (cadence daily, every 3 days or weekly; 6 to 12 cycles; `n` from `chooseN` over the four splits; either mode; soft
+or rigid; a stable leg in 30%; in 12% of legs a signed expiry inside the basket's life) and one random life: polls
+clustered at the instants that matter (tick time, `+ T/2 - 1`, `+ T/2`, `+ T/2 + 1`, `T - 1`), a clock that jumps
+forward by 1 s to `T` during 30% of the injected calls, leg orders that turn cancelled / expired / failed / executed /
+executing / active between polls, 8% of polls from a keeper of another chain, 10% with the last picks in flight,
+inserts that fail (8%) or are stored but answer with an error (8%), on a store that does NOT enforce the unique key.
+The oracle spells out the executable statuses and the deadlines from the spec, so a mutant cannot move both.
+
+| | Node 22.23.5 | Node 20.20.2 |
+|---|---|---|
+| runs (seeds 1 … 300) | 300 | 300 |
+| polls | 11 176 | 11 176 |
+| polls in which a deadline passed while an injected call was pending | 887 | 887 |
+| polls that returned picks | 1 690 | 1 690 |
+| I1 / I2 / I3 / I4 violations | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 |
+
+Polls by reason (both Nodes, deterministic): `leg_not_executable` 3 210, `tick_missed` 2 133, picks 1 690,
+`picks_executed` 1 023, `chain_mismatch` 932, `in_flight` 799, `before_first_tick` 323, `slot_not_reached` 289,
+`journal_write_failed` 238, `expired` 160, `tick_idle` 152, `completed` 112, `reference_recorded` 93, `tick_ended` 22.
+A test fails if any of these paths is reached fewer than 10 times (the property is not vacuous).
+
+**The same property test on `6023579a`** (the scratch tree of R2.4): I1 **1 203** violations, I2 **3 219**, I3
+**1 789**; I4 holds (decide-once was already sound). The coverage test fails too: `6023579a` never answers
+`tick_ended`, `leg_not_executable` or `chain_mismatch`.
+
+### R2.6 Mutation proof for the three High (commit 3)
+
+A scratch tree outside the repo with the repo's relative layout (the tests read `../schema.sql` and
+`../../../supabase/migrations/…`); one copy of `basket-coordinator.js` per mutant, every replacement checked to occur
+exactly once; both test files run on each (`basket-coordinator.test.mjs` 482 + `basket-coordinator.property.test.mjs`
+6 = 488 tests). **17 mutants, 17 killed, on Node 22.23.5 and on Node 20.20.2**, each by at least one test named after
+its finding. The goal's three: S1a ("remove the second clock read"), S2a ("accept a cancelled leg"), S3a ("drop the
+chain check").
+
+Baseline (no mutant): 0 of 488 fail on Node 22.23.5, 0 of 488 on Node 20.20.2.
+
+| Mutant | Finding | What it does | Failing tests (Node 22 / Node 20) |
+|---|---|---|---|
+| S1a | S-1 | the second clock read removed: the tick is decided with the reading taken before the prices | 6 / 6 |
+| S1b | S-1 | the second clock read removed for the reference row | 2 / 2 |
+| S1c | S-1 | no clock read after the journal write: picks returned for a tick that ended | 6 / 6 |
+| S1d | S-1 | no clock read after the journal read | 5 / 5 |
+| S1e | S-1 | readings within a call may go back | 2 / 2 |
+| S1f | S-1 | the clock is read once per call (the behaviour of 6023579a) | 12 / 12 |
+| S1g | S-1 | the clock is read again after the prices, but the deadline is not checked: written late | 4 / 4 |
+| S2a | S-2 | a cancelled leg is accepted ('cancelled' among the executable statuses) | 2 / 2 |
+| S2b | S-2 | a leg's status is not checked at all | 2 / 2 |
+| S2c | S-2 | a leg's signed expiry is not checked | 2 / 2 |
+| S2d | S-2 | the expiry second itself is still executable (> instead of >=) | 1 / 1 |
+| S2e | S-2 | the leg check runs at the first reading only, not after the awaits | 2 / 2 |
+| S3a | S-3 | the chain check is dropped | 3 / 3 |
+| S3b | S-3 | deps.chainId is not required | 1 / 1 |
+| S3c | S-3 | the chain is not passed to the price resolver | 2 / 2 |
+| S3d | S-3 | the chain is checked only after the journal read | 2 / 2 |
+| S3e | S-3 | a chain id given as text is accepted (loose compare) | 1 / 1 |
+
+Failing test names (the same on both Nodes):
+
+- **S1a**: `I2: never a row or a pick for a tick past its deadline; decided_at is the clock the row was written at (S-1)`; `S-1: prices that answer after the tick's time + T / 2 end as a missed tick: no row, no pick; the next tick is decided as after a missed one`; `S-1: prices that answer one second before the deadline are in time; at the deadline they are not`; `S-1: decided_at is the clock read once the prices are in, not the clock the poll started with`; `S-2: a leg whose signed expiry has come is refused from its expiry second on, also when it comes during the call`; `S-7: the clock must never step back; within one call a reading that goes back is refused and no pick comes out, between calls the coordinator cannot tell`
+- **S1b**: `I2: never a row or a pick for a tick past its deadline; decided_at is the clock the row was written at (S-1)`; `S-1: the reference row is written only if the clock read once the prices are in is still before t0 + T / 2`
+- **S1c**: `the runs reach every path the invariants are about (the property is not vacuous)`; `I1: never a pick for a leg that cannot execute, and none at all while a leg with chunks left cannot (S-2)`; `I2: never a row or a pick for a tick past its deadline; decided_at is the clock the row was written at (S-1)`; `S-1: a pick is returned only while its tick is current: a write that answers in the next tick returns no pick`; `S-2: a leg whose signed expiry has come is refused from its expiry second on, also when it comes during the call`; `S-7: the clock must never step back; within one call a reading that goes back is refused and no pick comes out, between calls the coordinator cannot tell`
+- **S1d**: `I1: never a pick for a leg that cannot execute, and none at all while a leg with chunks left cannot (S-2)`; `I2: never a row or a pick for a tick past its deadline; decided_at is the clock the row was written at (S-1)`; `S-1: a journal read that answers after the deadline: tick_missed, and no price is resolved`; `S-1: readings within one call never go back: a clock that steps back during the call refuses it, and nothing is written`; `S-7: the clock must never step back; within one call a reading that goes back is refused and no pick comes out, between calls the coordinator cannot tell`
+- **S1e**: `S-1: readings within one call never go back: a clock that steps back during the call refuses it, and nothing is written`; `S-7: the clock must never step back; within one call a reading that goes back is refused and no pick comes out, between calls the coordinator cannot tell`
+- **S1f**: `the runs reach every path the invariants are about (the property is not vacuous)`; `I1: never a pick for a leg that cannot execute, and none at all while a leg with chunks left cannot (S-2)`; `I2: never a row or a pick for a tick past its deadline; decided_at is the clock the row was written at (S-1)`; `S-1: prices that answer after the tick's time + T / 2 end as a missed tick: no row, no pick; the next tick is decided as after a missed one`; `S-1: prices that answer one second before the deadline are in time; at the deadline they are not`; `S-1: decided_at is the clock read once the prices are in, not the clock the poll started with`; `S-1: a journal read that answers after the deadline: tick_missed, and no price is resolved`; `S-1: a pick is returned only while its tick is current: a write that answers in the next tick returns no pick`; `S-1: the reference row is written only if the clock read once the prices are in is still before t0 + T / 2`; `S-1: readings within one call never go back: a clock that steps back during the call refuses it, and nothing is written`; `S-2: a leg whose signed expiry has come is refused from its expiry second on, also when it comes during the call`; `S-7: the clock must never step back; within one call a reading that goes back is refused and no pick comes out, between calls the coordinator cannot tell`
+- **S1g**: `I2: never a row or a pick for a tick past its deadline; decided_at is the clock the row was written at (S-1)`; `S-1: prices that answer after the tick's time + T / 2 end as a missed tick: no row, no pick; the next tick is decided as after a missed one`; `S-1: prices that answer one second before the deadline are in time; at the deadline they are not`; `S-7: the clock must never step back; within one call a reading that goes back is refused and no pick comes out, between calls the coordinator cannot tell`
+- **S2a**: `I1: never a pick for a leg that cannot execute, and none at all while a leg with chunks left cannot (S-2)`; `S-2: a leg with chunks left whose order is cancelled, expired, failed or executed: no decision, no pick for any leg, a reason`
+- **S2b**: `I1: never a pick for a leg that cannot execute, and none at all while a leg with chunks left cannot (S-2)`; `S-2: a leg with chunks left whose order is cancelled, expired, failed or executed: no decision, no pick for any leg, a reason`
+- **S2c**: `I1: never a pick for a leg that cannot execute, and none at all while a leg with chunks left cannot (S-2)`; `S-2: a leg whose signed expiry has come is refused from its expiry second on, also when it comes during the call`
+- **S2d**: `S-2: a leg whose signed expiry has come is refused from its expiry second on, also when it comes during the call`
+- **S2e**: `I1: never a pick for a leg that cannot execute, and none at all while a leg with chunks left cannot (S-2)`; `S-2: a leg whose signed expiry has come is refused from its expiry second on, also when it comes during the call`
+- **S3a**: `the runs reach every path the invariants are about (the property is not vacuous)`; `I3: nothing at all for a basket of another chain: no read, no write, no price, no pick (S-3)`; `S-3: a basket of another chain is refused before anything is read or written, at every moment of its life`
+- **S3b**: `S-3: the keeper's chain is required, as a number: missing, text, zero or not an integer refuses the call`
+- **S3c**: `the resolver is told which leg is the stable one, and only that leg's bandAdd is used`; `S-3: every price request carries the keeper's chain`
+- **S3d**: `I3: nothing at all for a basket of another chain: no read, no write, no price, no pick (S-3)`; `S-3: a basket of another chain is refused before anything is read or written, at every moment of its life`
+- **S3e**: `S-3: the keeper's chain is required, as a number: missing, text, zero or not an integer refuses the call`

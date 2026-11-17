@@ -386,7 +386,7 @@ fix per finding is the goal's details file (binding); S-5 is a separate API goal
 
 Checklist:
 - [x] Commit 1 `2ae6d2e6`: S-1, S-2, S-3, each with a test named after it that fails on `6023579a` and passes now
-- [ ] Commit 2: S-4, S-6, S-7, S-8, S-9, S-10 and the uncovered states; spec copied byte for byte (sha256 pair)
+- [x] Commit 2 `5a26e267`: S-4, S-6, S-7, S-8, S-9, S-10 and the uncovered states; spec copied byte for byte (sha256 pair)
 - [ ] Commit 3: seeded property test (four invariants); mutation proof for the three High
 - [ ] Verify: `scripts/agent-verify.sh --keeper --codeql`; `node scripts/gen-claude-state.mjs --check`; keeper suite on Node 20 and 22
 - [ ] Push `feat/split-dca-coordinator` (fast-forward, no force), compare link, evidence 1-4
