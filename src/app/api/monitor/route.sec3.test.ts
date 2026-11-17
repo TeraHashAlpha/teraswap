@@ -131,3 +131,19 @@ describe('GET /api/monitor over 20,000 invented names (SEC-3)', () => {
     expect(String(emitted[0][3])).toMatch(/SILENT/)
   })
 })
+
+describe('GET /api/monitor over a stored row naming an Object.prototype key (found while testing this branch)', () => {
+  // On origin/main 4a4129ef one such row, written by any POST /api/log-quote, made this run answer 500 for as long as
+  // the row stayed among the newest 2,000 quotes, and "__proto__" also set Object.prototype.quotes = NaN in the
+  // function instance (sourceHealth[src] found Object.prototype / Object instead of a fresh counter).
+  it.each(['__proto__', 'constructor', 'toString', 'hasOwnProperty'])('"%s": 200, counted nowhere, no prototype touched', async (name) => {
+    quoteRows.length = 0
+    quoteRows.push({ sources_queried: [REGISTRY[2], name], sources_responded: [REGISTRY[2]], best_source: REGISTRY[2], response_time_ms: 10 })
+    const res = await run()
+    expect(res.status).toBe(200)
+    const json = await res.json()
+    expect((json.sourceHealth as Array<{ source: string }>).map((s) => s.source)).toEqual([REGISTRY[2]])
+    expect(Object.prototype.hasOwnProperty.call(Object.prototype, 'quotes')).toBe(false)
+    expect(Object.prototype.hasOwnProperty.call(Object, 'quotes')).toBe(false)
+  })
+})
