@@ -5,7 +5,7 @@
  *  - outside it, on a request path, it is handed to Next's `after()`;
  *  - outside any request scope it is left as it was (no throw, no unhandled rejection).
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest'
 
 const afterMock = vi.hoisted(() => vi.fn())
 vi.mock('next/server', async (importActual) => ({
@@ -14,6 +14,18 @@ vi.mock('next/server', async (importActual) => ({
 }))
 
 import { trackAlert, runWithAlertsSettled, ALERT_SETTLE_MAX_MS } from './alert-inflight'
+
+// [fix/flaky-tests-root-cause] `after` is loaded lazily (alert-inflight.ts: `import('next/server')` at module evaluation). Here that
+// import is the factory above loading the real next/server, so on a loaded runner it can still be pending when a test expects a
+// synchronous hand-over (same cause as source-state-machine.alert-handoff.test.ts). Wait for the module's own load, as production
+// does, and prove the hook in place is this file's mock.
+beforeAll(async () => {
+  await vi.dynamicImportSettled()
+  afterMock.mockReset()
+  trackAlert(Promise.resolve())
+  expect(afterMock, 'trackAlert did not reach this file\'s `after` mock synchronously').toHaveBeenCalledTimes(1)
+  afterMock.mockReset()
+})
 
 /** A promise that settles after `ms` of (fake) time. */
 function later(ms: number, settle: 'resolve' | 'reject' = 'resolve'): Promise<void> {

@@ -3,8 +3,17 @@
  * The three places where the state machine raises an alert (kv-store-failure, state transition, probe-infra-failure)
  * each hand the promise to the keep-alive hook instead of leaving it bare. The machine still decides synchronously and
  * never waits for the alert; a failing alert never throws into the caller and never changes a state.
+ *
+ * [fix/flaky-tests-root-cause] alert-inflight.ts loads `after` lazily: its `import('next/server')` starts when the module is
+ * evaluated and finishes later. In a production build that import is a microtask (Turbopack compiles it to
+ * `Promise.resolve().then(() => require(...))`), so the hook is in place before any request can reach a state change. Here it
+ * is this file's mock factory, which loads the real next/server from disk: ~15 ms idle, more on a loaded runner, while the first
+ * test raises its alert ~10 ms after that import starts. Until it finishes, trackAlert hands the alert over on its late path
+ * (alert-inflight.ts handToAfter), i.e. after the synchronous assertions below: CI 2026-11-17 18:28 UTC, `afterMock` 0 calls in
+ * the 5 tests that read it. So the tests first wait for the module's own load to finish, as production does, then prove the hook
+ * in place is THIS file's mock; the last block pins the other order (alert first, hook later) on every alert site.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest'
 
 const kvStore = new Map<string, unknown>()
 const kvSets = new Set<string>()
@@ -36,6 +45,17 @@ vi.mock('next/server', async (importActual) => ({
 }))
 
 import { forceDisable, recordHealthCheck, recordRateLimited, getStatus, beginTick } from './source-state-machine'
+import { trackAlert } from './alert-inflight' // the same instance the state machine imports
+
+beforeAll(async () => {
+  await vi.dynamicImportSettled() // the module's own `import('next/server')` (started at evaluation) has finished
+  afterMock.mockReset()
+  trackAlert(Promise.resolve())
+  // Fails if the keep-alive hook the module under test calls is not this file's mock (still loading, failed, or bound to another
+  // file's `after` by a shared module registry): every hand-over assertion below would then read 0 calls.
+  expect(afterMock, 'trackAlert did not reach this file\'s `after` mock synchronously').toHaveBeenCalledTimes(1)
+  afterMock.mockReset()
+})
 
 /** An alert whose delivery completes when the test says so. */
 function controllable() {
@@ -137,4 +157,57 @@ describe('source-state-machine hands every alert promise to the keep-alive hook'
     expect(emit).toHaveBeenCalledTimes(1)
     expect(afterMock).toHaveBeenCalledTimes(1)
   })
+})
+
+// Kept last: it swaps the `next/server` mock for a gated one and loads fresh module instances.
+describe('the hand-over does not depend on when the keep-alive hook finishes loading', () => {
+  type Machine = typeof import('./source-state-machine')
+  const SITES: Array<[string, (m: Machine) => Promise<void>]> = [
+    ['state transition', (m) => m.forceDisable('openocean', 'operator-disable: test')],
+    ['kv-store-failure', async (m) => { kvFlags.failWrites = true; await m.recordRateLimited('cowswap', 'probe') }],
+    ['probe-infra-failure', async (m) => {
+      for (let i = 1; i <= 10; i++) {
+        m.beginTick()
+        await m.recordHealthCheck('uniswapv3', { ok: false, latencyMs: 0, error: 'probe timeout', kind: 'infra' })
+      }
+    }],
+  ]
+
+  beforeEach(() => {
+    kvStore.clear()
+    kvSets.clear()
+    kvFlags.failWrites = false
+    emit.mockReset().mockResolvedValue(undefined)
+    afterMock.mockReset()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  for (const [site, raise] of SITES) {
+    for (const order of ['hook loaded first', 'alert raised first'] as const) {
+      it(`${site}, ${order}: exactly one hand-over, to this file's hook`, async () => {
+        let release!: () => void
+        const gate = new Promise<void>((resolve) => { release = resolve })
+        vi.resetModules()
+        vi.doMock('next/server', async () => { await gate; return { after: afterMock } })
+        const m = await import('./source-state-machine') // fresh alert-inflight: its hook load now waits on `gate`
+        m.beginTick()
+        if (order === 'hook loaded first') {
+          release()
+          await vi.dynamicImportSettled()
+        }
+        await raise(m)
+        expect(emit).toHaveBeenCalledTimes(1)
+        if (order === 'alert raised first') {
+          expect(afterMock).not.toHaveBeenCalled() // nothing to hand it to yet...
+          release()
+          await vi.dynamicImportSettled() // ...so it is handed over as soon as the hook is there
+        }
+        expect(afterMock).toHaveBeenCalledTimes(1)
+        expect(afterMock.mock.calls[0][0]).toBeInstanceOf(Promise)
+      })
+    }
+  }
 })
