@@ -48,6 +48,13 @@
 //                    reading of the clock.
 //   Chain (S-3)      deps.chainId is the keeper's chain and is required. A basket of another chain is refused before
 //                    anything is read or written, and every price request carries the chain.
+//   Time limits (S-4) every injected call has one (CALL_TIME_LIMITS_MS). The wiring enforces it; a call it timed out
+//                    rejects, and the coordinator answers with the matching reason.
+//   Early sight (S-6) no reference row from a first sight more than REFERENCE_CLOCK_SKEW_S before t0.
+//   Clock (S-7)      the injected clock never steps back. Within a call a reading that goes back is refused; between
+//                    calls nothing is remembered, so that is the wiring's to keep (see deps.now).
+//   Signed fields (S-9) the leg orders are matched on owner, tokenIn, tokenOut and dcaTotal of the signed struct;
+//                    what is not compared, and is the API's to check, is listed at readOrders.
 //
 // What this module does NOT decide: whether a returned pick's order can execute (router, floor, freeze flag, retry
 // ladder, the contract's own dcaInterval): every existing gate of a DCA order still applies to a leg (SPEC §6).
@@ -123,6 +130,33 @@ export const FAIL_CLOSED_REASONS = Object.freeze([
   R.STATUS_WRITE_FAILED,
   R.INTERNAL_ERROR,
 ])
+
+/**
+ * S-4: the time limit of each injected call, in milliseconds. The WIRING enforces them: this module has no timer. A
+ * call that has not answered in time must reject (`AbortSignal.timeout` rejects with a TimeoutError), and the
+ * coordinator then answers with the matching reason, never a stall of the keeper loop:
+ *   readTicks → journal_unreadable, insertTick → journal_write_failed, setBasketStatus → status_write_failed,
+ *   resolvePrice → price_error (one leg; the three run together).
+ * One poll therefore waits at most readTicks + resolvePrice + insertTick = 50 s, against a decision window of T / 2
+ * (12 hours for a daily basket); a poll that overruns its deadline anyway ends as a missed tick (S-1). An insert that
+ * timed out may still have been stored: the next poll reads that row and never decides the tick again.
+ * resolvePrice gets 30 s because one ADR-024 price may wait on several sources (5 s each, CoinGecko up to 20 s,
+ * price-sources.js).
+ */
+export const CALL_TIME_LIMITS_MS = Object.freeze({
+  readTicks: 10_000,
+  insertTick: 10_000,
+  setBasketStatus: 10_000,
+  resolvePrice: 30_000,
+})
+
+/**
+ * S-6: how far before t0 a first sight may still write the reference row, in seconds. t0 is the API server's clock at
+ * creation, so a keeper sees a new basket before t0 only when its own clock is behind the server's, which NTP keeps
+ * under a second. A first sight further back than this is not trusted with the reference: nothing is written, and a
+ * later poll inside [t0 - skew, t0 + T / 2) records it.
+ */
+export const REFERENCE_CLOCK_SKEW_S = 60
 
 /** `orders.status` with which a leg that still has chunks to buy may be decided on and executed (S-2). */
 export const EXECUTABLE_LEG_STATUSES = Object.freeze(["active", "executing"])
@@ -297,7 +331,14 @@ function readBasket(row) {
  * The three order rows, placed by leg through the order hash the basket holds, and matched against the basket:
  * the basket id, the type, the chain, the owner, the token sold, the leg's token and n. Both the row's columns and
  * the signed struct in `order_data` are checked, because the executor builds the transaction from `order_data`.
- * @returns {Array<{ id: string, done: number, status: string }>} by leg index
+ *
+ * S-9, what is NOT compared here, and must be checked by the API when it stores the basket and its three orders
+ * (SPEC §3 and §7): the signed `dcaInterval` (T / 2), `expiry` (§3 item 5; read here only to refuse a leg whose expiry
+ * has come), `orderType` (DCA), `amountIn` (§3 item 1), and every other signed field (minAmountOut, maxSlippageBps,
+ * router, routerDataHash, nonce, condition, targetPrice, priceFeed). Nor is `order_hash` recomputed from the signed
+ * fields: the hash is taken from the row as given, so the API must compute it on the server (finding S-5, an API goal).
+ * The row's own `expiry` column is not read either; the signed one is.
+ * @returns {Array<{ id: string, done: number, status: string, expiry: number }>} by leg index
  */
 function readOrders(basket, rows) {
   const bad = (what) => refuse(R.ORDERS_MISMATCH, what)
@@ -631,8 +672,15 @@ async function writeStatus(basket, status, db, wrote) {
  * @param {object} deps
  * @param {number} deps.chainId the chain this keeper serves, as a number (required). A basket of another chain is
  *   refused before anything is read or written (`chain_mismatch`), and every price request carries it
- * @param {() => number} deps.now unix SECONDS. Read again after every await; the readings of one call must never go
- *   back (one that does refuses the call: `clock_invalid`)
+ * @param {() => number} deps.now unix SECONDS. Read again after every await. It must NEVER step back (S-7), within a
+ *   call or between calls. Within one call a reading that goes back refuses the call (`clock_invalid`). Between calls
+ *   the coordinator remembers nothing, so it cannot tell: a clock that steps back across a tick's time + T / 2 lets a
+ *   later poll decide a tick an earlier poll answered `tick_missed`. The wiring keeps it monotonic (never hand out a
+ *   reading lower than the last one).
+ *
+ * Time limits (S-4): each `deps.db` method and `deps.resolvePrice` is bounded by CALL_TIME_LIMITS_MS, which the
+ * wiring enforces by rejecting a call that has not answered in time; the coordinator turns that rejection into the
+ * matching reason.
  * @param {object} deps.db
  * @param {(basketId: string) => Promise<object[]>} deps.db.readTicks EVERY `basket_ticks` row of the basket; rejects
  *   when the read failed (an empty array means "no row yet")
@@ -741,6 +789,10 @@ export async function coordinateBasket(input, deps) {
       const { referenceDeadline } = timeline
       if (referenceDeadline === null || rows.has(REFERENCE_TICK) || now >= referenceDeadline) {
         return result([], R.BEFORE_FIRST_TICK, "the first tick has not come")
+      }
+      // S-6: a first sight much earlier than t0 is a clock far behind the API's: no reference from it.
+      if (now < basket.t0 - REFERENCE_CLOCK_SKEW_S) {
+        return result([], R.BEFORE_FIRST_TICK, `the first tick has not come; no reference row more than ${REFERENCE_CLOCK_SKEW_S} s before t0`)
       }
       const resolved = await resolvePrices(basket, deps.resolvePrice, chainId)
       // S-1: the reference row is written only if the clock, read again once the prices are in, is still before

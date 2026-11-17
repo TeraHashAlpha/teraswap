@@ -438,14 +438,21 @@ COMMENT ON COLUMN baskets.status IS
 -- ── orders.basket_id ────────────────────────────────────────────────────────────────────────────
 -- A leg order. NULL for every existing order. RESTRICT: nothing deletes a basket (cancel is a
 -- status), and a basket that still has orders must not be deletable by mistake.
+-- The ADD COLUMN takes an ACCESS EXCLUSIVE lock on `orders`, briefly: no rewrite, nothing to
+-- validate. lock_timeout bounds the WAIT for that lock: behind a long transaction the statement
+-- fails after 5 s instead of queueing every keeper and API query on `orders` behind it; re-run it
+-- later. RESET puts the session back as it was.
+-- No index on `orders` is built in this file: a plain CREATE INDEX blocks writes to the table for a
+-- whole scan. OWNER STEP, on the live database, after this migration, as a statement of its own
+-- (CONCURRENTLY cannot run inside a transaction block):
+--     CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_basket_id
+--       ON orders (basket_id) WHERE basket_id IS NOT NULL;
+SET lock_timeout = '5s';
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS basket_id UUID REFERENCES baskets(id) ON DELETE RESTRICT;
-
-CREATE INDEX IF NOT EXISTS idx_orders_basket_id
-  ON orders (basket_id)
-  WHERE basket_id IS NOT NULL;
 
 COMMENT ON COLUMN orders.basket_id IS
   'The basket this order is a leg of (Split DCA, ADR-027). NULL = an ordinary order. A leg order executes only when the journal row of the current tick picked it (SPEC-BASKET-DCA §6).';
+RESET lock_timeout;
 
 -- ── basket_ticks (the decision journal) ─────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS basket_ticks (

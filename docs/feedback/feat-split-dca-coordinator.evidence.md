@@ -74,6 +74,9 @@ No INSERT, UPDATE or DELETE policy on either table: see "Concern" in the feedbac
 
 ## 3 The coordinator's decision table
 
+**[superseded by round 2]** §3.2 below is the table audited at `6023579a`. The table as it stands after the audit
+fixes, with the rows they added, is section R2.2 at the end of this file.
+
 `coordinateBasket({ basket, orders, inFlight }, { now, db, resolvePrice })` in
 `contracts/order-engine/executor/basket-coordinator.js`. One call = one poll of one basket. It never throws.
 
@@ -552,3 +555,62 @@ After it, on the same tree: `node scripts/gen-claude-state.mjs --check` → "CLA
 
 The run for the first push, at `6ecbe7cf` on the same base, printed the same eight PASS lines with
 `keeper: PASS node20:2021-pass/0-fail/0-cancelled node22:2021-pass/0-fail/0-cancelled`.
+
+## R2 Round 2: the fixes for the audit of `6023579a` (2026-11-17)
+
+### R2.2 The extended decision table
+
+`coordinateBasket({ basket, orders, inFlight }, { chainId, now, db, resolvePrice })`. One call = one poll of one
+basket; it never throws. The clock is read at most four times (r1 to r4): r1 at the start, then once after each await
+(the journal read, the price reads, the journal write). A reading lower than the one before it refuses the call
+(`clock_invalid` FC). "Leg check" = row 12, run again at every reading after r1. **New** marks a row round 2 added.
+
+| # | When | Reads | Writes | Picks | `reason` |
+|---|---|---|---|---|---|
+| 1 | `deps.now`, `deps.resolvePrice` or a `deps.db` method missing; **new:** `deps.chainId` not a positive integer; the input not an object | - | - | none | `internal_error` FC |
+| 2 | the basket row is null or undefined | - | - | none | `basket_missing` FC |
+| 3 | a field of the basket row missing or out of range (as before) | - | - | none | `basket_unreadable` FC |
+| 4 | **new (S-3, state 3):** `basket.chain_id` is not `deps.chainId` | - | - | none | `chain_mismatch` FC |
+| 5 | `status` is not `active` | - | - | none | `basket_not_active` |
+| 6 | the order rows do not match (as before); **new:** `order_data.expiry` not a unix time | - | - | none | `orders_mismatch` FC |
+| 7 | `inFlight` unreadable | - | - | none | `in_flight_unreadable` FC |
+| 8 | r1 throws or is not unix seconds | - | - | none | `clock_invalid` FC |
+| 9 | every leg has `dca_executed ≥ n` | - | `baskets.status = completed` | none | `completed` |
+| 10 | r1 `≥ end`, a leg in flight | - | - | none | `in_flight` |
+| 11 | r1 `≥ end` (before the leg check: a basket must still close when its legs' signed expiry, one hour after the end, has passed) | - | `baskets.status = expired` | none | `expired` |
+| 12 | **new (S-2, state 1):** a leg with chunks left (`done < n`) whose order is not `active` or `executing`, or whose signed `expiry ≤` the reading; a complete leg is not looked at | - | - | none, for every leg | `leg_not_executable` FC |
+| 13 | the journal cannot be read, or a row is malformed (as before) | journal | - | none | `journal_unreadable` FC |
+| 14 | **new (S-1):** r2, read after the journal: lower than r1 → `clock_invalid` FC; `≥ end` → rows 10/11; then the leg check | journal | as 10/11 | none | as listed |
+| 15 | the journal holds a tick later than r2's | journal | - | none | `clock_behind_journal` FC |
+| 16 | **new (S-6, state 4):** before the first tick, `'reference'` mode, no reference row, r2 `< t0 - 60 s` (`REFERENCE_CLOCK_SKEW_S`) | journal | - | none | `before_first_tick` |
+| 17 | before the first tick, `'reference'` mode, no reference row, `t0 - 60 ≤` r2 `< t0 + T/2`: the three prices are read; **new (S-1):** r3 `≥ t0 + T/2` → nothing written; then the leg check; the row's `decided_at` is r3. **State 12:** three null prices are written as such, and the row is final | journal, 3 prices | row tick -1 | none | `reference_recorded`; **new:** `tick_missed` |
+| 18 | before the first tick, anything else | journal | - | none | `before_first_tick` |
+| 19 | the current tick (by r2) has a row | journal | - | R2.2b, at r2 | R2.2b |
+| 20 | the current tick has no row and r2 `≥` its time `+ T/2` | journal | - | none | `tick_missed` |
+| 21 | the current tick has no row and a leg is in flight | journal | - | none | `in_flight` |
+| 22 | the current tick has no row: the three prices are read; **new (S-1):** r3 `≥` the tick's time `+ T/2` → nothing written (`tick_missed`); the leg check; decide; write with `decided_at` = r3; **new:** r4 after the write: lower than r3 → `clock_invalid`; the leg check (`leg_not_executable`); r4 no longer in this tick → `tick_ended` (the row stays; its picks are not returned) | journal, 3 prices | row of the current tick | R2.2b, at r4 | R2.2b; **new:** `tick_missed`, `tick_ended` |
+
+R2.2b, the picks of the current tick's row that are executable: unchanged from §3.4, at the last reading.
+
+**State 5 (S-7), the clock stepping back.** Within one call: refused at the reading that goes back (rows 14, 17, 22),
+so no pick comes out of a call in which any reading had put the tick past its deadline. Between calls: the coordinator
+keeps nothing, so it cannot tell; a poll at the deadline + 1 s answers `tick_missed`, and a poll whose clock went back
+2 s then decides that tick. The JSDoc of `deps.now` makes a monotonic clock the wiring's duty; the S-7 test shows both.
+
+### R2.3 The audit's 13 uncovered states: where each now lives
+
+| # | State | Where |
+|---|---|---|
+| 1 | a leg order cancelled, expired or failed while the basket is active | coordinator, row 12 (S-2); tests `S-2: …` |
+| 2 | the clock moving during the call | coordinator, rows 14, 17, 22 (S-1); tests `S-1: …` |
+| 3 | a basket on a chain other than the keeper's | coordinator, row 4 (S-3); tests `S-3: …` |
+| 4 | `now` before t0 by any amount, reference mode | coordinator, row 16 (S-6); test `S-6: …` |
+| 5 | the clock stepping back when no later row exists | coordinator within a call; wiring between calls (S-7); test `S-7: …` |
+| 6 | an injected call that never answers | WIRING: enforce `CALL_TIME_LIMITS_MS` by rejecting (S-4); test `S-4: …` |
+| 7 | more executions on a leg than the tick picked | WIRING: alert, it means a leg ran outside the journal; the coordinator counts the picks as used |
+| 8 | an `executing` row put back to `active` by the 60 s stale unlock while its transaction is pending | WIRING: list every sent pick whose outcome is not in its order row in `inFlight`; never rely on `executing` |
+| 9 | an insert that upserts, or answers without storing | WIRING (db adapter): a plain INSERT with `Prefer: return=representation`, reject on any non-2xx, resolve with the stored row |
+| 10 | a truncated journal read | WIRING (db adapter): read every row of the basket (at most `N + 5`) and reject a partial answer |
+| 11 | a status write racing an API cancel | WIRING (db adapter): `setBasketStatus` only where `status = 'active'`, `true` only if one row changed; API: cancel the basket and its three orders in one transaction |
+| 12 | a reference row with all prices null | coordinator, row 17: written, final; test `uncovered state 12: …` |
+| 13 | the same signed leg order stored again as an ordinary order | API (S-5, its own goal): compute order hashes on the server and refuse a leg's hash outside `POST /api/baskets`; keeper: recognise a leg from its signed order, not only `basket_id` |

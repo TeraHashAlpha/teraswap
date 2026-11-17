@@ -22,9 +22,11 @@ import { existsSync, readFileSync } from "node:fs"
 import { GRACE_TICKS, IDLE_REASONS, LEG_REASONS, chooseN, decideTick } from "./basket-scheduler.js"
 import {
   BASKET_STATUS,
+  CALL_TIME_LIMITS_MS,
   COORDINATOR_REASONS as R,
   FAIL_CLOSED_REASONS,
   FIRST_BUY,
+  REFERENCE_CLOCK_SKEW_S,
   REFERENCE_TICK,
   basketTimeline,
   coordinateBasket,
@@ -1986,6 +1988,133 @@ describe("audit S-3 (H): the coordinator is told its chain", () => {
   })
 })
 
+describe("audit S-4, S-6, S-7, S-9 and the states the decision table did not cover", () => {
+  const source = readFileSync(new URL("./basket-coordinator.js", import.meta.url), "utf8")
+  /** What `AbortSignal.timeout` rejects with; the message carries a URL with a key, as a real one may. */
+  const timedOut = () => new DOMException("The operation was aborted due to timeout https://db.example/rest/v1?apikey=SECRET", "TimeoutError")
+  /** A clock that hands out these readings in turn, then keeps the last one. */
+  const readingsOf = (values) => () => (values.length > 1 ? values.shift() : values[0])
+
+  test("S-4: every injected call has a stated time limit, and a call the wiring timed out is the matching error with a reason", async () => {
+    assert.deepEqual(Object.keys(CALL_TIME_LIMITS_MS).sort(), ["insertTick", "readTicks", "resolvePrice", "setBasketStatus"])
+    assert.ok(Object.isFrozen(CALL_TIME_LIMITS_MS))
+    for (const ms of Object.values(CALL_TIME_LIMITS_MS)) assert.ok(Number.isSafeInteger(ms) && ms > 0, String(ms))
+    const onePoll = CALL_TIME_LIMITS_MS.readTicks + CALL_TIME_LIMITS_MS.resolvePrice + Math.max(CALL_TIME_LIMITS_MS.insertTick, CALL_TIME_LIMITS_MS.setBasketStatus)
+    assert.ok(onePoll * 100 < HALF * 1000, `a whole poll (${onePoll} ms) fits a hundred times in the decision window of a daily basket`)
+    assert.match(source, /Time limits \(S-4\): each `deps\.db` method and `deps\.resolvePrice` is bounded by CALL_TIME_LIMITS_MS/)
+    const cases = [
+      ["readTicks", R.JOURNAL_UNREADABLE, (w) => ({ db: { ...w.store.api, readTicks: async () => { throw timedOut() } } })],
+      ["resolvePrice", R.PRICE_ERROR, (w) => ({ resolvePrice: async (token, hint) => { if (token === LEG_TOKENS[1]) throw timedOut(); return w.resolvePrice(token, hint) } })],
+      ["insertTick", R.JOURNAL_WRITE_FAILED, (w) => ({ db: { ...w.store.api, insertTick: async () => { throw timedOut() } } })],
+    ]
+    for (const [call, reason, deps] of cases) {
+      const w = makeWorld()
+      await w.poll(T0 + 1)
+      const result = await w.call(w.at(0, 1), {}, deps(w))
+      assertFailClosed(result, reason, call)
+      assert.match(result.detail, /\(TimeoutError\)/, call)
+      assert.ok(!/SECRET|apikey|https?:/.test(result.detail), result.detail)
+      assert.equal(w.row(0), undefined, `${call}: nothing decided`)
+      assert.ok((await w.poll(w.at(0, 60))).picks.length > 0, `${call}: the next poll, in time, decides`)
+    }
+    // An insert the database stored but whose answer timed out: the next poll reads that row, never decides again.
+    const lost = makeWorld()
+    await lost.poll(T0 + 1)
+    const stored = async (row) => {
+      await lost.store.api.insertTick(row)
+      throw timedOut()
+    }
+    assertFailClosed(await lost.call(lost.at(0, 1), {}, { db: { ...lost.store.api, insertTick: stored } }), R.JOURNAL_WRITE_FAILED, "lost answer")
+    const calls = lost.calls.length
+    const next = await lost.poll(lost.at(0, 60))
+    assert.deepEqual(next.picks.map((pick) => pick.tick), [0], "the stored row's pick")
+    assert.deepEqual(next.wrote, [])
+    assert.equal(lost.calls.length, calls, "no price is resolved for a tick that has a row")
+    // A status write that timed out.
+    const done = makeWorld({ done: [2, 2, 2] })
+    const status = await done.call(done.at(0, 1), {}, { db: { ...done.store.api, setBasketStatus: async () => { throw timedOut() } } })
+    assertFailClosed(status, R.STATUS_WRITE_FAILED, "setBasketStatus")
+    assert.match(status.detail, /\(TimeoutError\)/)
+  })
+
+  test("S-6: no reference row from a first sight more than REFERENCE_CLOCK_SKEW_S before t0; within the skew it is written", async () => {
+    assert.equal(REFERENCE_CLOCK_SKEW_S, 60)
+    for (const [offset, written] of [[-400 * DAY, false], [-HALF, false], [-REFERENCE_CLOCK_SKEW_S - 1, false], [-REFERENCE_CLOCK_SKEW_S, true], [-1, true], [0, true]]) {
+      const w = makeWorld()
+      const result = await w.poll(T0 + offset)
+      assert.equal(result.reason, written ? R.REFERENCE_RECORDED : R.BEFORE_FIRST_TICK, `first sight at t0 ${offset} s`)
+      assert.equal(result.failClosed, false)
+      assert.equal(w.rows().length, written ? 1 : 0, `first sight at t0 ${offset} s: rows`)
+      assert.equal(w.calls.length, written ? 3 : 0, `first sight at t0 ${offset} s: no price is read for a reference that is not written`)
+    }
+    // Too early, then in time: the later poll records the reference.
+    const w = makeWorld()
+    assert.match((await w.poll(T0 - 3_600)).detail, /60 s before t0/)
+    assert.equal(w.rows().length, 0)
+    assert.equal((await w.poll(T0 + 5)).reason, R.REFERENCE_RECORDED)
+    assert.equal(w.row(REFERENCE_TICK).decided_at, iso(T0 + 5))
+  })
+
+  test("S-7: the clock must never step back; within one call a reading that goes back is refused and no pick comes out, between calls the coordinator cannot tell", async () => {
+    assert.match(source, /It must NEVER step back \(S-7\), within a\s+\*\s+call or between calls/)
+    // Within one call, every way a reading can put tick 1 past its deadline: no pick for tick 1 in that call.
+    const sequences = [
+      ["after the journal read", (w) => [w.at(1, HALF - 1), w.at(1, HALF + 1)], R.TICK_MISSED, 0],
+      ["after the prices", (w) => [w.at(1, HALF - 1), w.at(1, HALF - 1), w.at(1, HALF + 1)], R.TICK_MISSED, 0],
+      ["past, then back after the journal read", (w) => [w.at(1, HALF + 1), w.at(1, HALF - 1)], R.CLOCK_INVALID, 0],
+      ["back after the prices", (w) => [w.at(1, HALF - 1), w.at(1, HALF - 1), w.at(1, HALF - 2)], R.CLOCK_INVALID, 0],
+      ["back after the write", (w) => [w.at(1, HALF - 1), w.at(1, HALF - 1), w.at(1, HALF - 1), w.at(1, HALF - 2)], R.CLOCK_INVALID, 1],
+    ]
+    for (const [name, readings, reason, rows] of sequences) {
+      const w = makeWorld()
+      await w.poll(T0 + 1)
+      const result = await w.call(w.at(1, HALF - 1), {}, { now: readingsOf(readings(w)) })
+      assert.deepEqual(result.picks, [], name)
+      assert.equal(result.reason, reason, `${name}: ${result.detail}`)
+      assert.equal(w.rows().filter((row) => row.tick === 1).length, rows, `${name}: rows of tick 1`)
+    }
+    // Between calls nothing is remembered. WHAT HAPPENS if the wiring's clock steps back 2 s across the deadline: the
+    // tick a poll answered tick_missed is decided by the next poll. The wiring keeps its clock monotonic (deps.now).
+    const w = makeWorld()
+    await w.poll(T0 + 1)
+    assert.equal((await w.poll(w.at(1, HALF + 1))).reason, R.TICK_MISSED)
+    const back = await w.poll(w.at(1, HALF - 1))
+    assert.ok(w.row(1), "decided late, by a clock that stepped back")
+    assert.ok(back.picks.length > 0)
+  })
+
+  test("S-9: the contract names the signed fields the coordinator does not compare, for the API to check; a leg order that differs only there is accepted", async () => {
+    const start = source.indexOf("S-9, what is NOT compared here")
+    assert.ok(start > 0, "the S-9 paragraph")
+    const doc = source.slice(start, source.indexOf("@returns", start))
+    for (const field of ["dcaInterval", "expiry", "orderType", "amountIn", "order_hash"]) assert.ok(doc.includes(field), field)
+    assert.match(doc, /must be checked by the API/)
+    assert.match(doc, /the API must compute it on the server/)
+    // What that means: these differences reach no check here. The API refuses them when it stores the basket.
+    const w = makeWorld()
+    await w.poll(T0 + 1)
+    Object.assign(w.orders[0].order_data, { dcaInterval: "1", amountIn: "999999999999", orderType: "0", minAmountOut: "0" })
+    const result = await w.poll(w.at(0, 1))
+    assert.equal(result.failClosed, false, result.detail)
+    assert.deepEqual(result.picks.map((pick) => pick.orderId), ["order-0"])
+  })
+
+  test("uncovered state 12: a reference row with all three prices null is written and final, and the first tick runs as with no reference", async () => {
+    const w = makeWorld({ prices: { ref: [null, null, null], 0: [101, 95, 99] } })
+    assert.equal((await w.poll(T0 + 1)).reason, R.REFERENCE_RECORDED)
+    assert.deepEqual(LEGS.map((i) => w.row(REFERENCE_TICK)[`leg${i}_price`]), [null, null, null])
+    assert.deepEqual(LEGS.map((i) => w.row(REFERENCE_TICK)[`leg${i}_price_source`]), [null, null, null])
+    w.prices.ref = FLAT
+    assert.equal((await w.poll(T0 + 60)).reason, R.BEFORE_FIRST_TICK, "it is never filled in later")
+    assert.equal(w.rows().length, 1)
+    const first = await w.poll(w.at(0, 1))
+    assert.deepEqual(w.row(0).per_leg.map((leg) => leg.variation), [null, null, null], "no leg has a previous price")
+    assertRowIsDecision(w.row(0), decide(w.basket, 0, [[0, null, null], [0, null, null], [0, null, null]], null, [101, 95, 99]), "tick 0")
+    assert.equal(first.picks[0].leg, 0, "leg 0 first, as after a first sight that came too late")
+    assert.equal(w.row(0).next_state.legs[1].last, 95, "tick 0 gives every leg its last")
+  })
+})
+
 // ------------------------------------------------------------------------------------------------ the module itself
 describe("the module has no clock, network or state of its own", () => {
   const source = readFileSync(new URL("./basket-coordinator.js", import.meta.url), "utf8")
@@ -2161,5 +2290,26 @@ describe("migration 20261116120000_baskets_split_dca.sql (text only: it is never
     const migrationBody = statements(sql.slice(0, sql.indexOf("-- ROLLBACK")))
     assert.equal(from(statements(schema)), from(migrationBody))
     assert.ok(from(migrationBody).length > 4000)
+  })
+
+  test("S-8: no index is built on orders in this file (the CONCURRENTLY form is an owner step), and the ALTER on orders waits at most lock_timeout", () => {
+    assert.ok(!/CREATE INDEX[^;]*\bON orders\b/.test(ddl), "a CREATE INDEX on orders among the statements")
+    assert.match(sql, /-- {5}CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_basket_id\n-- {7}ON orders \(basket_id\) WHERE basket_id IS NOT NULL;/)
+    assert.match(sql, /OWNER STEP/)
+    const lines = ddl.split("\n")
+    const alter = lines.indexOf("ALTER TABLE orders ADD COLUMN IF NOT EXISTS basket_id UUID REFERENCES baskets(id) ON DELETE RESTRICT;")
+    const reset = lines.indexOf("RESET lock_timeout;")
+    assert.ok(alter > 0 && reset > alter)
+    assert.equal(lines[alter - 1], "SET lock_timeout = '5s';")
+    assert.deepEqual(
+      lines.slice(alter - 1, reset + 1).filter((line) => /^[A-Z]/.test(line)),
+      ["SET lock_timeout = '5s';", lines[alter], "COMMENT ON COLUMN orders.basket_id IS", "RESET lock_timeout;"],
+      "only the statements on orders run under it",
+    )
+    assert.equal(ddl.split("lock_timeout").length - 1, 2)
+    // The mirror holds the same statements (the test above compares them), so no index on orders there either.
+    const schema = statements(readFileSync(new URL("../schema.sql", import.meta.url), "utf8"))
+    assert.ok(!/CREATE INDEX[^;]*\bON orders \(basket_id\)/.test(schema))
+    assert.ok(schema.includes("SET lock_timeout = '5s';\nALTER TABLE orders ADD COLUMN IF NOT EXISTS basket_id"))
   })
 })

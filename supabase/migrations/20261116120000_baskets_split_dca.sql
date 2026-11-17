@@ -40,11 +40,10 @@
 --  OPS: apply to the LIVE Supabase DB MANUALLY (CI does NOT run migrations against prod), BEFORE
 --  the keeper and API releases that use it. This file was written and reviewed as text; it was not
 --  run against any database (the goal that produced it forbids touching one). The ADD COLUMN on
---  `orders` takes a brief ACCESS EXCLUSIVE lock; there is nothing to validate (every value is NULL)
---  and no table rewrite. On the live table build the partial index CONCURRENTLY, in a statement of
---  its own (it cannot run inside a transaction block):
---      CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_basket_id
---        ON orders (basket_id) WHERE basket_id IS NOT NULL;
+--  `orders` takes a brief ACCESS EXCLUSIVE lock, its wait bounded by lock_timeout (5 s); there is
+--  nothing to validate (every value is NULL) and no table rewrite. The partial index on
+--  orders.basket_id is NOT built by this file: it is an owner step, CONCURRENTLY, written out at
+--  the orders.basket_id section below (audit of 2026-11-16, S-8).
 --  Mirrored in contracts/order-engine/schema.sql.
 -- ══════════════════════════════════════════════════════════
 
@@ -177,14 +176,21 @@ COMMENT ON COLUMN baskets.status IS
 -- ── orders.basket_id ────────────────────────────────────────────────────────────────────────────
 -- A leg order. NULL for every existing order. RESTRICT: nothing deletes a basket (cancel is a
 -- status), and a basket that still has orders must not be deletable by mistake.
+-- The ADD COLUMN takes an ACCESS EXCLUSIVE lock on `orders`, briefly: no rewrite, nothing to
+-- validate. lock_timeout bounds the WAIT for that lock: behind a long transaction the statement
+-- fails after 5 s instead of queueing every keeper and API query on `orders` behind it; re-run it
+-- later. RESET puts the session back as it was.
+-- No index on `orders` is built in this file: a plain CREATE INDEX blocks writes to the table for a
+-- whole scan. OWNER STEP, on the live database, after this migration, as a statement of its own
+-- (CONCURRENTLY cannot run inside a transaction block):
+--     CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_basket_id
+--       ON orders (basket_id) WHERE basket_id IS NOT NULL;
+SET lock_timeout = '5s';
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS basket_id UUID REFERENCES baskets(id) ON DELETE RESTRICT;
-
-CREATE INDEX IF NOT EXISTS idx_orders_basket_id
-  ON orders (basket_id)
-  WHERE basket_id IS NOT NULL;
 
 COMMENT ON COLUMN orders.basket_id IS
   'The basket this order is a leg of (Split DCA, ADR-027). NULL = an ordinary order. A leg order executes only when the journal row of the current tick picked it (SPEC-BASKET-DCA §6).';
+RESET lock_timeout;
 
 -- ── basket_ticks (the decision journal) ─────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS basket_ticks (
@@ -283,7 +289,7 @@ CREATE POLICY "Users can view ticks of own baskets"
 --   DROP POLICY IF EXISTS "Users can view ticks of own baskets" ON basket_ticks;
 --   DROP POLICY IF EXISTS "Users can view own baskets" ON baskets;
 --   DROP TABLE IF EXISTS basket_ticks;
---   DROP INDEX IF EXISTS idx_orders_basket_id;
+--   DROP INDEX IF EXISTS idx_orders_basket_id;   (if the owner step built it)
 --   ALTER TABLE orders DROP COLUMN IF EXISTS basket_id;
 --   DROP TABLE IF EXISTS baskets;
 --   (Nothing reads these objects until the keeper wiring and the API ship.)

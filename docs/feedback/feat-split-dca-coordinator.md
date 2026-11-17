@@ -54,6 +54,8 @@ A second question, on its own, after the stop check refused the exit on the CONT
 
 For the Architect: the spec's Coordinator rule still reads "a tick whose time passed with no row is never decided
 late"; answer 2 gives it its deadline, "a tick is decided only before its time + T ÷ 2".
+**[superseded by round 2, S-10]** Stale when the audit read it: the pack's spec already had the deadline ("A tick may
+be decided only from its time until its time + `T ÷ 2`"). Round 2 copies that spec over the repo copy, byte for byte.
 
 ## Checklist
 - [x] Commit 1 `28bf0da9`: this file, with the goal's checklist. The copy of the spec and ADR-027 is no longer in it: see §1
@@ -80,6 +82,8 @@ PR #687, and the first commit replaced them and regenerated `CLAUDE.md`'s state 
 hash to the same two values (`git show origin/main:<path> | shasum -a 256`). After the rebase the copy is therefore
 not a change any more, and the first commit holds this file only. The pairs above were re-measured after the rebase:
 pack = repo = main.
+**[superseded by round 2, S-10]** The pack's spec has changed since (the deadline, then the block "Added after the
+audit of 2026-11-16"); round 2 copies it again. The new pair is in the Round 2 section.
 
 ## 2 Schema (commit 2)
 `supabase/migrations/20261116120000_baskets_split_dca.sql`: two new tables, one new nullable column on `orders`, two
@@ -131,6 +135,9 @@ module gets, which picks are executable, what a failure leaves behind) is eviden
 | Fail closed | missing or unreadable basket, mismatched leg order (row and signed `order_data`), unreadable journal, clock not in seconds or behind the journal, resolver error, selection-module error, failed write: no pick, a reason, nothing written |
 | Status | `completed` when every leg has `dca_executed ≥ n` (checked first); `expired` once `now ≥` the end of the last grace tick's window, unless a transaction is still in flight |
 
+**[superseded by round 2]** for "Stable pair" (the hint is now `{ stable, chainId }`, S-3) and "Fail closed" (also a
+foreign chain, S-3, and a leg with chunks left that cannot execute, S-2). The table as it stands now: evidence R2.2.
+
 Where the rules left a choice, as settled by the owner's answers (each is in the decision table and pinned by a test):
 - **"A tick whose time passed … never decided late"**: a tick is decided only before its time `+ T/2` (answer 2). I had
   first built "until the next tick's time", the window in which its picks are executable; that is now a mutant the
@@ -141,7 +148,8 @@ Where the rules left a choice, as settled by the owner's answers (each is in the
 - **"With a recorded reason"**: the reason is in the result of the call, for the caller's log. It is not a journal row
   (evidence §3.5; answer 3).
 - **First sight before `t0`** (a keeper clock a moment behind the server's): the reference is written; the rule gives
-  only the upper bound (answer 3).
+  only the upper bound (answer 3). **[superseded by round 2, S-6]** the spec now gives a lower bound too: not more
+  than `REFERENCE_CLOCK_SKEW_S` (60 s) before `t0`.
 
 ## 4 Tests and mutation proof (commits 4 and 6)
 `contracts/order-engine/executor/basket-coordinator.test.mjs`, node:test, 462 tests in 15 suites (458 at the first
@@ -290,11 +298,15 @@ evidence file as the only uncommitted changes: **RESULT: PASS**, 8 of 8 (the blo
   price, so leg 0 still buys first.
 - **A reference row is final.** A leg with no price at first sight has no reference even if the price is back a poll
   later (the spec foresees a leg with no reference price). First sight a moment BEFORE `t0` (clock skew between the
-  API and the keeper host) writes the reference: the rule only gives the upper bound.
+  API and the keeper host) writes the reference: the rule only gives the upper bound. **[superseded by round 2, S-6]**
+  within 60 s of `t0` only.
 - **A leg order that is cancelled, failed or expired while its basket is active.** The coordinator does not look at an
   order's status beyond `executing`: it keeps deciding, the dead leg stays owed and takes up to two picks per tick that
   cannot execute, the other legs still buy, and the basket ends `expired`, not `completed`. Whether the 8-miss ladder
   may fail one leg of a basket, and what the basket does then, is for the wiring and API goals.
+  **[superseded by round 2, S-2]** Such a leg (chunks left, not `active` or `executing`, or its signed expiry come)
+  now refuses the whole basket for the poll: no decision, no pick, `leg_not_executable`. What the basket does then
+  (cancel it, close it) is still the API's and the wiring's.
 - **An execution outside the journal is not flagged.** If a leg's executed count rises by more than its picks of the
   tick, the picks simply count as used. The wiring could alert on it: it would mean a leg order took the ordinary
   path, which spec §6 forbids.
@@ -356,6 +368,8 @@ evidence file as the only uncommitted changes: **RESULT: PASS**, 8 of 8 (the blo
 - **`resolvePrice` does not exist yet.** Its contract is in the JSDoc: `(token, { stable })` gives `null` /
   `{ price: null }`, or `{ price, source }` and, for the stable leg, `bandAdd`. Whether a single-source price
   (ADR-024 mode `single`) is a usable DECISION price is not something this module decides.
+  **[superseded by round 2, S-3, S-4]** The hint is `{ stable, chainId }`, and each call has a time limit
+  (`CALL_TIME_LIMITS_MS.resolvePrice`, 30 s) that the wiring enforces.
 
 ### Concern
 - **`done` must be true before the coordinator is called.** If the keeper dies between a transaction and the order
@@ -371,7 +385,7 @@ Audit of `6023579a` on `origin/main` `4a4129ef`: blocked 0C/3H (S-1 clock, S-2 l
 fix per finding is the goal's details file (binding); S-5 is a separate API goal. Run in this session on Opus 5.5.
 
 Checklist:
-- [ ] Commit 1: S-1, S-2, S-3, each with a test named after it that fails on `6023579a` and passes now
+- [x] Commit 1 `2ae6d2e6`: S-1, S-2, S-3, each with a test named after it that fails on `6023579a` and passes now
 - [ ] Commit 2: S-4, S-6, S-7, S-8, S-9, S-10 and the uncovered states; spec copied byte for byte (sha256 pair)
 - [ ] Commit 3: seeded property test (four invariants); mutation proof for the three High
 - [ ] Verify: `scripts/agent-verify.sh --keeper --codeql`; `node scripts/gen-claude-state.mjs --check`; keeper suite on Node 20 and 22
