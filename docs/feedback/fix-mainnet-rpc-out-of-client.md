@@ -8,7 +8,8 @@
 - **Guard scope, env checks, fallback names**: no answer came back; not re-asked; the recommended reading was applied:
   server-only = `src/app/api/**` + rpc-env.ts `readServerOnly` (L2 deprecated fallback kept byte-identical); the required
   `NEXT_PUBLIC_RPC_URL` rule removed, `RPC_URL_1` stays a warning; `NEXT_PUBLIC_FALLBACK_RPC_1/_2` dropped.
-- **Verify red outside the diff** (suite: 5 s timeouts under load, on main too; T7): asked before pushing, answer pending.
+- **Verify red outside the diff** (suite: 5 s timeouts under load, on main too; T7): asked before pushing; owner: **"Push now"**,
+  the failures recorded here as load timeouts outside the diff.
 
 ### 1. Step 0 (T1)
 Before (`4a4129ef`): marker in `.next/static/chunks/1_7izng880dte.js`, from `registry.ts:42`; CI bundle test FAIL (2 hits).
