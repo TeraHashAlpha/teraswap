@@ -322,12 +322,17 @@ export function createFakeChain(db, answerFor) {
   return { publicClient, canExecuteCalls }
 }
 
-/** Run `fn` with global fetch → the fake, and console.* captured (returned as `lines`). */
-export async function withFakes(db, fn) {
+/**
+ * Run `fn` with global fetch → the fake, and console.* captured (returned as `lines`). With `nowMs`,
+ * Date.now() answers that instant for the duration of `fn` (a fake clock for the keeper's in-memory timers).
+ */
+export async function withFakes(db, fn, { nowMs = null } = {}) {
   const realFetch = globalThis.fetch
+  const realNow = Date.now
   const real = { log: console.log, warn: console.warn, error: console.error }
   const lines = []
   globalThis.fetch = db.fetch
+  if (nowMs !== null) Date.now = () => nowMs
   console.log = (...a) => lines.push(a.join(" "))
   console.warn = (...a) => lines.push(a.join(" "))
   console.error = (...a) => lines.push(a.join(" "))
@@ -336,6 +341,7 @@ export async function withFakes(db, fn) {
     return { result, lines }
   } finally {
     globalThis.fetch = realFetch
+    Date.now = realNow
     Object.assign(console, real)
   }
 }

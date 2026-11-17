@@ -246,6 +246,18 @@ import {
 // (feed resolution, the viem chain object) — a bad value must exit before any of that, and before
 // any client exists.
 import { parseChainIdEnv } from "./boot-config.js"
+// [SEC-4 / fix/keeper-active-orders-window] The active-orders window rotates over the whole table instead
+// of always reading the 15 oldest rows (pure selection, cursor and slow-down rules; active-window.js).
+import {
+  activeWindowParams,
+  contentRangeTotal,
+  selectActiveWindow,
+  advanceActiveWindow,
+  activeWindowKeepIds,
+  noteCanExecuteAnswer,
+  pruneSlowRows,
+  activeWindowLogLine,
+} from "./active-window.js"
 
 // ---- Configuration -----------------------------------------------------
 // .env.executor is loaded by ./env.js (the FIRST import above), so every read
@@ -358,6 +370,19 @@ const pinnedRouteReverts = new Map()
 // failure-ladder input: a skip leaves the order untouched. Alert at SKIP_ALERT_CYCLES (order-
 // floor.js); cleared the first cycle a price resolves again, and on any successful fill.
 const quorumSkips = new Map()
+// [SEC-4 / fix/keeper-active-orders-window] The rotating active-orders window (active-window.js). In memory
+// only, never persisted: a restart begins at the oldest row.
+//   activeCursor      -- keyset (created_at, id) of the last row the previous cycle reached; null = oldest.
+//   activeRotationIds -- ids fetched since the scan last started from the oldest row; they cover
+//                        [oldest, activeCursor] (advanceActiveWindow) and drive the prune (activeWindowKeepIds).
+//   activeSlowRows    -- orderId -> { streak, lastAt }: consecutive "Insufficient balance/allowance"
+//                        answers; at 3 the row is examined at most once per 10 min. No status, no count, no alert.
+//   lastActiveScan    -- the window fetchActiveOrders built (read by executeCycle right after the fetch).
+let activeCursor = null
+let activeRotationIds = new Set()
+const activeSlowRows = new Map()
+let lastActiveScan = null
+let activeWindowRejectionLogged = false
 
 // [DCA-OBS] Cross-cycle freeze-observability state (in-memory only; never persisted).
 //   seenDcaOrderIds          -- DCA order ids already announced via alertNewDcaPosition.
@@ -663,25 +688,72 @@ async function supabaseFetch(path, options = {}) {
   return res
 }
 
+// [SEC-4] One PostgREST read with `Prefer: count=exact`: rows (none for HEAD) + the Content-Range total.
+async function readActiveRows(path, { head = false } = {}) {
+  const res = await supabaseFetch(path, { method: head ? "HEAD" : "GET", headers: { Prefer: "count=exact" } })
+  if (!res.ok) {
+    let body = ""
+    try { body = await res.text() } catch { /* body is diagnostic only */ }
+    return { ok: false, status: res.status, body, rows: [], total: null }
+  }
+  const rows = head ? [] : await res.json()
+  return { ok: true, status: res.status, body: "", rows: Array.isArray(rows) ? rows : [], total: contentRangeTotal(res.headers.get("content-range")) }
+}
+
 async function fetchActiveOrders() {
   // [CHORE-ORDER-API-CHAIN-AWARE] Scope the active-orders query by the keeper's configured chain so a
   // per-chain keeper only processes its OWN chain's rows. Without this filter a mainnet keeper would
   // pick up Base rows (and vice-versa) and execute them against the wrong OrderExecutor. Relies on the
   // create route persisting chain_id (deployed first); pre-existing rows default to chain_id=1.
-  const query = `orders?status=eq.active&chain_id=eq.${CHAIN_ID}&select=*&order=created_at.asc&limit=${MAX_BATCH * 3}`
-  log(`  Querying: ${SUPABASE_URL}/rest/v1/${query.slice(0, 80)}...`)
-  const res = await supabaseFetch(query)
-  if (!res.ok) {
-    const body = await res.text()
-    console.error(`  Supabase fetch error: ${res.status} -- ${body}`)
-    return []
+  // [SEC-4 / fix/keeper-active-orders-window] Same per-cycle budget (MAX_BATCH * 3 rows), but a WINDOW that
+  // rotates over every active row of the chain: up to 15 rows after the in-memory cursor (keyset on
+  // created_at, id), wrapping to the oldest when that runs short. It used to be the 15 OLDEST rows every
+  // cycle, so 15 rows that could not execute yet hid every newer order (active-window.js has the rules and
+  // the bound). Reads only: the cursor moves in executeCycle, after the loop, so the idle probe (runTick)
+  // can call this freely. Returns the window's rows; the window itself is left in lastActiveScan.
+  const activeOrders = `orders?status=eq.active&chain_id=eq.${CHAIN_ID}` // every read below is chain-scoped
+  const windowSize = MAX_BATCH * 3
+  const nowMs = Date.now()
+  let cursor = activeCursor
+  let fallback = null
+  let tail = await readActiveRows(`${activeOrders}&${activeWindowParams({ cursor, limit: windowSize })}`)
+  if (!tail.ok) {
+    // Owner answer 2026-11-17: if Supabase rejects the window query, use today's exact query (the 15
+    // oldest rows) for this cycle — never worse than before this change. Its detail is logged once per
+    // process; every such cycle says so on its window line (keyset=rejected).
+    fallback = tail.status
+    if (!activeWindowRejectionLogged) {
+      activeWindowRejectionLogged = true
+      console.error(`  Active window query REJECTED (${tail.status}: ${tail.body.slice(0, 160)}) — using the ${windowSize} oldest rows instead for every cycle it fails (logged once per process)`)
+    }
+    cursor = null
+    tail = await readActiveRows(`${activeOrders}&select=*&order=created_at.asc&limit=${MAX_BATCH * 3}`) // today's query, verbatim
+    if (!tail.ok) {
+      console.error(`  Supabase fetch error: ${tail.status} -- ${tail.body}`)
+      lastActiveScan = null
+      return []
+    }
   }
-  const data = await res.json()
-  log(`  Supabase returned ${data.length} row(s)`)
-  if (data.length > 0) {
-    log(`  First order: id=${data[0].id?.slice(0,8)}, status=${data[0].status}, wallet=${data[0].wallet?.slice(0,10)}...`)
+  let head = null
+  let total = cursor === null ? tail.total : null
+  if (cursor !== null && tail.rows.length < windowSize) {
+    // The tail reached the newest row: wrap to the oldest for the rest of this window.
+    const wrap = await readActiveRows(`${activeOrders}&${activeWindowParams({ cursor: null, limit: windowSize - tail.rows.length })}`)
+    if (wrap.ok) {
+      head = wrap.rows
+      total = wrap.total
+    } else {
+      console.error(`  Supabase fetch error (window wrap): ${wrap.status} -- ${wrap.body}`)
+    }
   }
-  return data
+  if (total === null && cursor !== null) {
+    // The window did not wrap, so neither page counted the whole chain: one HEAD for the total.
+    const count = await readActiveRows(`${activeOrders}&select=id&limit=1`, { head: true })
+    total = count.ok ? count.total : null
+  }
+  const scan = selectActiveWindow({ chainId: CHAIN_ID, windowSize, cursor, tail: tail.rows, head, slow: activeSlowRows, nowMs })
+  lastActiveScan = { ...scan, total, fallback }
+  return scan.rows
 }
 
 async function lockOrder(orderId) {
@@ -1403,9 +1475,14 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
 
   // 1. Fetch active orders
   const orders = await fetchActiveOrders()
+  // [SEC-4] The window behind `orders` (cursor, wrap, slowed rows); null when the fetch failed.
+  const scan = lastActiveScan
 
   if (orders.length === 0) {
     log("  No active orders")
+    // [SEC-4] No active row on this chain: the cursor restarts at the oldest (a failed fetch keeps it).
+    if (scan) ({ cursor: activeCursor, rotation: activeRotationIds } = advanceActiveWindow(scan, 0, activeRotationIds))
+    log(`  ${activeWindowLogLine({ active: scan?.total ?? null, window: 0, examined: 0, slowed: 0, wrapped: Boolean(scan), fallback: scan?.fallback })}`)
     // [DCA-OBS] Still close out observability (outflow check) even with no orders.
     // [PERF-KEEPER-IDLE-BACKOFF] …without a second balance read: nothing was sent, so the next
     // cycle's start read closes this window (idle-backoff.js).
@@ -1418,7 +1495,12 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   // [A73b S-9] An order that left the active set (cancelled / filled / failed elsewhere) takes its
   // in-memory infra streak with it — the keeper has no cancel path of its own, so absence from the
   // set just fetched is the signal (an empty set leaves the map alone: see pruneInfraMisses).
-  pruneInfraMisses(orderInfraMisses, orders.map((o) => o.id))
+  // [SEC-4] `orders` is now one window of the table, so absence from it alone is not the signal: an id
+  // keeps its streak until a whole pass of the table has not seen it (activeWindowKeepIds; null ⇒ prune
+  // nothing this cycle). A window that holds the whole table keeps the rule above exactly. The slow-down
+  // map is pruned the same way.
+  pruneInfraMisses(orderInfraMisses, activeWindowKeepIds(scan, orders.map((o) => o.id), activeRotationIds))
+  pruneSlowRows(activeSlowRows, activeWindowKeepIds(scan, orders.map((o) => o.id), activeRotationIds))
 
   // [ADR-026 §3] While the provider rejects our credentials nothing can execute: attempt NOTHING —
   // no lock, no tx, no retry count, no patch. The balance read above and the event watcher keep
@@ -1427,6 +1509,8 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   const pausedState = rpcAuthMonitor ? rpcAuthMonitor.state().paused : null
   if (pausedState) {
     log(`  PAUSED (${pausedState}): ${orders.length} active order(s) NOT attempted — no lock, no tx, no retry count (ADR-026)`)
+    // [SEC-4] Nothing was examined, so the cursor stays where it is.
+    log(`  ${activeWindowLogLine({ active: scan?.total ?? null, window: orders.length, examined: 0, slowed: scan?.slowedIds.size ?? 0, wrapped: false, fallback: scan?.fallback })}`)
     stats.pausedCycles++
     await endCycleObservability(obsCtx, publicClient, ownGasSpentWei, { idle: true })
     return orders.length
@@ -1449,9 +1533,14 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   let executed = 0
   let skipped = 0
   let errors = 0
+  // [SEC-4] Rows of the window the loop got to (the cursor moves past these only) and, of those, the
+  // slowed rows it skipped.
+  let reached = 0
+  let slowedSkips = 0
 
   for (const dbOrder of orders) {
     if (executed >= MAX_BATCH) break
+    reached++
 
     // [ADR-026] Set the moment writeContract returns a hash: the catch below needs to know whether
     // a tx was SENT (receipt unavailable ⇒ infra) or the attempt died before any tx (simulated
@@ -1470,6 +1559,14 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         quorumSkips.delete(dbOrder.id) // [ADR-024] drop the skip streak too (no Map leak)
         clearInfraMisses(orderInfraMisses, dbOrder.id) // [A73b S-9] and the infra streak (no Map leak)
         log(`  Order ${dbOrder.id.slice(0, 8)}... expired (expiry: ${dbOrder.expiry})`)
+        continue
+      }
+
+      // [SEC-4] Slow-down: a row that answered "Insufficient balance" / "Insufficient allowance" 3 times in
+      // a row is examined at most once per 10 minutes (active-window.js). It is skipped here — after the
+      // expiry pre-filter, before any lock or RPC — and the cursor still moves past it. In memory only.
+      if (scan?.slowedIds.has(dbOrder.id)) {
+        slowedSkips++
         continue
       }
 
@@ -1619,6 +1716,8 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         functionName: "canExecute",
         args: [orderStruct, dbOrder.signature],
       })
+      // [SEC-4] Feed the slow-down: balance/allowance answers count up, any other answer clears the row.
+      noteCanExecuteAnswer(activeSlowRows, dbOrder.id, { canExecute: canExec, reason, nowMs: Date.now() })
 
       if (!canExec) {
         log(`  Order ${dbOrder.id.slice(0, 8)}... -- ${reason}`)
@@ -2212,6 +2311,11 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
     }
   }
 
+  // [SEC-4] Move the cursor past the rows this cycle reached — all of them, unless MAX_BATCH executions or a
+  // gas SKIP stopped the loop early, in which case the rows it did not reach lead the next window.
+  const moved = advanceActiveWindow(scan, reached, activeRotationIds)
+  if (scan) ({ cursor: activeCursor, rotation: activeRotationIds } = moved)
+
   // Update stats
   stats.totalCycles++
   stats.totalExecuted += executed
@@ -2231,6 +2335,8 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   const sourceLine = await quoteCtx.summaryLine()
   if (sourceLine) log(`  ${sourceLine}`)
 
+  // [SEC-4] ONE window line per cycle: active rows on the chain, rows examined, cursor wrap. Counts only.
+  log(`  ${activeWindowLogLine({ active: scan?.total ?? null, window: orders.length, examined: reached - slowedSkips, slowed: slowedSkips, wrapped: moved.wrapped, fallback: scan?.fallback })}`)
   log(`  Cycle done: ${executed} executed, ${skipped} skipped`)
   // [PERF-KEEPER-IDLE-BACKOFF] The count drives the loop's idle/active mode (main's runTick).
   return orders.length
