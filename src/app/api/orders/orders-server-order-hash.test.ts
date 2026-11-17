@@ -152,6 +152,8 @@ async function post(body: unknown) {
 const WRONG_A = `0x${'ab'.repeat(32)}`
 const WRONG_B = `0x${'cd'.repeat(32)}`
 let warn: ReturnType<typeof vi.spyOn>
+// "No test calls a public RPC": any fetch from the route under test fails the test (afterEach).
+const network = vi.fn(async (input: unknown) => { throw new Error(`network access in a unit test: ${String(input)}`) })
 
 /** The mismatch lines the route logged, parsed. */
 function mismatchLines(): Record<string, unknown>[] {
@@ -167,10 +169,14 @@ beforeEach(() => {
   vi.stubEnv('SUPABASE_URL', 'https://fake.supabase.co')
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'fake-service-role-key')
   warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  network.mockClear()
+  vi.stubGlobal('fetch', network)
 })
 afterEach(() => {
   vi.useRealTimers()
   warn.mockRestore()
+  vi.unstubAllGlobals()
+  expect(network).not.toHaveBeenCalled()
 })
 afterAll(() => {
   vi.unstubAllEnvs()
