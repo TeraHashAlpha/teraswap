@@ -7,7 +7,7 @@
  * (same-origin fetch) so the Set-Cookie lands in that browser.
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { bodySizeGuard } from '@/lib/body-limit'
+import { bodySizeGuard, bodyTooLargeFrom } from '@/lib/body-limit'
 import { verifyBearerToken } from '@/lib/auth'
 import { UI_COOKIE_MAX_AGE_S, UI_COOKIE_NAME, signUiVersionCookie } from '@/ui/v2/ui-cookie'
 
@@ -41,8 +41,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let body: { version?: unknown }
   try {
     body = await req.json()
-  } catch {
-    return NextResponse.json({ error: 'invalid JSON body' }, { status: 400 })
+  } catch (err) {
+    // [SEC-8] A read past the cap bodySizeGuard put on the request: 413, as for a declared over-cap body.
+    return bodyTooLargeFrom(err) ?? NextResponse.json({ error: 'invalid JSON body' }, { status: 400 })
   }
   if (body.version !== 'v1' && body.version !== 'v2') {
     return NextResponse.json({ error: "version must be 'v1' or 'v2'" }, { status: 400 })

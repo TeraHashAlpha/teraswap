@@ -5,7 +5,7 @@ import { getSupabaseLogger } from '@/lib/supabase'
 import { trackQuoteFailure } from '@/lib/security-tracker'
 import { trackWalletAction } from '@/lib/wallet-activity-server'
 import { checkRateLimitWithin, LOG_RATE_LIMIT } from '@/lib/kv-rate-limiter'
-import { bodySizeGuard, clientIp } from '@/lib/body-limit'
+import { bodySizeGuard, bodyTooLargeFrom, clientIp } from '@/lib/body-limit'
 import { boundLogQuoteBody } from '@/lib/log-quote-input'
 
 /**
@@ -104,6 +104,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true })
   } catch (err) {
+    // [SEC-8] A read past the cap bodySizeGuard put on the request: 413, as for a declared over-cap body.
+    const tooLarge = bodyTooLargeFrom(err)
+    if (tooLarge) return tooLarge
     console.error('[log-quote] Error:', err)
     return NextResponse.json({ ok: true }) // Never fail
   }

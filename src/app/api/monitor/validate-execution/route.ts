@@ -25,7 +25,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { bodySizeGuard } from '@/lib/body-limit'
+import { bodySizeGuard, bodyTooLargeFrom } from '@/lib/body-limit'
 import { verifyBearerToken } from '@/lib/auth'
 import { validateExecution, type ValidateExecutionParams, type ExecutionValidation } from '@/lib/post-execution-validator'
 import { getSupabase } from '@/lib/supabase'
@@ -138,7 +138,10 @@ export async function POST(
   let body: unknown
   try {
     body = await req.json()
-  } catch {
+  } catch (err) {
+    // [SEC-8] A read past the cap bodySizeGuard put on the request: 413, as for a declared over-cap body.
+    const tooLarge = bodyTooLargeFrom(err)
+    if (tooLarge) return tooLarge as NextResponse<{ error: string }>
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 

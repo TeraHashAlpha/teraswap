@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { getSupabaseLogger } from '@/lib/supabase'
 import { getAllowedOrigin } from '@/lib/cors'
 import { checkRateLimitWithin, LOG_RATE_LIMIT } from '@/lib/kv-rate-limiter'
-import { bodySizeGuard, clientIp } from '@/lib/body-limit'
+import { bodySizeGuard, bodyTooLargeFrom, clientIp } from '@/lib/body-limit'
 
 // CORS — restricted to teraswap.app, Vercel previews, and localhost (EXT-L-01).
 function corsHeaders(request: Request) {
@@ -107,7 +107,8 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ ok: true, count: rows.length }, { headers })
-  } catch {
-    return NextResponse.json({ ok: true }, { headers })
+  } catch (err) {
+    // [SEC-8] A read past the cap bodySizeGuard put on the request: 413, as for a declared over-cap body.
+    return bodyTooLargeFrom(err, headers) ?? NextResponse.json({ ok: true }, { headers })
   }
 }

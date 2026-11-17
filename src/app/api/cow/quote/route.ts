@@ -1,5 +1,5 @@
 import type { NextRequest } from 'next/server'
-import { bodySizeGuard } from '@/lib/body-limit'
+import { bodySizeGuard, bodyTooLargeFrom } from '@/lib/body-limit'
 import {
   buildPriceQuoteBody,
   COW_PROXY_MAX_BODY_BYTES,
@@ -33,7 +33,8 @@ export async function POST(req: NextRequest) {
     const picked = pickPriceQuoteParams(await readRequestJson(req))
     if (!picked.ok) return cowBadRequest(picked.error)
     return cowJson(await relayToCow({ chainId, method: 'POST', path: '/quote', body: buildPriceQuoteBody(picked.value) }))
-  } catch {
-    return cowInternalError()
+  } catch (err) {
+    // [SEC-8] A read past the cap bodySizeGuard put on the request: 413, as for a declared over-cap body.
+    return bodyTooLargeFrom(err) ?? cowInternalError()
   }
 }
