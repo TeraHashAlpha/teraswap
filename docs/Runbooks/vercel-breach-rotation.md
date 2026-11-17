@@ -164,10 +164,12 @@ Não são secrets per se (são IDs numéricos), mas devem ser marcados como sens
 
 1. Vai ao teu provider (Alchemy / Infura / outro):
    - Cria novas API keys
-   - Actualiza `NEXT_PUBLIC_RPC_URL`, `NEXT_PUBLIC_FALLBACK_RPC_1`, `NEXT_PUBLIC_FALLBACK_RPC_2`
+   - Actualiza os nomes server-only `RPC_URL_1`, `RPC_URL_8453`, `RPC_URL_42161` (e `RPC_URL`, se ainda existir)
+   - [SEC-5, fix/mainnet-rpc-out-of-client] `NEXT_PUBLIC_RPC_URL`, `NEXT_PUBLIC_FALLBACK_RPC_1` e
+     `NEXT_PUBLIC_FALLBACK_RPC_2` já não são lidos por nenhum código: não os recries, apaga-os. Ver `docs/Runbooks/ENV-RPC.md`.
 2. Apaga as keys antigas no provider após confirmar que as novas funcionam
 
-- [ ] RPC URLs rotacionados (3 keys)
+- [ ] RPC URLs rotacionados (os nomes `RPC_URL_<id>`)
 
 ### 2.5 SUPABASE_URL
 
