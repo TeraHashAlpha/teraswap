@@ -217,8 +217,10 @@ export const truncatedMarker = (n) => `${TRUNCATED} ${n} chars]`
 const UNPRINTABLE = "[unprintable error]"
 // viem's own diagnostic lines, kept from a multi-line message (owner answer 1, 2026-11-18): where the call went,
 // what the transport answered, what the node said (`Details: … not on whitelist` is the INC-2026-10-30-001 auth
-// signal). Every other line of the message is dropped.
-const KEPT_LINE = /[ \t]{0,8}(?:URL|Status|Details):/y
+// signal). [A92 S-3] And from viem's Contract Call block, which contract and which function: the `address:` line,
+// and the `function:` line cut at its parenthesis (the name, never the parameter list). The block's `args:` line (the
+// order and its signature) and `sender:` line are not kept. Every other line of the message is dropped.
+const KEPT_LINE = /[ \t]{0,8}(URL|Status|Details|address|function):/y
 const MAX_KEPT_LINES = 8
 // The blocks the scrub removes from whatever text remains (a string handed in, a first line, a kept line): an
 // `args:` or `data:` line, and a `Request Arguments:` / `Raw Call Arguments:` header with its indented lines.
@@ -324,12 +326,18 @@ function composeErrorText(err) {
     if (r && !first.includes(r)) first = `${first} — reason: ${r}`
   }
   const lines = [first]
-  // viem's diagnostic lines, in the message's order; a sticky test at each line start (no copy of other lines).
+  // viem's diagnostic lines, in the message's order; a sticky match at each line start (no copy of other lines).
   for (let i = nl; i !== -1 && lines.length <= MAX_KEPT_LINES; i = message.indexOf("\n", i + 1)) {
     KEPT_LINE.lastIndex = i + 1
-    if (!KEPT_LINE.test(message)) continue
+    const key = KEPT_LINE.exec(message)
+    if (key === null) continue
     const end = message.indexOf("\n", i + 1)
-    lines.push(oneLine(message.slice(i + 1, end === -1 ? message.length : end), LINE_MAX))
+    let line = message.slice(i + 1, end === -1 ? message.length : end)
+    if (key[1] === "function") {
+      const paren = line.indexOf("(")
+      if (paren !== -1) line = line.slice(0, paren)
+    }
+    lines.push(oneLine(line, LINE_MAX))
   }
   return lines.join("\n")
 }
@@ -370,7 +378,8 @@ function capText(s, max, alreadyCut = 0) {
  *   1. `Name: shortMessage` (else the first line of `message`; a string is taken as it is; no prefix for a plain
  *      `Error`), then ` — reason: …` with
  *      the decoded revert reason when the error carries one (viem's Error(string)/Panic text or custom error name,
- *      or the executor's SwapFailed inner reason), then viem's `URL:`, `Status:` and `Details:` lines;
+ *      or the executor's SwapFailed inner reason), then viem's `URL:`, `Status:` and `Details:` lines and [A92 S-3]
+ *      its Contract Call `address:` line and `function:` name (cut at the parenthesis), in the message's order;
  *   2. every URL redaction (redactUrl);
  *   3. the scrub: `args:` / `data:` lines and Request / Raw Call Arguments blocks removed, any run of 130+ hex
  *      digits replaced by `<hex N>`;

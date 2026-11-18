@@ -67,7 +67,7 @@ export class ExecutorMonitor {
     if (this.consecutiveErrors >= CONSECUTIVE_ERROR_THRESHOLD) {
       this._sendCooldownAlert(
         "consecutive_errors",
-        `⚠️ ${this.consecutiveErrors} consecutive errors!\nLast error: ${esc(redactError(this.stats.lastError?.message || "unknown"))}`
+        `⚠️ ${this.consecutiveErrors} consecutive errors!\nLast error${orderTag(this.stats.lastError?.orderId)}: ${esc(redactError(this.stats.lastError?.message || "unknown"))}`
       )
     }
 
@@ -260,4 +260,16 @@ export class ExecutorMonitor {
     this.alertCooldown.set(type, now)
     sendTelegramAlert(capAlertText(message, MONITOR_ALERT_MAX))
   }
+}
+
+/**
+ * [A92 S-3, owner answer 4] Which order the "Last error" alert is about: ` (order 0b3c9e1a…)`, the first 8 characters
+ * of the id executor.js stores in stats.lastError (a database UUID, the same prefix its log lines print), or nothing
+ * when there is none. Escaped like every other value in the alert's HTML. Declared down here so the alert lines keep
+ * the numbers the tests cite (monitor.js:70, :126).
+ * @param {unknown} orderId
+ */
+function orderTag(orderId) {
+  if (typeof orderId !== "string" || orderId === "") return ""
+  return ` (order ${esc(orderId.slice(0, 8))}…)`
 }

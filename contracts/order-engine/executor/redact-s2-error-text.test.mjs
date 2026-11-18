@@ -1,8 +1,9 @@
 // [fix/keeper-errors-no-signature] A87 S-2 — what redactError keeps and what it drops (redact.js).
 //
 // Kept (owner answer 1, 2026-11-18): `Name: shortMessage` (else the first line of `message`), the decoded revert
-// reason, viem's own `URL:` / `Status:` / `Details:` lines. Dropped: everything else in the message (Contract Call
-// with `args:`, Raw Call / Request Arguments with `data:`, Request body, Docs, Version). Then URL redaction, the
+// reason, viem's own `URL:` / `Status:` / `Details:` lines; [A92 S-3, round 2] and the Contract Call block's `address:`
+// line and `function:` name. Dropped: everything else in the message (the Contract Call's `args:` and `sender:`,
+// Raw Call / Request Arguments with `data:`, Request body, Docs, Version). Then URL redaction, the
 // args/data/Arguments-block and 130+ hex scrub, and the 600-character cap with a visible marker. Never throws.
 //
 // The viem errors are REAL (viem-wrapped-errors.fixture.mjs: viem's own clients against a local JSON-RPC stub, or
@@ -38,12 +39,12 @@ const clean = (out) => !out.toLowerCase().includes(SIG_HEX) && !HEX_RUN_130.test
 describe("what an operator needs stays: error class, short reason, revert reason, URL host, status, details", () => {
   test("a revert with a reason string: class + the reason, nothing of the call", async () => {
     const out = redactError(await read({ rpc: { code: 3, message: "execution reverted: not ready", data: revertStringData("not ready") } }))
-    assert.equal(out, 'ContractFunctionExecutionError: The contract function "canExecute" reverted with the following reason: not ready\nDetails: execution reverted: not ready')
+    assert.equal(out, 'ContractFunctionExecutionError: The contract function "canExecute" reverted with the following reason: not ready\naddress:   0x000000000000000000000000000000000000beef\nfunction:  canExecute\nDetails: execution reverted: not ready')
   })
 
   test("a custom-error revert: the decoded error name is appended", async () => {
     const out = redactError(await write({ rpc: { code: 3, message: "execution reverted", data: INSUFFICIENT_OUTPUT_DATA } }))
-    assert.match(out, /^ContractFunctionExecutionError: .*executeOrder.* — reason: InsufficientOutput\nDetails: execution reverted$/)
+    assert.match(out, /^ContractFunctionExecutionError: .*executeOrder.* — reason: InsufficientOutput\naddress: {3}0x0{36}beef\nfunction: {2}executeOrder\nDetails: execution reverted$/)
     assert.ok(clean(out), out)
   })
 
@@ -58,13 +59,13 @@ describe("what an operator needs stays: error class, short reason, revert reason
     const err = await write({ http: 503, body: "Service Unavailable" })
     assert.ok(err.message.includes("Request body:"), "fixture sanity")
     const out = redactError(err)
-    assert.match(out, /^ContractFunctionExecutionError: HTTP request failed\.\nStatus: 503\nURL: http:\/\/127\.0\.0\.1:\d+\/\nDetails: "Service Unavailable"$/)
+    assert.match(out, /^ContractFunctionExecutionError: HTTP request failed\.\nStatus: 503\nURL: http:\/\/127\.0\.0\.1:\d+\/\naddress: {3}0x0{36}beef\nfunction: {2}executeOrder\nDetails: "Service Unavailable"$/)
     assert.ok(clean(out), out)
   })
 
   test("a timeout: the short message, the URL and viem's Details", async () => {
     const out = redactError(await read({ hang: true }))
-    assert.match(out, /^ContractFunctionExecutionError: The request took too long to respond\.\nURL: http:\/\/127\.0\.0\.1:\d+\/\nDetails: The request timed out\.$/)
+    assert.match(out, /^ContractFunctionExecutionError: The request took too long to respond\.\nURL: http:\/\/127\.0\.0\.1:\d+\/\naddress: {3}0x0{36}beef\nfunction: {2}canExecute\nDetails: The request timed out\.$/)
   })
 
   test("a keyed URL keeps its host; the key is gone", () => {

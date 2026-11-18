@@ -233,7 +233,20 @@ export function redactUrls(text) {
   return out.replace(HEX_SECRET, "<redacted-secret>")
 }
 
-const errText = (err) => redactUrls((err && err.shortMessage) || (err && err.message) || String(err))
+/**
+ * [A92 S-2] ONE line. viem's short message for a revert is two lines ("…reverted with the following reason:" then the
+ * reason), and executor.js prints a refusal through redactError, which keeps the first line of a message: the reason
+ * was lost at boot. Every line break (`\n`, `\r\n`, a lone `\r`) and the whitespace around it becomes one space. A split
+ * and a trim per line, not a `\s*\n\s*` pattern: that backtracks over a long run of spaces with no newline in it.
+ */
+const flatten = (s) =>
+  s
+    .split(/\r\n?|\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .join(" ")
+
+const errText = (err) => flatten(redactUrls((err && err.shortMessage) || (err && err.message) || String(err)))
 
 /**
  * Render an unexpected RPC answer for an error message. Deliberately NOT bare JSON.stringify:
