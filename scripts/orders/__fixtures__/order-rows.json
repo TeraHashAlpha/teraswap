@@ -20,7 +20,8 @@
       "routerDataHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
       "dcaInterval": "3600",
       "dcaTotal": "3"
-    }
+    },
+    "signature": "0xe1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e111111111111111111111111111111111111111111111111111111111111111111b"
   },
   {
     "id": "v3-dca-upper-case",
@@ -43,7 +44,8 @@
       "routerDataHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
       "dcaInterval": "3600",
       "dcaTotal": "365"
-    }
+    },
+    "signature": "0xe2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e212121212121212121212121212121212121212121212121212121212121212121b"
   },
   {
     "id": "v2-limit-match",
@@ -65,7 +67,8 @@
       "routerDataHash": "0x1212121212121212121212121212121212121212121212121212121212121212",
       "dcaInterval": "0",
       "dcaTotal": "1"
-    }
+    },
+    "signature": "0xe3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e313131313131313131313131313131313131313131313131313131313131313131b"
   },
   {
     "id": "v3-caller-text",
@@ -88,7 +91,8 @@
       "routerDataHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
       "dcaInterval": "3600",
       "dcaTotal": "3"
-    }
+    },
+    "signature": "0xe4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e414141414141414141414141414141414141414141414141414141414141414141b"
   },
   {
     "id": "v3-hash-of-another-order",
@@ -111,7 +115,8 @@
       "routerDataHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
       "dcaInterval": "3600",
       "dcaTotal": "3"
-    }
+    },
+    "signature": "0xe5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e515151515151515151515151515151515151515151515151515151515151515151b"
   },
   {
     "id": "legacy-uuid-hash",
@@ -134,13 +139,15 @@
       "routerDataHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
       "dcaInterval": "3600",
       "dcaTotal": "1"
-    }
+    },
+    "signature": "0xe6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e616161616161616161616161616161616161616161616161616161616161616161b"
   },
   {
     "id": "no-order-data",
     "chain_id": 8453,
     "order_hash": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
-    "order_data": null
+    "order_data": null,
+    "signature": "0xe7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e717171717171717171717171717171717171717171717171717171717171717171b"
   },
   {
     "id": "order-data-missing-nonce",
@@ -162,6 +169,7 @@
       "routerDataHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
       "dcaInterval": "3600",
       "dcaTotal": "3"
-    }
+    },
+    "signature": "0xe8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e818181818181818181818181818181818181818181818181818181818181818181b"
   }
 ]
