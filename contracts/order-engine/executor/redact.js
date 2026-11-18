@@ -5,7 +5,8 @@
  * the full keyed RPC URL to Telegram.
  *
  * redactUrl(text)  — every URL keeps scheme + host[:port] (the operator still sees WHICH provider)
- *                    and loses userinfo, path, query and fragment: `https://host/REDACTED`.
+ *                    and loses userinfo, path, query and fragment: `https://host/REDACTED`; a `0x` hex run of
+ *                    130+ digits (a signature, calldata, a raw transaction) becomes `0x<hex N>`.
  * redactError(err) — [fix/keeper-errors-no-signature, A87 S-2] a SHORT text built from the error's fields, never its
  *                    whole `message`: viem's message for a contract call prints the call's `args:` — the order's
  *                    EIP-712 signature — and its request `data:`. See redactError below for what it keeps.
@@ -188,7 +189,11 @@ export function redactUrl(text, { allowHosts = [] } = {}) {
     return `${scheme}://${authority}${REDACTED}`
   })
   // After the URL pass, so a scheme URL's own userinfo (already gone) is never this one's business.
-  return stripBareUserinfo(redacted)
+  // [fix/keeper-errors-no-signature] Then a `0x` hex run of 130+ digits: executor.js logs a fatal error as
+  // redactUrl(err.stack), and a viem stack repeats the whole message (the order signature in `args:`); every
+  // Telegram alert passes here last (sendTelegramAlert). Only the `0x` form: a bare run of the letters a-f is
+  // ordinary text to this function (redact-s6-schemeless.test.mjs and redact-shapes.test.mjs pin such runs).
+  return stripBareUserinfo(redacted).replace(HEX_RUN_0X, (m) => `0x<hex ${m.length - 2}>`)
 }
 
 // ── [fix/keeper-errors-no-signature] A87 S-2: what an error may say in a log line or an alert ──────────────────────
@@ -218,6 +223,7 @@ const BLOCK_HEAD = /^[ \t]{0,64}(?:Request|Raw Call) Arguments[ \t]{0,8}:/i
 const BLOCK_HINT = /(?:^|\n)[ \t]{0,64}(?:args|data|Request Arguments|Raw Call Arguments)[ \t]{0,8}:/i
 // Any run of 130+ hex digits (a 65-byte signature is 130; calldata, raw transactions, revert blobs are longer).
 const HEX_RUN = /[0-9a-f]{130,}/gi
+const HEX_RUN_0X = /0x[0-9a-f]{130,}/gi
 // What reaches the URL redactor is bounded first (a multi-megabyte message costs one linear scan, no more). The
 // cut lands on whitespace: a URL, a userinfo and a hex run are each one whitespace-free token, so none is split
 // into a shape the patterns no longer see; a token with no whitespace before the bound is dropped whole.
