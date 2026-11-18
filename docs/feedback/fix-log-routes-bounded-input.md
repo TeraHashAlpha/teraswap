@@ -65,3 +65,10 @@ no 413 mapping 2. Every failing test name: tables E4.
 - `monitor/route.usage-not-collected.test.ts` spends 4.3 of its 5 s in Upstash retries; the prune runs alongside the check.
 - Pre-fix rows keep invented names in `quotes`/`security_events` (now ignored); old per-name KV keys expire (6 h to 7 d).
 - `req.clone()` would read around the cap; no route calls it.
+
+### E6. Secret Scanning on PR #713 (generic-api-key, `body-limit.routes.test.ts:71`, b0c8df9f)
+1. **gitleaks 8.30.1, the workflow's range** (`--no-merges --first-parent 64da340a^..7db1bbcc`, `--redact`): before `7 commits scanned … leaks found: 1`
+   (fingerprint `b0c8df9f…:src/app/api/body-limit.routes.test.ts:generic-api-key:71`); after the change `7 commits scanned … no leaks found`, and the staged diff alone `no leaks found`.
+2. **Tests:** `body-limit.routes.test.ts` 21 passed before, 21 passed after; `SECRET` is now `` `tsbl-${randomUUID()}` ``, no assertion touched. Literal was 44 characters (goal text said 48).
+3. **Head:** the PR head the check failed on is 7db1bbcc (local was 1 merge behind, fast-forwarded, no rebase); the commit carrying this block sits directly on it and its SHA is in the run report, a commit cannot name itself.
+- **Never a credential:** the value was written by this branch's own first commit of the file (b0c8df9f, `git log -S`), as a test constant; it is only passed to `vi.stubEnv` for six env names inside that test and was never read from an env, vault or provider. Old fingerprint added to `.gitleaksignore` (history is not rewritten).

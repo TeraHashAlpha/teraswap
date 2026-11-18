@@ -11,6 +11,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { NextRequest } from 'next/server'
+import { randomUUID } from 'node:crypto'
 
 const writes = vi.hoisted(() => [] as string[])
 vi.mock('@/lib/supabase', () => {
@@ -68,7 +69,8 @@ import * as rpc from './rpc/route'
 import * as telegram from './telegram/webhook/route'
 import * as v1Swap from './v1/swap/route'
 
-const SECRET = 'route-test-secret-0123456789abcdef0123456789'
+// Built at run time: a fake bearer secret for the route tests, never a credential (no literal for gitleaks to flag).
+const SECRET = `tsbl-${randomUUID()}`
 const BEARER = { authorization: `Bearer ${SECRET}` }
 const CHUNK = 1024
 
