@@ -5,7 +5,7 @@
  *  - outside it, on a request path, it is handed to Next's `after()`;
  *  - outside any request scope it is left as it was (no throw, no unhandled rejection).
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest'
 
 const afterMock = vi.hoisted(() => vi.fn())
 vi.mock('next/server', async (importActual) => ({
@@ -14,6 +14,18 @@ vi.mock('next/server', async (importActual) => ({
 }))
 
 import { trackAlert, runWithAlertsSettled, ALERT_SETTLE_MAX_MS } from './alert-inflight'
+
+// [fix/flaky-tests-root-cause] `after` is loaded lazily (alert-inflight.ts: `import('next/server')` at module evaluation). Here that
+// import is the factory above loading the real next/server, so on a loaded runner it can still be pending when a test expects a
+// synchronous hand-over (same cause as source-state-machine.alert-handoff.test.ts). Wait until the hook is in place, as it is in
+// production before a request: a probe is handed over and the wait ends when THIS file's mock receives it (at once if loaded, else
+// when the load completes). Event-driven; if the module were bound to any other `after` the probe never arrives and this hook fails.
+beforeAll(async () => {
+  const received = new Promise<void>((resolve) => { afterMock.mockImplementationOnce(() => { resolve() }) })
+  trackAlert(Promise.resolve())
+  await received
+  afterMock.mockReset()
+})
 
 /** A promise that settles after `ms` of (fake) time. */
 function later(ms: number, settle: 'resolve' | 'reject' = 'resolve'): Promise<void> {

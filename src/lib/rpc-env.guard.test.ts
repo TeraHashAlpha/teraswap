@@ -5,11 +5,11 @@
  * `process.env.NEXT_PUBLIC_*RPC*` read in server code silently re-couples it to the browser key
  * (and to its domain allowlist). Comments are stripped before scanning.
  *
- * ALLOWLIST = modules that ARE the browser/shared config. Adding to it needs a reason:
- *  - rpc-env.ts          the resolver itself (the only place that names them for the server)
- *  - chains/registry.ts  shared registry; its `rpc.primary` is the browser value, the server
- *                        overrides it through rpc-env (clients.ts / adapters/shared.ts / api.ts)
- *  - wagmiConfig.ts      browser wagmi transports (polling budgets, #622)
+ * ALLOWLIST = modules that ARE the browser/shared config. Adding to it needs a reason.
+ * [fix/mainnet-rpc-out-of-client, SEC-5] Now EMPTY. It held rpc-env.ts, chains/registry.ts and wagmiConfig.ts for
+ * their literal mainnet NEXT_PUBLIC_RPC_URL reads (and wagmiConfig.ts's two fallback names); all three are gone,
+ * because each was in a module the browser reaches and so was inlined into a client chunk. The stricter, src/-wide
+ * guard is next-public-rpc-reads.guard.test.ts.
  *
  * [fix/user-ip-privacy] Second guard, stricter and with NO allowlist: nothing under src/ may read
  * NEXT_PUBLIC_BASE_RPC_URL or NEXT_PUBLIC_ARBITRUM_RPC_URL with a literal member access. Next inlines
@@ -22,7 +22,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
 const SRC = join(__dirname, '..')
-const ALLOW = new Set(['lib/rpc-env.ts', 'lib/chains/registry.ts', 'lib/wagmiConfig.ts'])
+const ALLOW = new Set<string>([])
 const SKIP_DIRS = new Set(['ui', 'node_modules', '__tests__', 'test-utils'])
 const READ = /process\.env\s*(?:\.\s*|\[\s*['"`])NEXT_PUBLIC_[A-Z0-9_]*RPC/
 
@@ -38,7 +38,14 @@ const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(
 describe('no direct NEXT_PUBLIC_*RPC* env reads outside the allowlist', () => {
   it('scans real files (non-vacuous)', () => {
     expect(walk(SRC).length).toBeGreaterThan(100)
-    expect(readFileSync(join(SRC, 'lib/rpc-env.ts'), 'utf8')).toMatch(READ)
+    // [SEC-5] The positive control used to be rpc-env.ts's own literal NEXT_PUBLIC_RPC_URL read: the read SEC-5
+    // removed (no file under src/ reads one now). The control is the scanner on rpc-env.ts's REAL text: it holds the
+    // server-only literal reads, and it is flagged the moment a NEXT_PUBLIC_*RPC* literal read comes back into it.
+    const rpcEnv = readFileSync(join(SRC, 'lib/rpc-env.ts'), 'utf8')
+    expect(walk(SRC).map((p) => relative(SRC, p))).toContain('lib/rpc-env.ts')
+    expect(stripComments(rpcEnv)).toMatch(/process\.env\.RPC_URL_1\b/)
+    expect(READ.test(stripComments(rpcEnv))).toBe(false)
+    expect(READ.test(stripComments(`${rpcEnv}\nconst back = process.env.NEXT_PUBLIC_RPC_URL\n`))).toBe(true)
   })
 
   it('the scan pattern catches dot and bracket reads', () => {

@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:fork": "NEXT_PUBLIC_RPC_URL=http://127.0.0.1:8545 next dev",
+    "dev:fork": "RPC_URL_1=http://127.0.0.1:8545 next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint . --max-warnings 94",

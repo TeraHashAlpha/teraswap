@@ -22,7 +22,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { bodySizeGuard } from '@/lib/body-limit'
+import { bodySizeGuard, bodyTooLargeFrom } from '@/lib/body-limit'
 import { randomBytes } from 'node:crypto'
 import { getSupabase } from '@/lib/supabase'
 import { verifyBearerToken } from '@/lib/auth'
@@ -88,8 +88,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let body: Record<string, unknown> = {}
   try {
     body = (await req.json()) as Record<string, unknown>
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 })
+  } catch (err) {
+    // [SEC-8] A read past the cap bodySizeGuard put on the request: 413, as for a declared over-cap body.
+    return bodyTooLargeFrom(err) ?? NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 })
   }
 
   // Required: name. Optional: tier (default 'free'), expiresAt (ISO).

@@ -40,52 +40,11 @@ export interface OnChainOrder {
   dcaTotal: bigint
 }
 
-// ── EIP-712 types for signing (v2) ───────────────────────
-export const ORDER_EIP712_TYPES = {
-  Order: [
-    { name: 'owner', type: 'address' },
-    { name: 'tokenIn', type: 'address' },
-    { name: 'tokenOut', type: 'address' },
-    { name: 'amountIn', type: 'uint256' },
-    { name: 'minAmountOut', type: 'uint256' },
-    { name: 'orderType', type: 'uint8' },
-    { name: 'condition', type: 'uint8' },
-    { name: 'targetPrice', type: 'uint256' },
-    { name: 'priceFeed', type: 'address' },
-    { name: 'expiry', type: 'uint256' },
-    { name: 'nonce', type: 'uint256' },
-    { name: 'router', type: 'address' },
-    { name: 'routerDataHash', type: 'bytes32' },  // [C-01]
-    { name: 'dcaInterval', type: 'uint256' },
-    { name: 'dcaTotal', type: 'uint256' },
-  ],
-} as const
-
-// ── EIP-712 types for signing (v3) [ADR-013 §1] ──────────
-// Adds `maxSlippageBps` (uint16) right after minAmountOut — MUST mirror
-// contracts/order-engine/TeraSwapOrderExecutorV3.sol's ORDER_TYPEHASH field-for-field
-// (audit-approved SHA 954c415). A mismatch here would make recoverTypedDataAddress
-// disagree with the contract's on-chain signer recovery — escalate as a P1 finding.
-export const ORDER_V3_EIP712_TYPES = {
-  Order: [
-    { name: 'owner', type: 'address' },
-    { name: 'tokenIn', type: 'address' },
-    { name: 'tokenOut', type: 'address' },
-    { name: 'amountIn', type: 'uint256' },
-    { name: 'minAmountOut', type: 'uint256' },
-    { name: 'maxSlippageBps', type: 'uint16' },  // [ADR-013 §1]
-    { name: 'orderType', type: 'uint8' },
-    { name: 'condition', type: 'uint8' },
-    { name: 'targetPrice', type: 'uint256' },
-    { name: 'priceFeed', type: 'address' },
-    { name: 'expiry', type: 'uint256' },
-    { name: 'nonce', type: 'uint256' },
-    { name: 'router', type: 'address' },
-    { name: 'routerDataHash', type: 'bytes32' },  // [C-01]
-    { name: 'dcaInterval', type: 'uint256' },
-    { name: 'dcaTotal', type: 'uint256' },
-  ],
-} as const
+// ── EIP-712 types for signing (v2 and v3) ────────────────
+// [fix/orders-server-side-order-hash] Defined in ./order-eip712-types (no imports, no enums, so
+// plain-Node scripts can load them) and re-exported here unchanged: every importer of ./types sees
+// the same objects as before.
+export { ORDER_EIP712_TYPES, ORDER_V3_EIP712_TYPES } from './order-eip712-types'
 
 // The exact EIP-712 type string the v3 contract hashes for ORDER_TYPEHASH — pinned here so a
 // unit test can assert byte-for-byte parity against the .sol source (read-only reference).

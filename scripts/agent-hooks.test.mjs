@@ -71,17 +71,23 @@ describe('readonly-guard decide() — allowed (a quoted "git push" is not a push
 
 // A77d H-11: `checkout --detach`, `merge` and `worktree remove --force` change the checkout they run in. hookExit() is
 // defined further down (function declaration, hoisted); every case runs through the decision AND the wired hook.
+// [fix/flaky-tests-root-cause] One hookExit() per `it` wherever an `it` used to loop over several: each call starts up to four
+// processes (`sh` + `node` per hook) and each `it` has vitest's default 5 s. Seven commands in one `it` (14 process starts) timed
+// out on a loaded machine (docs/feedback/chore-dependabot-alerts-2026-11.md:78); with every start delayed 700 ms that test and the
+// six 8-start ones below were red, all others green. Same commands, same hooks, same assertions, one row per `it`.
 const H11_FORMS = ['git checkout --detach origin/main', 'git merge --no-commit --no-ff origin/main', 'git worktree remove --force /tmp/ro-guard-x']
 const inDir = (c, dir) => c.replace(/^git /, `git -C ${dir} `)
 describe('A77d H-11 — read-only git respects where it runs', () => {
   for (const c of H11_FORMS) {
     describe(c, () => {
-      it('refused with the hook cwd = the main checkout (and a subdirectory of it)', () => {
-        for (const cwd of [MAIN, path.join(MAIN, 'src')]) {
-          expect(roDecide(c, { cwd }), `${cwd}: ${c}`).toMatch(/MAIN checkout/)
-          for (const agent of ['recon', 'auditor']) expect(hookExit(c, agent, cwd), `${agent} ${cwd}`).toBe(2)
+      for (const cwd of [MAIN, path.join(MAIN, 'src')]) {
+        for (const agent of ['recon', 'auditor']) {
+          it(`refused with the hook cwd = the main checkout (and a subdirectory of it): ${agent} in ${path.relative(FIXTURE, cwd)}`, () => {
+            expect(roDecide(c, { cwd }), `${cwd}: ${c}`).toMatch(/MAIN checkout/)
+            expect(hookExit(c, agent, cwd), `${agent} ${cwd}`).toBe(2)
+          })
         }
-      })
+      }
       it('refused with `cd MAIN &&` in front, from a linked worktree', () => {
         expect(roDecide(`cd ${MAIN} && ${c}`, { cwd: WT }), c).toMatch(/MAIN checkout/)
         expect(hookExit(`cd ${MAIN} && ${c}`, 'recon', WT)).toBe(2)
@@ -90,12 +96,14 @@ describe('A77d H-11 — read-only git respects where it runs', () => {
         expect(roDecide(inDir(c, MAIN), { cwd: WT }), c).toMatch(/MAIN checkout/)
         expect(hookExit(inDir(c, MAIN), 'auditor', WT)).toBe(2)
       })
-      it('allowed with the hook cwd = a linked worktree (and a subdirectory of it)', () => {
-        for (const cwd of [WT, path.join(WT, 'src')]) {
-          expect(roDecide(c, { cwd }), `${cwd}: ${c}`).toBeNull()
-          for (const agent of ['recon', 'auditor']) expect(hookExit(c, agent, cwd), `${agent} ${cwd}`).toBe(0)
+      for (const cwd of [WT, path.join(WT, 'src')]) {
+        for (const agent of ['recon', 'auditor']) {
+          it(`allowed with the hook cwd = a linked worktree (and a subdirectory of it): ${agent} in ${path.relative(FIXTURE, cwd)}`, () => {
+            expect(roDecide(c, { cwd }), `${cwd}: ${c}`).toBeNull()
+            expect(hookExit(c, agent, cwd), `${agent} ${cwd}`).toBe(0)
+          })
         }
-      })
+      }
       it('allowed with `cd WORKTREE &&` and with `git -C WORKTREE`, even when the hook cwd is the main checkout', () => {
         expect(roDecide(`cd ${WT} && ${c}`, { cwd: MAIN }), c).toBeNull()
         expect(roDecide(inDir(c, WT), { cwd: MAIN }), c).toBeNull()
@@ -107,10 +115,12 @@ describe('A77d H-11 — read-only git respects where it runs', () => {
       })
     })
   }
-  it('merge --abort / --quit, fetch, `worktree add --detach` and `worktree remove` (no --force) stay allowed in the main checkout', () => {
+  describe('merge --abort / --quit, fetch, `worktree add --detach` and `worktree remove` (no --force) stay allowed in the main checkout', () => {
     for (const c of ['git merge --abort', 'git merge --quit', 'git fetch origin main', 'git fetch --all --tags', 'git worktree add --detach /tmp/ro-guard-w origin/main', 'git worktree remove /tmp/ro-guard-x', 'git status']) {
-      expect(roDecide(c, { cwd: MAIN }), c).toBeNull()
-      expect(hookExit(c, 'recon', MAIN), c).toBe(0)
+      it(c, () => {
+        expect(roDecide(c, { cwd: MAIN }), c).toBeNull()
+        expect(hookExit(c, 'recon', MAIN), c).toBe(0)
+      })
     }
   })
   it('the other merge forms stay refused everywhere (any form but --abort/--quit changes the checkout)', () => {

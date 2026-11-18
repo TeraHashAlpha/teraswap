@@ -2,11 +2,15 @@
 /**
  * [FIX-RPC-CHAIN-IDENTITY-GUARD] The SERVER-side mainnet transport.
  *
- * wagmiConfig builds a different mainnet transport with no `window`: the browser gets the relative
- * `/api/rpc` proxy, the server hits NEXT_PUBLIC_RPC_URL (then the fallback RPCs, then an explicit
- * llamarpc last resort) directly. That branch is unreachable from wagmiConfig.test.ts, which runs
- * in jsdom — and a relative URL cannot even be turned into a `Request` outside a browser, so the
- * browser branch is equally unreachable from here. Hence two files.
+ * wagmiConfig builds a different mainnet transport with no `window`: the browser gets the
+ * `/api/rpc` proxy, the server hits its own resolver directly. That branch is unreachable from
+ * wagmiConfig.test.ts, which runs in jsdom — and a relative URL cannot even be turned into a
+ * `Request` outside a browser, so the browser branch is equally unreachable from here. Hence two files.
+ *
+ * [fix/mainnet-rpc-out-of-client, SEC-5] The server resolver is rpc-env's `serverRpcUrl(1)` (RPC_URL_1, then
+ * RPC_URL, then llamarpc), the same builder Base and Arbitrum use. It used to be NEXT_PUBLIC_RPC_URL (then the two
+ * NEXT_PUBLIC_FALLBACK_RPC_* names): a literal read in a module the browser reaches, so the value was in a client chunk.
+ * The browser-era name is set below to a different value and must not be the URL this transport dials.
  *
  * This pins the same invariant on the server ladder: an endpoint that answers for another chain is
  * refused; an endpoint that cannot answer at all is an outage and still serves the read.
@@ -22,7 +26,8 @@ let __resetChainIdentityCache: () => void
 
 beforeAll(async () => {
   vi.stubEnv('NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID', 'test_projectid_0123456789abcdef')
-  vi.stubEnv('NEXT_PUBLIC_RPC_URL', PRIMARY_RPC)
+  vi.stubEnv('RPC_URL_1', PRIMARY_RPC)
+  vi.stubEnv('NEXT_PUBLIC_RPC_URL', 'https://browser-era.invalid/v2/IGNORED-BY-THE-SERVER')
   vi.stubEnv('NEXT_PUBLIC_FALLBACK_RPC_1', '')
   vi.stubEnv('NEXT_PUBLIC_FALLBACK_RPC_2', '')
   config = (await import('./wagmiConfig')).config
@@ -57,7 +62,7 @@ afterEach(() => {
 })
 
 describe('wagmiConfig (server): mainnet transport identity guard', () => {
-  it('refuses the read when NEXT_PUBLIC_RPC_URL is served by another chain', async () => {
+  it('refuses the read when RPC_URL_1 is served by another chain', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (_url: string, init?: RequestInit) =>
@@ -85,6 +90,8 @@ describe('wagmiConfig (server): mainnet transport identity guard', () => {
     await client.request({ method: 'eth_getBalance', params: ['0x0', 'latest'] }).catch(() => {})
 
     expect(fetchMock.mock.calls.map(([, init]) => methodOf(init))).toEqual(['eth_chainId'])
+    // [SEC-5] and the endpoint probed is the server name's, not the browser-era NEXT_PUBLIC_RPC_URL.
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([PRIMARY_RPC])
   })
 
   it('still serves the read when the probe is UNREACHABLE. An outage is not a lie', async () => {

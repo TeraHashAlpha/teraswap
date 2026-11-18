@@ -75,6 +75,16 @@
       "added": "2026-11-06",
       "expires": "2026-12-06",
       "reason": "Low, inside rainbowkit's vanilla-extract/css chain (build-time CSS helper). No upstream patch exists. Reachability of mergeObject() with untrusted input NOT verified. Re-check on the 2026-12-06 expiry."
+    },
+    {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "package": "picomatch",
+      "vulnerableRange": "<=4.0.7 (4.0.7 via @sentry/nextjs > @rollup/plugin-commonjs and vitest/vite/tinyglobby; 2.3.2 via tailwindcss > chokidar/micromatch and wagmi > WalletConnect > unstorage > anymatch)",
+      "fixedIn": "none (advisory first_patched: none; latest 4.0.7, newest 2.x 2.3.2)",
+      "added": "2026-11-17",
+      "noPatch": true,
+      "reviewDate": "2026-12-17",
+      "reason": "High ReDoS (SEC-18). Owner decision 2026-11-17: time-boxed exception, noPatch + reviewDate. No patched release exists in any line; upstream fix micromatch/picomatch PR 194 is still open. The exploit needs the attacker to SUPPLY the glob (e.g. +(*)); every caller here gets its patterns from our own or tool config. Measured on `npm run build` (docs/feedback/chore-audit-gate-green-2026-11.evidence.md, section E): picomatch code is in 0 client chunks, 0 server chunks and 0 of 68 function traces; unstorage loads anymatch only in drivers/fs, WalletConnect uses drivers/fs-lite. Next's own vendored copy (next/dist/compiled/picomatch, not seen by npm audit) is traced into next-server and runs only the image pattern matchers on next.config.js patterns, of which none are set. Removing @sentry/nextjs alone does not clear it (measured, section F). Delete when a patched release ages past min-release-age and is pinned; otherwise re-review by 2026-12-17."
     }
   ]
 }
