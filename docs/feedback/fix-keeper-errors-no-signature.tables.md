@@ -244,3 +244,82 @@ measured the line ending at `reason:` before).
   0 ms on both Nodes (the audit measured exit 134, heap exhausted, on round 1).
 - Keeper suite: Node 22.23.5 2,201/2,201, Node 20.20.2 2,201/2,201, 0 cancelled (round 1: 2,167). gitleaks 8.30.1 over
   the 5 round-2 commits (68769f0c..0e411f1f): no leaks.
+
+## R3. Round 3 — A93 audit of PR #717 round 2 (findings R2-1..R2-3)
+
+Commits: 68f5ab28 (R2-1), b8afe818 (R2-2 + R2-3), eeaf3661 (signed merge of origin/main e613792c: PR #716 moved main
+mid-round; token catalog only, no keeper file), 1a38a830 (CodeQL fix in a test: the verified CODE commit). Dummy secrets
+only. "Red first" = the same test file copied into a `git archive` of b367f054 (and of 68f5ab28 for commit 2). The scratch
+rigs (mutation scripts, archives) were lost when the machine rebooted at ~20:45; every mutant's edit is listed in §R3-4.
+
+### R3-1. Red on b367f054, green on b8afe818
+
+| Test file | b367f054 | b8afe818 |
+|---|---|---|
+| redact-a93-r2-1-forms (21) | 12 fail: every leak case (path, query, userinfo, %-encoded, case, non-URL value, `\/`, `%252F`, host-like, split, Details:, `&lt;redacted&gt;`); 6 guards pass (kept values, floor, unset, 3 classifier) | 21/21 |
+| redact-a93-r2-1-sinks (13) | 12/12 sinks fail (3 call sites x log line, monitor :70, :126, alertOps) | 13/13 |
+| redact-a93-r2-1-cli (32) | 16 fail: the audit's 14 path-only runs (echoPath + express404 x the 7 methods outside chain-verify) + both print-scrub runs; 16 pass (7 schemeless echoes, already redacted; 9 chain-verify runs, which printed no provider words before R2-3) | 32/32 |
+| redact-a93-r2-2-cli-url (8), r2-3-boot-details (6) | 13 fail, 1 guard passes (no details: no suffix) — same on 68f5ab28 | 14/14 |
+| redact-a93-r2-1-names (7), -fuzz (12 seeds) | new API (import fails) | 7/7, 12/12 |
+
+### R3-2. Names (redact.js:248 SECRET_ENV_NAMES, frozen)
+
+URL values (userinfo, path segments, query values; never the host): RPC_URL, BACKFILL_RPC_URL, FLASHBOTS_RPC_URL,
+TERASWAP_API_URL, VAULT_ADDR, SUPABASE_URL. Whole values (and without `0x`): SUPABASE_SERVICE_ROLE_KEY, TELEGRAM_BOT_TOKEN,
+EXECUTOR_PRIVATE_KEY, HEALTH_TOKEN, COINGECKO_API_KEY, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN (the KMS
+SDK). A URL-named value that is not an http(s)/ws(s) URL is a secret whole. Read and secret-like but NOT scrubbed, each
+with its reason in the names test: ALLOW_PLAINTEXT_KEY(_MAINNET) (switches), FEE_COLLECTOR_ADDRESS, ORDER_EXECUTOR(_V3)_ADDRESS
+(public, printed on purpose), KMS_KEY_ID (an identifier). The test scans every keeper source for `process.env.X`,
+`env.X`, `env["X"]`, `requireEnv("X")` and fails on a secret-like name in neither list.
+
+### R3-3. How a secret is found, and what the fuzz taught
+
+- One linear walk over canonical bytes (`%XX` decoded, HTML entities and `\" \' \\ \/ \uXXXX` decoded, ASCII lower-cased, a
+  line break with its surrounding blanks skipped) with a map back to source positions; `indexOf` per form. A regex with an
+  alternative per character (the first design) failed to compile in V8 ("Stack overflow") at a 1,200-character literal.
+  Cost: list build 0.8 ms; 600 B 0.2 ms; 16 KB 1.4 ms; 1 MB 22 ms; 4 MB 51 ms; 1,000 redactError calls 4.3 ms.
+- The fuzz alphabet is printable ASCII without whitespace (URL delimiters, `% \ &`, quotes and `<>` included). Seeds 1-500 on the
+  first walk: 23 seeds failed, all secrets holding an escape introducer (`%BA`, `\\`, a final `\` or `%`) read in a mix of
+  forms. Fixed by: every combination of a secret's own escape-like tokens (<= 6, else all/none); a second, PLAIN walk for a
+  secret holding `% \ &`; the scrub also BEFORE redactUrl's decoder (redactUrl first and last; redactError on each field as
+  read); a secret ending where an escape can begin is also sought without that tail (<= 9 chars, if 12 remain). Then
+  seeds 1-2000 x 60 cases x 9 sinks (1,080,000 outputs): 0 readable under percent / HTML / JSON decoding, any case, line
+  breaks removed (Node 22); seeds 1-200 on Node 20: 0. CI runs seeds 1-12.
+- Split by a line break (with the blanks around it): removed whole in every sink; in redactError too, where the second line
+  is dropped (the fields are scrubbed before lines are dropped): `Cannot POST /v2/<half>\n   <half> (404)` ->
+  `Cannot POST /v2/<redacted> (404)`. Split by a plain space (no line break): NOT matched, by design (a space is an ordinary
+  character; skipping every space would let a secret made of dictionary words match prose).
+- A keyed URL line still reads `URL: https://<host>/REDACTED`: a mask inside a URL path is absorbed into `/REDACTED`.
+
+### R3-4. Mutation proof (scratch copies of the head, node_modules symlinked)
+
+R2-1, against the 5 R2-1 files (fuzz seeds 1-60): 19/19 killed — M1 redactError last scrub, M2 redactError field scrub,
+M3 redactUrl first scrub, M4 redactUrl last scrub, M5 sendTelegramAlert final pass without the scrub, M6 html mask not asked
+for, M7 list-missing-fills prints, M8 backfill-execution prints, M9 length floor removed, M10 `%XX` not decoded, M11 line
+break ordinary, M12 scrub inside redactUrlOnly (S-5 broken: killed by the two rpc-auth classifier tests), M13 plain walk,
+M14 escape-start tail forms, M15 mask-in-path absorption, M16 escape-token combinations, M17 JSON escapes, M18 HTML entities,
+M19 case folding. R2-2/R2-3, against their files + the CLI runs: 8/8 killed — N1/N2 each CLI's URL check, N3 any scheme
+accepted, N4 details not appended, N5 details not redactUrls'd, N6 details not scrubbed by value, N7 not one line, N8 cut
+before the scrub.
+
+### R3-5. The earlier probes again
+
+- Both auditors' p1-viem.mjs (sessions 4f747ffc and f8ada078), unmodified, on b8afe818, Node 22 and Node 20: 75 real viem
+  errors x every sink: 0 with a signature fragment, 0 over a cap; the receipt-timeout tx hash still in line and alert.
+- s5-diff.mjs (seed 0xA92B5), unmodified, head vs origin/main 85a6f9cb (scratch extraction, byte-identical rpc-auth /
+  retry-policy / redact): classifyRpcError 0 and classifyMissCause 0 of 40,000 calls differ; power check round 1 vs main 425 /
+  650. Variant with 4 secrets configured AND placed in the shapes (raw, glued to auth words, holding `Unauthorized` /
+  `InsufficientBalance`): head vs main 0 / 0; power check mutant M12 vs main 117 / 234.
+- Keeper suite, b8afe818: Node 22.23.5 2,300/2,300 and Node 20.20.2 2,300/2,300, 0 cancelled (round 2: 2,201; no existing
+  test file changed). gitleaks 8.30.1 over b367f054..1a38a830: no leaks.
+
+### R3-6. agent-verify --keeper --codeql
+
+| Commit | load1 at start | Result |
+|---|---|---|
+| b8afe818 (~20:40) | — | cut by a machine reboot before it wrote anything; no result, no log survives (/tmp) |
+| eeaf3661 | 6.52 | all PASS (suite 11,363/0, 534 files; keeper Node 20 + 22 2,300/0/0) but **codeql FAIL 14 vs 13**: `js/incomplete-sanitization` at redact-a93-r2-1-forms.test.mjs:140, my own test building its `\/` form with a `/`-only replace. Fixed in 1a38a830 (the same text as a constant; no assertion changed). |
+| 1a38a830 | 9.84 | **PASS**: suite 11,363/0 (534 files), lint +0/+0, tsc 0, build ok, parity 123, rpc-budget 36, CodeQL 13 = 13 (0 new), keeper Node 20 and 22 2,300/0/0 |
+
+Logs: `~/ts-worktrees/keeper-errors-no-signature-a93.verify/` (verify-run.eeaf3661.log + verify-out.eeaf3661/; verify-run.log +
+verify-out/), outside the repo and outside /tmp.
