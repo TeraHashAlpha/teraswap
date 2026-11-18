@@ -96,7 +96,10 @@ describe('refresh-decision — the three real failures (issues #700 #703 #706)',
         expect(d.removed.map((l) => l.symbol).sort()).toEqual([...expected].sort())
         expect(d.leftOut).toEqual([])
         expect(d.catalog).toHaveLength(f.previousSize - expected.length)
-        for (const l of d.removed) expect(l.why).toContain('trusted-list')
+        for (const l of d.removed) {
+          expect(l.why).toContain('guard: trusted-list')
+          expect(l.why).not.toContain('add to the allowlist') // remediation advice for an allowlist editor, not for the PR reader
+        }
       })
 
       it('the guard is green on the result (same auditChain the CI gate runs)', () => {
@@ -353,6 +356,7 @@ describe('refresh-decision — PR body / issue text', () => {
   it('sanitizeInline strips control characters, markup and caps the length', () => {
     expect(sanitizeInline('a\u0000b\nc`d|e<f>')).toBe("a?b?c'd'e'f'")
     expect(sanitizeInline('x'.repeat(500), 50)).toHaveLength(50)
+    expect(sanitizeInline('a \u2014 b \u2013 c')).toBe('a - b - c')
   })
 
   it('blocked summary names the reason, says nothing changed and keeps the attempted lists', () => {

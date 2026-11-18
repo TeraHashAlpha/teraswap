@@ -98,7 +98,10 @@ export function trustedListVerdict(previous: number | null, current: number | nu
 }
 
 function fatalDetail(outcome: GuardOutcome | undefined): string {
-  return outcome?.detail ? `guard: ${outcome.detail}` : 'guard: fatal'
+  // the guard's detail ends with remediation advice for a human editing the allowlist ("— add to the
+  // allowlist ... or correct the address"); the PR line only needs what the guard found.
+  const finding = outcome?.detail?.split(' — ')[0]
+  return finding ? `guard: ${finding}` : 'guard: fatal'
 }
 
 export function decideRefresh(input: RefreshDecisionInput): RefreshDecision {
@@ -173,7 +176,7 @@ export function decideRefresh(input: RefreshDecisionInput): RefreshDecision {
 
 /** Symbols and guard text come from external token lists (attacker-choosable): printable, no markup. */
 export function sanitizeInline(s: string, max = 160): string {
-  const cleaned = s.replace(/[^\x20-\x7e]/g, '?').replace(/[`|<>[\]()*_~\\]/g, "'").replace(/\s+/g, ' ').trim()
+  const cleaned = s.replace(/[\u2013\u2014]/g, '-').replace(/[^\x20-\x7e]/g, '?').replace(/[`|<>[\]()*_~\\]/g, "'").replace(/\s+/g, ' ').trim()
   return cleaned.length > max ? `${cleaned.slice(0, max - 1)}…` : cleaned
 }
 
