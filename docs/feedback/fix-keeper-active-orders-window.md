@@ -31,7 +31,7 @@ origin/main `bfe26155` merged first (`a01d9251`), `7bd3ec12` before the verify (
 - [x] Differential vs origin/main (500 seeded runs, M <= 15); seeded properties; pre-screen chunk failures; mutation proof
 - [x] Multicall3 code + one aggregate3 call on Base and Arbitrum (public RPC)
 - [x] Runbooks, ADR-024 / ADR-026 dated notes
-- [ ] Keeper suite Node 20 + 22; agent-verify --keeper --codeql (load < 10, once); gen-claude-state --check; push; evidence 1-6
+- [x] Keeper suite Node 20 + 22; agent-verify --keeper --codeql (load < 10, once); gen-claude-state --check; push; evidence 1-6
 
 ### Evidence (round 2)
 
@@ -61,9 +61,11 @@ origin/main `bfe26155` merged first (`a01d9251`), `7bd3ec12` before the verify (
    not repeating: `Supabase fetch error (scan wrap):`, `Tick skipped:`, `Cycle error:`; gone: `Active window:`,
    `Querying:`, `Supabase returned`, `First order:`; `/health` stats `scanFallbackCycles`, `prescreenFallbackCycles`,
    `overlapSkippedTicks` = 0.
-6. **Verify**: VERIFY_RESULT. Keeper suite 2136/2136 on Node 20 and 22 (R8). diff since a9f12d9a, this round's files:
+6. **Verify** (once, quiet: load1 7.04 / 5.31 at the two checks 15:36Z, no other verify or CodeQL): `agent-verify --keeper
+   --codeql` on `c4c9a878` **RESULT: PASS** — suite 11090/11090, lint +0/+0, tsc 0, build ok, parity 123, rpc-budget 36,
+   CodeQL 13 = 13 / 0 new, keeper 2136/2136 on Node 20 and 22 (R9). `gen-claude-state --check`: current. gitleaks: no leaks. diff since a9f12d9a, this round's files:
    16 files, +2541 / −1006 (`executor.js` +568 lines touched, `active-window.js` rewritten, tests/fixture/rig ~2,000, docs
-   136). Head HEAD_SHA. Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/keeper-active-orders-window
+   136). Verified head `c4c9a878`; HEAD adds only this paragraph and R9 (docs). Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/keeper-active-orders-window
    **Not verified**: PostgREST accepting `offset=` with `or=` absent, `id=in.(…)` and the count against a real Supabase
    (fake only); Supabase `max_rows` below 1000 (the count decides the end: a unit test, not a real server); Multicall3
    beyond code presence and one `getChainId` call (no real `canExecute` through it); a run on the host; CI.

@@ -199,3 +199,26 @@ callData: getChainId()}])`, 2026-11-18 14:52Z:
 At `cc262b34`: Node 22 2136/2136, Node 20 2136/2136. At `a01d9251` (a9f12d9a merged with main, before round 2): 2098/2098 (Node 22).
 New and changed files, user CPU (Node 22): probes 3.98 s (9.75 s before `cc262b34`), cycle 0.47 s, property 1.80 s,
 active-window 0.60 s, active-window-cycle 0.41 s.
+
+## R9. The one verify run (owner rule: when no other verify or CodeQL runs and the 1-minute load is under 10)
+
+Quiet checks 15:36:09Z load1 7.04 and 15:36:39Z load1 5.31, no other agent-verify or CodeQL process; `brew` stubbed out of
+PATH (this goal forbids running brew; agent-verify fell back to `/opt/homebrew/opt/node@20` / `node@22`); the
+OpenZeppelin submodule not initialised (CodeQL head and base on the same tree).
+`PATH=<stub>:$PATH scripts/agent-verify.sh --keeper --codeql` on `c4c9a878` (base origin/main `7bd3ec12`), exit 0:
+
+```
+suite:       PASS 11090 tests passed, 0 failed, 520 files
+lint-delta:  PASS errors +0, warnings +0 (11 changed files; head 0 err/0 warn, base 0 err/0 warn)
+tsc:         PASS 0 errors
+build:       PASS next build ok
+v1v2-parity: PASS 123 tests passed, 0 failed, 11 files
+rpc-budget:  PASS 36 tests passed, 0 failed, 3 files
+codeql:      PASS security-extended: head 13, base 13, new by rule+file+message 0
+keeper:      PASS node20:2136-pass/0-fail/0-cancelled node22:2136-pass/0-fail/0-cancelled
+17 files changed, 3779 insertions(+), 54 deletions(-)   (diff --stat origin/main...HEAD: rounds 1 and 2)
+RESULT: PASS
+```
+
+`node scripts/gen-claude-state.mjs --check`: `CLAUDE.md state block is current`. `gitleaks git --log-opts=a9f12d9a..HEAD`:
+67 commits scanned, no leaks found.
