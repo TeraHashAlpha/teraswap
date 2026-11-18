@@ -71,3 +71,42 @@ export function normalizeOrderHashText(text: unknown): string | null {
   const lower = text.toLowerCase()
   return lower.startsWith('0x') ? lower : `0x${lower}`
 }
+
+/** The order of the secp256k1 group. */
+const SECP256K1_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n
+const SIGNATURE_TEXT_RE = /^(?:0[xX])?[0-9a-fA-F]{130}$/
+
+/**
+ * [A86 S-3] Every text of one 65-byte signature (r ‖ s ‖ v) that viem's recovery accepts for the same signer, lower
+ * case with 0x: v as 27/28 and as 0/1, for s and for its twin n − s with the other parity. viem accepts all four
+ * (recoverPublicKey: v ∈ {0, 1, 27, 28}, any s in [1, n−1]); the executors' OZ ECDSA.recover accepts only the low-s
+ * one with v 27/28 (= canonicalOrderSignature). The first entry is the given text, lower-cased.
+ * null when the text is not (0x +) 130 hex, v is not 0/1/27/28, or s is not in [1, n−1].
+ */
+export function orderSignatureEncodings(signature: unknown): string[] | null {
+  if (typeof signature !== 'string' || !SIGNATURE_TEXT_RE.test(signature)) return null
+  const hex = signature.slice(signature.length - 130).toLowerCase()
+  const r = hex.slice(0, 64)
+  const sHex = hex.slice(64, 128)
+  const v = parseInt(hex.slice(128), 16)
+  const s = BigInt(`0x${sHex}`)
+  if (s === 0n || s >= SECP256K1_N) return null
+  const parity = v === 0 || v === 27 ? 0 : v === 1 || v === 28 ? 1 : null
+  if (parity === null) return null
+  const twinHex = (SECP256K1_N - s).toString(16).padStart(64, '0')
+  const vTexts = (p: number) => [(27 + p).toString(16), `0${p}`] // '1b' | '1c', '00' | '01'
+  const own = vTexts(parity).map((vt) => `0x${r}${sHex}${vt}`)
+  const twin = vTexts(1 - parity).map((vt) => `0x${r}${twinHex}${vt}`)
+  const given = `0x${hex}`
+  return [given, ...[...own, ...twin].filter((t) => t !== given)]
+}
+
+/**
+ * [A86 S-3] The one text the executors accept for this signature: low s (s ≤ n/2), v 27/28, lower case with 0x.
+ * Two rows whose signatures have the same canonical text hold the same signature. null as orderSignatureEncodings.
+ */
+export function canonicalOrderSignature(signature: unknown): string | null {
+  const all = orderSignatureEncodings(signature)
+  if (!all) return null
+  return all.find((t) => (t.endsWith('1b') || t.endsWith('1c')) && BigInt(`0x${t.slice(66, 130)}`) <= SECP256K1_N / 2n) ?? null
+}

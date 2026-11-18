@@ -24,8 +24,22 @@ const fake = vi.hoisted(() => {
   // config.ts reads these at module load: stub (never read) the production addresses first.
   vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_V3_ADDRESS_BASE', '0x686b4f812291F4De238E59ED00BA6dD6129e60a0')
   vi.stubEnv('NEXT_PUBLIC_ORDER_EXECUTOR_ADDRESS', '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130')
-  return { rows: [] as Record<string, unknown>[] }
+  return {
+    rows: [] as Record<string, unknown>[],
+    /** [A86 S-3] Every `or` filter the route sent, and how many rows each lookup found. */
+    lookups: [] as { filter: string; found: number }[],
+    /** When set, each lookup waits until `needed` lookups have arrived: requests racing past the lookup together. */
+    barrier: null as null | { needed: number; arrived: number; release: () => void; open: Promise<void> },
+    lookupError: null as null | { message: string },
+  }
 })
+
+/** PostgREST `ilike`: case-insensitive, whole value; `%` and `*` match any run, `_` one character. */
+function ilike(value: unknown, pattern: string): boolean {
+  if (typeof value !== 'string') return false
+  const re = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/[%*]/g, '.*').replace(/_/g, '.')
+  return new RegExp(`^${re}$`, 'is').test(value)
+}
 
 // In-memory `orders` with the one constraint that matters here: UNIQUE (order_hash).
 vi.mock('@supabase/supabase-js', () => ({
@@ -37,6 +51,29 @@ vi.mock('@supabase/supabase-js', () => ({
     from: (table: string) => {
       if (table !== 'orders') throw new Error(`unexpected table ${table}`)
       return {
+        // [A86 S-3] The route's lookup: .select('id').or('signature.ilike.<t>,…').limit(1)
+        select: (cols: string) => ({
+          or: (filter: string) => ({
+            limit: async (n: number) => {
+              if (cols !== 'id') throw new Error(`unexpected select ${cols}`)
+              const terms = filter.split(',').map((term) => {
+                const m = /^signature\.ilike\.(.*)$/s.exec(term)
+                if (!m) throw new Error(`unexpected filter term ${term}`)
+                return m[1]
+              })
+              const barrier = fake.barrier
+              if (barrier) {
+                barrier.arrived += 1
+                if (barrier.arrived >= barrier.needed) barrier.release()
+                await barrier.open
+              }
+              if (fake.lookupError) return { data: null, error: fake.lookupError }
+              const hits = fake.rows.filter((r) => terms.some((t) => ilike(r.signature, t)))
+              fake.lookups.push({ filter, found: hits.length })
+              return { data: hits.slice(0, n).map((r) => ({ id: r.id })), error: null }
+            },
+          }),
+        }),
         insert: (row: Record<string, unknown>) => ({
           select: () => ({
             single: async () => {
@@ -164,6 +201,9 @@ function mismatchLines(): Record<string, unknown>[] {
 
 beforeEach(() => {
   fake.rows.length = 0
+  fake.lookups.length = 0
+  fake.barrier = null
+  fake.lookupError = null
   vi.useFakeTimers()
   vi.setSystemTime(NOW_MS)
   vi.stubEnv('SUPABASE_URL', 'https://fake.supabase.co')
@@ -193,7 +233,7 @@ describe('POST /api/orders stores the server hash [S-5]', () => {
     const b = await post({ ...body, orderHash: second ?? hash })
     expect(a.status).toBe(201)
     expect(b.status).toBe(409)
-    expect(b.json.error).toBe('Order already exists (duplicate hash)')
+    expect(b.json.error).toBe('Order already exists')
     expect(fake.rows).toHaveLength(1)
     expect(fake.rows[0].order_hash).toBe(hash)
   })
@@ -302,4 +342,117 @@ describe('orderData that differs from the signed order where M-07 does not compa
       expect(fake.rows[0]).toMatchObject({ order_hash: hash, order_data: firstData })
     },
   )
+})
+
+// [A86 S-3] Rows written before PR #708 carry the caller's order_hash text, which unique_order_hash cannot match to
+// the server hash. The signature column can: the route looks it up before the insert.
+const SECP256K1_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n
+
+/** Other texts of one signature that recover the same signer, computed here without the server helper. */
+function signatureVariants(sig: string): Record<string, string> {
+  const r = sig.slice(2, 66)
+  const s = BigInt(`0x${sig.slice(66, 130)}`)
+  const v = parseInt(sig.slice(130), 16)
+  if (v !== 27 && v !== 28) throw new Error('fixture: viem signs with v 27/28')
+  const word = (x: bigint) => x.toString(16).padStart(64, '0')
+  const byte = (x: number) => x.toString(16).padStart(2, '0')
+  const other = v === 27 ? 28 : 27
+  return {
+    'upper-case hex': `0x${sig.slice(2).toUpperCase()}`,
+    'v − 27': `0x${r}${word(s)}${byte(v - 27)}`,
+    'the high-s twin': `0x${r}${word(SECP256K1_N - s)}${byte(other)}`,
+    'the high-s twin, v − 27': `0x${r}${word(SECP256K1_N - s)}${byte(other - 27)}`,
+  }
+}
+
+/** A row as the pre-#708 route wrote it: the caller's order_hash text, the signature as sent. */
+function legacyRow(body: Record<string, unknown>, orderHash: string, signature = String(body.signature)) {
+  return {
+    id: 'legacy-1', wallet: account.address.toLowerCase(), order_type: 'dca', token_in: TOKEN_IN, token_out: TOKEN_OUT,
+    signature, order_hash: orderHash, order_data: body.orderData, chain_id: body.chainId, status: 'active',
+  }
+}
+
+const LEGACY_TEXTS: [string, (h: string) => string][] = [
+  ['a UUID', () => '3f1c2a4e-9b7d-4c1e-8a2f-5d6e7f8a9b0c'],
+  ['upper-case hex', (h) => `0x${h.slice(2).toUpperCase()}`],
+  ['a 0X prefix, upper case', (h) => h.toUpperCase()],
+  ['a 0X prefix, lower case', (h) => `0X${h.slice(2)}`],
+  ['no 0x prefix', (h) => h.slice(2)],
+  ['another order\'s hash', () => WRONG_A],
+  ['the exact server hash (control: refused before the fix too)', (h) => h],
+]
+
+describe('one signed order is stored once, rows written before the fix included [A86 S-3]', () => {
+  it.each(([3, 2] as const).flatMap((v) => LEGACY_TEXTS.map(([label, spell]) => [v, label, spell] as const)))(
+    'v%s, a pre-existing row whose order_hash is %s + a re-post of its signed order: 409, one row, the old row untouched',
+    async (version, _label, spell) => {
+      const { body, hash } = await signedDca(version)
+      const old = legacyRow(body, spell(hash))
+      fake.rows.push({ ...old })
+      const res = await post(body)
+      expect(res.status).toBe(409)
+      expect(res.json.error).toBe('Order already exists')
+      expect(fake.rows).toEqual([old])
+    },
+  )
+
+  it.each(['upper-case hex', 'v − 27', 'the high-s twin', 'the high-s twin, v − 27'])(
+    'the same signature as %s: a re-post refused against a pre-existing row, and the other way round',
+    async (variant) => {
+      const { body } = await signedDca(3)
+      const other = signatureVariants(String(body.signature))[variant]
+      const uuid = '3f1c2a4e-9b7d-4c1e-8a2f-5d6e7f8a9b0c'
+
+      fake.rows.push(legacyRow(body, uuid))
+      const a = await post({ ...body, signature: other })
+      expect(a.status).toBe(409)
+      expect(fake.rows).toHaveLength(1)
+
+      fake.rows.length = 0
+      fake.rows.push(legacyRow(body, uuid, other))
+      const b = await post(body)
+      expect(b.status).toBe(409)
+      expect(b.json.error).toBe('Order already exists')
+      expect(fake.rows).toHaveLength(1)
+      expect(fake.rows[0].signature).toBe(other)
+    },
+  )
+
+  it('the lookup sends the 4 texts of the signature, lower case, each 0x + 130 hex (no pattern character)', async () => {
+    const { body } = await signedDca(3)
+    const v = signatureVariants(String(body.signature))
+    expect((await post(body)).status).toBe(201)
+    expect(fake.lookups).toHaveLength(1)
+    const terms = fake.lookups[0].filter.split(',')
+    expect(terms.every((t) => /^signature\.ilike\.0x[0-9a-f]{130}$/.test(t))).toBe(true)
+    expect(new Set(terms.map((t) => t.slice('signature.ilike.'.length)))).toEqual(new Set([
+      String(body.signature).toLowerCase(), v['v − 27'], v['the high-s twin'], v['the high-s twin, v − 27'],
+    ]))
+  })
+
+  it.each([
+    ['the same text', (sig: string) => sig],
+    ['two encodings (v and v − 27)', (sig: string) => signatureVariants(sig)['v − 27']],
+  ])('two concurrent first posts of one order (%s), both past the lookup: one 201, one 409, one row', async (_label, second) => {
+    const { body, hash } = await signedDca(3)
+    let release!: () => void
+    const open = new Promise<void>((resolve) => { release = resolve })
+    fake.barrier = { needed: 2, arrived: 0, release, open }
+    const [a, b] = await Promise.all([post(body), post({ ...body, signature: second(String(body.signature)) })])
+    // Both requests were at the lookup before either inserted, and neither found a row: the race, not the lookup.
+    expect(fake.lookups.map((l) => l.found)).toEqual([0, 0])
+    expect([a.status, b.status].sort()).toEqual([201, 409])
+    expect([a, b].find((x) => x.status === 409)!.json.error).toBe('Order already exists (duplicate hash)')
+    expect(fake.rows.map((r) => r.order_hash)).toEqual([hash])
+  })
+
+  it('a lookup that cannot answer fails closed: 503, nothing written', async () => {
+    const { body } = await signedDca(3)
+    fake.lookupError = { message: 'connection reset' }
+    const res = await post(body)
+    expect(res.status).toBe(503)
+    expect(res.json.error).toBe('Could not check for an existing order. Try again shortly.')
+    expect(fake.rows).toHaveLength(0)
+  })
 })

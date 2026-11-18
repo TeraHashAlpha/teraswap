@@ -749,6 +749,25 @@ export async function POST(req: NextRequest) {
       }))
     }
 
+    // [A86 S-3] One signed order is stored once, whatever order_hash text an older row carries. Rows written before
+    // PR #708 kept the caller's text (a UUID, upper case, 0X, no prefix, another hash), so unique_order_hash cannot see
+    // them; their signature column can. Any row whose signature is one of the 4 texts that recover the same signer
+    // (orderSignatureEncodings: v 27/28 or 0/1, s or its twin n − s) is this order: 409, nothing written. Each text is
+    // compared case-insensitively and exactly: it is 0x + 130 hex (checked above, and rebuilt from the parsed bytes),
+    // so no LIKE/PostgREST pattern character (% _ *) reaches the filter. Fail closed if the lookup cannot answer.
+    // (Imported here, not in the import block, to keep this change inside POST.)
+    const { orderSignatureEncodings } = await import('@/lib/order-engine/order-hash')
+    const sameSignature = (orderSignatureEncodings(body.signature) ?? [body.signature.toLowerCase()])
+      .map((text) => `signature.ilike.${text}`)
+      .join(',')
+    const existing = await supabase.from('orders').select('id').or(sameSignature).limit(1)
+    if (existing.error) {
+      return NextResponse.json({ error: 'Could not check for an existing order. Try again shortly.' }, { status: 503 })
+    }
+    if ((existing.data ?? []).length > 0) {
+      return NextResponse.json({ error: 'Order already exists' }, { status: 409 })
+    }
+
     // Insert
     const { data, error } = await supabase
       .from('orders')
@@ -767,8 +786,9 @@ export async function POST(req: NextRequest) {
         expiry: body.expiry,
         nonce: body.nonce,
         signature: body.signature,
-        // [S-5] The server's hash of the signed order, never body.orderHash: one signed order has one
-        // order_hash, so the unique_order_hash constraint refuses it a second time whatever text is sent.
+        // [S-5] The server's hash of the signed order, never body.orderHash. A row written by this code carries that
+        // hash, so unique_order_hash refuses a second row for it whatever text is sent; a row written before PR #708
+        // may carry other text, and the signature lookup above is what refuses a second row for it [A86 S-3].
         order_hash: serverOrderHash,
         dca_interval: body.dcaInterval ?? 0,
         dca_total: body.dcaTotal ?? 1,
@@ -791,8 +811,9 @@ export async function POST(req: NextRequest) {
       .single()
 
     if (error) {
-      // [S-5] unique_order_hash (schema.sql) now fires on the SERVER's hash: the same signed order is
-      // refused here whatever orderHash text accompanies it.
+      // [S-5] unique_order_hash (schema.sql) fires when a row already holds this SERVER hash: one written by this
+      // code, including a concurrent request for the same order that passed the signature lookup at the same time.
+      // A row written before PR #708 under other text does not fire it; the lookup above refuses that case [A86 S-3].
       if (error.code === '23505') {
         return NextResponse.json({ error: 'Order already exists (duplicate hash)' }, { status: 409 })
       }
