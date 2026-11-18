@@ -45,3 +45,25 @@ Keeper code: Draft PR, **Auditor required**. Tables: `fix-keeper-errors-no-signa
 - executor.js:2147 logs the router's raw revert bytes (`inner=`) outside any redactor; not the order signature, and
   executor.js is off-limits here. The operator CLIs (backfill-execution.mjs, list-missing-fills.mjs) print raw
   `err.message`; they make no signature-bearing call.
+
+## Round 2 — A92 audit of PR #717 (blocked 0C/1H), findings S-1..S-8
+
+### Owner answers, round 2 (asked once, 2026-11-18; they supersede the goal text)
+
+1. S-3 vs "existing redaction tests unchanged": the four exact-output assertions of round 1's own
+   redact-s2-error-text.test.mjs (:41, :46, :61, :67) get the `address:` / `function:` lines in their expected texts
+   (still exact matches); every other existing test stays byte-identical.
+2. S-1 also fixes list-missing-fills.mjs:110 (scanLogsChunked's retry log line, reached by both CLIs).
+3. S-1 timeout case: a test-only preload turns only viem's own 10,000 ms timer into 200 ms in the child CLI; the
+   provider socket really hangs and viem's real TimeoutError is what gets printed.
+4. S-3's optional part is done: monitor.js:70's "Last error" alert names the order (first 8 characters of its id).
+
+### Checklist, round 2
+
+- [x] Merge origin/main 85a6f9cb with a normal, signed merge commit (68769f0c); main's 17 files touch no keeper file.
+- [ ] C1 S-1: CLIs print `redactError(err)` (list-missing-fills.mjs :110, :287, :325; backfill-execution.mjs :297),
+      backfill :149 the RPC host only; spawn test red on the head first, then green.
+- [ ] C2 S-2 (chain-verify errText one line) + S-3 (`address:` and `function:` name kept; order id in the alert).
+- [ ] C3 S-4 (extractRevertData depth 16) + S-5 (rpc-auth URL-only redaction; 20,000-text differential vs main).
+- [ ] C4 S-7 (line references in redact-s2-signature.test.mjs).
+- [ ] Proof: signature probe, mutants, keeper Node 20 + 22, gitleaks; one agent-verify; evidence; push.
