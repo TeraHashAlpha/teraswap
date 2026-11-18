@@ -24,6 +24,7 @@ import { NATIVE_ETH } from '@/lib/constants'
 
 const MAINNET = 1
 const BASE = 8453
+const ARBITRUM = 42161
 
 // ── Address-integrity fixtures — pin the majors per chain (guard accidental edits) ──
 const MAINNET_MAJORS: Record<string, string> = {
@@ -223,6 +224,9 @@ describe('[9Y] search performance stays bounded (no UI jank)', () => {
   it('catalogs are hundreds of tokens, not thousands (CoinGecko 2369 was deliberately not baked)', () => {
     expect(getFullCatalog(BASE).length).toBeLessThan(500)
     expect(getFullCatalog(MAINNET).length).toBeLessThan(1000)
+    // [fix/catalog-refresh-drops-untrusted, owner rule C] every chain has a bound. Arbitrum: 389 committed rows
+    // (2026-11-18) + 38 = Base's headroom (500 - 462) = 427. Added alongside the two above, which are unchanged.
+    expect(getFullCatalog(ARBITRUM).length).toBeLessThan(427)
     // displayed results are capped so a broad query never renders the whole list
     expect(SEARCH_RESULT_LIMIT).toBeGreaterThan(0)
     expect(SEARCH_RESULT_LIMIT).toBeLessThanOrEqual(150)

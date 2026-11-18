@@ -1,5 +1,5 @@
 /**
- * [feat/catalog-auto-merge] One all-pass fixture + one failing fixture per condition (C1–C9),
+ * [feat/catalog-auto-merge] One all-pass fixture + one failing fixture per condition (C1–C10),
  * plus an end-to-end run of the CLI against a throwaway git repo (the real `git show`/`rev-list`
  * path the workflow uses). Pure verdict logic is exercised through evaluateEligibility.
  */
@@ -52,6 +52,7 @@ const base = (over: Record<string, unknown> = {}) => ({
   trustBefore: { tokens: [trust(1, 1), trust(1, 2), trust(1, 3)] },
   trustAfter: { tokens: [trust(1, 1), trust(1, 2, { inTrustedList: false }), trust(1, 3), trust(1, 4), trust(1, 5)] },
   commit: { count: 1, parentIsBase: true, author: 'github-actions[bot]', headline: 'chore(catalog): scheduled tokens:sync refresh — chain 1' },
+  heldBackSources: 0 as number | undefined, // [rule D] the refresh's decision file lists no held-back source
   ...over,
 })
 const failedIds = (i: ReturnType<typeof base>) => evaluateEligibility(i).checks.filter((c) => !c.pass).map((c) => c.id)
@@ -59,7 +60,7 @@ const failedIds = (i: ReturnType<typeof base>) => evaluateEligibility(i).checks.
 describe('evaluateEligibility — all-pass fixture', () => {
   it('is eligible when every condition holds (volume churn + 2 additions, mainnet, PAT author)', () => {
     const r = evaluateEligibility(base())
-    expect(r.checks.map((c) => c.id)).toEqual(['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9'])
+    expect(r.checks.map((c) => c.id)).toEqual(['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10'])
     expect(r.reasons).toEqual([])
     expect(r.eligible).toBe(true)
     expect(r.stats).toEqual({ added: 2, removed: 0, rows: 5 })
@@ -101,6 +102,27 @@ describe('evaluateEligibility — one fixture per failing condition', () => {
     const big = Array.from({ length: 999 }, (_, k) => row(1000 + k))
     const i = base({ before: { tokens: big }, after: { tokens: [...big, row(1), row(2)] } })
     expect(evaluateEligibility(i).checks.find((c) => c.id === 'C4')!.pass).toBe(false)
+  })
+
+  // [fix/catalog-refresh-drops-untrusted] owner rule D — auto-merge ONLY with (1) zero removals, (2) zero sources
+  // held back by the growth breaker, (3) additions within the cap: one test per condition.
+  it('rule D (1) removals: a single removed row makes the PR ineligible even when everything else holds', () => {
+    const i = base({ after: { tokens: [row(1), row(2), row(4), row(5)] } })
+    expect(failedIds(i)).toEqual(['C3'])
+  })
+  it('rule D (2) held back: one held-back source makes an otherwise perfect PR ineligible', () => {
+    const r = evaluateEligibility(base({ heldBackSources: 1 }))
+    expect(r.eligible).toBe(false)
+    expect(r.checks.filter((c) => !c.pass).map((c) => c.id)).toEqual(['C10'])
+    expect(r.reasons[0]).toMatch(/^C10 .*1 source\(s\) held back/)
+  })
+  it('rule D (2) held back: an unknown count (decision file missing / unreadable / not a number) fails closed', () => {
+    for (const v of [undefined, Number.NaN, -1 + 0.5, '0' as unknown as number]) expect(failedIds(base({ heldBackSources: v }))).toEqual(['C10'])
+  })
+  it('rule D (3) additions: one above the owner cap of 25 is ineligible (and C4 stays the stricter 10)', () => {
+    expect(ELIGIBILITY_DEFAULTS.maxAdditions).toBeLessThanOrEqual(25)
+    const many = Array.from({ length: 26 }, (_, k) => row(100 + k))
+    expect(failedIds(base({ after: { tokens: [row(1), row(2), row(3), ...many] } }))).toEqual(['C4'])
   })
 
   it('C5 mainnet row carrying a single-source admission', () => {
@@ -214,7 +236,8 @@ describe('CLI against a throwaway git repo (real git show / rev-list path)', () 
     const { dir, baseSha, headSha } = repo([row(1), row(2), row(3)])
     const out = path.join(dir, 'gh-output'); const cl = path.join(dir, 'checklist.md')
     writeFileSync(out, '')
-    const stdout = run(dir, baseSha, headSha, ['--checklist-file', cl], { GITHUB_OUTPUT: out })
+    const decision = path.join(dir, 'decision.1.json'); writeFileSync(decision, JSON.stringify({ heldBackSources: [] }))
+    const stdout = run(dir, baseSha, headSha, ['--checklist-file', cl, '--decision-file', decision], { GITHUB_OUTPUT: out })
     expect(stdout.trim()).toBe('eligible=true')
     expect(readFileSync(out, 'utf8')).toBe('eligible=true\n')
     expect(readFileSync(cl, 'utf8')).toContain('ELIGIBLE')
@@ -224,6 +247,20 @@ describe('CLI against a throwaway git repo (real git show / rev-list path)', () 
     const stdout = run(dir, baseSha, headSha)
     expect(stdout).toContain('eligible=false')
     expect(stdout).toMatch(/reason=C2 .*package\.json/)
+  })
+  it('held-back source in the decision file: eligible=false with a C10 reason', () => {
+    const { dir, baseSha, headSha } = repo([row(1), row(2), row(3)])
+    const decision = path.join(dir, 'decision.1.json'); writeFileSync(decision, JSON.stringify({ heldBackSources: [{ chainId: 1, source: 'oneinch', previous: 1074, current: 3203, baseline: 1074 }] }))
+    expect(run(dir, baseSha, headSha, ['--decision-file', decision])).toMatch(/eligible=false[\s\S]*reason=C10 .*1 source\(s\) held back/)
+  })
+  it('no / unreadable / malformed decision file: eligible=false with a C10 reason (fail closed)', () => {
+    const { dir, baseSha, headSha } = repo([row(1), row(2), row(3)])
+    expect(run(dir, baseSha, headSha)).toMatch(/eligible=false[\s\S]*reason=C10 .*unknown/)
+    expect(run(dir, baseSha, headSha, ['--decision-file', path.join(dir, 'nope.json')])).toMatch(/reason=C10 .*unknown/)
+    const bad = path.join(dir, 'bad.json'); writeFileSync(bad, '{not json')
+    expect(run(dir, baseSha, headSha, ['--decision-file', bad])).toMatch(/reason=C10 .*unknown/)
+    const noKey = path.join(dir, 'nokey.json'); writeFileSync(noKey, JSON.stringify({ kept: 3 }))
+    expect(run(dir, baseSha, headSha, ['--decision-file', noKey])).toMatch(/reason=C10 .*unknown/)
   })
   it('removed row: eligible=false with a C3 reason', () => {
     const { dir, baseSha, headSha } = repo([row(1), row(3)])
