@@ -204,6 +204,10 @@ always qualify by chain. Operational status and the checks behind each row are i
   The refresh never ships a token the catalog guard calls fatal: a new one is left out, one already on the site is removed and listed in the
   refresh PR body (first section), and more than 20 removals / 5% of a chain, a dead CoinGecko list or a failing core token changes nothing
   for that chain and opens the failure issue (`scripts/token-catalog/lib/refresh-decision.ts`, tests beside it). The guard and its allowlist are unchanged.
+  A source list that grows by more than 50% against the previous run is held back (the previous snapshot stands in) until the owner accepts its
+  size in `scripts/token-catalog/accepted-source-sizes.json`; a refresh adds at most 25 tokens per chain (highest 7-day volume first, never past the
+  chain's size bound `CATALOG_SIZE_BOUND`); auto-merge needs 0 removals, 0 held-back sources and additions within the cap
+  (`lib/source-growth.ts`, `lib/refresh-decision.ts`, `auto-merge-eligibility.mjs` C10).
 - **CI:** `ci.yml` job `full-suite` runs the whole vitest suite with no file list (`ci.yml:442-470`); the per-file guard jobs are additive.
   ADR-025 and ADR-026 are Proposed, ADR-013 and ADR-024 Accepted (their `Status` lines).
 - **Tests (real runs, Node 25.6.1 on the owner's Mac, 2026-11-11):** `CI=true npx vitest run` → 8249 tests in 463 files, 0 failed;
