@@ -201,6 +201,9 @@ always qualify by chain. Operational status and the checks behind each row are i
 - **Token catalog:** one shared pipeline, `npm run tokens:sync` (`scripts/token-catalog/build.ts`), writes
   `src/config/generated/token-catalog.{1,8453,42161}.json` (994 / 450 / 376 entries); `token-catalog-refresh.yml` runs it Mondays 06:00 UTC.
   `src/lib/chains/arbitrum-catalog*.ts` is the superseded manifest pipeline, kept in place.
+  The refresh never ships a token the catalog guard calls fatal: a new one is left out, one already on the site is removed and listed in the
+  refresh PR body (first section), and more than 20 removals / 5% of a chain, a dead CoinGecko list or a failing core token changes nothing
+  for that chain and opens the failure issue (`scripts/token-catalog/lib/refresh-decision.ts`, tests beside it). The guard and its allowlist are unchanged.
 - **CI:** `ci.yml` job `full-suite` runs the whole vitest suite with no file list (`ci.yml:442-470`); the per-file guard jobs are additive.
   ADR-025 and ADR-026 are Proposed, ADR-013 and ADR-024 Accepted (their `Status` lines).
 - **Tests (real runs, Node 25.6.1 on the owner's Mac, 2026-11-11):** `CI=true npx vitest run` → 8249 tests in 463 files, 0 failed;
