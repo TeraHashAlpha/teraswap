@@ -27,5 +27,15 @@ Skips: `e2e/third-party-hosts/bundle.pw.ts:24`, `scripts/grok-guard.test.mjs:65`
 Retries: `playwright.config.ts:21`, `playwright.mobile.config.ts:18` (`process.env.CI ? 1 : 0`). Workflows: `continue-on-error: true`
 at `dependabot-auto-merge.yml:61`, `security-audit.yml:44`.
 
-## 5. Verify
-TODO
+## 5. Verify (code head 85d715ad; the branch head adds only this file)
+`scripts/agent-verify.sh --keeper --codeql` (Node 22 first on PATH, a `brew` stub first so it never calls Homebrew): suite PASS
+10875/0 in 507 files · lint-delta +0/+0 · tsc 0 · build ok · v1v2-parity 123/0 · rpc-budget 36/0 · codeql 13 → 13, 0 new ·
+keeper Node 20 1563/0/0, Node 22 1563/0/0 · RESULT PASS. `node scripts/gen-claude-state.mjs --check`: current. gitleaks over the
+branch commits: no leaks. diff --stat: 9 files, +346 −42 (7 test files, 2 feedback docs). The only file under `contracts/` is
+test 2's own keeper test (the goal's target); no `.sol`, `executor.js`, `basket-*`, `src/app/api/orders/**`, workflow or dep.
+Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/flaky-tests-root-cause (no PR).
+
+**Not verified:** every recipe ran on this Mac only, not on a Linux CI runner (`process.cpuUsage` resolution there not measured);
+E2E on cached Chromium 1248 (Playwright 1.65 wants 1254, not installed), only the intro spec of the v2-mobile-parity job (the
+job's DCA specs need the repo variables); CI not watched; branch not rebased on main 02487c98 (`git merge-tree` clean; main only
+added a vitest include glob); test 3's untouched 4-start `it`s pass at 700 ms (3.2 s) but would time out from ~1.2 s per start.
