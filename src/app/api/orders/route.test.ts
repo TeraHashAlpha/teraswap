@@ -14,6 +14,11 @@
  * insert never actually connects in these tests because every assertion returns at/before verification
  * — except the real-signature cases, which we drive only to the point where 'Signature mismatch' would
  * fire, asserting it does NOT.
+ *
+ * [A86 S-3] Those two cases used to reach the network (fake.supabase.co) after verification, and failed fast
+ * because a POST is never retried. The route now looks up the signature (a GET) before the insert, and
+ * postgrest-js retries a GET that fails on the network 3 times (1 s, 2 s, 4 s), past the 5 s test timeout. The
+ * client is stubbed instead: the lookup finds no row, the insert fails as the unreachable host did (→ 500).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { NextRequest } from 'next/server'
@@ -41,6 +46,18 @@ vi.mock('@/lib/kv-rate-limiter', async () => {
     checkRateLimit: vi.fn(async () => ({ allowed: true, remaining: 99, resetAt: Date.now() + 60_000 })),
   }
 })
+
+// No database in this test (see the header): rate-limit RPC allows, the signature lookup finds no row, the insert
+// fails like the unreachable host it used to reach.
+vi.mock('@supabase/supabase-js', () => ({
+  createClient: () => ({
+    rpc: async () => ({ data: true, error: null }),
+    from: () => ({
+      select: () => ({ or: () => ({ limit: async () => ({ data: [], error: null }) }) }),
+      insert: () => ({ select: () => ({ single: async () => ({ data: null, error: { message: 'no database in this test' } }) }) }),
+    }),
+  }),
+}))
 
 import { POST } from './route'
 

@@ -27,7 +27,9 @@ export async function GET(req: NextRequest) {
     // [BUGFIX] Helper to build query with optional wallet filter — was previously
     // constructed via baseFilter but never actually applied to the parallel queries
     function ordersQuery() {
-      let q = supabase!.from('orders').select('*', { count: 'exact', head: true })
+      // [fix/order-signature-not-returned] A count (head: true) returns no row, but an orders read names its columns,
+      // never `*` (orders-read-select-guard.test.ts); `id` gives the same count.
+      let q = supabase!.from('orders').select('id', { count: 'exact', head: true })
       if (wallet) q = q.eq('wallet', wallet.toLowerCase())
       return q
     }
