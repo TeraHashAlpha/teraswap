@@ -176,7 +176,17 @@ export function decideRefresh(input: RefreshDecisionInput): RefreshDecision {
 
 /** Symbols and guard text come from external token lists (attacker-choosable): printable, no markup. */
 export function sanitizeInline(s: string, max = 160): string {
-  const cleaned = s.replace(/[\u2013\u2014]/g, '-').replace(/[^\x20-\x7e]/g, '?').replace(/[`|<>[\]()*_~\\]/g, "'").replace(/\s+/g, ' ').trim()
+  // HTML-significant characters become entities (GitHub shows the character, a tag can never form);
+  // markdown structure characters that could open a link, code span, table cell or emphasis become '.
+  const cleaned = s
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/[^\x20-\x7e]/g, '?')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/[`|[\]*_~\\]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
   return cleaned.length > max ? `${cleaned.slice(0, max - 1)}…` : cleaned
 }
 

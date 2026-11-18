@@ -349,12 +349,15 @@ describe('refresh-decision — PR body / issue text', () => {
     const leftOutPart = body.slice(body.indexOf(`## ${LEFT_OUT_HEADING}`))
     expect(leftOutPart).toContain(evil.address)
     expect(body.match(/^## /gm)).toHaveLength(2) // the symbol cannot inject a heading
-    expect(body).not.toContain('http://evil)')
+    expect(body).not.toMatch(/`[^`\n]*`[^\n]*`[^`\n]*`[^\n]*`/) // a symbol cannot close its own code span (3+ spans on a line)
     expect(body).not.toMatch(/<b>/)
+    expect(body).not.toMatch(/\]\(http/) // no markdown link from a symbol
   })
 
   it('sanitizeInline strips control characters, markup and caps the length', () => {
-    expect(sanitizeInline('a\u0000b\nc`d|e<f>')).toBe("a?b?c'd'e'f'")
+    expect(sanitizeInline('a\u0000b\nc`d|e<f>')).toBe("a?b?c'd'e&lt;f&gt;")
+    expect(sanitizeInline('1 external vote(s) < 2 required')).toBe('1 external vote(s) &lt; 2 required')
+    expect(sanitizeInline('[x](http://evil)')).toBe("'x'(http://evil)") // no [..](..) link can form
     expect(sanitizeInline('x'.repeat(500), 50)).toHaveLength(50)
     expect(sanitizeInline('a \u2014 b \u2013 c')).toBe('a - b - c')
   })
