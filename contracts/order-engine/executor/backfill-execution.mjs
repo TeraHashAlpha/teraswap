@@ -37,6 +37,9 @@ import { resolve } from "node:path"
 import { createPublicClient, http } from "viem"
 import { decodeOrderExecuted, ORDER_EXECUTED_EVENT, buildExecutionRow, recordExecutionRow } from "./record-execution.js"
 import { scanLogsChunked, resolveBlockFromTimestamp } from "./list-missing-fills.mjs"
+// [A92 S-1] An error is printed through redactError, never as err.message: viem's message carries `URL: <RPC_URL>`,
+// the provider key in its path (redact-a92-s1-cli.test.mjs).
+import { redactError } from "./redact.js"
 
 // ── Pure / injectable helpers (exported for backfill-execution.test.mjs; no client, no network) ──
 
@@ -146,7 +149,13 @@ async function main() {
 
   const client = createPublicClient({ transport: http(RPC_URL) })
 
-  console.log(`\n=== Backfill ${txHash} (apply=${APPLY}${REPAIR ? ", repair" : ""}) via RPC ${RPC_URL} ===`)
+  // [A92 S-1] The RPC by HOST only: BACKFILL_RPC_URL routinely carries the provider key in its path, query or userinfo,
+  // and `new URL(…).host` drops all three (same rule as executor.js's boot refusal).
+  let rpcHost = "unparseable BACKFILL_RPC_URL"
+  try {
+    rpcHost = new URL(RPC_URL).host
+  } catch {}
+  console.log(`\n=== Backfill ${txHash} (apply=${APPLY}${REPAIR ? ", repair" : ""}) via RPC host=${rpcHost} ===`)
 
   const receipt = await client.getTransactionReceipt({ hash: txHash })
   console.log(
@@ -294,7 +303,7 @@ async function main() {
 const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])
 if (isMainModule) {
   main().catch((err) => {
-    console.error(`FATAL: ${err instanceof Error ? err.message : String(err)}`)
+    console.error(`FATAL: ${redactError(err)}`)
     process.exit(1)
   })
 }

@@ -19,8 +19,9 @@
 // Optional env: LOGS_CHUNK (default 10000) — block range per eth_getLogs call.
 //
 // No secrets are ever printed: RPC_URL / SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are read but
-// never logged, not even redacted — only their variable NAMES appear in refusal messages. The RPC
-// host is masked as `<provider>` wherever it would otherwise appear.
+// never logged — only their variable NAMES appear in refusal messages, and the RPC is named as
+// `<provider>`. [A92 S-1] An error is printed through redactError: viem's `URL:` line keeps the
+// host and loses the path, query and userinfo, where a provider key lives.
 
 // [KEEPER-ENV-ORDER] MUST stay the first import (see env.js) — loads .env.executor
 // from cwd before the module-scope env reads below; explicit shell env still wins.
@@ -32,6 +33,9 @@ import { createPublicClient, http } from "viem"
 import { verifyChainBinding, createRpcProbe, EXPECTED_ORDER_TYPEHASH_V3 } from "./chain-verify.js"
 import { decodeOrderExecuted, ORDER_EXECUTED_EVENT } from "./record-execution.js"
 import { parseChainIdEnv } from "./boot-config.js"
+// [A92 S-1] An error is printed through redactError, never as err.message: viem's message carries `URL: <RPC_URL>`,
+// the provider key in its path (redact-a92-s1-cli.test.mjs).
+import { redactError } from "./redact.js"
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────
 export const USAGE =
@@ -107,7 +111,7 @@ export async function scanLogsChunked({ getLogs, fromBlock, toBlock, chunkSize, 
       const halfSize = Math.max(1, Math.floor(chunkSize / 2))
       const halfEnd = Math.min(cursor + halfSize - 1, toBlock)
       log(
-        `[list-missing-fills] range error on ${cursor}-${end} (${err instanceof Error ? err.message : String(err)}), ` +
+        `[list-missing-fills] range error on ${cursor}-${end} (${redactError(err)}), ` +
           `retrying ${cursor}-${halfEnd} at half chunk size`,
       )
       const logs = await getLogs(cursor, halfEnd)
@@ -284,7 +288,7 @@ async function main() {
       log: (msg) => console.log(msg),
     })
   } catch (err) {
-    console.error(err instanceof Error ? err.message : String(err))
+    console.error(redactError(err))
     console.error(`   Refusing to scan against ${maskRpcUrl()}.`)
     process.exit(1)
   }
@@ -322,7 +326,7 @@ async function main() {
 const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])
 if (isMainModule) {
   main().catch((err) => {
-    console.error(`FATAL: ${err instanceof Error ? err.message : String(err)}`)
+    console.error(`FATAL: ${redactError(err)}`)
     process.exit(1)
   })
 }
