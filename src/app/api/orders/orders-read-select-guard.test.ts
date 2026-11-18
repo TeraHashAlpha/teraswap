@@ -19,6 +19,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { privateKeyToAccount } from 'viem/accounts'
 import { buildOrdersReadTypedData, ORDERS_READ_HEADER_ISSUED, ORDERS_READ_HEADER_SIGNATURE } from '@/lib/order-engine/read-auth'
+import { escapeRegExp } from '@/test-utils/escape-regexp'
 import { parseSelect, type RecordedSelect, type Row } from '@/test-utils/fake-postgrest'
 import { DB_ORDER_STATUSES, makeExecutionRow, makeOrderRow, makeOrdersDb, makeSwapRow, prng } from '@/test-utils/orders-db-fixture'
 
@@ -225,7 +226,7 @@ function resolveTable(arg: string, fileSrc: string, exported: Map<string, string
   const lit = /^(['"`])([^'"`$\\]*)\1$/.exec(arg)
   if (lit) return lit[2]
   if (!/^[A-Za-z_$][\w$]*$/.test(arg)) return null
-  const local = new RegExp(`\\bconst\\s+${arg.replace(/\$/g, '\\$')}\\s*(?::\\s*[^=\\n]+)?=\\s*(['"\`])([^'"\`$\\\\\\n]*)\\1\\s*(?:as const)?\\s*[;\\n]`).exec(fileSrc)
+  const local = new RegExp(`\\bconst\\s+${escapeRegExp(arg)}\\s*(?::\\s*[^=\\n]+)?=\\s*(['"\`])([^'"\`$\\\\\\n]*)\\1\\s*(?:as const)?\\s*[;\\n]`).exec(fileSrc)
   if (local) return local[2]
   return exported.get(arg) ?? null
 }
@@ -270,7 +271,7 @@ function isOrderReadColumnsParam(src: string, index: number, first: string): boo
     const cb = /^\s*(?:async\s*)?(?:\(\s*([A-Za-z_$][\w$]*)\s*(?::[^)]*)?\)|([A-Za-z_$][\w$]*))\s*=>/.exec(inner)
     const param = cb ? (cb[1] ?? cb[2]) : undefined
     if (param !== first) continue
-    if (new RegExp(`(?<![\\w$.])${first.replace(/\$/g, '\\$')}\\s*(?:[-+*/%&|^]|\\*\\*|<<|>>>?|\\?\\?|&&|\\|\\|)?=(?![=>])`).test(inner.slice(cb![0].length))) continue
+    if (new RegExp(`(?<![\\w$.])${escapeRegExp(first)}\\s*(?:[-+*/%&|^]|\\*\\*|<<|>>>?|\\?\\?|&&|\\|\\|)?=(?![=>])`).test(inner.slice(cb![0].length))) continue
     return true
   }
   return false
