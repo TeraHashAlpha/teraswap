@@ -2,7 +2,7 @@
 
 Tables (E2 to E4 in full): [`fix-log-routes-bounded-input.tables.md`](fix-log-routes-bounded-input.tables.md).
 Commits: 9b4039c8 feedback start · adc845ff log-quote · 51550bf5 monitor/source-health · b0c8df9f body-limit + Step 0 ·
-8d4ee961 prototype-name test · this file (docs only, branch head).
+8d4ee961 prototype-name test · 91a5327e and this edit (docs only; the last is the branch head).
 
 ### Owner answers (asked once, 2026-11-17; they supersede the goal text)
 1. **Body cap:** `bodySizeGuard` stays synchronous (same signature, header check kept) and installs a byte-capped reader;
@@ -11,6 +11,8 @@ Commits: 9b4039c8 feedback start · adc845ff log-quote · 51550bf5 monitor/sourc
 2. **Size bounds:** symbols ≤ 32 chars; tokenIn, tokenOut, wallet ≤ 64; amounts ≤ 80; allQuotes registry keys only,
    values ≤ 80; responseTimeMs finite or 0. Past the bound or wrong type = absent (dropped required field → 400).
 3. **Test mock:** `smismember` + `kvRaw` stubs in `source-health-monitor.test.ts`'s kv mock; no assertion changed.
+4. **Red verify outside the diff (asked 2026-11-18):** "Hold, verify once more": wait for the other sessions' runs to
+   end, run agent-verify --codeql once more on a quiet machine, push only if green. Done: E5, third run.
 
 ### Checklist
 - [x] Step 0 (a) (b) fail on origin/main, pass on head · [x] change 1: one list `ADAPTER_SOURCE_NAMES` (derived from
@@ -48,7 +50,11 @@ no 413 mapping 2. Every failing test name: tables E4.
 - @ **8d4ee961** (+4 tests only): FAIL on suite only, 31 of 10,918, 13 files, **none in this diff**: 30 timeouts
   (28 × 5 s, 60 s, 120 s) + 1 late call from a timed-out test, load average 86 to 91 with two other sessions' `--keeper --codeql` runs. Lint
   +0/+0, tsc 0, build, parity, rpc-budget, CodeQL 13 = 13 PASS. Not re-run to make it green.
-- `gen-claude-state --check`: current. Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/log-routes-bounded-input
+- @ **91a5327e** (= 8d4ee961 + docs), owner answer 4, started 01:55 at load 2.1, no other verify running: **PASS** ·
+  suite 10,918 / 0 failed · lint-delta +0/+0 · tsc 0 · build ok · parity 123 · rpc-budget 36 · CodeQL 13 = 13, 0 new
+  (base origin/main 02487c98). Head after this file: docs only. diff --stat origin/main...HEAD: 30 files, +1,751 −67.
+- `gen-claude-state --check`: current. main moved to 02487c98 (#707, #708, #710): no file overlap, `merge-tree` clean;
+  the merged result was not run. Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/log-routes-bounded-input
 - **Not verified:** a live Upstash (SMISMEMBER, SRANDMEMBER count, SREM, `automaticDeserialization: false` ran on a fake
   modelled on @upstash/redis 1.39.0); a chunked body through a real server or Vercel (vitest NextRequest streams only);
   production's set, `quotes` and `security_events` contents; Node 26 suite; keeper (untouched).
