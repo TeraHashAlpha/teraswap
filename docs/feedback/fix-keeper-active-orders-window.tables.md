@@ -227,8 +227,23 @@ RESULT: PASS
 `node scripts/gen-claude-state.mjs --check`: `CLAUDE.md state block is current`. `gitleaks git --log-opts=a9f12d9a..HEAD`:
 67 commits scanned, no leaks found.
 
-The verified head `c4c9a878` carried `cc262b34`'s weakened probe file. `df38ad6b` restored it byte for byte to `11502c78`; the
-keeper suite was run again on Node 20 and 22 (2137/2137) but agent-verify was not (the goal allows one run).
+The first verified head `c4c9a878` carried `cc262b34`'s weakened probe file. `df38ad6b` restored it byte for byte to
+`11502c78`. Owner answer 5: a second run on the pushed head. Quiet checks 16:11:44Z load1 3.18 and 16:12:15Z 3.55, no other
+verify or CodeQL; same brew stub; `agent-verify --keeper --codeql` on `4ec3e258` (base origin/main `85a6f9cb`), exit 0:
+
+```
+suite:       PASS 11090 tests passed, 0 failed, 520 files
+lint-delta:  PASS errors +0, warnings +0 (11 changed files; head 0 err/0 warn, base 0 err/0 warn)
+tsc:         PASS 0 errors
+build:       PASS next build ok
+v1v2-parity: PASS 123 tests passed, 0 failed, 11 files
+rpc-budget:  PASS 36 tests passed, 0 failed, 3 files
+codeql:      PASS security-extended: head 13, base 13, new by rule+file+message 0
+keeper:      PASS node20:2137-pass/0-fail/0-cancelled node22:2137-pass/0-fail/0-cancelled
+17 files changed, 3795 insertions(+), 54 deletions(-)   (diff --stat origin/main...HEAD)
+RESULT: PASS
+```
+gen-claude-state: current. gitleaks `c5cf3c52..HEAD`: no leaks.
 
 ## R10. Round-2 feedback (moved here to keep the round-2 section of the feedback file to one screen)
 

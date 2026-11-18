@@ -10,6 +10,7 @@ Main merged `a01d9251` (bfe26155) and `5d45dfe2` (7bd3ec12). Tables R1–R10 in 
 id, and first, only when the rotating scan does not hold the row). 2. Multicall3 check: read-only public RPC allowed. 3. Expired
 rows always walked; ONE 15-row budget for rows the pre-screen cannot answer, rotating (least recently walked first); 5 s limits;
 added test: 40 unanswerable rows, one more walked within 3 cycles. 4. Register only walked DCA rows (main's quorum-wiring regex).
+5. (asked after the probe file was restored) A second agent-verify, on the pushed head 4ec3e258, on a quiet machine.
 
 **Evidence.** (tests: P `active-scan-probes`, C `active-scan-cycle`, U `active-window`, Pr `active-scan-property`)
 1. Every finding fixed. S-1 asking without locking, 1000-row scan `executor.js:351,940`, only true rows walked `:1836` (P flood ×4,
@@ -29,9 +30,11 @@ added test: 40 unanswerable rows, one more walked within 3 cycles. 4. Register o
 5. Host log, one per cycle: `Active scan: active=<n> scanned=<n> true=<n> attempted=<n> carried=<n> rotate=no fallback=none`;
    absent `Active scan query FAILED (`, `Pre-screen chunk`, `fallback=scan-`, `fallback=prescreen-`; not repeating `Supabase fetch
    error (scan wrap):`, `Tick skipped:`; gone `Active window:`, `Querying:`, `Supabase returned`, `First order:` (runbook § 9).
-6. agent-verify --keeper --codeql, once, quiet (load 5–7): PASS on `c4c9a878` (suite 11090, CodeQL 13=13, keeper 2136 Node 20+22).
-   After it, `df38ad6b` restored the probe file (below): keeper 2137/2137 on Node 20 and 22, agent-verify NOT re-run (rule: once).
-   gen-claude-state current; gitleaks clean. Diff since a9f12d9a (this round's files): 16 files, +2541/−1006 at c4c9a878.
+6. agent-verify --keeper --codeql on `4ec3e258` (owner answer 5; load 3.2–3.6, no other verify/CodeQL): **PASS** — suite
+   11090, lint +0/+0, tsc 0, build, parity 123, rpc-budget 36, CodeQL 13=13 / 0 new, keeper 2137 on Node 20 and 22. The first run
+   (`c4c9a878`, weakened probe file) also passed. HEAD adds only this paragraph and R9 (docs). gen-claude-state current; gitleaks
+   clean. Diff since a9f12d9a, this round's files: 16 files, +2541/−1006 at c4c9a878 (+ the restored probe file). main moved to
+   85a6f9cb (PR #709, nothing under contracts/order-engine; merge-tree clean): not merged, to keep the verified head.
    Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/keeper-active-orders-window. NOT verified: the reads
    against a real Supabase (offset, id=in, count, max_rows), a real canExecute through Multicall3, the host, CI.
 
