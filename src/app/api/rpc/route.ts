@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { bodySizeGuard, RPC_MAX_BODY_BYTES } from '@/lib/body-limit'
+import { bodySizeGuard, bodyTooLargeFrom, RPC_MAX_BODY_BYTES } from '@/lib/body-limit'
 import { checkRateLimitWithin, RPC_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { resolveProxyChainId } from '@/lib/rpc-proxy-chain'
 import { serverRpcUrl } from '@/lib/rpc-env'
@@ -94,7 +94,10 @@ export async function POST(req: NextRequest) {
   let parseFailed = false
   try {
     body = await req.json()
-  } catch {
+  } catch (err) {
+    // [SEC-8] A read past the cap bodySizeGuard put on the request: 413, as for a declared over-cap body.
+    const tooLarge = bodyTooLargeFrom(err)
+    if (tooLarge) return tooLarge
     parseFailed = true
   }
   // [fix/user-ip-privacy A76 S-5] Bounded at 1 s (RATE_LIMIT_GATE_TIMEOUT_MS), as /api/quote bounds its KV gate: with

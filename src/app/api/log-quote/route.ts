@@ -5,7 +5,8 @@ import { getSupabaseLogger } from '@/lib/supabase'
 import { trackQuoteFailure } from '@/lib/security-tracker'
 import { trackWalletAction } from '@/lib/wallet-activity-server'
 import { checkRateLimitWithin, LOG_RATE_LIMIT } from '@/lib/kv-rate-limiter'
-import { bodySizeGuard, clientIp } from '@/lib/body-limit'
+import { bodySizeGuard, bodyTooLargeFrom, clientIp } from '@/lib/body-limit'
+import { boundLogQuoteBody } from '@/lib/log-quote-input'
 
 /**
  * POST /api/log-quote
@@ -34,20 +35,22 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json()
 
+    // [SEC-3] Registry source names only (de-duplicated, at most one per registry source) and a size bound on every
+    // other field; a value past its bound is dropped like an absent one (lib/log-quote-input.ts).
     const {
       tokenIn,
       tokenInSymbol,
       tokenOut,
       tokenOutSymbol,
       amountIn,
-      sourcesQueried = [],
-      sourcesResponded = [],
+      sourcesQueried,
+      sourcesResponded,
       bestSource,
       bestAmountOut,
       allQuotes,
-      responseTimeMs = 0,
+      responseTimeMs,
       wallet,
-    } = body
+    } = boundLogQuoteBody(body as Record<string, unknown>)
 
     if (!tokenIn || !tokenOut || !amountIn) {
       return NextResponse.json(
@@ -85,23 +88,25 @@ export async function POST(req: NextRequest) {
         source: bestSource ?? undefined,
         durationMs: responseTimeMs,
         metadata: {
-          sourcesQueried: (sourcesQueried as string[]).length,
-          sourcesResponded: (sourcesResponded as string[]).length,
+          sourcesQueried: sourcesQueried.length,
+          sourcesResponded: sourcesResponded.length,
           bestSource,
         },
       })
     }
 
     // ── Server-side: track sources that failed to respond ──
-    const failed = (sourcesQueried as string[]).filter(
-      (s: string) => !(sourcesResponded as string[]).includes(s)
-    )
+    // [SEC-3] sourcesQueried holds each registry name at most once, so this is at most one event per registry source.
+    const failed = sourcesQueried.filter((s) => !sourcesResponded.includes(s))
     for (const src of failed) {
       trackQuoteFailure({ source: src, tokenIn: tokenInSymbol || tokenIn, tokenOut: tokenOutSymbol || tokenOut, error: 'No response' })
     }
 
     return NextResponse.json({ ok: true })
   } catch (err) {
+    // [SEC-8] A read past the cap bodySizeGuard put on the request: 413, as for a declared over-cap body.
+    const tooLarge = bodyTooLargeFrom(err)
+    if (tooLarge) return tooLarge
     console.error('[log-quote] Error:', err)
     return NextResponse.json({ ok: true }) // Never fail
   }

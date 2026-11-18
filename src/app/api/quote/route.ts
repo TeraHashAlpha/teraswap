@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { bodySizeGuard } from '@/lib/body-limit'
+import { bodySizeGuard, bodyTooLargeFrom } from '@/lib/body-limit'
 import { fetchMetaQuote, diagnoseQuoteSources } from '@/lib/api'
 import { isValidAddress } from '@/lib/validation'
 import { SequencerDownError } from '@/lib/chains/sequencer-check'
@@ -319,6 +319,9 @@ async function handleQuotePost(req: NextRequest): Promise<NextResponse> {
       },
     })
   } catch (err) {
+    // [SEC-8] A read past the cap bodySizeGuard put on the request: 413, as for a declared over-cap body.
+    const tooLarge = bodyTooLargeFrom(err)
+    if (tooLarge) return tooLarge
     // [E-2] L2 sequencer down/recovering — calm, typed 503 the client can
     // surface as "quotes paused" (vs a generic upstream failure).
     if (err instanceof SequencerDownError) {

@@ -34,7 +34,7 @@
  */
 
 import { NextResponse, type NextRequest } from 'next/server'
-import { bodySizeGuard } from '@/lib/body-limit'
+import { bodySizeGuard, bodyTooLargeFrom } from '@/lib/body-limit'
 import { encodeFunctionData } from 'viem'
 import {
   fetchMetaQuote,
@@ -421,8 +421,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let rawBody: SwapRequestBody
   try {
     rawBody = (await req.json()) as SwapRequestBody
-  } catch {
-    return jsonError(400, 'Invalid JSON body.')
+  } catch (err) {
+    // [SEC-8] A read past the cap bodySizeGuard put on the request: 413, as for a declared over-cap body.
+    return bodyTooLargeFrom(err) ?? jsonError(400, 'Invalid JSON body.')
   }
   const parsed = parseBody(rawBody)
   if (parsed instanceof NextResponse) return parsed
