@@ -1,18 +1,24 @@
 /**
  * [fix/order-signature-not-returned] Guard: a read of `orders` selects an explicit column list, never `*`, never
  * `signature`. Two layers:
- *   1. Dynamic: every UNAUTHENTICATED read path is driven through the fake PostgREST client and every `orders` select
- *      it sends (top level, or an `orders(...)` embed from another table) is checked.
- *   2. Static: every `.from('orders')` chain in src/ (tests excluded) that does not write (insert / update / upsert /
- *      delete) must not select `*`, must not call `.select()` empty (= `*`), and must not name `signature`; an
- *      `orders(...)` / `orders!inner(...)` embed anywhere in src/ must not either. A select whose argument is not a
- *      string literal is allowed only in a file that imports the allow-list module (layer 1 checks its value).
- * Each layer's checker is first shown to FAIL on a `*` select, so the guard cannot pass vacuously.
+ *   1. Dynamic: every read path is driven through the fake PostgREST client, WITHOUT a read signature and WITH one
+ *      (the authenticated poll, live orders, history fills), and every `orders` select it sends (top level, or an
+ *      `orders(...)` embed from another table) is checked.
+ *   2. Static: every `.from(<table>)` chain in src/ (tests excluded) that does not write (insert / update / upsert /
+ *      delete) and selects: the table argument must be a string literal or resolve to a `const` string (in the file, or
+ *      an exported constant of src/); a chain on `orders` must not select `*`, must not call `.select()` empty (= `*`),
+ *      and must not name `signature`; an `orders(...)` / `orders!inner(...)` embed anywhere in src/ must not either.
+ *      A select whose argument is not a string literal is accepted ONLY when it is, bare, the columns parameter of the
+ *      `withOrderReadColumns((columns) => ...)` callback it sits in (order-read-columns.ts), never a variable, spread,
+ *      ternary or concatenation.
+ * Each layer's checker is first shown to FAIL on a `*` select, so the guard cannot pass vacuously. [A87 S-5]
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
 import fs from 'node:fs'
 import path from 'node:path'
+import { privateKeyToAccount } from 'viem/accounts'
+import { buildOrdersReadTypedData, ORDERS_READ_HEADER_ISSUED, ORDERS_READ_HEADER_SIGNATURE } from '@/lib/order-engine/read-auth'
 import { parseSelect, type RecordedSelect, type Row } from '@/test-utils/fake-postgrest'
 import { DB_ORDER_STATUSES, makeExecutionRow, makeOrderRow, makeOrdersDb, makeSwapRow, prng } from '@/test-utils/orders-db-fixture'
 
@@ -35,8 +41,18 @@ import { GET as STATS } from './stats/route'
 import { GET as HISTORY } from '../history/route'
 import { GET as ANALYTICS } from '../analytics/route'
 
-const WALLET = '0x' + '3c'.repeat(20)
+// Published Anvil/Hardhat default account #0 key, value-allowlisted in .gitleaks.toml (NOT a secret).
+const account = privateKeyToAccount('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80')
+const WALLET = account.address.toLowerCase()
 let seeded: Row[] = []
+
+async function readAuth(): Promise<Record<string, string>> {
+  const issuedAt = Math.floor(Date.now() / 1000)
+  return {
+    [ORDERS_READ_HEADER_ISSUED]: String(issuedAt),
+    [ORDERS_READ_HEADER_SIGNATURE]: await account.signTypedData(buildOrdersReadTypedData(WALLET, issuedAt)),
+  }
+}
 
 // ── Layer 1: what the unauthenticated read paths ask the database for ─────────────────────────────────────────────
 /** Problems with one recorded select, as text; [] when it is an explicit list without `signature`. */
@@ -66,7 +82,7 @@ function ordersSelectProblems(s: RecordedSelect): string[] {
   return problems
 }
 
-describe('guard, layer 1: the unauthenticated read paths select an explicit orders column list', () => {
+describe('guard, layer 1: every read path, without and with a read signature, selects an explicit orders column list', () => {
   beforeEach(() => {
     vi.stubEnv('SUPABASE_URL', 'https://stub.supabase.co')
     vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'service-role-stub')
@@ -83,30 +99,64 @@ describe('guard, layer 1: the unauthenticated read paths select an explicit orde
     expect(ordersSelectProblems({ table: 'orders', columns: 'id,status', head: true })).toEqual([])
   })
 
+  const byId = (id: unknown) => ({ params: Promise.resolve({ id: String(id) }) })
+  const get = (path: string, headers: Record<string, string> = {}) => new NextRequest(`http://localhost${path}`, { headers })
+  const reachesOrders = (sel: RecordedSelect) => sel.table === 'orders' || /\borders\s*(!\w+)?\s*\(/.test(sel.columns)
+
   it('every orders select of every unauthenticated read path is explicit', async () => {
     const terminal = 'executed,cancelled,expired,failed'
-    const byId = (id: unknown) => ({ params: Promise.resolve({ id: String(id) }) })
-    await LIST(new NextRequest(`http://localhost/api/orders?wallet=${WALLET}&status=${terminal}`))
-    await LIST(new NextRequest(`http://localhost/api/orders?wallet=${WALLET}&status=cancelled&hashes=0x${'11'.repeat(32)}`))
+    await LIST(get(`/api/orders?wallet=${WALLET}&status=${terminal}`))
+    await LIST(get(`/api/orders?wallet=${WALLET}&status=cancelled&hashes=0x${'11'.repeat(32)}`))
     for (const order of seeded) {
-      await BY_ID(new NextRequest(`http://localhost/api/orders/${order.id}?wallet=${WALLET}`), byId(order.id))
-      await EXECUTIONS(new NextRequest(`http://localhost/api/orders/${order.id}/executions?wallet=${WALLET}`), byId(order.id))
+      await BY_ID(get(`/api/orders/${order.id}?wallet=${WALLET}`), byId(order.id))
+      await EXECUTIONS(get(`/api/orders/${order.id}/executions?wallet=${WALLET}`), byId(order.id))
     }
-    await STATS(new NextRequest(`http://localhost/api/orders/stats?wallet=${WALLET}`))
-    await STATS(new NextRequest('http://localhost/api/orders/stats'))
-    await HISTORY(new NextRequest(`http://localhost/api/history?wallet=${WALLET}`))
+    await STATS(get(`/api/orders/stats?wallet=${WALLET}`))
+    await STATS(get('/api/orders/stats'))
+    await HISTORY(get(`/api/history?wallet=${WALLET}`))
     await ANALYTICS()
 
-    const touchingOrders = db.selects.filter((s) => s.table === 'orders' || /\borders\s*(!\w+)?\s*\(/.test(s.columns))
+    const touchingOrders = db.selects.filter(reachesOrders)
     // Not vacuous: list, by-id x6, executions x6, stats x12 and the analytics embed all reached `orders`.
     expect(touchingOrders.length).toBeGreaterThanOrEqual(20)
+    expect(touchingOrders.flatMap(ordersSelectProblems)).toEqual([])
+  })
+
+  // [A87 S-5] A `*` that only a signed read gets (the authenticated by-hash poll, live orders, history fills) never ran above.
+  it('every orders select of every AUTHENTICATED read path is explicit: the poll, live orders, history fills', async () => {
+    const auth = await readAuth()
+    const hashes = seeded.map((o) => String(o.order_hash)).join(',')
+    const shapes = [
+      '', // no status filter = everything, live included
+      'status=active',
+      'status=executing',
+      'status=active,executing',
+      'status=executed,cancelled,expired,failed',
+      `hashes=${hashes}`, // the browser's poll (supabase.ts fetchActiveOrders): no status, the hashes it tracks
+      `status=active,executing&hashes=${hashes}`,
+    ]
+    const listStatuses: number[] = []
+    for (const q of shapes) listStatuses.push((await LIST(get(`/api/orders?wallet=${WALLET}${q ? `&${q}` : ''}`, auth))).status)
+    for (const order of seeded) {
+      await BY_ID(get(`/api/orders/${order.id}?wallet=${WALLET}`, auth), byId(order.id))
+      await EXECUTIONS(get(`/api/orders/${order.id}/executions?wallet=${WALLET}`, auth), byId(order.id))
+    }
+    await STATS(get(`/api/orders/stats?wallet=${WALLET}`, auth))
+    const history = await (await HISTORY(get(`/api/history?wallet=${WALLET}`, auth))).json()
+    await ANALYTICS()
+
+    // Not vacuous: the read signature was accepted (no 401), and the fills path (orders!inner embed) ran.
+    expect(listStatuses).toEqual(shapes.map(() => 200))
+    expect(history.fillsIncluded).toBe(true)
+    const touchingOrders = db.selects.filter(reachesOrders)
+    expect(touchingOrders.length).toBeGreaterThanOrEqual(25)
     expect(touchingOrders.flatMap(ordersSelectProblems)).toEqual([])
   })
 })
 
 // ── Layer 2: every orders read chain in the source ──────────────────────────────────────────────────────────────────
 interface Call { name: string; args: string }
-interface Chain { file: string; line: number; calls: Call[] }
+interface Chain { file: string; line: number; index: number; tableArg: string; calls: Call[] }
 
 function skipTrivia(src: string, i: number): number {
   for (;;) {
@@ -132,12 +182,14 @@ function matchParen(src: string, open: number): number {
   return src.length
 }
 
-function ordersChains(file: string, src: string): Chain[] {
+/** Every `.from(<arg>)` and the calls chained on it. The table is resolved later (resolveTable), not matched here. */
+function fromChains(file: string, src: string): Chain[] {
   const out: Chain[] = []
-  const re = /\.from\(\s*(?:(['"`])orders\1|SUPABASE_ORDERS_TABLE)\s*\)/g
-  for (const m of src.matchAll(re)) {
-    let i = (m.index ?? 0) + m[0].length
+  for (const m of src.matchAll(/\.from\s*\(/g)) {
+    const open = (m.index ?? 0) + m[0].length - 1
+    const argClose = matchParen(src, open)
     const calls: Call[] = []
+    let i = argClose + 1
     for (;;) {
       i = skipTrivia(src, i)
       if (src[i] !== '.') break
@@ -149,45 +201,97 @@ function ordersChains(file: string, src: string): Chain[] {
       calls.push({ name: id[0], args: src.slice(i + 1, close) })
       i = close + 1
     }
-    out.push({ file, line: src.slice(0, m.index).split('\n').length, calls })
+    out.push({ file, line: src.slice(0, m.index).split('\n').length, index: m.index ?? 0, tableArg: src.slice(open + 1, argClose).trim(), calls })
   }
   return out
 }
 
-/** The text of a select's FIRST argument when it is a string literal or literals joined by `+`; null otherwise. */
-function literalArg(args: string): string | null {
+/** `const NAME = 'text'` constants exported anywhere in src/ (a name defined twice with different text is ambiguous: null). */
+function exportedStringConstants(files: { src: string }[]): Map<string, string | null> {
+  const out = new Map<string, string | null>()
+  for (const { src } of files) {
+    for (const m of src.matchAll(/\bexport\s+const\s+([A-Za-z_$][\w$]*)\s*(?::\s*[^=\n]+)?=\s*(['"`])([^'"`$\\\n]*)\2\s*(?:as const)?\s*[;\n]/g)) {
+      out.set(m[1], out.has(m[1]) && out.get(m[1]) !== m[3] ? null : m[3])
+    }
+  }
+  return out
+}
+
+/**
+ * The table a `.from(<arg>)` names: a string literal, or an identifier that is a `const` string in the file or an exported
+ * string constant of src/. Anything else (a `let`, a call, a template with `${}`, a member) is null = cannot be told.
+ */
+function resolveTable(arg: string, fileSrc: string, exported: Map<string, string | null>): string | null {
+  const lit = /^(['"`])([^'"`$\\]*)\1$/.exec(arg)
+  if (lit) return lit[2]
+  if (!/^[A-Za-z_$][\w$]*$/.test(arg)) return null
+  const local = new RegExp(`\\bconst\\s+${arg.replace(/\$/g, '\\$')}\\s*(?::\\s*[^=\\n]+)?=\\s*(['"\`])([^'"\`$\\\\\\n]*)\\1\\s*(?:as const)?\\s*[;\\n]`).exec(fileSrc)
+  if (local) return local[2]
+  return exported.get(arg) ?? null
+}
+
+/** The first argument of a call, as text (up to the first top-level comma; string literals are skipped whole). */
+function firstArg(args: string): string {
   let depth = 0
-  let first = ''
+  let end = args.length
   for (let i = 0; i < args.length; i++) {
     const ch = args[i]
     if (ch === '"' || ch === "'" || ch === '`') {
-      const start = i
       for (i++; i < args.length && args[i] !== ch; i++) if (args[i] === '\\') i++
-      first += args.slice(start, i + 1)
       continue
     }
     if (ch === '(' || ch === '{' || ch === '[') depth++
     if (ch === ')' || ch === '}' || ch === ']') depth--
-    if (ch === ',' && depth === 0) break
-    first += ch
+    if (ch === ',' && depth === 0) { end = i; break }
   }
+  return args.slice(0, end).trim()
+}
+
+/** A select's first argument when it is a string literal or literals joined by `+`; null otherwise. */
+function literalArg(first: string): string | null {
   const parts = first.split('+').map((p) => p.trim())
   if (parts.length === 1 && parts[0] === '') return ''
   if (!parts.every((p) => /^(['"`])[^]*\1$/.test(p) && !p.includes('${'))) return null
   return parts.map((p) => p.slice(1, -1)).join('')
 }
 
-const WRITES = new Set(['insert', 'update', 'upsert', 'delete'])
-const ALLOW_LIST_IMPORT = /from\s+['"](?:@\/app\/api\/orders\/|\.\.?\/(?:\.\.\/)*(?:orders\/)?)order-read-columns['"]/
+/**
+ * True when `first` is, bare, the columns parameter of the `withOrderReadColumns(...)` callback that contains the chain at
+ * `index`, and the callback never assigns to it. Nothing else non-literal is accepted: not a variable, a spread, a ternary,
+ * a concatenation, and not `columns` outside that callback.
+ */
+function isOrderReadColumnsParam(src: string, index: number, first: string): boolean {
+  if (!/^[A-Za-z_$][\w$]*$/.test(first)) return false
+  for (const m of src.matchAll(/\bwithOrderReadColumns\s*\(/g)) {
+    const open = (m.index ?? 0) + m[0].length - 1
+    const close = matchParen(src, open)
+    if (index <= open || index >= close) continue
+    const inner = src.slice(open + 1, close)
+    const cb = /^\s*(?:async\s*)?(?:\(\s*([A-Za-z_$][\w$]*)\s*(?::[^)]*)?\)|([A-Za-z_$][\w$]*))\s*=>/.exec(inner)
+    const param = cb ? (cb[1] ?? cb[2]) : undefined
+    if (param !== first) continue
+    if (new RegExp(`(?<![\\w$.])${first.replace(/\$/g, '\\$')}\\s*(?:[-+*/%&|^]|\\*\\*|<<|>>>?|\\?\\?|&&|\\|\\|)?=(?![=>])`).test(inner.slice(cb![0].length))) continue
+    return true
+  }
+  return false
+}
 
-function chainProblems(chain: Chain, fileSrc: string): string[] {
+const WRITES = new Set(['insert', 'update', 'upsert', 'delete'])
+
+function chainProblems(chain: Chain, fileSrc: string, exported: Map<string, string | null>): string[] {
   if (chain.calls.some((c) => WRITES.has(c.name))) return []
+  const selects = chain.calls.filter((x) => x.name === 'select')
+  if (selects.length === 0) return []
   const where = `${chain.file}:${chain.line}`
+  const table = resolveTable(chain.tableArg, fileSrc, exported)
+  if (table === null) return [`${where}: .from(${chain.tableArg}) is not a string literal and does not resolve to a const string: the table this select reads cannot be told`]
+  if (table !== 'orders') return []
   const problems: string[] = []
-  for (const c of chain.calls.filter((x) => x.name === 'select')) {
-    const lit = literalArg(c.args)
+  for (const c of selects) {
+    const first = firstArg(c.args)
+    const lit = literalArg(first)
     if (lit === null) {
-      if (!ALLOW_LIST_IMPORT.test(fileSrc)) problems.push(`${where}: select(${c.args.trim()}) is not a literal and the file does not import order-read-columns`)
+      if (!isOrderReadColumnsParam(fileSrc, chain.index, first)) problems.push(`${where}: select(${first}) is not a literal and is not the columns parameter of withOrderReadColumns`)
       continue
     }
     if (lit.trim() === '') problems.push(`${where}: select() with no columns reads *`)
@@ -224,7 +328,14 @@ function sourceFiles(dir: string): string[] {
   return out
 }
 
+/** One source text through the scanner: every problem its chains and embeds have. */
+function scan(src: string, exported: Map<string, string | null> = new Map()): string[] {
+  return [...fromChains('x.ts', src).flatMap((c) => chainProblems(c, src, exported)), ...embedProblems('x.ts', src)]
+}
+
 describe('guard, layer 2: no orders read chain in src/ selects * or signature', () => {
+  const ORDERS_TABLE = new Map([['SUPABASE_ORDERS_TABLE', 'orders']])
+
   it('the scanner itself fails * / empty / signature selects and orders(*) embeds, and passes writes', () => {
     const bad = [
       "supabase.from('orders').select('*').eq('wallet', w)",
@@ -232,34 +343,60 @@ describe('guard, layer 2: no orders read chain in src/ selects * or signature', 
       "supabase.from('orders').select('id, ' +\n 'signature').single()",
       'supabase.from(SUPABASE_ORDERS_TABLE).select(cols)',
     ]
-    for (const src of bad) {
-      const chains = ordersChains('x.ts', src)
-      expect(chains).toHaveLength(1)
-      expect(chainProblems(chains[0], src).length).toBeGreaterThan(0)
-    }
+    for (const src of bad) expect(scan(src, ORDERS_TABLE).length).toBeGreaterThan(0)
     expect(embedProblems('x.ts', ".from('order_executions').select('id, orders!inner(*)')")).toHaveLength(1)
     expect(embedProblems('x.ts', ".select('id,' +\n 'orders(wallet,signature)')")).toHaveLength(1)
-    const write = "supabase.from('orders').insert({ a: 1 }).select().single()"
-    expect(chainProblems(ordersChains('x.ts', write)[0], write)).toEqual([])
-    const ok = "supabase.from('orders').select('id, status', { count: 'exact', head: true }).eq('a', 1)"
-    expect(chainProblems(ordersChains('x.ts', ok)[0], ok)).toEqual([])
+    expect(scan("supabase.from('orders').insert({ a: 1 }).select().single()")).toEqual([])
+    expect(scan("supabase.from('orders').select('id, status', { count: 'exact', head: true }).eq('a', 1)")).toEqual([])
+  })
+
+  // [A87 S-5] The four evasions the Auditor found: each must fail the STATIC layer by itself (layer 1 needs the path to run).
+  it('the scanner fails a * in a ternary, a * in a variable, a spread, and a table name in a variable', () => {
+    const inCallback = (select: string, pre = '') => `${pre}\nawait withOrderReadColumns((columns) => supabase.from('orders').${select}.eq('wallet', w))`
+    expect(scan(inCallback("select(hashes ? '*' : columns)"))).toEqual([expect.stringContaining('not the columns parameter')])
+    expect(scan(inCallback('select(cols)', "const cols = '*'"))).toEqual([expect.stringContaining('not the columns parameter')])
+    expect(scan(inCallback("select(...['*'])"))).toEqual([expect.stringContaining('not the columns parameter')])
+    expect(scan("const t = 'orders'\nsupabase.from(t).select('*')")).toEqual([expect.stringContaining("select('*') on orders")])
+    expect(scan("let t = 'orders'\nsupabase.from(t).select('id')")).toEqual([expect.stringContaining('cannot be told')])
+    expect(scan("supabase.from(tableFor(kind)).select('id')")).toEqual([expect.stringContaining('cannot be told')])
+    expect(scan('supabase.from(`orders${x}`).select(\'id\')')).toEqual([expect.stringContaining('cannot be told')])
+    // The table constant still resolves through an exported const, and its `*` is then caught like a literal's.
+    expect(scan('supabase.from(SUPABASE_ORDERS_TABLE).select("*")', ORDERS_TABLE)).toEqual([expect.stringContaining("select('*') on orders")])
+    // Concatenation is not the parameter either, nor is a different identifier, nor `columns` outside the callback.
+    expect(scan(inCallback("select(columns + ',signature')"))).toHaveLength(1)
+    expect(scan(inCallback('select(other)'))).toHaveLength(1)
+    expect(scan("supabase.from('orders').select(columns)")).toHaveLength(1)
+    // A callback that overwrites its parameter is not accepted.
+    expect(scan("await withOrderReadColumns((columns) => { columns = '*'; return supabase.from('orders').select(columns) })")).toHaveLength(1)
+    expect(scan("await withOrderReadColumns((columns) => { columns += ',signature'; return supabase.from('orders').select(columns) })")).toHaveLength(1)
+  })
+
+  it('the scanner passes the one shape the routes use: the columns parameter of withOrderReadColumns, and a const table', () => {
+    const arrow = "await withOrderReadColumns((columns) => supabase.from('orders').select(columns).eq('id', id).single())"
+    const block = "await withOrderReadColumns((columns) => {\n  let query = supabase\n    .from('orders')\n    .select(columns, { count: 'exact' })\n  return query\n})"
+    const typed = "await withOrderReadColumns(async (cols: string) => supabase.from(SUPABASE_ORDERS_TABLE).select(cols))"
+    expect(scan(arrow)).toEqual([])
+    expect(scan(block)).toEqual([])
+    expect(scan(typed, ORDERS_TABLE)).toEqual([])
+    expect(scan("const T = 'circuit_breaker'\nsb.from(T).select('*')")).toEqual([])
   })
 
   it('src/ has no orders read chain selecting * or signature, and no such embed', () => {
     const root = path.resolve(process.cwd(), 'src')
+    const files = sourceFiles(root).map((file) => ({ file, src: fs.readFileSync(file, 'utf8') }))
+    const exported = exportedStringConstants(files)
     const problems: string[] = []
-    let chains = 0
-    for (const file of sourceFiles(root)) {
-      const src = fs.readFileSync(file, 'utf8')
+    let ordersChains = 0
+    for (const { file, src } of files) {
       const rel = path.relative(process.cwd(), file)
-      for (const chain of ordersChains(rel, src)) {
-        chains++
-        problems.push(...chainProblems(chain, src))
+      for (const chain of fromChains(rel, src)) {
+        if (resolveTable(chain.tableArg, src, exported) === 'orders') ordersChains++
+        problems.push(...chainProblems(chain, src, exported))
       }
       problems.push(...embedProblems(rel, src))
     }
     // Not vacuous: the four API routes, keeper-health-monitor and monitoring-loop read orders (>= 8 chains today).
-    expect(chains).toBeGreaterThanOrEqual(8)
+    expect(ordersChains).toBeGreaterThanOrEqual(8)
     expect(problems).toEqual([])
   })
 })

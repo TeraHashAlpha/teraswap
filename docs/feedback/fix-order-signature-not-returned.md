@@ -19,7 +19,7 @@ explicit allow-list. Long tables: [`fix-order-signature-not-returned.tables.md`]
 
 ## Feedback
 - Edge case: `GET /api/orders?status=<terminal>&hashes=…` is a public by-hash read (no read signature); covered by the tests.
-- Concern: guard layer 2 accepts a non-literal `select(x)` in a file importing order-read-columns.ts; layer 1 checks the value.
+- Concern (A87 S-5, closed in round 2): guard layer 2 now accepts a non-literal select only as the `withOrderReadColumns` columns parameter; layer 1 runs over signed reads too. Open limit: a chain split across statements (tables E4).
 - Concern (keeper, OPEN above): log and alert `err.shortMessage`, or strip `args:`, in a keeper goal.
 - Merge note: route.ts gains one import line at the top (for GET) besides the GET body; POST is untouched, but the open POST branch may meet a one-line conflict in the import block.
 
@@ -27,7 +27,7 @@ explicit allow-list. Long tables: [`fix-order-signature-not-returned.tables.md`]
 Checklist (ticked as each commit lands; the evidence 1-4 replaces it in the last edit):
 - [x] Commit 1, S-1: the privacy clause reworded, every clause cited in the proof comment, pinned by privacy-copy.test.tsx and orders-privacy-clause.test.ts.
 - [x] Commit 2, S-3 + S-4: line references re-cited at the merged head; `basket_id` in ORDERS_SCHEMA; schema-reading column-count test.
-- [ ] Commit 3, S-5: guard layer 1 over authenticated reads, layer 2 strict on `withOrderReadColumns`.
+- [x] Commit 3, S-5: guard layer 1 over authenticated reads, layer 2 strict on `withOrderReadColumns`.
 - [ ] Verify: agent-verify --codeql, gen-claude-state --check, lint delta 0.
 
 ### Edge case (S-1, LIVE orders)
