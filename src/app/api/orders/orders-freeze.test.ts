@@ -46,10 +46,13 @@ const mockSingle = vi.fn()
 const mockInsert = vi.fn(() => ({ select: () => ({ single: () => mockSingle() }) }))
 const mockUpdate = vi.fn(() => ({ eq: () => ({ eq: () => ({ eq: () => ({ select: () => Promise.resolve({ data: [], error: null }) }) }) }) }))
 const mockDelete = vi.fn(() => ({ eq: () => Promise.resolve({ data: null, error: null }) }))
+// [A86 S-3] The route's pre-insert lookup by signature (.select('id').or(...).limit(1)): no existing row. Read-only.
+const mockLookup = vi.fn(() => ({ or: () => ({ limit: async () => ({ data: [], error: null }) }) }))
 const mockFrom = vi.fn((..._args: unknown[]) => ({
   insert: mockInsert,
   update: mockUpdate,
   delete: mockDelete,
+  select: mockLookup,
 }))
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({

@@ -15,8 +15,10 @@ vi.mock('viem', async () => {
 const mockSingle = vi.fn()
 const mockInsert = vi.fn((_row: Record<string, unknown>) => ({ select: () => ({ single: () => mockSingle() }) }))
 const mockRpc = vi.fn()
+// [A86 S-3] The route's pre-insert lookup by signature (.select('id').or(...).limit(1)): no existing row.
+const mockLookup = vi.fn(() => ({ or: () => ({ limit: async () => ({ data: [], error: null }) }) }))
 vi.mock('@supabase/supabase-js', () => ({
-  createClient: () => ({ rpc: (...a: unknown[]) => mockRpc(...a), from: () => ({ insert: mockInsert }) }),
+  createClient: () => ({ rpc: (...a: unknown[]) => mockRpc(...a), from: () => ({ insert: mockInsert, select: mockLookup }) }),
 }))
 vi.mock('@/lib/kv-rate-limiter', async () => {
   const actual = await vi.importActual<typeof import('@/lib/kv-rate-limiter')>('@/lib/kv-rate-limiter')
