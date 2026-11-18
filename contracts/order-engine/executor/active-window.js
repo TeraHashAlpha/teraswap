@@ -199,7 +199,7 @@ function lastCursor(rows) {
  *               is one; when rotating, a pass from the oldest row to the newest.
  *
  * @param {{ cursor: object|null, pass: { ids: Set<string>, fromOldest: boolean } }} state
- * @param {ReturnType<typeof selectActiveWindow>} scan  (or truncateScan's prefix of it)
+ * @param {ReturnType<typeof selectActiveWindow>} scan  the scan as READ (round 3: never a prefix — it never holds)
  * @param {{ extraIds?: string[] }} [opts]  extraIds: carried rows re-read by id this cycle
  * @returns {{ cursor: object|null, pass: { ids: Set<string>, fromOldest: boolean }, complete: Set<string>|null }}
  */
