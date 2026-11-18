@@ -185,14 +185,20 @@ export const PRIVACY_PROVIDERS_NOTE =
 //    2026-11-17; pinned by orders-read-no-signature.test.ts).
 //  - "a count of its orders by status" = /api/orders/stats: no auth, wallet filter (orders/stats/route.ts:24, :33), buckets (:41-59).
 //  - "open orders ... need a signature from that wallet" = 401 READ_AUTH_REQUIRED (orders/route.ts:852-859; by id
-//    orders/[id]/route.ts:61-76).
+//    orders/[id]/route.ts:61-76; the fills and progress of an open order, orders/[id]/executions/route.ts:69-84 [A87b R2-1]).
 //  - "the DCA fills in a wallet's history need a signature from that wallet" = /api/history withholds the fills without the read
 //    signature (history/route.ts:106-115, `fillsIncluded: false`).
 //  - "the fills of a finished order can be read with its record" = /api/orders/[id]/executions asks for the wallet parameter only
-//    (orders/[id]/executions/route.ts:32-33), checks that the order belongs to it (:41-51) and returns the order_executions rows
-//    (:56-60) with no status test and no read signature. A finished order's fills are public on-chain transactions. The same route
-//    answers a LIVE order's fills the same way today (A87 S-1; unchanged here, pinned by orders-privacy-clause.test.ts).
-// Each half of the last clause is proved by orders-privacy-clause.test.ts; the sentence is pinned by privacy-copy.test.tsx.
+//    for a finished order (orders/[id]/executions/route.ts:44), checks that the order belongs to it (:60) and returns the
+//    order_executions rows (:86-90); the status test (:69, PUBLIC_ORDER_STATUSES, the same terminal set orders/[id]/route.ts:61
+//    uses) skips the read signature for exactly those four statuses. A finished order's fills are public on-chain transactions.
+//  - the same route for an order that is NOT finished (active, executing, any status outside that set) answers 401
+//    READ_AUTH_REQUIRED unless the wallet's valid read signature is attached (:69-84), before the fills are read: so "open
+//    orders ... need a signature from that wallet" holds for an open DCA's fills and progress too [A87b R2-1, owner decision
+//    2026-11-18; it answered them openly before, A87 S-1]. The browser sends the Orders tab's cached read signature for it
+//    (lib/order-engine/executions-client.ts).
+// Each half of the last clause is proved by orders-privacy-clause.test.ts (the whole status x auth matrix: orders-executions-live-auth.test.ts
+// and its seeded property); the sentence is pinned by privacy-copy.test.tsx.
 export const PRIVACY_PUBLIC_ANALYTICS_NOTE =
   "The data behind the Analytics tab is public: the tab lists recent swaps and order fills made through the site by all users, each with its token pair, route, time and a link to its transaction on a block explorer. The tab does not display wallet addresses or amounts; the data behind it holds each trade's amounts and dollar value and each address shortened to its first six and last four characters, and every swap or order fill it lists is a public blockchain transaction that shows the wallet behind it. Anyone who knows a wallet address can also request, with no signature from that wallet, the swap history, swap statistics and swap export the site holds for that address, the records of its executed, cancelled, expired or failed orders (without the signature that authorised each order), and a count of its orders by status; open orders and the DCA fills in a wallet's history need a signature from that wallet; the fills of a finished order can be read with its record."
 export const PRIVACY_BADGE = 'Proxied RPC & quotes'

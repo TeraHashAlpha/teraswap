@@ -217,12 +217,24 @@ describe('the other read routes: totals, fills, history and analytics stay reada
     expect(all.leaks).toEqual([])
   })
 
-  it.each(DB_ORDER_STATUSES)('GET /api/orders/[id]/executions for a %s order: no signature', async (status) => {
+  it.each(TERMINAL)('GET /api/orders/[id]/executions for a %s order, no read signature: 200, never an order signature', async (status) => {
     const order = mine.find((o) => o.status === status)!
     const r = await bodyOf(await EXECUTIONS(req(`/api/orders/${order.id}/executions?wallet=${WALLET}`), idParams(order.id)))
     expect(r.status).toBe(200)
     expect(r.body.order).not.toBeNull()
     expect(r.leaks).toEqual([])
+  })
+
+  // [A87b R2-1] CHANGED EXPECTATION: a LIVE order's fills were 200 with no read signature; now 401 without it, 200 with it.
+  it.each(LIVE)('GET /api/orders/[id]/executions for a %s order: 401 without the read signature, 200 with it, never an order signature', async (status) => {
+    const order = mine.find((o) => o.status === status)!
+    const bare = await bodyOf(await EXECUTIONS(req(`/api/orders/${order.id}/executions?wallet=${WALLET}`), idParams(order.id)))
+    expect(bare.status).toBe(401)
+    expect(bare.leaks).toEqual([])
+    const own = await bodyOf(await EXECUTIONS(req(`/api/orders/${order.id}/executions?wallet=${WALLET}`, await readAuth()), idParams(order.id)))
+    expect(own.status).toBe(200)
+    expect(own.body.order).not.toBeNull()
+    expect(own.leaks).toEqual([])
   })
 
   it('GET /api/history without and with a read signature: swaps, then swaps + fills, no signature', async () => {

@@ -6,10 +6,22 @@
  * metadata. Bundling the metadata avoids a second round-trip from
  * ExecutionTimeline.tsx and lets it build a synthetic entry when a legacy
  * order has been executed without `order_executions` rows.
+ *
+ * [A87b R2-1] The fills and progress of a LIVE order (any status outside PUBLIC_ORDER_STATUSES — active,
+ * executing, future additions: default-deny) need the wallet's read signature, exactly as reading the order
+ * itself does (orders/[id]/route.ts): same helper, same terminal set, same headers, same 401 body. A finished
+ * order's fills stay readable with the wallet parameter only (public on-chain transactions). The ownership
+ * check runs first, so a wrong wallet or an unknown id still gets the 403 it always did.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import {
+  verifyOrdersReadAccess,
+  PUBLIC_ORDER_STATUSES,
+  ORDERS_READ_HEADER_ISSUED,
+  ORDERS_READ_HEADER_SIGNATURE,
+} from '@/lib/order-engine/read-auth'
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
@@ -40,7 +52,7 @@ export async function GET(
   const { data: order } = await supabase
     .from('orders')
     .select(
-      'wallet, chain_id, token_in_symbol, token_out_symbol, token_in_decimals, token_out_decimals, dca_total, dca_executed, tx_hash, amount_out, gas_used, executed_at, executed_price',
+      'wallet, status, chain_id, token_in_symbol, token_out_symbol, token_in_decimals, token_out_decimals, dca_total, dca_executed, tx_hash, amount_out, gas_used, executed_at, executed_price',
     )
     .eq('id', id)
     .single()
@@ -50,6 +62,25 @@ export async function GET(
       { executions: [], order: null, error: 'Not authorized' },
       { status: 403 },
     )
+  }
+
+  // [A87b R2-1] A row in a live (non-terminal) status still carries unfinished strategy and progress — same
+  // ownership proof as reading the order. Checked BEFORE the fills are read, so nothing is fetched without it.
+  if (!PUBLIC_ORDER_STATUSES.has(order.status)) {
+    const auth = await verifyOrdersReadAccess({
+      wallet,
+      issuedAt: req.headers.get(ORDERS_READ_HEADER_ISSUED),
+      signature: req.headers.get(ORDERS_READ_HEADER_SIGNATURE),
+    })
+    if (!auth.ok) {
+      return NextResponse.json(
+        {
+          error: `Reading an active order requires a wallet signature: ${auth.error}`,
+          code: 'READ_AUTH_REQUIRED',
+        },
+        { status: 401 },
+      )
+    }
   }
 
   const { data, error } = await supabase

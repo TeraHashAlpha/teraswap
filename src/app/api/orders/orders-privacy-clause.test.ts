@@ -6,9 +6,10 @@
  *   1. /api/history withholds the DCA fills when the request carries no read signature (and returns them with one,
  *      so the withholding is not vacuous);
  *   2. /api/orders/[id]/executions returns the fills of a FINISHED order with no read signature;
- *   3. what the same route does for a LIVE order TODAY is pinned, not endorsed: it returns the fills with no read
- *      signature (the route asks for the wallet parameter only). This test fails if that changes, so a change of who
- *      may read what is a decision someone makes, never an accident.
+ *   3. the same route for a LIVE order [A87b R2-1, owner decision 2026-11-18]: no read signature => 401 READ_AUTH_REQUIRED and
+ *      none of its fills or progress in the body; the wallet's own read signature => the fills. (CHANGED EXPECTATION: until
+ *      then this test pinned "200 with the fill, no signature", the thing the audit reported.) The full status x auth matrix
+ *      is orders-executions-live-auth.test.ts; this test fails if the route ever goes back to answering a live order openly.
  * Fill transaction hashes are compared in the responses; no order signature is read or printed.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -120,10 +121,22 @@ describe('privacy clause, second half: the fills of a finished order can be read
   })
 })
 
-describe('LIVE orders, pinned as the route behaves today (A87 S-1: reported, not changed)', () => {
-  it.each(LIVE)('GET /api/orders/[id]/executions of a %s order, no read signature: RETURNED (200 with its fill)', async (status) => {
+describe('LIVE orders need the wallet\'s read signature, as reading the order does (A87b R2-1)', () => {
+  // CHANGED EXPECTATION (was: 200 with its fill, no read signature).
+  it.each(LIVE)('GET /api/orders/[id]/executions of a %s order, no read signature: 401 READ_AUTH_REQUIRED, no fill, no progress', async (status) => {
     const order = orderOf(status)
     const res = await EXECUTIONS(req(`/api/orders/${order.id}/executions?wallet=${WALLET}`), idParams(order.id))
+    const body = await res.json()
+    expect(res.status).toBe(401)
+    expect(body.code).toBe('READ_AUTH_REQUIRED')
+    expect(body.executions).toBeUndefined()
+    expect(body.order).toBeUndefined()
+    expect(JSON.stringify(body)).not.toContain(fillHashByOrder.get(String(order.id))!)
+  })
+
+  it.each(LIVE)('GET /api/orders/[id]/executions of a %s order WITH the wallet\'s read signature: 200 and its fill (the 401 above is not vacuous)', async (status) => {
+    const order = orderOf(status)
+    const res = await EXECUTIONS(req(`/api/orders/${order.id}/executions?wallet=${WALLET}`, await readAuth()), idParams(order.id))
     const body = await res.json()
     expect(res.status).toBe(200)
     expect(body.executions).toHaveLength(1)
