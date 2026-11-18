@@ -1,13 +1,13 @@
 /**
  * [fix/order-signature-not-returned] Tables for driving the order read routes through `fake-postgrest.ts`.
  *
- * ORDERS_SCHEMA is every column of `orders` in contracts/order-engine/schema.sql (CREATE TABLE + the migrations it
- * mirrors), so `select('*')` returns what production returns, `signature` included. Stored signatures here are
+ * ORDERS_SCHEMA is every column of `orders` in contracts/order-engine/schema.sql (CREATE TABLE + its ALTER TABLE ADD COLUMN
+ * lines; orders-db-fixture.schema.test.ts reads that file and fails if this list drifts from it), so `select('*')` returns what production returns, `signature` included. Stored signatures here are
  * signature-SHAPED random hex (0x + 130), never a real signature.
  */
 import { createFakePostgrest, type Row } from './fake-postgrest'
 
-/** contracts/order-engine/schema.sql:18-106, in file order (42 columns). */
+/** contracts/order-engine/schema.sql in file order: CREATE TABLE :18-106 (42 columns), then `basket_id` (ALTER TABLE :451, PR #707): 43. */
 export const ORDERS_SCHEMA = [
   'id', 'created_at', 'updated_at', 'wallet', 'order_type', 'status',
   'token_in', 'token_in_symbol', 'token_out', 'token_out_symbol', 'amount_in', 'min_amount_out',
@@ -16,7 +16,7 @@ export const ORDERS_SCHEMA = [
   'tx_hash', 'amount_out', 'fee_amount', 'gas_used', 'executed_at', 'executed_price',
   'order_data', 'token_in_decimals', 'token_out_decimals', 'error',
   'consecutive_failures', 'last_attempt_at', 'last_infra_miss_at', 'last_infra_miss_reason',
-  'floor_tier', 'floor_ack_at', 'router', 'chain_id',
+  'floor_tier', 'floor_ack_at', 'router', 'chain_id', 'basket_id',
 ] as const
 
 /** contracts/order-engine/schema.sql:118-137. */
@@ -102,6 +102,7 @@ export function makeOrderRow(rand: () => number, over: Partial<Row> & { wallet: 
     floor_ack_at: orderType === 'dca' ? created : null,
     router: randomHex(rand, 20),
     chain_id: [1, 8453, 42161][Math.floor(rand() * 3)],
+    basket_id: null,
     ...over,
   }
   if (row.status === 'executed') {

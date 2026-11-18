@@ -1,26 +1,28 @@
 # fix/order-signature-not-returned: evidence tables
 
-Companion to [`fix-order-signature-not-returned.md`](fix-order-signature-not-returned.md). Line numbers are at the branch head.
+Companion to [`fix-order-signature-not-returned.md`](fix-order-signature-not-returned.md). Line numbers are at 091bc08f (round 2, after merging origin/main into 99678b33); every one was re-checked there for A87 S-3. A reference marked "at base" is to origin/main 4a4129ef, the code before this branch.
 
 ## E1. Every read of `orders`: route, auth, columns before and after
 
-`*` = all 42 columns of `orders` (contracts/order-engine/schema.sql:18-106), `signature` included. "Allow-list" =
+`*` = all 43 columns of `orders`: the 42 of CREATE TABLE (contracts/order-engine/schema.sql:18-106) plus `basket_id` (`ALTER TABLE orders ADD COLUMN`, schema.sql:451, PR #707), `signature` included. "Allow-list" =
 `ORDER_READ_COLUMNS` in src/app/api/orders/order-read-columns.ts (30 columns: the browser's `OrderRow` minus
-`signature`), retried once without `floor_tier`, `floor_ack_at` on Postgres 42703 / PGRST204.
+`signature`; the other 13 columns are withheld: `signature` and 12 no page reads, `updated_at`, `price_condition`, `current_price`,
+`dca_last_exec`, `fee_amount`, `gas_used`, `executed_price`, `consecutive_failures`, `last_attempt_at`, `last_infra_miss_at`,
+`last_infra_miss_reason`, `basket_id`), retried once without `floor_tier`, `floor_ack_at` on Postgres 42703 / PGRST204.
 
 | Route (handler) | Auth | `orders` columns before | After |
 |---|---|---|---|
-| GET /api/orders (route.ts:778) | none when every `status` is terminal (also with `hashes`); read signature otherwise (route.ts:811-828) | `*` (route.ts:835-836 at base) | allow-list (route.ts:837-852) |
+| GET /api/orders (route.ts:811) | none when every `status` is terminal (also with `hashes`); read signature otherwise (route.ts:844-861) | `*` (route.ts:835-836 at base) | allow-list (route.ts:870-885) |
 | GET /api/orders/[id] ([id]/route.ts:29) | none when the row is terminal; read signature when live ([id]/route.ts:61-76) | `*` ([id]/route.ts:42-44 at base) | allow-list ([id]/route.ts:45-52) |
 | GET /api/orders/stats (stats/route.ts:18) | none | `select('*', { head: true })`: counts only, no row | `select('id', { head: true })`, same counts (stats/route.ts:32) |
 | GET /api/orders/[id]/executions | `wallet` param only | 13 named columns, no `signature` (executions/route.ts:42-44) | unchanged |
 | GET /api/history | swaps public; fills need the read signature (history/route.ts:106-115) | embed `orders!inner(` 9 columns (history/route.ts:247-249) | unchanged |
 | GET /api/analytics | none | embed `orders(` 10 columns (analytics/route.ts:84) | unchanged |
-| POST /api/orders 201 (not a read) | the order's own EIP-712 signature, recovered == wallet | `.insert(...).select()` = every column (route.ts:760) | unchanged (Do-NOT; owner: SAFE, it echoes the caller's own submission) |
+| POST /api/orders 201 (not a read) | the order's own EIP-712 signature, recovered == wallet | `.insert(...).select()` = every column (route.ts:755-792), echoed at route.ts:803 | unchanged (Do-NOT; owner: SAFE, it echoes the caller's own submission) |
 | PATCH /api/orders/[id] (not a read) | CancelOrder signature | `select('id')`, probe `wallet, status, chain_id` ([id]/route.ts:148-166) | unchanged |
 | src/lib/keeper-health-monitor.ts:142-146, :255-256 | server only, no response body | `created_at, executed_at, dca_interval`; `id` count | unchanged |
 | src/lib/monitoring-loop.ts:390 | server only (keepalive) | `id` | unchanged |
-| keeper fetchActiveOrders (executor.js:670) | service role, own process | `select=*` | not changed (keeper; it needs `signature` to execute) |
+| keeper fetchActiveOrders (executor.js:671) | service role, own process | `select=*` | not changed (keeper; it needs `signature` to execute) |
 
 ## E3. The hunt: every exit of `orders.signature`
 
@@ -29,9 +31,9 @@ Companion to [`fix-order-signature-not-returned.md`](fix-order-signature-not-ret
 | Order read routes | route.ts GET, [id]/route.ts GET | CLOSED by this branch (allow-list, both auth modes) |
 | Stats | stats/route.ts:32 | SAFE before (head-only counts), now named column |
 | Executions, history fills, analytics feed | executions/route.ts:42-44, history/route.ts:247-249, analytics/route.ts:84 | SAFE (named columns, no `signature`; pinned by the new tests) |
-| POST 201 echo | route.ts:760, :770 | SAFE (owner 2026-11-17): returns only the signature the caller just sent and the route verified |
+| POST 201 echo | route.ts:791, :803 | SAFE (owner 2026-11-17): returns only the signature the caller just sent and the route verified |
 | PATCH and its errors | [id]/route.ts:148-186 | SAFE (`id` / `wallet, status, chain_id`; messages name status or chain only) |
-| Errors returned to the client | route.ts:767 (POST insert error), :853 (GET), [id]/route.ts:157 | SAFE: PostgREST `message` names the column or constraint, not row values (`details` is not returned); POST's is the caller's own row |
+| Errors returned to the client | route.ts:800 (POST insert error), :886 (GET), [id]/route.ts:157 | SAFE: PostgREST `message` names the column or constraint, not row values (`details` is not returned); POST's is the caller's own row |
 | Other API routes | analytics/export (swaps only), analytics/personal (no DB), portfolio, v1, cow, admin/* | SAFE: no other `from('orders')` or `orders(` in src/app/api (guard layer 2 scans all of src/) |
 | Reference file contracts/order-engine/api/orders.ts | its own header: "reference implementation", not under src/app | SAFE: not served |
 | Admin page | src/app/admin/page.tsx:9-25: client-side check of the connected address against `NEXT_PUBLIC_ADMIN_WALLET`, no signature, no server check | SAFE for `signature`: renders AdminMonitor, which reads only /api/analytics (useAnalytics). Note: the gate is cosmetic (the bundle and /api/analytics are public anyway) |
@@ -56,7 +58,7 @@ Companion to [`fix-order-signature-not-returned.md`](fix-order-signature-not-ret
 | src/app/api/orders/orders-read-select-guard.test.ts | 4 | Layer 1: every `orders` select (and `orders(` embed) sent by the unauthenticated read paths is explicit. Layer 2: a scan of every `.from('orders')` read chain and every `orders(` embed in src/. Each checker is first shown to fail on `*` |
 
 Before the fix (base code, same tests): 25 of 41 route tests, 10 of 10 property seeds and 2 of 4 guard tests failed
-(the guard named route.ts:835, [id]/route.ts:43 and stats/route.ts:30 as `select('*')`).
+(at base, the guard named route.ts:835, [id]/route.ts:43 and stats/route.ts:30 as `select('*')`).
 
 Mutation proof (detached scratch worktree at the branch head, one mutant at a time, file restored after each):
 

@@ -6,7 +6,7 @@ explicit allow-list. Long tables: [`fix-order-signature-not-returned.tables.md`]
 ## Owner answers (asked once, 2026-11-17; they supersede the goal text)
 1. Drop `signature` from authenticated reads too. Client type made honest: `OrderRow.signature?`, `rowToOrder` → `''`.
 2. Allow-list = the browser's `OrderRow` columns minus `signature` (30); on Postgres 42703 retry once without `floor_tier`, `floor_ack_at` (migration 20261011120000).
-3. POST 201 echo of the caller's own just-verified signature (route.ts:760): POST untouched, SAFE.
+3. POST 201 echo of the caller's own just-verified signature (route.ts:791, :803): POST untouched, SAFE.
 4. Privacy section 6 clause: "the records of its executed, cancelled, expired or failed orders (without the signature that authorised each order)".
 5. False premise (asked after the build, before closing): supabase/schema.sql has no `orders`; the owner confirmed the RLS source is contracts/order-engine/schema.sql:175-217 and supabase/improvements.sql:17-40.
 
@@ -26,7 +26,7 @@ explicit allow-list. Long tables: [`fix-order-signature-not-returned.tables.md`]
 ## Round 2 (A87 on 99678b33: blocked 0C/1H; owner decision: finished orders and their fills stay readable without a signature)
 Checklist (ticked as each commit lands; the evidence 1-4 replaces it in the last edit):
 - [x] Commit 1, S-1: the privacy clause reworded, every clause cited in the proof comment, pinned by privacy-copy.test.tsx and orders-privacy-clause.test.ts.
-- [ ] Commit 2, S-3 + S-4: line references re-cited at the merged head; `basket_id` in ORDERS_SCHEMA; schema-reading column-count test.
+- [x] Commit 2, S-3 + S-4: line references re-cited at the merged head; `basket_id` in ORDERS_SCHEMA; schema-reading column-count test.
 - [ ] Commit 3, S-5: guard layer 1 over authenticated reads, layer 2 strict on `withOrderReadColumns`.
 - [ ] Verify: agent-verify --codeql, gen-claude-state --check, lint delta 0.
 

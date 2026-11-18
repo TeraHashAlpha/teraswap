@@ -7,8 +7,10 @@
  * a read signature.
  *
  * The list is the browser's OrderRow contract (src/lib/order-engine/supabase.ts) minus `signature`: everything the
- * site reads, nothing else. Columns no page reads (updated_at, price_condition, current_price, dca_last_exec,
- * fee_amount, gas_used, executed_price, the keeper's retry and infra-miss trail) stay on the server too.
+ * site reads, nothing else. Of the 43 columns of `orders` (contracts/order-engine/schema.sql) a read returns 30 and withholds
+ * 13: `signature`, and the 12 no page reads (updated_at, price_condition, current_price, dca_last_exec, fee_amount, gas_used,
+ * executed_price, the keeper's retry and infra-miss trail consecutive_failures / last_attempt_at / last_infra_miss_at /
+ * last_infra_miss_reason, and basket_id, which came with PR #707 and which nothing reads).
  *
  * floor_tier / floor_ack_at come from migration 20261011120000, which a database may not have yet (AUDIT-TOTAL.md:1595
  * recorded it NOT applied). `select('*')` worked either way; a named missing column fails the whole read (Postgres
