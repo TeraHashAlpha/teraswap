@@ -43,14 +43,16 @@ export const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11"
 const ZERO_HASH = "0x" + "00".repeat(32)
 
 /**
- * Copy executor.js (edits listed in the header) to a temp file and import it.
- * @param {{ exportNames?: string[], optionalExports?: string[], constants?: Record<string, string|number>, sourceFile?: string|URL }} [opts]
+ * Copy executor.js (edits listed in the header) to a temp file and import it. `env` is applied after the
+ * fixture's own variables (e.g. ORDER_EXECUTOR_V3_ADDRESS, which executor.js reads at module scope).
+ * @param {{ exportNames?: string[], optionalExports?: string[], constants?: Record<string, string|number>, sourceFile?: string|URL, env?: Record<string, string> }} [opts]
  */
 export async function loadShippedExecutor({
   exportNames = ["executeCycle", "fetchActiveOrders"],
   optionalExports = [],
   constants = {},
   sourceFile = new URL("executor.js", EXECUTOR_DIR),
+  env = {},
 } = {}) {
   Object.assign(process.env, {
     CHAIN_ID: String(TEST_CHAIN_ID),
@@ -65,6 +67,7 @@ export async function loadShippedExecutor({
   delete process.env.ORDER_EXECUTOR_V3_ADDRESS
   delete process.env.TERASWAP_API_URL
   delete process.env.FLASHBOTS_RPC_URL
+  Object.assign(process.env, env)
 
   const src = readFileSync(sourceFile, "utf8")
   const cut = src.lastIndexOf("\nmain().catch(")
