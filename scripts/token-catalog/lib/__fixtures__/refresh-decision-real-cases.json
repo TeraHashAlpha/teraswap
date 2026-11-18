@@ -1,0 +1,512 @@
+{
+ "$comment": "FROZEN 2026-11-18 from origin/main bfe26155 (committed catalogs + trust fixture) and a live fetch of tokens.coingecko.com/<platform>/all.json the same day: the 18 tokens of issues #700/#703/#706. previousSize = rows in the committed catalog that day; the other rows are synthesised by the test (clean, trusted). verdicts = the committed verdict rows with inTrustedList flipped to false (the fresh list no longer holds them — measured, see docs/feedback/fix-catalog-refresh-drops-untrusted.md). Do not regenerate: the weekly cron changes the live files.",
+ "freshCoingeckoListSize": {
+  "1": 5800,
+  "8453": 2857,
+  "42161": 3236
+ },
+ "chains": {
+  "1": {
+   "previousSize": 994,
+   "previousCoingeckoSourceCount": 6115,
+   "rows": [
+    {
+     "address": "0x4104b135DBC9609Fc1A9490E61369036497660c8",
+     "symbol": "APW",
+     "name": "Spectra [OLD]",
+     "decimals": 18,
+     "category": "Other",
+     "logoURI": "/api/token-logo?chainId=1&address=0x4104b135dbc9609fc1a9490e61369036497660c8",
+     "verified": false,
+     "sources": [
+      "curated"
+     ],
+     "volume24hUsd": 0,
+     "volumeSource": "coingecko",
+     "volumeFetchedAt": "2026-11-09"
+    },
+    {
+     "address": "0x08389495D7456E1951ddF7c3a1314A4bfb646d8B",
+     "symbol": "CRPT",
+     "name": "Crypterium",
+     "decimals": 18,
+     "category": "Other",
+     "logoURI": "/api/token-logo?chainId=1&address=0x08389495d7456e1951ddf7c3a1314a4bfb646d8b",
+     "verified": false,
+     "sources": [
+      "curated"
+     ],
+     "volume24hUsd": 0,
+     "volumeSource": "coingecko",
+     "volumeFetchedAt": "2026-11-09"
+    },
+    {
+     "address": "0xE5CAeF4Af8780E59Df925470b050Fb23C43CA68C",
+     "symbol": "FRM",
+     "name": "Ferrum Network",
+     "decimals": 6,
+     "category": "Other",
+     "logoURI": "/api/token-logo?chainId=1&address=0xe5caef4af8780e59df925470b050fb23c43ca68c",
+     "verified": true,
+     "sources": [
+      "curated",
+      "coingecko",
+      "oneinch",
+      "trustwallet",
+      "defillama"
+     ],
+     "volume24hUsd": 46.87,
+     "volumeSource": "coingecko",
+     "volumeFetchedAt": "2026-11-09"
+    },
+    {
+     "address": "0x4CC19356f2D37338b9802aa8E8fc58B0373296E7",
+     "symbol": "KEY",
+     "name": "SelfKey",
+     "decimals": 18,
+     "category": "Other",
+     "logoURI": "/api/token-logo?chainId=1&address=0x4cc19356f2d37338b9802aa8e8fc58b0373296e7",
+     "verified": false,
+     "sources": [
+      "curated"
+     ],
+     "volume24hUsd": 0,
+     "volumeSource": "coingecko",
+     "volumeFetchedAt": "2026-11-09"
+    },
+    {
+     "address": "0x65Ef703f5594D2573eb71Aaf55BC0CB548492df4",
+     "symbol": "MULTI",
+     "name": "Multichain",
+     "decimals": 18,
+     "category": "Other",
+     "logoURI": "/api/token-logo?chainId=1&address=0x65ef703f5594d2573eb71aaf55bc0cb548492df4",
+     "verified": true,
+     "sources": [
+      "curated",
+      "uniswap",
+      "coingecko",
+      "oneinch"
+     ],
+     "volume24hUsd": 0,
+     "volumeSource": "coingecko",
+     "volumeFetchedAt": "2026-11-09"
+    },
+    {
+     "address": "0xaA8330FB2B4D5D07ABFE7A72262752a8505C6B37",
+     "symbol": "POLC",
+     "name": "Polkacity",
+     "decimals": 18,
+     "category": "Other",
+     "logoURI": "/api/token-logo?chainId=1&address=0xaa8330fb2b4d5d07abfe7a72262752a8505c6b37",
+     "verified": false,
+     "sources": [
+      "curated"
+     ],
+     "volume24hUsd": 0,
+     "volumeSource": "coingecko",
+     "volumeFetchedAt": "2026-11-09"
+    },
+    {
+     "address": "0xfB5c6815cA3AC72Ce9F5006869AE67f18bF77006",
+     "symbol": "PSTAKE",
+     "name": "pSTAKE Finance",
+     "decimals": 18,
+     "category": "Other",
+     "logoURI": "/api/token-logo?chainId=1&address=0xfb5c6815ca3ac72ce9f5006869ae67f18bf77006",
+     "verified": false,
+     "sources": [
+      "curated"
+     ],
+     "volume24hUsd": 0,
+     "volumeSource": "coingecko",
+     "volumeFetchedAt": "2026-11-09"
+    },
+    {
+     "address": "0xD291E7a03283640FDc51b121aC401383A46cC623",
+     "symbol": "RGT",
+     "name": "Rari Governance Token",
+     "decimals": 18,
+     "category": "Other",
+     "logoURI": "/api/token-logo?chainId=1&address=0xd291e7a03283640fdc51b121ac401383a46cc623",
+     "verified": true,
+     "sources": [
+      "curated",
+      "uniswap",
+      "coingecko",
+      "oneinch"
+     ],
+     "volume24hUsd": 0,
+     "volumeSource": "coingecko",
+     "volumeFetchedAt": "2026-11-09"
+    },
+    {
+     "address": "0xaAAf91D9b90dF800Df4F55c205fd6989c977E73a",
+     "symbol": "TKN",
+     "name": "Monolith TKN",
+     "decimals": 8,
+     "category": "Other",
+     "logoURI": "/api/token-logo?chainId=1&address=0xaaaf91d9b90df800df4f55c205fd6989c977e73a",
+     "verified": true,
+     "sources": [
+      "curated",
+      "coingecko",
+      "oneinch",
+      "trustwallet"
+     ],
+     "volume24hUsd": 0,
+     "volumeSource": "coingecko",
+     "volumeFetchedAt": "2026-11-09"
+    },
+    {
+     "address": "0x667102BD3413bFEaa3Dffb48fa8288819E480a88",
+     "symbol": "TKX",
+     "name": "Tokenize Xchange",
+     "decimals": 8,
+     "category": "Other",
+     "logoURI": "/api/token-logo?chainId=1&address=0x667102bd3413bfeaa3dffb48fa8288819e480a88",
+     "verified": false,
+     "sources": [
+      "curated"
+     ],
+     "volume24hUsd": 0,
+     "volumeSource": "coingecko",
+     "volumeFetchedAt": "2026-11-09"
+    },
+    {
+     "address": "0x2Ab6Bb8408ca3199B8Fa6C92d5b455F820Af03c4",
+     "symbol": "TONE",
+     "name": "TE FOOD",
+     "decimals": 18,
+     "category": "Other",
+     "logoURI": "/api/token-logo?chainId=1&address=0x2ab6bb8408ca3199b8fa6c92d5b455f820af03c4",
+     "verified": false,
+     "sources": [
+      "curated"
+     ],
+     "volume24hUsd": 0,
+     "volumeSource": "coingecko",
+     "volumeFetchedAt": "2026-11-09"
+    },
+    {
+     "address": "0xd084B83C305daFD76AE3E1b4E1F1fe2eCcCb3988",
+     "symbol": "TVK",
+     "name": "The Virtua Kolect",
+     "decimals": 18,
+     "category": "Other",
+     "logoURI": "/api/token-logo?chainId=1&address=0xd084b83c305dafd76ae3e1b4e1f1fe2ecccb3988",
+     "verified": true,
+     "sources": [
+      "curated",
+      "uniswap",
+      "coingecko",
+      "trustwallet"
+     ],
+     "volume24hUsd": 0,
+     "volumeSource": "coingecko",
+     "volumeFetchedAt": "2026-11-09"
+    },
+    {
+     "address": "0x0202Be363B8a4820f3F4DE7FaF5224fF05943AB1",
+     "symbol": "UFT",
+     "name": "UniLend Finance",
+     "decimals": 18,
+     "category": "Other",
+     "logoURI": "/api/token-logo?chainId=1&address=0x0202be363b8a4820f3f4de7faf5224ff05943ab1",
+     "verified": true,
+     "sources": [
+      "curated",
+      "coingecko",
+      "oneinch",
+      "trustwallet"
+     ],
+     "volume24hUsd": null,
+     "volumeSource": null,
+     "volumeFetchedAt": null
+    },
+    {
+     "address": "0xde17a000BA631c5d7c2Bd9FB692EFeA52D90DEE2",
+     "symbol": "USDN",
+     "name": "SMARDEX USDN",
+     "decimals": 18,
+     "category": "Other",
+     "logoURI": "/api/token-logo?chainId=1&address=0xde17a000ba631c5d7c2bd9fb692efea52d90dee2",
+     "verified": false,
+     "sources": [
+      "curated"
+     ],
+     "volume24hUsd": 0,
+     "volumeSource": "coingecko",
+     "volumeFetchedAt": "2026-11-09"
+    },
+    {
+     "address": "0x7659CE147D0e714454073a5dd7003544234b6Aa0",
+     "symbol": "XCAD",
+     "name": "XCAD Network",
+     "decimals": 18,
+     "category": "Other",
+     "logoURI": "/api/token-logo?chainId=1&address=0x7659ce147d0e714454073a5dd7003544234b6aa0",
+     "verified": true,
+     "sources": [
+      "curated",
+      "coingecko",
+      "oneinch",
+      "trustwallet"
+     ],
+     "volume24hUsd": 0,
+     "volumeSource": "coingecko",
+     "volumeFetchedAt": "2026-11-09"
+    }
+   ],
+   "verdicts": [
+    {
+     "chainId": 1,
+     "address": "0x4104b135DBC9609Fc1A9490E61369036497660c8",
+     "symbol": "APW",
+     "inTrustedList": false,
+     "hasBytecode": true,
+     "transferable": true,
+     "onchainSymbol": "APW",
+     "decimals": 18
+    },
+    {
+     "chainId": 1,
+     "address": "0x08389495D7456E1951ddF7c3a1314A4bfb646d8B",
+     "symbol": "CRPT",
+     "inTrustedList": false,
+     "hasBytecode": true,
+     "transferable": true,
+     "onchainSymbol": "CRPT",
+     "decimals": 18
+    },
+    {
+     "chainId": 1,
+     "address": "0xE5CAeF4Af8780E59Df925470b050Fb23C43CA68C",
+     "symbol": "FRM",
+     "inTrustedList": false,
+     "hasBytecode": true,
+     "transferable": true,
+     "onchainSymbol": "FRM",
+     "decimals": 6
+    },
+    {
+     "chainId": 1,
+     "address": "0x4CC19356f2D37338b9802aa8E8fc58B0373296E7",
+     "symbol": "KEY",
+     "inTrustedList": false,
+     "hasBytecode": true,
+     "transferable": true,
+     "onchainSymbol": "KEY",
+     "decimals": 18
+    },
+    {
+     "chainId": 1,
+     "address": "0x65Ef703f5594D2573eb71Aaf55BC0CB548492df4",
+     "symbol": "MULTI",
+     "inTrustedList": false,
+     "hasBytecode": true,
+     "transferable": true,
+     "onchainSymbol": "MULTI",
+     "decimals": 18
+    },
+    {
+     "chainId": 1,
+     "address": "0xaA8330FB2B4D5D07ABFE7A72262752a8505C6B37",
+     "symbol": "POLC",
+     "inTrustedList": false,
+     "hasBytecode": true,
+     "transferable": true,
+     "onchainSymbol": "POLC",
+     "decimals": 18
+    },
+    {
+     "chainId": 1,
+     "address": "0xfB5c6815cA3AC72Ce9F5006869AE67f18bF77006",
+     "symbol": "PSTAKE",
+     "inTrustedList": false,
+     "hasBytecode": true,
+     "transferable": true,
+     "onchainSymbol": "PSTAKE",
+     "decimals": 18
+    },
+    {
+     "chainId": 1,
+     "address": "0xD291E7a03283640FDc51b121aC401383A46cC623",
+     "symbol": "RGT",
+     "inTrustedList": false,
+     "hasBytecode": true,
+     "transferable": true,
+     "onchainSymbol": "RGT",
+     "decimals": 18
+    },
+    {
+     "chainId": 1,
+     "address": "0xaAAf91D9b90dF800Df4F55c205fd6989c977E73a",
+     "symbol": "TKN",
+     "inTrustedList": false,
+     "hasBytecode": true,
+     "transferable": true,
+     "onchainSymbol": "TKN",
+     "decimals": 8
+    },
+    {
+     "chainId": 1,
+     "address": "0x667102BD3413bFEaa3Dffb48fa8288819E480a88",
+     "symbol": "TKX",
+     "inTrustedList": false,
+     "hasBytecode": true,
+     "transferable": true,
+     "onchainSymbol": "TKX",
+     "decimals": 8
+    },
+    {
+     "chainId": 1,
+     "address": "0x2Ab6Bb8408ca3199B8Fa6C92d5b455F820Af03c4",
+     "symbol": "TONE",
+     "inTrustedList": false,
+     "hasBytecode": true,
+     "transferable": true,
+     "onchainSymbol": "TONE",
+     "decimals": 18
+    },
+    {
+     "chainId": 1,
+     "address": "0xd084B83C305daFD76AE3E1b4E1F1fe2eCcCb3988",
+     "symbol": "TVK",
+     "inTrustedList": false,
+     "hasBytecode": true,
+     "transferable": true,
+     "onchainSymbol": "TVK",
+     "decimals": 18
+    },
+    {
+     "chainId": 1,
+     "address": "0x0202Be363B8a4820f3F4DE7FaF5224fF05943AB1",
+     "symbol": "UFT",
+     "inTrustedList": false,
+     "hasBytecode": true,
+     "transferable": true,
+     "onchainSymbol": "UFT",
+     "decimals": 18
+    },
+    {
+     "chainId": 1,
+     "address": "0xde17a000BA631c5d7c2Bd9FB692EFeA52D90DEE2",
+     "symbol": "USDN",
+     "inTrustedList": false,
+     "hasBytecode": true,
+     "transferable": true,
+     "onchainSymbol": "USDN",
+     "decimals": 18
+    },
+    {
+     "chainId": 1,
+     "address": "0x7659CE147D0e714454073a5dd7003544234b6Aa0",
+     "symbol": "XCAD",
+     "inTrustedList": false,
+     "hasBytecode": true,
+     "transferable": true,
+     "onchainSymbol": "XCAD",
+     "decimals": 18
+    }
+   ]
+  },
+  "8453": {
+   "previousSize": 462,
+   "previousCoingeckoSourceCount": 2981,
+   "rows": [
+    {
+     "address": "0x38815A4455921667d673B4cb3d48F0383eE93400",
+     "symbol": "PSTAKE",
+     "name": "pSTAKE Finance",
+     "decimals": 18,
+     "category": "Other",
+     "logoURI": "/api/token-logo?chainId=8453&address=0x38815a4455921667d673b4cb3d48f0383ee93400",
+     "verified": true,
+     "sources": [
+      "curated",
+      "superchain",
+      "uniswap",
+      "coingecko"
+     ],
+     "volume24hUsd": 0,
+     "volumeSource": "coingecko",
+     "volumeFetchedAt": "2026-11-09"
+    }
+   ],
+   "verdicts": [
+    {
+     "chainId": 8453,
+     "address": "0x38815A4455921667d673B4cb3d48F0383eE93400",
+     "symbol": "PSTAKE",
+     "inTrustedList": false,
+     "hasBytecode": true,
+     "transferable": true,
+     "onchainSymbol": "PSTAKE",
+     "decimals": 18
+    }
+   ]
+  },
+  "42161": {
+   "previousSize": 389,
+   "previousCoingeckoSourceCount": 3283,
+   "rows": [
+    {
+     "address": "0x93C15cd7DE26f07265f0272E0b831C5D7fAb174f",
+     "symbol": "LIQD",
+     "name": "Liquid Finance",
+     "decimals": 18,
+     "category": "Other",
+     "logoURI": "/api/token-logo?chainId=42161&address=0x93c15cd7de26f07265f0272e0b831c5d7fab174f",
+     "verified": false,
+     "sources": [
+      "curated"
+     ],
+     "volume24hUsd": 0,
+     "volumeSource": "coingecko",
+     "volumeFetchedAt": "2026-11-09"
+    },
+    {
+     "address": "0xef888bcA6AB6B1d26dbeC977C455388ecd794794",
+     "symbol": "RGT",
+     "name": "Rari Governance Token",
+     "decimals": 18,
+     "category": "Other",
+     "logoURI": "/api/token-logo?chainId=42161&address=0xef888bca6ab6b1d26dbec977c455388ecd794794",
+     "verified": true,
+     "sources": [
+      "curated",
+      "arbitrumBridge",
+      "uniswap",
+      "coingecko"
+     ],
+     "volume24hUsd": 0,
+     "volumeSource": "coingecko",
+     "volumeFetchedAt": "2026-11-09"
+    }
+   ],
+   "verdicts": [
+    {
+     "chainId": 42161,
+     "address": "0x93C15cd7DE26f07265f0272E0b831C5D7fAb174f",
+     "symbol": "LIQD",
+     "inTrustedList": false,
+     "hasBytecode": true,
+     "transferable": true,
+     "onchainSymbol": "LIQD",
+     "decimals": 18
+    },
+    {
+     "chainId": 42161,
+     "address": "0xef888bcA6AB6B1d26dbeC977C455388ecd794794",
+     "symbol": "RGT",
+     "inTrustedList": false,
+     "hasBytecode": true,
+     "transferable": true,
+     "onchainSymbol": "RGT",
+     "decimals": 18
+    }
+   ]
+  }
+ }
+}
