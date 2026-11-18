@@ -1,0 +1,3 @@
+{
+  "$comment": "Owner-accepted source list sizes (fix/catalog-refresh-drops-untrusted, growth breaker). A source whose list grew by more than 50% against the previous run is held back (the previous snapshot is used) until its new size is accepted HERE: add one line per source and chain, \"<chainId>:<source>\": <size>, in an ordinary reviewed commit. The size to write is the 'current' size in the refresh PR / issue. Empty = nothing accepted."
+}

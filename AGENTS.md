@@ -1,4 +1,4 @@
-<!-- claude-md-sha256: faa4b681a6fe3f16f15801f467ff5becb07260da3e0f36a1a60bc19b93345b7e -->
+<!-- claude-md-sha256: 07cf0eaf7b82a99bc85bfa1a0eb3d87bc72b15ca69263a874696f38c753e132c -->
 # AGENTS.md — TeraSwap for Grok Build and other non-Claude coding agents
 
 Grok Build reads this file, not `CLAUDE.md`. This file exists so a second coding agent gets the same
@@ -60,7 +60,12 @@ these are fund-flow-adjacent and stay Claude/Opus + Auditor territory unless a s
 otherwise. The token-catalog pipeline and its generated JSON are address-hygiene-critical (they are the
 sole source of the addresses `src/lib/chains/tokens.ts` renders and swaps against, across all three
 chains — see CLAUDE.md's Token catalog note) and fall under the same Address hygiene rule above: a wrong
-or hand-edited address here routes a real swap to the wrong contract. `scripts/grok-dispatch.sh` refuses to
+or hand-edited address here routes a real swap to the wrong contract. The refresh holds back a source list that
+grew by more than 50% and adds at most 25 tokens per chain (CLAUDE.md, Token catalog note):
+`scripts/token-catalog/accepted-source-sizes.json` is the owner's decision record for accepting a new list size, so
+no agent adds a line to it, and no agent commits a regenerated catalog or raises a size bound
+(`src/lib/chains/token-catalog.test.ts`, `CATALOG_SIZE_BOUND` in `scripts/token-catalog/lib/config.ts`) to make a
+refresh pass. `scripts/grok-dispatch.sh` refuses to
 dispatch a spec whose "Files affected" list matches these paths in non-interactive (`--always-approve`)
 mode; see the dispatcher's own refusal checks for the exact patterns.
 
