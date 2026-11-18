@@ -12,8 +12,10 @@
 
 The executor is a long-running Node.js process that:
 
-1. Polls Supabase for orders in `active` status whose trigger conditions are met (Limit / Stop-Loss / Take-Profit / DCA).
-2. Calls `canExecute(orderHash)` on `TeraSwapOrderExecutor` to confirm the contract agrees the order is fillable.
+1. Scans up to 1000 `active` orders of its chain per cycle (Limit / Stop-Loss / Take-Profit / DCA) and asks
+   `canExecute` for all of them in one batched read (Multicall3), without locking any (§ 9).
+2. Locks only the orders that answered true, oldest first, and calls `canExecute` on `TeraSwapOrderExecutor` again
+   for each to confirm the contract agrees the order is fillable.
 3. Builds aggregator calldata via `/api/swap`, then calls `executeOrder(orderHash, routerData)` on the contract.
 4. Writes the resulting tx hash + status back to Supabase.
 
@@ -21,6 +23,11 @@ The executor is a long-running Node.js process that:
 |---------|-------|--------|
 | Poll interval | 30 s | `POLL_INTERVAL_MS` in `executor.js` |
 | Stale-lock recovery window | 60 s | `LOCK_TIMEOUT_MS` in `executor.js` |
+| Active orders scanned per cycle | 1000 | `SCAN_CAP` in `executor.js` (§ 9) |
+| Pre-screen: calls per Multicall3 chunk / time limit | 50 / 5 s | `PRESCREEN_CHUNK`, `PRESCREEN_CHUNK_TIMEOUT_MS` |
+| Time limit of every Supabase read | 5 s | `SUPABASE_READ_TIMEOUT_MS` |
+| Orders asked one by one when the pre-screen cannot answer them | 15 per cycle, rotating | `ONE_BY_ONE` |
+| Fills per cycle | 5 | `MAX_BATCH` |
 | Gas tier — NORMAL ceiling | 30 gwei | `executor.js:101` |
 | Gas tier — ELEVATED ceiling | 80 gwei | `executor.js:101` |
 | Gas tier — URGENT ceiling | 100 gwei | `executor.js:101` |
@@ -296,6 +303,67 @@ holds, within their expiry. An order that expires DURING the outage is recorded 
 **Nothing to do for the orders themselves** once the cause is fixed (§ 5 restart, § 7 key swap, gas
 top-up): they resume on their own. What to check is that the cause IS fixed — a persistent infra
 miss is never capped, so it keeps retrying (and logging) until the order fills or expires.
+
+---
+
+## 9. The active-orders scan (SEC-4, PR #714)
+
+**What a cycle does.** It reads up to 1000 active orders of its chain (`SCAN_CAP`; oldest first, and the whole
+chain whenever it holds <= 1000), asks `canExecute` for every one of them through Multicall3
+(`0xcA11bde05977b3631167028862bE2a173976CA11`, chunks of 50 calls, 5 s each) WITHOUT locking anything, and only
+then locks and executes the orders that answered true, oldest first, through the usual path (lock, `canExecute`
+again, every gate, the retry ladder). At most 5 fills per cycle (`MAX_BATCH`), as before. A ready order the loop did
+not reach (5 fills done, or a gas SKIP) is attempted next cycle. An order that answers false is neither locked nor
+written. Before this, every cycle locked the 15 OLDEST orders to ask them, so 15 orders that could not execute yet
+hid every newer one.
+
+**The cycle line** — one per cycle, after `Found N active order(s)` (or `No active orders`):
+
+```
+  Active scan: active=37 scanned=37 true=2 attempted=2 carried=0 rotate=no fallback=none
+```
+
+| Field | Meaning |
+|---|---|
+| `active` | active orders on this chain (`?` when the count could not be read) |
+| `scanned` | orders read and pre-screened this cycle (0 on a `PAUSED` cycle) |
+| `true` | of those, how many answered `canExecute` = true |
+| `attempted` | how many times the per-order path itself asked `canExecute` (each one locked first) |
+| `carried` | ready orders the loop did not reach: attempted next cycle |
+| `rotate` | `yes` = more than 1000 active orders: the scan reads the next 1000 each cycle (one pass every ceil(N/1000) cycles) |
+| `fallback` | `none`; `scan-<status>` = the scan query failed, the 15 oldest orders were examined instead; `prescreen-<k>of<n>` = k of n Multicall3 chunks failed, their orders were asked one by one (15 per cycle, rotating) |
+
+**A fallback pages ops.** `🛠️ Ops issue: active-scan-fallback` (scan query failed) or `prescreen-fallback` (a
+Multicall3 chunk failed): warn tier, on the first cycle, then at most hourly while it lasts. `/health` →
+`stats.scanFallbackCycles` / `stats.prescreenFallbackCycles` (this process). While it lasts only 15 orders are
+examined per cycle, so newer orders can wait.
+- `scan-<status>`: read the line `Active scan query FAILED (<status>: <body>)`, logged once per process (bodies
+  capped at 200 characters, ids and URLs masked). `400` = PostgREST refused the keyset filter or the count;
+  `5xx` / `timeout` / `network` = Supabase itself. The cycle used main's exact query (no count header).
+- `prescreen-…`: read `Pre-screen chunk <n> FAILED (…)`. Check the RPC first (§ 7, rpc-auth), then that Multicall3
+  has code on the chain — read-only, from your terminal:
+  `cast code 0xcA11bde05977b3631167028862bE2a173976CA11 --rpc-url <the chain's public RPC>` must print bytecode
+  (3808 bytes on Base and Arbitrum One, checked 2026-11-18).
+
+**One cycle at a time.** A tick that finds the previous cycle still running (a slow receipt) is skipped and logged
+once per long cycle: `Tick skipped: the previous cycle is still running (<s>s) — one cycle at a time`; `/health` →
+`stats.overlapSkippedTicks`. A few are normal; a steady stream means cycles take longer than 30 s.
+
+**More than 1000 active orders on a chain** (`rotate=yes`): every order is still pre-screened at least once every
+ceil(N/1000) cycles, plus one cycle per fallback cycle; a flood of new orders must add 1000 per cycle to hide one.
+But an order the path ATTEMPTED and deferred (gas tier, price-quorum skip, deviation defer, an infra miss) is tried
+again at its next scan, not the next cycle, so per-order streaks count scans, not cycles: the ADR-024 skip alert
+after 3 skips comes after about 3 × ceil(N/1000) cycles, and ADR-026's 20-miss rule takes longer (its ~10-minute
+rule does not). A restarted process starts at a random page. An in-memory infra streak is dropped only when its
+order is absent from two consecutive complete scans (ADR-026 note 2026-11-18).
+
+**Host check after deploying this change** (`pm2 logs <app> --lines 200 --nostream`, each app):
+- present, one per cycle: `Active scan: active=<n> scanned=<n> true=<n> attempted=<n> carried=<n> rotate=no fallback=none`
+  — `scanned` equals `active` while `active` <= 1000;
+- absent: `Active scan query FAILED (`, `Pre-screen chunk`, `fallback=scan-`, `fallback=prescreen-`;
+- not repeating: `Supabase fetch error (scan wrap):`, `Tick skipped:`, `Cycle error:`;
+- gone (older code): `Active window:`, `Querying:`, `Supabase returned`, `First order:`;
+- `/health` → `stats.scanFallbackCycles`, `stats.prescreenFallbackCycles`, `stats.overlapSkippedTicks` present (0).
 
 ---
 

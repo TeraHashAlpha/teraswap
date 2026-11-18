@@ -377,7 +377,9 @@ ts_host_guard && pm2 logs teraswap-keeper-arbitrum --lines 60 --nostream
    `Contract (v2): not configured -- v2 orders will be skipped + flagged` · `Contract (v3): 0x…`
 7. `Health check: http://localhost:3002/health` (Base stays on 3001)
 8. `No active orders` / `Found <n> active order(s)` — the first Supabase query, filtered
-   `chain_id=eq.42161`, authenticated with the S2.2 key.
+   `chain_id=eq.42161`, authenticated with the S2.2 key — then, every cycle, one
+   `Active scan: active=<n> scanned=<n> true=<n> attempted=<n> carried=<n> rotate=no fallback=none` line
+   (EXECUTOR-OPERATIONS.md § 9: any `fallback=` other than `none` pages ops and is explained there).
 
 Any `FATAL:` line ⇒ the refusal names the variable or check; fix the env file, `pm2 restart
 teraswap-keeper-arbitrum`, re-read from line 1. Never work around a refusal with an override.

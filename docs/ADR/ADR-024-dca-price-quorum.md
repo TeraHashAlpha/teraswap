@@ -200,6 +200,20 @@ reason is why the CoinGecko leg stopped early (`429 twice on 0x… — k of N to
 down now shows as `=0` with its reason in `pm2 logs`, next to the per-order
 `DCA price quorum: in=… out=… -> …` line. Rollout: `docs/Runbooks/EXECUTOR-OPERATIONS.md` §3.
 
+## Note 2026-11-18 — the active-orders scan (SEC-4, PR #714)
+
+The keeper no longer locks the 15 oldest active rows of its chain each cycle to ask them: it scans up to 1000
+(`SCAN_CAP`), asks `canExecute` for all of them without a lock (Multicall3), and walks only the rows that answered
+true through the per-order path, where this ADR's quorum runs unchanged. For `SKIP_ALERT_CYCLES`:
+
+- **<= 1000 active rows on the chain** (every chain today): a DCA row whose chunk is due answers true every cycle,
+  so it is walked — and its quorum asked — every cycle. The skip streak counts cycles, as written above.
+- **> 1000 active rows**: the scan rotates, 1000 rows per cycle, and a row is pre-screened once every
+  ceil(M / 1000) cycles. A quorum skip is an attempt, not a row the loop failed to reach, so it is not carried over:
+  the row is asked again at its next scan, and the streak counts scans. The alert after 3 skips comes after about
+  3 × ceil(M / 1000) cycles (2000 rows: 6 cycles, 3 minutes, instead of 1.5). Still never cancelled, never filled
+  blind. Runbook: `EXECUTOR-OPERATIONS.md` § 9.
+
 ## Verification
 
 - `contracts/order-engine/executor`: `node --test` — 736 tests (origin/main 650; 731 before the

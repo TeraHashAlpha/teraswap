@@ -105,6 +105,21 @@ out of gas — none of which the user can fix, and none of which says anything a
   `canExecute` returns false (interval / nonce) and the row is reconciled by the existing
   `backfill-execution.mjs` path; if it reverted, the next attempt reverts again ⇒ `order`.
 
+## Note 2026-11-18 — the active-orders scan (SEC-4, PR #714)
+
+Nothing here changes which misses count. Two things changed around it:
+
+- **Pruning (A73b S-9).** An order's in-memory infra streak used to be dropped when the order was absent from the
+  rows just fetched (the 15 oldest). The cycle now reads up to 1000 active rows (`SCAN_CAP`; a rotating page when
+  the chain holds more), and a streak is dropped only when its order is absent from two consecutive COMPLETE
+  scans — a cycle that read the whole chain, or a full rotation — so an order that was `executing` during one scan
+  keeps it.
+- **> 1000 active rows on a chain.** With <= 1000 an order is walked every cycle it is ready, so § 2b's backoff and
+  § 2c's 20-miss rule count cycles, as written above. With more, a ready order the loop did not reach is carried to
+  the next cycle, but one the path attempted (an infra miss included) is next attempted at its next scan,
+  ceil(M / 1000) cycles later: the 20-miss rule takes longer; the ~10-minute wall-clock rule does not. Runbook:
+  `EXECUTOR-OPERATIONS.md` § 9.
+
 ## Alternatives rejected
 
 - Reusing `orders.error` for the infra reason: the UI reads any `error` as failed.
