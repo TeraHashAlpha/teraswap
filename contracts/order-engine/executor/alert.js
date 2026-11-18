@@ -77,6 +77,8 @@ export async function sendTelegramAlert(message) {
   // host — except a public tx link to one of the keeper's own block explorers (event-watcher.js).
   // [fix/keeper-errors-no-signature] Then the cap: Telegram refuses a text over 4,096 characters and the
   // alert is lost; a longer one is cut (tags closed, entities whole) and ends with a visible marker.
+  // [A93 R2-1] redactUrl's last step removes every configured secret by value (`html`: as `&lt;redacted&gt;`, a raw
+  // `<redacted>` is a tag Telegram refuses). It runs before the cap, which only removes characters.
   const text = capAlertText(
     redactUrl(
       [
@@ -87,7 +89,7 @@ export async function sendTelegramAlert(message) {
         ``,
         message,
       ].join("\n"),
-      { allowHosts: ALERT_LINK_HOSTS },
+      { allowHosts: ALERT_LINK_HOSTS, html: true },
     ),
     ALERT_TEXT_MAX,
   )

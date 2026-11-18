@@ -35,7 +35,14 @@ import { decodeOrderExecuted, ORDER_EXECUTED_EVENT } from "./record-execution.js
 import { parseChainIdEnv } from "./boot-config.js"
 // [A92 S-1] An error is printed through redactError, never as err.message: viem's message carries `URL: <RPC_URL>`,
 // the provider key in its path (redact-a92-s1-cli.test.mjs).
-import { redactError } from "./redact.js"
+import { redactError, redactSecretLiterals } from "./redact.js"
+import { format } from "node:util"
+
+// [A93 R2-1] EVERY line this CLI prints passes the configured-secret scrub last: a provider that echoes only the request
+// path (`Cannot POST /v2/<key>`) gives redactError no host to anchor on, and an argument an operator pasted by mistake
+// (the keyed RPC URL as --from-block) is echoed by a refusal. Nothing below calls console.* directly.
+const say = (...args) => console.log(redactSecretLiterals(format(...args)))
+const sayErr = (...args) => console.error(redactSecretLiterals(format(...args)))
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────
 export const USAGE =
@@ -217,7 +224,7 @@ export async function runScan({
 function requireEnv(name) {
   const value = process.env[name]
   if (!value) {
-    console.error(`FATAL: ${name} must be set in the environment.`)
+    sayErr(`FATAL: ${name} must be set in the environment.`)
     process.exit(1)
   }
   return value
@@ -226,7 +233,7 @@ function requireEnv(name) {
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   if (!args.fromBlock && !args.fromTs) {
-    console.error(USAGE)
+    sayErr(USAGE)
     process.exit(1)
   }
 
@@ -237,7 +244,7 @@ async function main() {
 
   const chainIdResult = parseChainIdEnv(process.env.CHAIN_ID)
   if (!chainIdResult.ok) {
-    console.error(`FATAL: ${chainIdResult.reason}`)
+    sayErr(`FATAL: ${chainIdResult.reason}`)
     process.exit(1)
   }
   const CHAIN_ID = chainIdResult.chainId
@@ -252,13 +259,13 @@ async function main() {
   if (args.fromBlock !== undefined) {
     fromBlock = Number(args.fromBlock)
     if (!Number.isFinite(fromBlock) || fromBlock < 0) {
-      console.error(`FATAL: --from-block must be a non-negative integer (received ${args.fromBlock})`)
+      sayErr(`FATAL: --from-block must be a non-negative integer (received ${args.fromBlock})`)
       process.exit(1)
     }
   } else {
     const targetTs = Number(args.fromTs)
     if (!Number.isFinite(targetTs)) {
-      console.error(`FATAL: --from-ts must be a unix timestamp (received ${args.fromTs})`)
+      sayErr(`FATAL: --from-ts must be a unix timestamp (received ${args.fromTs})`)
       process.exit(1)
     }
     fromBlock = await resolveBlockFromTimestamp({
@@ -285,16 +292,16 @@ async function main() {
           fromBlock: BigInt(from),
           toBlock: BigInt(to),
         }),
-      log: (msg) => console.log(msg),
+      log: (msg) => say(msg),
     })
   } catch (err) {
-    console.error(redactError(err))
-    console.error(`   Refusing to scan against ${maskRpcUrl()}.`)
+    sayErr(redactError(err))
+    sayErr(`   Refusing to scan against ${maskRpcUrl()}.`)
     process.exit(1)
   }
 
   const contract = scan.verified.contracts[0]
-  console.log(formatBootLine({ chainId: scan.verified.chainId, address: contract.address, codeSize: contract.codeSize }))
+  say(formatBootLine({ chainId: scan.verified.chainId, address: contract.address, codeSize: contract.codeSize }))
 
   async function supabaseFetch(path, options = {}) {
     return fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
@@ -314,19 +321,19 @@ async function main() {
     recordedTxHashes,
   })
 
-  console.log(formatTable(rows))
-  console.log(formatSummaryLine({ onChainCount, recordedCount, missingCount }))
+  say(formatTable(rows))
+  say(formatSummaryLine({ onChainCount, recordedCount, missingCount }))
 
   const outFile = args.out || `./missing-fills.${scan.verified.chainId}.txt`
   const outPath = resolve(process.cwd(), outFile)
   writeFileSync(outPath, missing.map((r) => r.txHash).join("\n") + (missing.length ? "\n" : ""))
-  console.log(`Wrote ${missing.length} missing hash(es) to ${outFile}`)
+  say(`Wrote ${missing.length} missing hash(es) to ${outFile}`)
 }
 
 const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])
 if (isMainModule) {
   main().catch((err) => {
-    console.error(`FATAL: ${redactError(err)}`)
+    sayErr(`FATAL: ${redactError(err)}`)
     process.exit(1)
   })
 }
