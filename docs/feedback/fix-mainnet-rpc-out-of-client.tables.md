@@ -138,18 +138,24 @@ FAIL src/lib/rpc-env.mainnet-server.test.ts > … RPC_URL_1 still wins when the 
 After `fc4e84f9` reworked the mainnet-server test's setup (T7), M2 and M3 were re-run on that file alone: the same cases
 fail (M2: "set ALONE: ignored"; M3: "set ALONE: ignored" and "RPC_URL_1 still wins").
 
-## T7. Verify (`scripts/agent-verify.sh --codeql`, base origin/main `4a4129ef`)
+## T7. Verify (`scripts/agent-verify.sh --codeql`)
 
-| Check | Run 1 (suite at `04058dbb`) | Run 2 (`fc4e84f9`) |
-|---|---|---|
-| suite | FAIL 10867 / 3 failed (510 files) | FAIL 10867 / 3 failed (510 files) |
-| lint-delta | PASS +0 errors / +0 warnings (17 changed files) | PASS +0 / +0 |
-| tsc | PASS 0 errors | PASS 0 errors |
-| build | PASS | PASS |
-| v1v2-parity | PASS 123 / 0 | PASS 123 / 0 |
-| rpc-budget | PASS 36 / 0 | PASS 36 / 0 |
-| codeql (security-extended) | PASS head 13, base 13, 0 new | PASS head 13, base 13, 0 new |
-| `node scripts/gen-claude-state.mjs --check` | "CLAUDE.md state block is current" | (same tree for the block) |
+Runs 1-2: base origin/main `4a4129ef`, default Node 26, load average ~64 on 10 cores. Run 3: the owner's ONE permitted rerun,
+started 02:05:14 on 2026-11-18 once no other verify / CodeQL / vitest process ran and the 1-minute load was under 10 (4.5),
+`PATH=/opt/homebrew/opt/node@22/bin` (Node 22.23.5, CI's), base origin/main `02487c98` (main had moved; no shared files,
+merges cleanly).
+
+| Check | Run 1 (suite at `04058dbb`) | Run 2 (`fc4e84f9`) | **Run 3 (`32640ef1`, quiet)** |
+|---|---|---|---|
+| suite | FAIL 10867 / 3 failed (510 files) | FAIL 10867 / 3 failed (510 files) | **PASS 10870 / 0 failed (510 files)** |
+| lint-delta | PASS +0 errors / +0 warnings (17 changed files) | PASS +0 / +0 | PASS +0 / +0 (17 changed files) |
+| tsc | PASS 0 errors | PASS 0 errors | PASS 0 errors |
+| build | PASS | PASS | PASS |
+| v1v2-parity | PASS 123 / 0 | PASS 123 / 0 | PASS 123 / 0 |
+| rpc-budget | PASS 36 / 0 | PASS 36 / 0 | PASS 36 / 0 |
+| codeql (security-extended) | PASS head 13, base 13, 0 new | PASS head 13, base 13, 0 new | PASS head 13, base 13, 0 new |
+| RESULT | FAIL | FAIL | **PASS** |
+| `node scripts/gen-claude-state.mjs --check` | current | (same tree for the block) | current |
 
 Suite failures (all `Test timed out in 5000ms`, except the one assertion error marked below):
 

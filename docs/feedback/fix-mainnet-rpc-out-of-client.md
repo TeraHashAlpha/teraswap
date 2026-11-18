@@ -5,11 +5,11 @@
 
 ### Owner answers (asked once, 2026-11-17; they supersede the goal text)
 - **E2E quote**, answered: real `/api/rpc` handler, ABI-aware upstream stub, `/api/quote` fixture, rig committed, local-only config.
-- **Guard scope, env checks, fallback names**: no answer came back; not re-asked; the recommended reading was applied:
-  server-only = `src/app/api/**` + rpc-env.ts `readServerOnly` (L2 deprecated fallback kept byte-identical); the required
-  `NEXT_PUBLIC_RPC_URL` rule removed, `RPC_URL_1` stays a warning; `NEXT_PUBLIC_FALLBACK_RPC_1/_2` dropped.
-- **Verify red outside the diff** (suite: 5 s timeouts under load, on main too; T7): asked before pushing; owner: **"Push now"**,
-  the failures recorded here as load timeouts outside the diff.
+- **Guard scope, env checks, fallback names**: no answer the first time; applied the recommended readings, then **confirmed by
+  the owner (2026-11-18)**: server-only = `src/app/api/**` + rpc-env.ts `readServerOnly` (L2 deprecated fallback kept
+  byte-identical); the required `NEXT_PUBLIC_RPC_URL` rule removed, `RPC_URL_1` stays a warning; `NEXT_PUBLIC_FALLBACK_RPC_1/_2` dropped.
+- **Verify red outside the diff** (suite: 5 s timeouts under load, on main too; T7): owner "Push now"; then, for the green
+  gate, owner allowed **ONE rerun on a quiet machine** (no other verify/CodeQL, 1-min load < 10): run 3, PASS.
 
 ### 1. Step 0 (T1)
 Before (`4a4129ef`): marker in `.next/static/chunks/1_7izng880dte.js`, from `registry.ts:42`; CI bundle test FAIL (2 hits).
@@ -31,11 +31,12 @@ in 4 files; Base/Arbitrum tests unchanged and green. Mutants: M1 (registry read 
 fallback) by 5, M3 (alias read) by 4; names in T6.
 
 ### 5. Verify, diff, NOT verified, owner steps (T7)
-`agent-verify.sh --codeql` at `fc4e84f9`: lint-delta +0/+0, tsc 0, build, v1v2-parity 123/0, rpc-budget 36/0, CodeQL 13 → 13
-(0 new) PASS. **suite FAIL**: 10867 passed, 3 failed, all 5 s timeouts in files this branch does not touch, under load avg ~64
-on 10 cores (other sessions' CodeQL). Untouched main, same command and load: 2 failed, also 5 s timeouts. My own run-1 red
-(mainnet-server cold load) is fixed in `fc4e84f9`. `gen-claude-state.mjs --check`: current. Diff: 25 files (T7 has --stat).
-Code head `fc4e84f9`. Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/mainnet-rpc-out-of-client
+`agent-verify.sh --codeql` run 3 at `32640ef1` (quiet machine, Node 22.23.5, base origin/main `02487c98`): **RESULT: PASS**:
+suite 10870 passed / 0 failed (510 files), lint-delta +0/+0, tsc 0, build, v1v2-parity 123/0, rpc-budget 36/0, CodeQL 13 → 13
+(0 new). Runs 1-2 (under load avg ~64) were red on 5 s timeouts only; my own run-1 red is fixed in `fc4e84f9` (T7).
+`gen-claude-state.mjs --check`: current. The owner then merged main (`02487c98`) into the branch on GitHub (`03fb1900`,
+PR #711): no file shared with this diff; that merged tree is not verified here (CI on #711 runs it). Diff: 25 files (T7 --stat).
+Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/mainnet-rpc-out-of-client
 NOT verified: Vercel Production/Preview and the live bundle; a real chain's cadence (T3 is a stub chain); WalletConnect
 wallets relaying reads through the proxy URL; several tabs per IP; the CI jobs (run when the owner opens the PR).
 **Owner, after deploy (names only):** 1. confirm `RPC_URL_1` in Production + Preview and the log `rpc: chain=1
