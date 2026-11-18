@@ -10,6 +10,8 @@
  * redactError(err) — [fix/keeper-errors-no-signature, A87 S-2] a SHORT text built from the error's fields, never its
  *                    whole `message`: viem's message for a contract call prints the call's `args:` — the order's
  *                    EIP-712 signature — and its request `data:`. See redactError below for what it keeps.
+ * capAlertText(t)  — a Telegram HTML text cut below Telegram's 4,096 limit with a visible marker, never inside a tag
+ *                    or an entity, open tags closed (Telegram refuses a longer or unbalanced text: the alert is lost).
  *
  * What is read first [A74 S-5]: the text is DECODED to a fixpoint (percent, stacked percent, JSON/JS and octal
  * escapes, HTML entities — for `/ : @ ? # \\ %` only), so an encoded delimiter cannot hide a URL; text nested
@@ -205,6 +207,8 @@ export function redactUrl(text, { allowHosts = [] } = {}) {
 
 /** The longest text redactError returns. */
 export const ERROR_TEXT_MAX = 600
+/** Every keeper Telegram text is cut to this (Telegram's limit is 4,096 characters after entity parsing). */
+export const ALERT_TEXT_MAX = 4_000
 /** The start of the visible marker a cut text ends with: `…[truncated N chars]`. */
 export const TRUNCATED = "…[truncated"
 /** @param {number} n */
@@ -391,4 +395,40 @@ export function redactError(err, { max } = {}) {
     /* unprintable */
   }
   return capText(out, cap, cut)
+}
+
+const OPEN_OR_CLOSE_TAG = /<(\/?)([a-z][a-z0-9-]{0,15})(?:\s[^<>]{0,2048})?>/gi
+
+/**
+ * A Telegram HTML text cut to at most `max` characters, ending with the marker; an alert is never dropped for its
+ * length. The cut never lands inside a tag or an entity (every `&` in a Telegram HTML text opens one), and each tag
+ * left open is closed: Telegram refuses an unbalanced text and the alert would be lost. The limit counts the HTML
+ * source, which is never shorter than what Telegram counts after parsing the entities.
+ * @param {unknown} text @param {number} [max]
+ * @returns {string}
+ */
+export function capAlertText(text, max = ALERT_TEXT_MAX) {
+  const s = typeof text === "string" ? text : safeString(text)
+  if (s.length <= max) return s
+  let keep = Math.max(0, max - truncatedMarker(s.length).length - 1)
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const lt = s.lastIndexOf("<", keep - 1)
+    if (lt !== -1 && lt > s.lastIndexOf(">", keep - 1)) keep = lt
+    const amp = s.lastIndexOf("&", keep - 1)
+    if (amp !== -1 && amp > s.lastIndexOf(";", keep - 1)) keep = amp
+    if (keep > 0 && /[\uD800-\uDBFF]/.test(s[keep - 1])) keep--
+    const head = s.slice(0, keep)
+    const open = []
+    for (const m of head.matchAll(OPEN_OR_CLOSE_TAG)) {
+      const tag = m[2].toLowerCase()
+      if (m[1] === "") open.push(tag)
+      else if (open.lastIndexOf(tag) !== -1) open.splice(open.lastIndexOf(tag), 1)
+    }
+    const out = `${head}${open.reverse().map((t) => `</${t}>`).join("")}\n${truncatedMarker(s.length - keep)}`
+    if (out.length <= max) return out
+    keep = Math.max(0, keep - (out.length - max))
+  }
+  // Pathological nesting: plain text (tags removed, entities kept whole), then the cut.
+  const plain = s.slice(0, keep).replace(/<[^<>]{0,2048}>/g, "")
+  return `${plain}\n${truncatedMarker(s.length - plain.length)}`.slice(0, max)
 }
