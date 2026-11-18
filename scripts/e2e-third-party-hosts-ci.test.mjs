@@ -54,7 +54,8 @@ describe('e2e.yml: third-party-host capture', () => {
   })
 
   describe('bundle markers', () => {
-    const MARKER_ENV = ['NEXT_PUBLIC_BASE_RPC_URL', 'NEXT_PUBLIC_ARBITRUM_RPC_URL', 'NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', 'NEXT_PUBLIC_SENTRY_DSN']
+    // [fix/mainnet-rpc-out-of-client, SEC-5] + the three retired mainnet RPC names.
+    const MARKER_ENV = ['NEXT_PUBLIC_BASE_RPC_URL', 'NEXT_PUBLIC_ARBITRUM_RPC_URL', 'NEXT_PUBLIC_RPC_URL', 'NEXT_PUBLIC_FALLBACK_RPC_1', 'NEXT_PUBLIC_FALLBACK_RPC_2', 'NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', 'NEXT_PUBLIC_SENTRY_DSN']
     const markers = (runStep.env?.CAPTURE_BUNDLE_MARKERS ?? '').split(',').filter(Boolean)
 
     it.each(MARKER_ENV)('the build is given a marker value for %s', (name) => {

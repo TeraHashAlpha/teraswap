@@ -13,10 +13,16 @@
  *   2. `RPC_URL`             — LEGACY server name, mainnet ONLY. It has always meant "the mainnet
  *                              RPC"; letting it answer for Base/Arbitrum would point those chains
  *                              at mainnet (the exact silent-lie class rpc-chain-identity guards).
- *   3. `NEXT_PUBLIC_*`       — the old browser env, kept as a fallback so an unset RPC_URL_<id>
- *                              behaves byte-identically to before this change.
+ *   3. `NEXT_PUBLIC_*`       — Base/Arbitrum ONLY: the deprecated browser env, kept as a fallback so
+ *                              an unset RPC_URL_<id> behaves byte-identically to before this change.
  *   4. the public default the callers already use (mainnet: llamarpc; Base/Arbitrum: the registry
  *      fallbacks — see `serverRpcUrl`).
+ *
+ * MAINNET: [fix/mainnet-rpc-out-of-client, SEC-5] RPC_URL_1, then RPC_URL, then the public default — no step 3.
+ * The mainnet browser name was read here, in chains/registry.ts and in wagmiConfig.ts with literal member accesses,
+ * all in modules the browser reaches, so its value (a provider URL with its key) was inlined into a client chunk.
+ * That name, and the two mainnet fallback names wagmiConfig.ts read, are not read anywhere in src/ any more
+ * (pinned by next-public-rpc-reads.guard.test.ts).
  *
  * BROWSER: [fix/user-ip-privacy] the browser no longer dials a provider on any chain — every read
  * goes to our own `/api/rpc` proxy (rpc-proxy-url.ts). `browserRpcEnvUrl` / `browserRpcUrl` remain
@@ -43,13 +49,13 @@ const PUBLIC_DEFAULT: Readonly<Record<number, string>> = {
 }
 
 const SERVER_NAMES: Readonly<Record<number, readonly string[]>> = {
-  1: ['RPC_URL_1', 'RPC_URL', 'NEXT_PUBLIC_RPC_URL'],
+  1: ['RPC_URL_1', 'RPC_URL'],
   8453: ['RPC_URL_8453', 'NEXT_PUBLIC_BASE_RPC_URL'],
   42161: ['RPC_URL_42161', 'NEXT_PUBLIC_ARBITRUM_RPC_URL'],
 }
 
+/** Legacy browser names still known, for the server diagnostics. [SEC-5] Mainnet has none any more. */
 const BROWSER_NAMES: Readonly<Record<number, string>> = {
-  1: 'NEXT_PUBLIC_RPC_URL',
   8453: 'NEXT_PUBLIC_BASE_RPC_URL',
   42161: 'NEXT_PUBLIC_ARBITRUM_RPC_URL',
 }
@@ -85,7 +91,6 @@ function readEnv(name: string): string | undefined {
     case 'RPC_URL_8453': return process.env.RPC_URL_8453
     case 'RPC_URL_42161': return process.env.RPC_URL_42161
     case 'RPC_URL': return process.env.RPC_URL
-    case 'NEXT_PUBLIC_RPC_URL': return process.env.NEXT_PUBLIC_RPC_URL
     default: return readServerOnly(name)
   }
 }
@@ -139,9 +144,9 @@ export function serverRpcUrl(chainId: number): string {
 }
 
 /**
- * The value of the legacy `NEXT_PUBLIC_*` name for `chainId`, or `undefined` when unset. Mainnet's is
- * still inlined (the server-side wagmi transport reads it); the two L2 names resolve on the server only
- * and are `undefined` in the browser (see the header). Used by server diagnostics, not to pick a transport.
+ * The value of the legacy `NEXT_PUBLIC_*` name for `chainId`, or `undefined` when unset. The two L2 names
+ * resolve on the server only and are `undefined` in the browser (see the header); [SEC-5] mainnet has no
+ * legacy browser name any more, so it is always `undefined`. Used by server diagnostics, not to pick a transport.
  */
 export function browserRpcEnvUrl(chainId: number): string | undefined {
   const name = BROWSER_NAMES[chainId]

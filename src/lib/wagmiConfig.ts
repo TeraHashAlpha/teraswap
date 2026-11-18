@@ -8,84 +8,42 @@ import {
 } from '@rainbow-me/rainbowkit/wallets'
 import { lazyWalletConnectWallet } from '@/lib/lazy-walletconnect'
 import { mainnet, base, arbitrum } from 'wagmi/chains'
-import { fallback } from 'wagmi'
 import type { Transport } from 'viem'
 import { guardedHttp } from '@/lib/rpc-guarded-transport'
 import { INTEGRATED_DEX_SOURCE_COUNT, SWAP_CHAIN_LIST_LABEL } from '@/config/product-claims'
 import { proxyRpcUrl } from '@/lib/rpc-proxy-url'
 import { serverRpcUrl } from '@/lib/rpc-env'
 
-// ── RPC Configuration with Fallback ──────────────────────
-// Primary: user-configured RPC (e.g. Alchemy, Infura)
-// Fallbacks: public RPCs for resilience when primary is down
-//
+// ── RPC transports ───────────────────────────────────────
 // [FIX-RPC-CHAIN-IDENTITY-GUARD] Every transport below is built with `guardedHttp`, never bare
 // `http`. NEXT_PUBLIC_ARBITRUM_RPC_URL held a BASE endpoint from 2026-08-05 to 2026-08-26: viem
 // forwarded Base's answers as Arbitrum's for three weeks without a single error, because a
 // well-formed 200 from the wrong chain is not an error to any layer below this one. guardedHttp
 // asks each endpoint `eth_chainId` once (cached per process — see rpc-chain-identity.ts) and
 // refuses to read from one that answers for a different chain. An UNREACHABLE endpoint is an
-// outage, not a lie, and still falls through to the next entry exactly as it does today.
-const primaryRpc = process.env.NEXT_PUBLIC_RPC_URL
-const fallbackRpc1 = process.env.NEXT_PUBLIC_FALLBACK_RPC_1
-const fallbackRpc2 = process.env.NEXT_PUBLIC_FALLBACK_RPC_2
-
-function buildMainnetTransport(): Transport {
-  const transports: Transport[] = []
-
-  // In browser: always use /api/rpc as primary (hides user IP, avoids CORS).
-  // [fix/user-ip-privacy] Absolute same-origin URL (proxyRpcUrl): wagmi's WalletConnect connector
-  // copies this transport URL into the provider's rpcMap, and WalletConnect refuses a relative one
-  // ("Provided URL is not compatible with HTTP connection: /api/rpc") while it builds the session's
-  // EVM provider. Same request as before, in a form the wallet SDK accepts.
-  if (typeof window !== 'undefined') {
-    transports.push(guardedHttp(proxyRpcUrl(mainnet.id), mainnet.id, { timeout: 10_000 }))
-  } else if (primaryRpc) {
-    // Server-only: hit the configured RPC directly (no IP to protect).
-    transports.push(guardedHttp(primaryRpc, mainnet.id, { timeout: 10_000 }))
-  }
-
-  // Fallback RPCs (secondary providers) — server-only; browser cannot
-  // reach these directly without CORS allowlisting.
-  if (typeof window === 'undefined') {
-    if (fallbackRpc1) transports.push(guardedHttp(fallbackRpc1, mainnet.id, { timeout: 12_000 }))
-    if (fallbackRpc2) transports.push(guardedHttp(fallbackRpc2, mainnet.id, { timeout: 12_000 }))
-  }
-
-  // No implicit/URL-less http() entry here: an unconfigured `http(undefined)`
-  // resolves to viem's built-in chain default (eth.merkle.io for mainnet),
-  // an endpoint we never chose and that isn't CORS-allowlisted for the
-  // browser. Every RPC URL used must be explicit — see Base/Arbitrum below.
-  //
-  // Server-only last resort, only reached if no primary/fallback env vars are
-  // set: an EXPLICIT written-down URL (same constant used by src/lib/rpc.ts
-  // and src/lib/on-chain-monitor.ts), not viem's implicit chain default.
-  if (typeof window === 'undefined' && transports.length === 0) {
-    transports.push(guardedHttp('https://eth.llamarpc.com', mainnet.id, { timeout: 15_000 }))
-  }
-
-  // If only one transport, return it directly (no fallback wrapper needed)
-  if (transports.length === 1) return transports[0]
-
-  // No `rank`: /api/rpc (our privacy-preserving proxy) must stay authoritative
-  // and never be demoted below a fallback by a latency/stability heuristic —
-  // rank:true also runs an unbounded background pinger against every
-  // transport in the array for the client's lifetime.
-  return fallback(transports, { retryCount: 2 })
-}
+// outage, not a lie.
+//
+// No implicit/URL-less http() entry: an unconfigured `http(undefined)` resolves to viem's built-in
+// chain default (eth.merkle.io for mainnet), an endpoint we never chose. Every URL is explicit.
 
 /**
- * [fix/user-ip-privacy] Base / Arbitrum transport.
+ * [fix/user-ip-privacy] One transport per chain, the same builder for Ethereum, Base and Arbitrum.
  *
- * Browser: our own proxy and nothing else — `/api/rpc?chainId=<id>`, exactly like mainnet. It used to
- * be the provider URL from NEXT_PUBLIC_{BASE,ARBITRUM}_RPC_URL (and a public endpoint behind it), so
- * every L2 read handed the visitor's IP, and the key in that URL, to the provider. There is no direct
- * fallback in the browser: a second entry here would be a third-party host again.
+ * Browser: our own proxy and nothing else — `/api/rpc` for mainnet, `/api/rpc?chainId=<id>` otherwise
+ * (rpc-proxy-url.ts). Absolute same-origin URL: wagmi's WalletConnect connector copies this transport URL
+ * into the provider's rpcMap, and WalletConnect refuses a relative one ("Provided URL is not compatible
+ * with HTTP connection: /api/rpc") while it builds the session's EVM provider. There is no direct fallback
+ * in the browser: a second entry here would be a third-party host again.
  *
  * Server (this module is evaluated once without `window` because of `ssr: true`): the server resolver,
- * `serverRpcUrl` — RPC_URL_<id> first. The NEXT_PUBLIC_* L2 names are no longer read in this file.
+ * `serverRpcUrl` — RPC_URL_<id> first, then (mainnet only) RPC_URL, then the public default.
+ *
+ * [fix/mainnet-rpc-out-of-client, SEC-5] Mainnet used to have its own builder. Its browser branch was this one,
+ * but its server branch read three NEXT_PUBLIC_* names (the mainnet RPC and two fallbacks) with literal member
+ * accesses, and a literal NEXT_PUBLIC_* read in a module the browser reaches is inlined into its client chunk.
+ * No NEXT_PUBLIC_* RPC name is read in this file any more.
  */
-function buildL2Transport(chainId: number): Transport {
+function buildTransport(chainId: number): Transport {
   if (typeof window !== 'undefined') {
     return guardedHttp(proxyRpcUrl(chainId), chainId, { timeout: 10_000 })
   }
@@ -146,7 +104,8 @@ export const WALLET_GROUPS = [
 // [P219] Multi-chain: mainnet stays the default (first in the array, so wallets
 // connect to it by default). Base is added so users can switch, but swaps stay
 // gated behind "Coming Soon" until a Base FeeCollector is deployed (ChainSelector).
-// [fix/user-ip-privacy] Base and Arbitrum read through /api/rpc?chainId=<id> (buildL2Transport).
+// [fix/user-ip-privacy] Base and Arbitrum read through /api/rpc?chainId=<id>, mainnet through /api/rpc
+// ([SEC-5] all three from the same builder, buildTransport).
 //
 // `config` is a MODULE SINGLETON — created exactly once per runtime so there is a
 // single WalletConnect Core/provider instance. Do NOT recreate it per-render
@@ -161,9 +120,9 @@ export const config = getDefaultConfig({
   // This is already RainbowKit's default; it is stated here so a default change upstream cannot turn it on.
   walletConnectParameters: { telemetryEnabled: false },
   transports: {
-    [mainnet.id]: buildMainnetTransport(),
-    [base.id]: buildL2Transport(base.id),
-    [arbitrum.id]: buildL2Transport(arbitrum.id),
+    [mainnet.id]: buildTransport(mainnet.id),
+    [base.id]: buildTransport(base.id),
+    [arbitrum.id]: buildTransport(arbitrum.id),
   },
   // [feat/frontend-rpc-diet] viem splits a Multicall3 into calldata chunks of `batchSize` bytes — default 1 024, i.e.
   // ~5 balanceOf reads per eth_call — so refreshing a 30-token balance list cost ~6 provider calls instead of 1.

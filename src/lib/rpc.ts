@@ -15,7 +15,7 @@ import { serverRpcUrl } from '@/lib/rpc-env'
 const isServer = typeof window === 'undefined'
 
 /** Server-side RPC URL — only used in API routes / SSR.
- *  [FEAT-SERVER-RPC-ENV-SPLIT] Resolved by rpc-env (RPC_URL_1 -> RPC_URL -> NEXT_PUBLIC_RPC_URL -> llamarpc). */
+ *  [FEAT-SERVER-RPC-ENV-SPLIT] Resolved by rpc-env (RPC_URL_1 -> RPC_URL -> llamarpc; [SEC-5] no browser-era name). */
 const directRpcUrl = () => serverRpcUrl(1)
 
 /**

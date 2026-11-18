@@ -17,6 +17,13 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MetaQuoteResult } from '@/lib/adapters/types'
 import { NO_ORACLE, fixtureMeta, taggedFixture } from './test-fixtures'
+// [fix/flaky-tests-root-cause] The one cold load of the card's module tree (node_modules reads + transforms, ~1 s idle) is paid HERE,
+// while the file is collected, by importing the same tree statically: untimed, like any test subject imported at the top of a file.
+// It used to land in the first test (`freshPage` is the first import of the tree) and time it out at 5 s on a loaded machine; the
+// abandoned import then ran on into the next test. sounds.ts creates its AudioContext lazily, so nothing audible happens at load, and
+// every test still builds a fresh registry (`freshPage`) that only re-evaluates code already loaded.
+import '@/lib/sounds'
+import './SwapCard'
 
 const h = vi.hoisted(() => ({
   quote: { meta: null as unknown, loading: false, error: null as string | null, countdown: 12, refresh: () => {} },
