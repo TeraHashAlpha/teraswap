@@ -22,3 +22,13 @@ explicit allow-list. Long tables: [`fix-order-signature-not-returned.tables.md`]
 - Concern: guard layer 2 accepts a non-literal `select(x)` in a file importing order-read-columns.ts; layer 1 checks the value.
 - Concern (keeper, OPEN above): log and alert `err.shortMessage`, or strip `args:`, in a keeper goal.
 - Merge note: route.ts gains one import line at the top (for GET) besides the GET body; POST is untouched, but the open POST branch may meet a one-line conflict in the import block.
+
+## Round 2 (A87 on 99678b33: blocked 0C/1H; owner decision: finished orders and their fills stay readable without a signature)
+Checklist (ticked as each commit lands; the evidence 1-4 replaces it in the last edit):
+- [x] Commit 1, S-1: the privacy clause reworded, every clause cited in the proof comment, pinned by privacy-copy.test.tsx and orders-privacy-clause.test.ts.
+- [ ] Commit 2, S-3 + S-4: line references re-cited at the merged head; `basket_id` in ORDERS_SCHEMA; schema-reading column-count test.
+- [ ] Commit 3, S-5: guard layer 1 over authenticated reads, layer 2 strict on `withOrderReadColumns`.
+- [ ] Verify: agent-verify --codeql, gen-claude-state --check, lint delta 0.
+
+### Edge case (S-1, LIVE orders)
+- `GET /api/orders/[id]/executions?wallet=W` for a LIVE order (active, executing) is RETURNED today: 200 with its fills and the order's metadata, with no read signature; the route asks for the wallet parameter only (executions/route.ts:32-33, :41-51, :56-60). The sentence says nothing about live orders' fills, so it stays true; the route is unchanged (Do NOT: no route gains or loses a signature requirement) and the behaviour is pinned by orders-privacy-clause.test.ts. If the owner wants a live order's fills behind the read signature, that is a route change for its own goal.
