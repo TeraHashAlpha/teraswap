@@ -29,20 +29,20 @@ import { GENERATED_TOKEN_CATALOG } from '@/lib/chains/token-catalog.generated'
 import type { Allowlist, Verdict } from '@/lib/chains/catalog-guard'
 import allowlistJson from '@/lib/chains/catalog-guard.allowlist.json'
 import { CATEGORY_OVERRIDES } from '../token-category-overrides'
-import { PIPELINE_CONFIG, CORE_TOKENS } from './lib/config'
+import { PIPELINE_CONFIG, CORE_TOKENS, CATALOG_SIZE_BOUND } from './lib/config'
 import seedBaseline from './seed-baseline.json'
-import type { SeedToken, SourceCounts } from './lib/types'
+import type { CatalogRow, SeedToken, SourceCounts } from './lib/types'
 import { OutageSuspectedError } from './lib/types'
 import { buildChainCatalog } from './lib/build-chain'
 import { makeFetchers, makeMarketFetcher, makeVolumeFetcher, makeVolumeHistoryFetcher } from './lib/fetch-sources'
 import { resolveSingleSourceConfig } from './lib/verify'
-import type { CatalogRow } from './lib/types'
 import { makeCategoryResolver } from './lib/category'
 import { applyCuratedCorrections, correctSeed, CURATED_BASE_SEEDS, CURATED_ARBITRUM_SEEDS } from './lib/curated'
 import { collectVerdicts, writeTrustFixture } from './lib/verdicts'
 import { formatSingleSourceDryRun } from './lib/dry-run'
 import { deriveGuardOutcomes } from './lib/guard-gate'
-import { decideRefresh, renderBlockedSummary, renderPrBodySections, type DecisionLine, type RefreshDecision } from './lib/refresh-decision'
+import { decideRefresh, applyAdditionsCap, additionsAllowed, cappableAdditions, renderBlockedSummary, renderPrBodySections, type DecisionLine, type RefreshDecision } from './lib/refresh-decision'
+import { ACCEPTED_SIZES_FILE, parseAcceptedSizes } from './lib/source-growth'
 
 const OUT_DIR = path.join('src', 'config', 'generated')
 
@@ -52,6 +52,9 @@ const REPORT_DIR = process.env.TOKENS_SYNC_REPORT_DIR?.trim() || 'catalog-refres
 
 /** Removed / left-out lines get a real 7-day volume only for this many tokens per chain (one CoinGecko call each). */
 const VOLUME_LOOKUP_LIMIT = 40
+/** When more new tokens than the cap allows are waiting, the weekly cap ranks by 7-day volume: looked up for the
+ *  top-N by 24h volume (one CoinGecko call each, ~6 s apart); the rest rank after them by 24h volume. */
+const CAP_VOLUME_LOOKUP_LIMIT = 60
 
 /** `--dry-run`: run the whole pipeline (live sources + RPC reads) but write NOTHING — no catalog,
  *  no trust fixture, no output dir — and print what the single-source volume rule would admit. */
@@ -200,14 +203,27 @@ function previousSourceCountsFor(chainId: number): SourceCounts | undefined {
   }
 }
 
+/** [rule A] Source sizes the owner accepted for this chain (scripts/token-catalog/accepted-source-sizes.json).
+ *  A missing file means "nothing accepted"; a malformed one throws — never silently "everything". */
+function acceptedSourceSizesFor(chainId: number) {
+  let raw: unknown
+  try {
+    raw = JSON.parse(fs.readFileSync(ACCEPTED_SIZES_FILE, 'utf8'))
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') return {}
+    throw new Error(`${ACCEPTED_SIZES_FILE} is not readable JSON: ${String((e as Error)?.message ?? e)}`)
+  }
+  return parseAcceptedSizes(raw, chainId)
+}
+
 /** Thrown after every chain was processed when at least one chain's refresh was blocked. */
 export class RefreshBlockedError extends Error {}
 
 /** 7-day volume (sum of the last 7 daily 24h-volume readings, CoinGecko — the catalog's own volume source)
  *  for the tokens a PR body lists. Any failure ⇒ null for that token ("n/a"), never a made-up number. */
-async function sevenDayVolumes(chainId: number, lines: DecisionLine[], log: (m: string) => void): Promise<Map<string, number | null>> {
+async function sevenDayVolumes(chainId: number, lines: DecisionLine[], log: (m: string) => void, limit = VOLUME_LOOKUP_LIMIT): Promise<Map<string, number | null>> {
   const out = new Map<string, number | null>()
-  const wanted = lines.slice(0, VOLUME_LOOKUP_LIMIT)
+  const wanted = lines.slice(0, limit)
   for (const l of lines) out.set(l.address.toLowerCase(), null)
   if (wanted.length === 0) return out
   try {
@@ -280,6 +296,7 @@ async function run() {
       log,
       previousCatalog: previousCatalogFor(chainId),
       previousSourceCounts: previousSourceCountsFor(chainId),
+      acceptedSourceSizes: acceptedSourceSizesFor(chainId),
       builtAt,
     })
 
@@ -293,18 +310,36 @@ async function run() {
     // guard calls fatal is left out (new) or removed (already on the site, listed in the PR body); a
     // dead upstream list, a protected token or an over-cap removal blocks the chain and changes NOTHING.
     const previousRows = [...previousCatalogFor(chainId).values()]
-    const decision = decideRefresh({
+    const protectedAddresses = new Set([...CORE_TOKENS[chainId].map((c) => c.address.toLowerCase()), ...handCuratedSeedsFor(chainId)])
+    const audit = (rows: readonly CatalogRow[]) => deriveGuardOutcomes(chainId, [...rows], result.verdicts, allowlist)
+    let decision = decideRefresh({
       chainId,
       previous: previousRows,
       candidate: result.tokens,
-      audit: (rows) => deriveGuardOutcomes(chainId, [...rows], result.verdicts, allowlist),
-      protectedAddresses: new Set([...CORE_TOKENS[chainId].map((c) => c.address.toLowerCase()), ...handCuratedSeedsFor(chainId)]),
+      audit,
+      protectedAddresses,
       trustedList: { previous: previousSourceCountsFor(chainId)?.coingecko ?? null, current: result.sourceCounts.coingecko ?? null },
       pipelineDropReasons: new Map(result.report.trustLost.map((t) => [t.address.toLowerCase(), t.reason])),
+      heldBackSources: result.heldBackSources,
     })
+    // [rule B] at most 25 additions per chain (and never past the chain's size bound), highest 7-day volume first.
+    // Volumes are looked up only when the cap actually bites.
+    let capVolumes = new Map<string, number | null>()
+    if (!decision.blocked) {
+      const capInput = { previous: previousRows, protectedAddresses, sizeBound: CATALOG_SIZE_BOUND[chainId] }
+      const cappable = cappableAdditions(decision, previousRows, protectedAddresses)
+      if (cappable.length > additionsAllowed(decision, capInput).allowed) {
+        const top = [...cappable].sort((a, b) => (b.volume24hUsd ?? -1) - (a.volume24hUsd ?? -1)).slice(0, CAP_VOLUME_LOOKUP_LIMIT)
+        capVolumes = await sevenDayVolumes(chainId, top.map((r) => ({ chainId, symbol: r.symbol, address: r.address, why: '' })), log, CAP_VOLUME_LOOKUP_LIMIT)
+      }
+      decision = applyAdditionsCap(decision, { ...capInput, volume7d: capVolumes, audit })
+    }
     const volume7d = await sevenDayVolumes(chainId, [...decision.attempted.removed, ...decision.attempted.leftOut], log)
+    for (const [addr, v] of capVolumes) if (!volume7d.has(addr) || volume7d.get(addr) == null) volume7d.set(addr, v)
     writeDecisionArtifacts(chainId, decision, volume7d)
-    log(`\ndecision: kept ${decision.catalog.length}, removed ${decision.attempted.removed.length}, left out ${decision.attempted.leftOut.length}`)
+    log(`\ndecision: kept ${decision.catalog.length}, removed ${decision.attempted.removed.length}, left out ${decision.attempted.leftOut.length}, held back by the cap ${decision.heldBack.length}, sources held back ${decision.heldBackSources.length}`)
+    for (const h of decision.heldBackSources) log(`  SOURCE HELD BACK  ${h.source} ${h.previous} → ${h.current} (chain ${h.chainId})`)
+    for (const l of decision.heldBack) log(`  HELD BACK (cap)  ${l.symbol} ${l.address} — ${l.why}`)
     for (const l of decision.attempted.removed) log(`  REMOVED  ${l.symbol} ${l.address} — ${l.why}`)
     for (const l of decision.attempted.leftOut) log(`  LEFT OUT ${l.symbol} ${l.address} — ${l.why}`)
     if (decision.blocked) {

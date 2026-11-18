@@ -84,3 +84,16 @@ export const CORE_TOKENS: Record<number, CoreToken[]> = {
     { address: '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f', symbol: 'WBTC', name: 'Wrapped BTC', decimals: 8 },
   ],
 }
+
+/**
+ * [fix/catalog-refresh-drops-untrusted] The committed-size bound per chain — EXCLUSIVE upper limits, the
+ * numbers asserted in src/lib/chains/token-catalog.test.ts ("[9Y] search performance stays bounded":
+ * `getFullCatalog(chain).length` < N). The refresh never builds a catalog at or over its bound: the
+ * additions cap is clamped to the room that is left (refresh-decision.ts applyAdditionsCap). The
+ * test file keeps its own literals (those assertions are the owner's gate); size-bounds.test.ts fails
+ * when this table and the test file drift apart.
+ *
+ * 42161 = 389 committed rows (2026-11-18) + 38, the headroom Base has (500 − 462); owner answer 2026-11-18.
+ */
+export const CATALOG_SIZE_BOUND: Readonly<Record<number, number>> = { 1: 1000, 8453: 500, 42161: 427 }
+

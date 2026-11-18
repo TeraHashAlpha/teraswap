@@ -17,6 +17,8 @@ import {
   renderPrBodySections,
   sanitizeInline,
   trustedListVerdict,
+  HELD_CANDIDATES_HEADING,
+  HELD_SOURCES_HEADING,
   LEFT_OUT_HEADING,
   MAX_REMOVED_ABS,
   REMOVED_HEADING,
@@ -348,7 +350,9 @@ describe('refresh-decision — PR body / issue text', () => {
     const body = renderPrBodySections(d)
     const leftOutPart = body.slice(body.indexOf(`## ${LEFT_OUT_HEADING}`))
     expect(leftOutPart).toContain(evil.address)
-    expect(body.match(/^## /gm)).toHaveLength(2) // the symbol cannot inject a heading
+    // the symbol cannot inject a heading: the body's headings are EXACTLY the four sections, in order
+    // (was `toHaveLength(2)` before rules A and B added "Sources held back" and "Candidates held back")
+    expect(body.match(/^## .*$/gm)).toEqual([`## ${REMOVED_HEADING}`, `## ${LEFT_OUT_HEADING}`, `## ${HELD_SOURCES_HEADING}`, `## ${HELD_CANDIDATES_HEADING}`])
     expect(body).not.toMatch(/`[^`\n]*`[^\n]*`[^`\n]*`[^\n]*`/) // a symbol cannot close its own code span (3+ spans on a line)
     expect(body).not.toMatch(/<b>/)
     expect(body).not.toMatch(/\]\(http/) // no markdown link from a symbol

@@ -20,10 +20,15 @@
  *  5. a PROTECTED token (core, or hand-pinned in this repo) the guard calls fatal is never removed
  *     silently: the chain is blocked and a human decides (build-chain.ts already throws for cores).
  *
+ *  6. [owner 2026-11-18, rule B] at most MAX_ADDITIONS_PER_CHAIN (25) NEW tokens per chain, the highest 7-day volume
+ *     first, and never past the chain's size bound: `applyAdditionsCap` (below). The rest are listed in the PR body and are
+ *     candidates again next week. Rule A (growth breaker, source-growth.ts) and rule D (auto-merge, C10) feed the same report.
+ *
  * "Blocked" always means: catalog = the previous catalog, removed = [], leftOut = []; the lists the
  * decision WOULD have produced are kept in `attempted` so the failure issue can show them.
  */
 import type { CatalogRow, GuardOutcome } from './types'
+import type { HeldBackSource } from './source-growth'
 
 /** More than this many removals in one chain-refresh ⇒ blocked. */
 export const MAX_REMOVED_ABS = 20
@@ -31,6 +36,8 @@ export const MAX_REMOVED_ABS = 20
 export const MAX_REMOVED_PERCENT = 5
 /** The fresh trusted list must be STRICTLY larger than this percentage of its previous size. */
 export const TRUSTED_LIST_MIN_PERCENT = 70
+/** [rule B, owner 2026-11-18] A refresh adds at most this many new tokens per chain; the highest 7-day volume first. */
+export const MAX_ADDITIONS_PER_CHAIN = 25
 
 export type BlockReason = 'trusted-list-dead' | 'removal-cap' | 'protected-token-fatal' | 'residual-fatal'
 
@@ -59,6 +66,8 @@ export interface RefreshDecisionInput {
   trustedList: { previous: number | null; current: number | null }
   /** Why the pipeline itself dropped a previous row it did not carry into `candidate` (lowercase address → reason). */
   pipelineDropReasons?: ReadonlyMap<string, string>
+  /** [rule A] Sources the growth breaker held back this run (reported, carried through to the PR body / issue / auto-merge). */
+  heldBackSources?: readonly HeldBackSource[]
 }
 
 export interface BlockedInfo {
@@ -77,6 +86,10 @@ export interface RefreshDecision {
   blocked: BlockedInfo | null
   /** What `removed` / `leftOut` would have been — populated when blocked, equal to them otherwise. */
   attempted: { removed: DecisionLine[]; leftOut: DecisionLine[] }
+  /** [rule B] New tokens the weekly cap (or the size bound) kept off the site this run; candidates again next week. */
+  heldBack: DecisionLine[]
+  /** [rule A] Sources whose growth was held back; reported even when the chain is blocked. */
+  heldBackSources: HeldBackSource[]
 }
 
 const lc = (s: string): string => s.toLowerCase()
@@ -110,7 +123,7 @@ export function decideRefresh(input: RefreshDecisionInput): RefreshDecision {
 
   const line = (r: Pick<CatalogRow, 'symbol' | 'address'>, why: string): DecisionLine => ({ chainId, symbol: r.symbol, address: r.address, why })
   const blockedResult = (blocked: BlockedInfo, attempted: RefreshDecision['attempted']): RefreshDecision => ({
-    chainId, catalog: [...previous], removed: [], leftOut: [], blocked, attempted,
+    chainId, catalog: [...previous], removed: [], leftOut: [], blocked, attempted, heldBack: [], heldBackSources: [...(input.heldBackSources ?? [])],
   })
   const noAttempt = { removed: [], leftOut: [] }
 
@@ -169,7 +182,85 @@ export function decideRefresh(input: RefreshDecisionInput): RefreshDecision {
     )
   }
 
-  return { chainId, catalog, removed, leftOut, blocked: null, attempted }
+  return { chainId, catalog, removed, leftOut, blocked: null, attempted, heldBack: [], heldBackSources: [...(input.heldBackSources ?? [])] }
+}
+
+// ─── rule B: the additions cap ────────────────────────────────────────────────────────────
+
+export interface AdditionsCapInput {
+  /** The chain's committed catalog. A row of `decision.catalog` that is not in here is an ADDITION. */
+  previous: readonly CatalogRow[]
+  /** Cores + hand-pinned seeds: a human chose them, they are never held back by the cap (they still use size room). */
+  protectedAddresses: ReadonlySet<string>
+  /** 7-day volume per lowercase address (CoinGecko history). Missing / null = unknown: ranks after every known value. */
+  volume7d: ReadonlyMap<string, number | null>
+  /** Exclusive size bound for the chain (CATALOG_SIZE_BOUND): the result must stay under it. undefined = none. */
+  sizeBound?: number
+  /** Defaults to MAX_ADDITIONS_PER_CHAIN. */
+  maxAdditions?: number
+  /** The same guard as decideRefresh: the capped catalog is audited once more. */
+  audit: (rows: readonly CatalogRow[]) => ReadonlyMap<string, GuardOutcome>
+}
+
+/** The additions the cap may hold back (new rows that are not protected). */
+export function cappableAdditions(decision: Pick<RefreshDecision, 'catalog'>, previous: readonly CatalogRow[], protectedAddresses: ReadonlySet<string>): CatalogRow[] {
+  const prev = new Set(previous.map((r) => lc(r.address)))
+  return decision.catalog.filter((r) => !prev.has(lc(r.address)) && !protectedAddresses.has(lc(r.address)))
+}
+
+/** How many additions this chain may take: min(cap, room under the size bound). Never negative. */
+export function additionsAllowed(decision: Pick<RefreshDecision, 'catalog'>, input: Pick<AdditionsCapInput, 'previous' | 'protectedAddresses' | 'sizeBound' | 'maxAdditions'>): { allowed: number; limitedBy: 'weekly-cap' | 'size-bound' } {
+  const cap = input.maxAdditions ?? MAX_ADDITIONS_PER_CHAIN
+  const prev = new Set(input.previous.map((r) => lc(r.address)))
+  const newRows = decision.catalog.filter((r) => !prev.has(lc(r.address)))
+  const protectedNew = newRows.filter((r) => input.protectedAddresses.has(lc(r.address))).length
+  const base = decision.catalog.length - newRows.length
+  if (input.sizeBound === undefined) return { allowed: cap, limitedBy: 'weekly-cap' }
+  const room = Math.max(0, input.sizeBound - 1 - base - protectedNew) // result.length < sizeBound
+  return room < cap ? { allowed: room, limitedBy: 'size-bound' } : { allowed: cap, limitedBy: 'weekly-cap' }
+}
+
+/** Highest 7-day volume first; unknown last; then 24h volume, symbol, address — a total order, so the result is deterministic. */
+export function compareCandidates(a: CatalogRow, b: CatalogRow, volume7d: ReadonlyMap<string, number | null>): number {
+  const nz = (v: number | null | undefined): number => (v == null || !Number.isFinite(v) ? Number.NEGATIVE_INFINITY : v)
+  const d7 = nz(volume7d.get(lc(b.address))) - nz(volume7d.get(lc(a.address)))
+  if (d7 !== 0 && !Number.isNaN(d7)) return d7
+  const d24 = nz(b.volume24hUsd) - nz(a.volume24hUsd)
+  if (d24 !== 0 && !Number.isNaN(d24)) return d24
+  if (a.symbol !== b.symbol) return a.symbol < b.symbol ? -1 : 1
+  return lc(a.address) < lc(b.address) ? -1 : lc(a.address) > lc(b.address) ? 1 : 0
+}
+
+/**
+ * Rule B: at most MAX_ADDITIONS_PER_CHAIN new tokens per chain, the highest 7-day volume first; the
+ * rest are held back (listed in the PR body) and are candidates again next week. The cap is also
+ * clamped to the room under the chain's size bound (owner answer 2026-11-18), so a refresh never
+ * builds a catalog the size assertion rejects. A blocked decision changes nothing.
+ */
+export function applyAdditionsCap(decision: RefreshDecision, input: AdditionsCapInput): RefreshDecision {
+  if (decision.blocked) return decision
+  const cappable = cappableAdditions(decision, input.previous, input.protectedAddresses)
+  const { allowed, limitedBy } = additionsAllowed(decision, input)
+  if (cappable.length <= allowed) return decision
+
+  const ranked = [...cappable].sort((a, b) => compareCandidates(a, b, input.volume7d))
+  const dropped = new Set(ranked.slice(allowed).map((r) => lc(r.address)))
+  const why = limitedBy === 'size-bound'
+    ? `size bound: the catalog must stay under ${input.sizeBound} rows (room for ${allowed} addition(s) this week)`
+    : `weekly cap: at most ${input.maxAdditions ?? MAX_ADDITIONS_PER_CHAIN} additions per chain`
+  const catalog = decision.catalog.filter((r) => !dropped.has(lc(r.address)))
+  const heldBack = ranked.slice(allowed).map((r) => ({ chainId: decision.chainId, symbol: r.symbol, address: r.address, why }))
+
+  // fewer rows can only remove findings, but the result is the thing that ships: audit it once more
+  const after = input.audit(catalog)
+  const residual = catalog.filter((r) => after.get(lc(r.address))?.status === 'fatal')
+  if (residual.length > 0) {
+    return {
+      ...decision, catalog: [...input.previous], removed: [], leftOut: [], heldBack: [],
+      blocked: { reason: 'residual-fatal', detail: `after the additions cap the guard still calls fatal: ${residual.map((r) => `${r.symbol} ${r.address}`).join(', ')}` },
+    }
+  }
+  return { ...decision, catalog, heldBack }
 }
 
 // ─── rendering ────────────────────────────────────────────────────────────────────────────
@@ -202,6 +293,18 @@ function renderLine(l: DecisionLine, volume7d: ReadonlyMap<string, number | null
 
 export const REMOVED_HEADING = 'Tokens removed from the site by this refresh'
 export const LEFT_OUT_HEADING = 'Candidates left out'
+export const HELD_SOURCES_HEADING = 'Sources held back by the growth breaker'
+export const HELD_CANDIDATES_HEADING = 'Candidates held back by the weekly cap'
+
+export function renderHeldBackSource(h: HeldBackSource): string {
+  const growth = h.previous > 0 ? Math.round(((h.current - h.previous) * 100) / h.previous) : 0
+  return `- chain ${h.chainId} · \`${sanitizeInline(h.source, 24)}\` · previous ${h.previous} → now ${h.current} entries (+${growth}%)${h.baseline !== h.previous ? ` · compared with the accepted size ${h.baseline}` : ''}`
+}
+
+/** The accept instruction, one line per held source — the exact line the owner commits. */
+export function acceptanceLine(h: HeldBackSource): string {
+  return `"${h.chainId}:${h.source}": ${h.current}`
+}
 
 /**
  * The two PR-body sections, REMOVED FIRST (the body opens with it). Always both headings, "None."
@@ -228,6 +331,45 @@ export function renderPrBodySections(decision: RefreshDecision, volume7d: Readon
     out[out.length] = ''
     for (const l of decision.leftOut) out[out.length] = renderLine(l, volume7d)
   }
+  out[out.length] = ''
+  out[out.length] = `## ${HELD_SOURCES_HEADING}`
+  out[out.length] = ''
+  if (decision.heldBackSources.length === 0) {
+    out[out.length] = 'None.'
+  } else {
+    out[out.length] = `${decision.heldBackSources.length} source list(s) grew by more than 50% since the previous run and were NOT used: the previous snapshot of each stood in. They stay held back until you accept the new size — add the line below to \`scripts/token-catalog/accepted-source-sizes.json\` in a reviewed commit.`
+    out[out.length] = ''
+    for (const h of decision.heldBackSources) out[out.length] = `${renderHeldBackSource(h)} · accept with \`${acceptanceLine(h)}\``
+  }
+  out[out.length] = ''
+  out[out.length] = `## ${HELD_CANDIDATES_HEADING}`
+  out[out.length] = ''
+  if (decision.heldBack.length === 0) {
+    out[out.length] = 'None.'
+  } else {
+    out[out.length] = `${decision.heldBack.length} new token(s) were kept off the site this week (highest 7-day volume first; they are candidates again next week).`
+    out[out.length] = ''
+    for (const l of decision.heldBack) out[out.length] = renderLine(l, volume7d)
+  }
+  return `${out.join('\n')}\n`
+}
+
+/** Body of the (one per chain) issue that tells the owner a source is held back. Empty when none is. */
+export function renderHeldBackIssueBody(chainId: number, held: readonly HeldBackSource[], runUrl: string): string {
+  if (held.length === 0) return ''
+  const out = [
+    `The token-catalog refresh for **chain ${chainId}** did not use ${held.length} source list(s) that grew by more than 50% since the previous run. The previous snapshot of each was used; the refresh went on with the other sources.`,
+    '',
+    ...held.map(renderHeldBackSource),
+    '',
+    'To accept a new size, add the line(s) below to `scripts/token-catalog/accepted-source-sizes.json` in a reviewed commit (one line per source and chain):',
+    '',
+    '```',
+    ...held.map(acceptanceLine),
+    '```',
+    '',
+    `Run: ${sanitizeInline(runUrl, 300)}`,
+  ]
   return `${out.join('\n')}\n`
 }
 

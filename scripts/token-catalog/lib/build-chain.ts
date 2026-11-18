@@ -44,6 +44,7 @@ import {
   type VolumeHistory,
 } from './verify'
 import { deriveGuardOutcomes } from './guard-gate'
+import { evaluateSourceGrowth, snapshotEntries, type HeldBackSource } from './source-growth'
 
 /**
  * [fix/catalog-trust-loss-means-previously-verified — outage circuit breaker] A source whose
@@ -134,6 +135,9 @@ export interface ChainBuildDeps {
    *  `counts.sourceCounts`). Omitted ⇒ no baseline yet (first run with the breaker, or a new
    *  source) ⇒ the breaker records this run's counts but compares nothing. */
   previousSourceCounts?: SourceCounts
+  /** [fix/catalog-refresh-drops-untrusted] Source sizes the owner accepted for THIS chain
+   *  (accepted-source-sizes.json). A source that grew >50% is held back unless accepted. */
+  acceptedSourceSizes?: Partial<Record<SourceId, number>>
 }
 
 export interface ChainBuildResult {
@@ -145,6 +149,9 @@ export interface ChainBuildResult {
   /** [fix/catalog-trust-loss-means-previously-verified — outage circuit breaker] This run's
    *  per-source fetched-list sizes — the caller persists it as next run's baseline. */
   sourceCounts: SourceCounts
+  /** [fix/catalog-refresh-drops-untrusted] Sources whose list grew >50% against the previous run:
+   *  not used this run (the previous snapshot stood in), their recorded size kept at the old number. */
+  heldBackSources: HeldBackSource[]
   /** `${chainId}:${addrLower}`-keyed market signals (for reporting). */
   market: Map<string, MarketSignal>
 }
@@ -193,6 +200,26 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
     if (now === 0 || now < prevCount * SOURCE_OUTAGE_RATIO_THRESHOLD) {
       throw new OutageSuspectedError(`source outage suspected: ${source} ${prevCount}→${now}`)
     }
+  }
+
+  // 1c. [fix/catalog-refresh-drops-untrusted] GROWTH breaker (the outage breaker above only catches a
+  // source that shrinks). A source whose list grew by more than 50% against its previous size is NOT
+  // used this run: its entries are replaced by the previous snapshot (rebuilt from the previous
+  // catalog's rows, see source-growth.ts) and the recorded size stays at the previous number, so
+  // the source stays held back until the owner accepts the new size (accepted-source-sizes.json).
+  const heldBackSources = evaluateSourceGrowth({
+    chainId,
+    previousCounts: deps.previousSourceCounts,
+    currentCounts: sourceCounts,
+    accepted: deps.acceptedSourceSizes,
+  })
+  for (const h of heldBackSources) {
+    for (let i = entries.length - 1; i >= 0; i--) if (entries[i].source === h.source) entries.splice(i, 1)
+    entries.push(...snapshotEntries(chainId, h.source, deps.previousCatalog?.values() ?? []))
+    sourceCounts[h.source] = h.previous
+    const note = `HELD BACK ${h.source}: list grew ${h.previous} → ${h.current} (>50%) — previous snapshot used; accept the new size in scripts/token-catalog/accepted-source-sizes.json`
+    sourceNotes.push(note)
+    log(`::warning::chain ${chainId} ${note}`)
   }
 
   // 2. seeds join the pool as 'curated' provenance (canonical priority in conflicts;
@@ -482,5 +509,5 @@ export async function buildChainCatalog(chainId: number, deps: ChainBuildDeps): 
     )
   }
 
-  return { tokens, report, sourcesUsed, sourceNotes, verdicts, market, sourceCounts }
+  return { tokens, report, sourcesUsed, sourceNotes, verdicts, market, sourceCounts, heldBackSources }
 }
