@@ -239,17 +239,17 @@ describe('POST /api/orders stores the server hash [S-5]', () => {
   })
 
   it.each([
-    ['another order\'s hash', WRONG_A],
-    ['not a hash at all', 'not-a-hash'],
-  ])('wrong hash text (%s) is stored as the server hash and logged once, without the signature', async (_label, text) => {
+    ['another order\'s hash', WRONG_A, WRONG_A],
+    ['not a hash at all', 'not-a-hash', '<string len 10>'],
+  ])('wrong hash text (%s) is stored as the server hash and logged once, without the signature', async (_label, text, callerHash) => {
     const { body, hash } = await signedDca(3)
     const res = await post({ ...body, orderHash: text })
     expect(res.status).toBe(201)
     expect(res.json.order?.order_hash).toBe(hash)
     expect(fake.rows.map((r) => r.order_hash)).toEqual([hash])
     expect(mismatchLines()).toEqual([{
-      event: 'orders_order_hash_mismatch', mode: 'observe', chainId: 8453, version: 3, orderType: 'dca',
-      storedHash: hash, callerHash: text,
+      event: 'orders_order_hash_mismatch', mode: 'observe', outcome: 'stored', chainId: 8453, version: 3, orderType: 'dca',
+      serverHash: hash, callerHash,
     }])
     const logged = warn.mock.calls.map((c: unknown[]) => String(c[0])).join('\n')
     expect(logged).not.toContain(String(body.signature).slice(2, 42))
@@ -286,7 +286,7 @@ describe('POST /api/orders stores the server hash [S-5]', () => {
     const res = await post({ ...body, orderHash: WRONG_B })
     expect(res.status).toBe(201)
     expect(fake.rows.map((r) => r.order_hash)).toEqual([hash])
-    expect(mismatchLines()).toMatchObject([{ version: 2, chainId: 1, storedHash: hash, callerHash: WRONG_B }])
+    expect(mismatchLines()).toMatchObject([{ outcome: 'stored', version: 2, chainId: 1, serverHash: hash, callerHash: WRONG_B }])
     expect((await post(body)).status).toBe(409)
   })
 
@@ -454,5 +454,64 @@ describe('one signed order is stored once, rows written before the fix included 
     expect(res.status).toBe(503)
     expect(res.json.error).toBe('Could not check for an existing order. Try again shortly.')
     expect(fake.rows).toHaveLength(0)
+  })
+})
+
+// [A86 S-7] The observe line is written once the outcome is known, says what that outcome was, and carries the caller's
+// text only when it has the shape of a hash.
+describe('the orders_order_hash_mismatch line [A86 S-7]', () => {
+  const METHODS = ['log', 'info', 'warn', 'error', 'debug'] as const
+
+  it.each([
+    ['as signed (0x, lower case)', (sig: string) => sig, 132],
+    ['in upper case', (sig: string) => `0x${sig.slice(2).toUpperCase()}`, 132],
+    ['without 0x', (sig: string) => sig.slice(2), 130],
+  ])('a caller that puts its signature %s in orderHash leaves no fragment of it in console output', async (_label, spell, len) => {
+    const { body, hash } = await signedDca(3)
+    const others = METHODS.filter((m) => m !== 'warn').map((m) => vi.spyOn(console, m).mockImplementation(() => {}))
+    try {
+      const res = await post({ ...body, orderHash: spell(String(body.signature)) })
+      expect(res.status).toBe(201)
+      expect(mismatchLines()).toEqual([{
+        event: 'orders_order_hash_mismatch', mode: 'observe', outcome: 'stored', chainId: 8453, version: 3, orderType: 'dca',
+        serverHash: hash, callerHash: `<string len ${len}>`,
+      }])
+      const printed = [warn, ...others]
+        .flatMap((spy) => spy.mock.calls.map((c: unknown[]) => c.map(String).join(' ')))
+        .join('\n')
+        .toLowerCase()
+      const sigHex = String(body.signature).slice(2).toLowerCase()
+      const fragments = Array.from({ length: sigHex.length - 9 }, (_, i) => sigHex.slice(i, i + 10))
+      expect(fragments.filter((f) => printed.includes(f))).toEqual([])
+    } finally {
+      for (const spy of others) spy.mockRestore()
+    }
+  })
+
+  it('stored: the line is written after the insert (the row exists when it is logged), outcome "stored"', async () => {
+    const { body, hash } = await signedDca(3)
+    const rowsWhenLogged: number[] = []
+    warn.mockImplementation(() => { rowsWhenLogged.push(fake.rows.length) })
+    expect((await post({ ...body, orderHash: WRONG_A })).status).toBe(201)
+    expect(rowsWhenLogged).toEqual([1])
+    expect(mismatchLines()).toMatchObject([{ outcome: 'stored', serverHash: hash, callerHash: WRONG_A }])
+  })
+
+  it('a re-post refused with 409 logs outcome "exists" and names no row as stored by it', async () => {
+    const { body, hash } = await signedDca(3)
+    expect((await post(body)).status).toBe(201)
+    expect(mismatchLines()).toEqual([])
+    expect((await post({ ...body, orderHash: WRONG_B })).status).toBe(409)
+    const [line] = mismatchLines()
+    expect(line).toMatchObject({ outcome: 'exists', serverHash: hash, callerHash: WRONG_B })
+    expect(line).not.toHaveProperty('storedHash')
+    expect(fake.rows).toHaveLength(1)
+  })
+
+  it('a refused request (lookup cannot answer, 503) logs outcome "error"', async () => {
+    const { body } = await signedDca(3)
+    fake.lookupError = { message: 'connection reset' }
+    expect((await post({ ...body, orderHash: 'x'.repeat(200) })).status).toBe(503)
+    expect(mismatchLines()).toMatchObject([{ outcome: 'error', callerHash: '<string len 200>' }])
   })
 })
