@@ -204,8 +204,13 @@ const WORDS = {
   echoSchemeless: /upstream refused request to 127\.0\.0\.1:\d+\/REDACTED/,
 }
 // The methods chain-verify.js calls: a failure there is printed as its boot refusal, which names the RPC as
-// `<provider>` and (before A93 R2-3) carried only viem's short message, not the provider's words.
+// `<provider>` and, since A93 R2-3, carries the provider's words (viem's `details`) after ` — details: `.
 const CHAIN_VERIFY = new Set(["eth_chainId", "eth_getCode", "eth_call"])
+const CHAIN_VERIFY_WORDS = {
+  echoPath: /— details: no route for \/v2\/<redacted>\?apikey=<redacted> — /,
+  express404: /— details: "<pre>Cannot POST \/v2\/<redacted>\?apikey=<redacted><\/pre>" — /,
+  echoSchemeless: /— details: upstream refused request to <redacted-url> — /,
+}
 
 describe("[A93 R2-1] the audit's 30 CLI runs: a provider echo of the request target never prints the key", { concurrency: 6 }, () => {
   for (const [name, cli] of Object.entries(CLIS)) {
@@ -222,6 +227,7 @@ describe("[A93 R2-1] the audit's 30 CLI runs: a provider echo of the request tar
           assertNoSecret(run, `${name} ${method} ${shape}`)
           if (CHAIN_VERIFY.has(method)) {
             assert.match(run.stderr, /^ {3}Refusing to scan against <provider>\.$/m, run.all)
+            assert.match(run.stderr, CHAIN_VERIFY_WORDS[shape], `the provider's words are not on the refusal:\n${run.all}`)
           } else {
             assert.match(run.all, WORDS[shape], `the provider's words are gone:\n${run.all}`)
             assert.match(run.all, /127\.0\.0\.1:\d+/, "the operator still sees which provider")

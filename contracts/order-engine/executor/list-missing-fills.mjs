@@ -66,6 +66,18 @@ export function maskRpcUrl() {
   return "<provider>"
 }
 
+// [A93 R2-2] A URL variable that does not parse is refused at startup, by NAME: fetch's own error for it
+// (`Failed to parse URL from <value>/rest/v1/…`) printed the whole value — a key pasted into the wrong variable.
+// Shared with backfill-execution.mjs.
+export function isHttpUrl(value) {
+  try {
+    const { protocol } = new URL(value)
+    return protocol === "http:" || protocol === "https:"
+  } catch {
+    return false
+  }
+}
+
 // ── Formatting. Every function here takes ONLY chain-derived / decoded data as arguments — never
 // RPC_URL or a Supabase credential — so leaking a secret through a print line is impossible by
 // construction, not by discipline. ──────────────────────────────────────────────────────────────
@@ -241,6 +253,12 @@ async function main() {
   const EXECUTOR_ADDRESS = requireEnv("ORDER_EXECUTOR_V3_ADDRESS")
   const SUPABASE_URL = requireEnv("SUPABASE_URL")
   const SUPABASE_KEY = requireEnv("SUPABASE_SERVICE_ROLE_KEY")
+  for (const [name, value] of [["RPC_URL", RPC_URL], ["SUPABASE_URL", SUPABASE_URL]]) {
+    if (!isHttpUrl(value)) {
+      sayErr(`FATAL: ${name} is not a valid http(s) URL.`) // [A93 R2-2] the name, never the value
+      process.exit(1)
+    }
+  }
 
   const chainIdResult = parseChainIdEnv(process.env.CHAIN_ID)
   if (!chainIdResult.ok) {

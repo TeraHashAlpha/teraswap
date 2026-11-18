@@ -58,6 +58,8 @@ import { keccak256, stringToHex } from "viem"
 // rejection is tagged on the refusal (rpcAuth / rpcAuthSignal) so executor.js can say so loudly. The
 // retry bound, every check and every refusal are unchanged — an auth error still refuses the boot.
 import { classifyRpcError, RPC_AUTH } from "./rpc-auth.js"
+// [A93 R2-3] The provider's `details` on a boot refusal: every configured secret removed by value before it is cut.
+import { redactSecretLiterals } from "./redact.js"
 
 // ── The identity read ────────────────────────────────────────────────────────────────────────
 // Minimal ABI: the auto-generated getter for `bytes32 public constant ORDER_TYPEHASH`.
@@ -246,7 +248,25 @@ const flatten = (s) =>
     .filter((line) => line !== "")
     .join(" ")
 
-const errText = (err) => flatten(redactUrls((err && err.shortMessage) || (err && err.message) || String(err)))
+/**
+ * [A93 R2-3] The provider's own words: for a JSON-RPC error viem's short message is generic ("Missing or invalid
+ * parameters.", "RPC Request failed.") and the node's answer is in `details` (for an HTTP error page, its body), which
+ * never reached the refusal. Appended when it adds something: redacted like the rest, then every configured secret
+ * removed by value (a path echoed with no host has nothing redactUrls anchors on), then cut to DETAILS_MAX — the cut
+ * comes after the scrub, so it never leaves half a secret — and on the same one line.
+ */
+const DETAILS_MAX = 300
+function errText(err) {
+  const head = flatten(redactUrls((err && err.shortMessage) || (err && err.message) || String(err)))
+  let details = ""
+  try {
+    if (err && typeof err.details === "string") details = flatten(redactSecretLiterals(redactUrls(err.details)))
+  } catch {
+    details = "" // a getter that throws: no details
+  }
+  if (details === "" || head.includes(details)) return head
+  return `${head} — details: ${details.length > DETAILS_MAX ? `${details.slice(0, DETAILS_MAX)}…` : details}`
+}
 
 /**
  * Render an unexpected RPC answer for an error message. Deliberately NOT bare JSON.stringify:

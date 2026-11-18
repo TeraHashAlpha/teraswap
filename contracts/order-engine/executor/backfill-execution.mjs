@@ -36,7 +36,7 @@ import { fileURLToPath } from "node:url"
 import { resolve } from "node:path"
 import { createPublicClient, http } from "viem"
 import { decodeOrderExecuted, ORDER_EXECUTED_EVENT, buildExecutionRow, recordExecutionRow } from "./record-execution.js"
-import { scanLogsChunked, resolveBlockFromTimestamp } from "./list-missing-fills.mjs"
+import { scanLogsChunked, resolveBlockFromTimestamp, isHttpUrl } from "./list-missing-fills.mjs"
 // [A92 S-1] An error is printed through redactError, never as err.message: viem's message carries `URL: <RPC_URL>`,
 // the provider key in its path (redact-a92-s1-cli.test.mjs).
 import { redactError, redactSecretLiterals } from "./redact.js"
@@ -136,6 +136,12 @@ async function main() {
     sayErr("FATAL: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in the environment.")
     process.exit(1)
   }
+  for (const [name, value] of [["SUPABASE_URL", SUPABASE_URL], ["BACKFILL_RPC_URL", RPC_URL]]) {
+    if (!isHttpUrl(value)) {
+      sayErr(`FATAL: ${name} is not a valid http(s) URL.`) // [A93 R2-2] the name, never the value
+      process.exit(1)
+    }
+  }
   if (!txHash) {
     sayErr("Usage: node backfill-execution.mjs <txHash> [expectedOrderIdPrefix]")
     sayErr("       node backfill-execution.mjs <txHash> --repair")
@@ -157,11 +163,8 @@ async function main() {
   const client = createPublicClient({ transport: http(RPC_URL) })
 
   // [A92 S-1] The RPC by HOST only: BACKFILL_RPC_URL routinely carries the provider key in its path, query or userinfo,
-  // and `new URL(…).host` drops all three (same rule as executor.js's boot refusal).
-  let rpcHost = "unparseable BACKFILL_RPC_URL"
-  try {
-    rpcHost = new URL(RPC_URL).host
-  } catch {}
+  // and `new URL(…).host` drops all three (same rule as executor.js's boot refusal). [A93 R2-2] It parses: checked above.
+  const rpcHost = new URL(RPC_URL).host
   say(`\n=== Backfill ${txHash} (apply=${APPLY}${REPAIR ? ", repair" : ""}) via RPC host=${rpcHost} ===`)
 
   const receipt = await client.getTransactionReceipt({ hash: txHash })
