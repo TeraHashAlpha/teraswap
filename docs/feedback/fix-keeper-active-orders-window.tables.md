@@ -83,6 +83,8 @@ the cursor is at the start (every idle probe: the cursor resets when the chain h
 | 8 | branch `39818055` | agent-verify keeper (23:33–00:11Z, 38 min) | v20 / v22 | **1610/1610 each** | — |
 | 9 | branch `39818055` | agent-verify suite (vitest; load ≈ 30–65) | 22 | 10834 pass / 11 fail | all 5 s timeouts: `agent-hooks` ×9, `retired-claims.test.ts:104`, `useQuote.log-quote.callers.test.ts:163` |
 
+| 10 | branch `25285c9c` | agent-verify `--keeper --codeql`, ONE run (owner answer), started 02:16:20Z at load 1.62 with no other verify/CodeQL running | 20 / 22 | **RESULT: PASS** — suite 10845/10845, keeper 1610/1610 each, CodeQL 13 = 13 | — |
+
 agent-verify `39818055` otherwise: lint-delta +0/+0, tsc 0, `next build` ok, v1v2-parity 123/123, rpc-budget 36/36, CodeQL
 security-extended head 13 = base 13, 0 new by rule+file+message.
 

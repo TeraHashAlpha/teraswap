@@ -26,13 +26,16 @@ One AskUserQuestion, four parts; only (1) came back answered. Per "ask ONCE", (2
 4. **Host log** (one line per cycle, counts only): `Active window: active=37 window=15 examined=12 slowed=3 wrap=no`; `wrap=yes` once per
    rotation; `keyset=rejected(400) fallback=oldest` + one `Active window query REJECTED …` line per process if Supabase refuses the filter;
    `active=0 window=0 … wrap=yes` after `No active orders`. Gone: `Querying:`, `Supabase returned`, `First order: … wallet=` (T4).
-5. **Verify** `39818055`: keeper PASS (20 + 22), CodeQL PASS 13 = 13 / 0 new, lint-delta, tsc, build, parity, rpc-budget PASS; **suite FAIL:
-   11 vitest 5 s timeouts** in untouched files (`agent-hooks` ×9, `retired-claims`, `useQuote.log-quote.callers`) — main fails the same
-   files under the same load, 34 timeouts (T5 rows 6, 9). `gen-claude-state --check`: current. gitleaks: no leaks. diff: 7 files,
-   +2,021 / −13 (`executor.js` +119/−13; `active-window.js` 271; tests + fixture 1,488; docs 143). Verified code head `39818055`; HEAD adds this feedback (docs only).
+5. **Verify** — owner answer 2026-11-18 (second question, after `39818055` was red only on 11 vitest 5 s timeouts in untouched files
+   that main also timed out on under load, T5 rows 6, 9): "run agent-verify once on this head when no other verify/CodeQL runs and the
+   1-minute load is under 10; push only if green". Run on `25285c9c`, 02:16:20–02:23:18Z, load 1.62: **RESULT: PASS** — suite
+   10845/10845, keeper 1610/1610 on Node 20 and 22, CodeQL 13 = 13 / 0 new, lint-delta +0/+0, tsc 0, build ok, parity 123, rpc-budget 36.
+   `gen-claude-state --check`: current. gitleaks: no leaks. diff: 7 files, +2,021 / −13 (`executor.js` +119/−13; `active-window.js` 271;
+   tests + fixture 1,488; docs 143). Verified head `25285c9c`; HEAD adds only this paragraph (docs).
    Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/keeper-active-orders-window
    **Not verified**: the keyset `or=(…)` and `HEAD`+`count=exact` against a real PostgREST/Supabase (fake only; the fallback bounds the
-   damage); a run on the host; rows held `executing` by another process while the scan passes (pruned, as today); a green vitest suite.
+   damage); a run on the host; rows held `executing` by another process while the scan passes (pruned, as today); the branch merged
+   with origin/main `02487c98` (#707 adds `basket-coordinator.*` beside executor.js; `git merge-tree` is clean, the combined tree untested).
 
 ## Feedback — P1 (a94a963a, 39818055)
 
