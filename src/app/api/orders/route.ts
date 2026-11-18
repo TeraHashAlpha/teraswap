@@ -15,6 +15,8 @@ import { getOrderExecutor, getOrderExecutorDomain, MIN_ORDER_AMOUNT,
 import { verifyRouterDataHash } from '@/lib/order-engine/canonical-route'
 import { STOP_LOSS_DEFERRED_REASON, LIMIT_TP_CHAIN_ID } from '@/lib/order-engine/limit-launch'
 import { ORDER_EIP712_TYPES, ORDER_V3_EIP712_TYPES, MAX_ORDER_SLIPPAGE_BPS } from '@/lib/order-engine/types'
+// [fix/orders-server-side-order-hash, audit 2026-11-16 S-5] The stored order hash is the server's.
+import { computeOrderHash, normalizeOrderHashText } from '@/lib/order-engine/order-hash'
 import { getDcaMinChunkUsd } from '@/lib/order-engine/dca-custom'
 // [FEAT-DCA-FLOOR-TIERS] Server-side floor tier + the consent it requires.
 import { checkTokenOnChain } from '@/lib/order-engine/token-on-chain'
@@ -351,9 +353,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // [fix/orders-server-side-order-hash, audit 2026-11-16 S-5] Set below from the typed data the signer
+    // is recovered from; the ONLY value ever stored in order_hash. body.orderHash is compared, never stored.
+    let serverOrderHash: `0x${string}`
     {
       try {
         const domain = isV3Order ? getOrderExecutorV3Domain(chainId) : getOrderExecutorDomain(chainId)
+        const types = isV3Order ? ORDER_V3_EIP712_TYPES : ORDER_EIP712_TYPES
         // [SPRINT-P1B-SEC] Enums come from the strict parse above — the same values every policy
         // gate uses. Previously re-derived here by a lossy mapping, which is what allowed the
         // policy view and the signed view to disagree.
@@ -372,7 +378,7 @@ export async function POST(req: NextRequest) {
 
         const recovered = await recoverTypedDataAddress({
           domain,
-          types: isV3Order ? ORDER_V3_EIP712_TYPES : ORDER_EIP712_TYPES,
+          types,
           primaryType: 'Order' as const,
           message,
           signature: body.signature as `0x${string}`,
@@ -380,6 +386,11 @@ export async function POST(req: NextRequest) {
         if (recovered.toLowerCase() !== body.wallet.toLowerCase()) {
           return NextResponse.json({ error: 'Signature mismatch' }, { status: 400 })
         }
+        // [S-5] The order hash, from the SAME `types` + `message` the signer was just recovered from:
+        // EIP-712 hashStruct = the executor's getOrderHash(order) (V3 :1149, v2 :964), the key of
+        // cancelledOrders / dcaExecutions and the OrderExecuted topic. The domain only enters the
+        // digest recovery checked. Proven against the contracts in OrderHashDifferential.t.sol.
+        serverOrderHash = computeOrderHash({ types, message })
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'unknown'
         return NextResponse.json({ error: `Signature verification failed: ${msg}` }, { status: 400 })
@@ -720,6 +731,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
     }
 
+    // [fix/orders-server-side-order-hash, audit 2026-11-16 S-5] OBSERVE mode. A caller whose orderHash
+    // text is not the server's hash (compared after lower-casing and one leading 0x) is NOT refused in
+    // this release: the row is stored under the server's hash, one structured line is logged (never the
+    // signature), and the answer is the same as for a matching text. How to switch to reject later:
+    // docs/feedback/fix-orders-server-side-order-hash.md.
+    if (normalizeOrderHashText(body.orderHash) !== serverOrderHash) {
+      console.warn(JSON.stringify({
+        event: 'orders_order_hash_mismatch',
+        mode: 'observe',
+        chainId,
+        version: isV3Order ? 3 : 2,
+        orderType: orderTypeLabel,
+        storedHash: serverOrderHash,
+        // The caller's text as sent (bounded); a non-string is logged by its type only.
+        callerHash: typeof body.orderHash === 'string' ? body.orderHash.slice(0, 80) : `<${typeof body.orderHash}>`,
+      }))
+    }
+
     // Insert
     const { data, error } = await supabase
       .from('orders')
@@ -738,7 +767,9 @@ export async function POST(req: NextRequest) {
         expiry: body.expiry,
         nonce: body.nonce,
         signature: body.signature,
-        order_hash: body.orderHash,
+        // [S-5] The server's hash of the signed order, never body.orderHash: one signed order has one
+        // order_hash, so the unique_order_hash constraint refuses it a second time whatever text is sent.
+        order_hash: serverOrderHash,
         dca_interval: body.dcaInterval ?? 0,
         dca_total: body.dcaTotal ?? 1,
         router: body.router.toLowerCase(),
@@ -760,6 +791,8 @@ export async function POST(req: NextRequest) {
       .single()
 
     if (error) {
+      // [S-5] unique_order_hash (schema.sql) now fires on the SERVER's hash: the same signed order is
+      // refused here whatever orderHash text accompanies it.
       if (error.code === '23505') {
         return NextResponse.json({ error: 'Order already exists (duplicate hash)' }, { status: 409 })
       }

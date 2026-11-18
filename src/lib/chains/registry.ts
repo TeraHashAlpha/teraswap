@@ -39,7 +39,11 @@ const ETHEREUM_MAINNET: ChainConfig = {
     cowVaultRelayer: COW_VAULT_RELAYER,
   },
   rpc: {
-    primary: process.env.NEXT_PUBLIC_RPC_URL || 'https://eth.llamarpc.com',
+    // [fix/mainnet-rpc-out-of-client, SEC-5] No env read here, as for Base/Arbitrum below. This registry ships in the
+    // browser bundle, and the literal NEXT_PUBLIC_RPC_URL read that stood here was inlined into a client chunk at build
+    // time, the provider key with it. The browser reads mainnet through /api/rpc (rpc-proxy-url.ts); the server resolves
+    // its upstream in rpc-env.ts (RPC_URL_1, then RPC_URL, then this same public default). Same public endpoints, same order.
+    primary: 'https://eth.llamarpc.com',
     fallbacks: ['https://rpc.ankr.com/eth', 'https://cloudflare-eth.com'],
   },
   blockExplorer: 'https://etherscan.io',
