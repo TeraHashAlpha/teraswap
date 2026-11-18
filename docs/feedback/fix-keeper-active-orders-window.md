@@ -1,30 +1,48 @@
 # fix/keeper-active-orders-window — SEC-4 (keeper's 15-row active-orders window)
 
-Keeper, fund-flow: Draft PR, **Auditor required**. Base: origin/main `4a4129ef`.
+Keeper, fund-flow: Draft PR, **Auditor required**. Base origin/main `4a4129ef`. Long tables: `fix-keeper-active-orders-window.tables.md` (T1–T5).
 
 ## Owner answers (asked once, 2026-11-17; they supersede the goal text)
 
-One AskUserQuestion with four parts. Only one part came back answered; the goal says ask ONCE, so the
-other three were not re-asked and the recommended option was built (marked "unanswered").
+One AskUserQuestion, four parts; only (1) came back answered. Per "ask ONCE", (2)–(4) were not re-asked: the recommended option was built.
+1. Keyset query rejected (non-2xx) ⇒ today's exact query (15 oldest) for that cycle, logged once, flagged on the line. (answered)
+2. MAX_BATCH / gas-SKIP stop ⇒ the cursor moves only past rows the loop reached; bound = ceil(M/15) + early-stop cycles. (unanswered)
+3. M under churn ⇒ distinct rows active at any point in the observed cycles. (unanswered)
+4. fetchActiveOrders' 3 per-query lines (Supabase URL, count, `wallet=0x…` prefix) ⇒ replaced by the one window line. (unanswered)
 
-1. Keyset query rejected by Supabase (non-2xx) → **fall back to today's query (15 oldest) for that cycle**,
-   log the status once per process, flag it on the per-cycle line. (answered)
-2. MAX_BATCH / gas-SKIP stop vs the ceil(M/15) bound → cursor moves only past rows the loop reached; cut-off
-   rows lead the next cycle; bound = ceil(M/15) + cycles that hit the cap or the gas stop. (unanswered)
-3. M under churn in the property test → number of distinct rows active at any point in the observed
-   cycles. (unanswered)
-4. fetchActiveOrders' three per-fetch log lines (Supabase URL, row count, first order id + wallet prefix)
-   → replaced by the one per-cycle line; "No active orders" / "Found N active order(s)" kept. (unanswered)
+## Evidence
 
-## Checklist
+1. **Step 0** (`ecd422e9`, origin/main executor.js, Node 20 + 22, exit 1): `the newer executable row was never examined in 20 cycles; per-cycle canExecute calls: 15,15,…,15` (T1). Passes after the fix.
+2. **Bound**: with M rows, every row is examined within ceil(M/15) cycles, + 1 per cycle that MAX_BATCH or a gas SKIP stops early.
+   The window is up to 15 rows after an in-memory keyset cursor `active-window.js:81` (`order=created_at.asc,id.asc`), wrapping to the oldest
+   when the tail is short `:126,141` / `executor.js:715-741`; the loop counts what it reached `executor.js:1543` and the cursor moves exactly
+   past that `active-window.js:194`, `executor.js:2316`, so consecutive windows tile the table; an early stop (`executor.js:1542`, `:2074`)
+   still moves ≥ 1 row. The cursor passes slowed rows with no lock or RPC (`executor.js:1568`, `active-window.js:233-241`). Prune keeps every
+   active row's ADR-026 streak: the rotation set covers [oldest, cursor] `active-window.js:199`, keep-set `:217-219`, `executor.js:1502`.
+3. **Tests**: 47 new (31 helper, 16 shipped cycle); seeded properties 40 + 6 seeds, 613,857 + 51,511 bound checks (T2). Keeper suite at
+   `39818055`: Node 20 1610/1610, Node 22 1610/1610 (own run and agent-verify). Mutants killed: cursor frozen 20 fail, slow-down on
+   interval 6 fail, window doubled 8 fail (T3). Earlier runs at `a94a963a` failed `chain-verify.test.mjs:765` (timing ratio) 3 of 4 times
+   while main passed it 2/2: my property tests burned 8.9 s CPU beside it; fix attempt 1 (`39818055`) = same checks at 3.5 s (T5).
+4. **Host log** (one line per cycle, counts only): `Active window: active=37 window=15 examined=12 slowed=3 wrap=no`; `wrap=yes` once per
+   rotation; `keyset=rejected(400) fallback=oldest` + one `Active window query REJECTED …` line per process if Supabase refuses the filter;
+   `active=0 window=0 … wrap=yes` after `No active orders`. Gone: `Querying:`, `Supabase returned`, `First order: … wallet=` (T4).
+5. **Verify** `39818055`: keeper PASS (20 + 22), CodeQL PASS 13 = 13 / 0 new, lint-delta, tsc, build, parity, rpc-budget PASS; **suite FAIL:
+   11 vitest 5 s timeouts** in untouched files (`agent-hooks` ×9, `retired-claims`, `useQuote.log-quote.callers`) — main fails the same
+   files under the same load, 34 timeouts (T5 rows 6, 9). `gen-claude-state --check`: current. gitleaks: no leaks. diff: 7 files,
+   +2,021 / −13 (`executor.js` +119/−13; `active-window.js` 271; tests + fixture 1,488; docs 143). Verified code head `39818055`; HEAD adds this feedback (docs only).
+   Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/keeper-active-orders-window
+   **Not verified**: the keyset `or=(…)` and `HEAD`+`count=exact` against a real PostgREST/Supabase (fake only; the fallback bounds the
+   damage); a run on the host; rows held `executing` by another process while the scan passes (pruned, as today); a green vitest suite.
 
-- [ ] Step 0: failing test on origin/main code (15 non-executable old rows + 1 newer executable row, 20 cycles)
-- [ ] Pure helper beside executor.js (rows in; rows to examine + next cursor out)
-- [ ] executor.js wiring: rotating keyset window, cursor in memory, wrap, restart at oldest
-- [ ] Balance/allowance slow-down (3 consecutive answers ⇒ at most once per 10 min, in memory)
-- [ ] One log line per cycle (active, examined, wrap; no address, no signature)
-- [ ] Tests: Step 0 passes; seeded property; restart, empty, 15 rows, 1 row, equal created_at
-- [ ] Existing keeper suite unchanged and green on Node 20 and 22
-- [ ] Mutation proof: cursor frozen; slow-down on "interval not reached"; window doubled
-- [ ] Verify: agent-verify --keeper --codeql; gen-claude-state --check
-- [ ] Evidence 1-5 below; push; compare link
+## Feedback — P1 (a94a963a, 39818055)
+
+### Assumption that turned out wrong
+- My first keep-set restarted on every wrap. When the loop stopped ON the newest row the next window wrapped at once and the union
+  covered only the table's two ends: the seeded property (seed 48017) caught 192 entries of ACTIVE rows dropped in one cycle. Fixed
+  before commit by the [oldest, cursor] invariant; the property asserts no active row's entry is ever dropped.
+
+### Concern
+- canExecute's permanent answers (`Order cancelled`, `DCA complete`, `Nonce used`, `Invalid signature`) are unlocked to `active` and
+  never slowed (goal: only balance/allowance). They no longer hide other rows, but cost a lock + RPC + unlock every pass.
+- Supabase reads: 1 GET per cycle before; now 2 when the cursor is mid-table (page + wrap page or a count `HEAD`), still 1 on idle probes.
+- `chain-verify.test.mjs:765` measures a ratio over a 0.7 ms baseline: any CPU-heavy file beside it can fail it.
