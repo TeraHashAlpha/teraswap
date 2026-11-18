@@ -100,3 +100,17 @@ Keeper code: Draft PR, **Auditor required**. Tables: `fix-keeper-errors-no-signa
 ### Concern
 - redact.js now exports `redactUrlOnly` (no hex scrub): only for text that is classified, never printed; a printed text must
   keep going through redactUrl / redactError (its doc comment says so).
+
+## Round 3 — A93 audit of PR #717 round 2 (blocked 0C/1H), findings R2-1..R2-3
+
+### Checklist, round 3
+
+- [ ] origin/main unchanged since round 2 (85a6f9cb): no merge needed.
+- [ ] C1 R2-1 (High): configured secrets removed by their literal value (redact.js SECRET_ENV_NAMES, built lazily once),
+      last step of redactError / redactUrl / sendTelegramAlert's final pass / every CLI print; rpc-auth and retry-policy
+      still read the raw text (S-5). Tests red on b367f054 first: the audit's 30 CLI runs, 3 call sites x 4 keeper sinks.
+- [ ] C2 R2-2 + R2-3 (Low): both CLIs refuse an unparseable SUPABASE_URL / RPC URL naming only the variable; a boot
+      refusal carries the provider's `details`, redacted, on one line.
+- [ ] Proof: signature probes, classifier differential vs origin/main, over-redaction, seeded fuzz, mutants, keeper
+      Node 20 + 22.
+- [ ] One `agent-verify.sh --keeper --codeql` on the last code commit; evidence; push.
