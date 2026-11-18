@@ -45,7 +45,9 @@ export interface OrderRow {
   dca_interval: number | null
   dca_total: number | null
   dca_executed: number
-  signature: string
+  // [fix/order-signature-not-returned] No read route returns the order's EIP-712 signature any more (the server keeps
+  // it for the keeper; nothing in the browser reads it). Only POST's 201 echo of the caller's own order still has it.
+  signature?: string
   order_data: Record<string, unknown>  // full Order struct as JSON
   tx_hash: string | null
   amount_out: string | null
