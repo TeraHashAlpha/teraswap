@@ -62,19 +62,19 @@ describe("[A88 S-1] flood: new unexecutable rows every cycle never hide an older
     })
   }
 
-  test("30 new rows per cycle at full size (SCAN_CAP 1000, 980 rows growing to 1190): every row within ceil(M/1000) cycles", async () => {
+  test("30 new rows per cycle at full size (SCAN_CAP 1000, 980 rows growing to 1340): every row within ceil(M/1000) cycles", async () => {
     const k = await loadKeeper()
     const db = createFakePostgrest(rowsOf(980))
     const chain = createFakeChain(db, notReady)
     let n = 5000
-    const run = await drive(k, db, chain, 8, {
+    const run = await drive(k, db, chain, 13, {
       random: mulberry32(30),
       before: (c) => {
         if (c > 0) for (let i = 0; i < 30; i++) db.insert(makeRow(n++))
       },
     })
     const { checked } = checkScreenBound({ ...run, scan: SCAN, label: "flood 30/cycle at SCAN_CAP 1000" })
-    assert.ok(checked > 3000)
+    assert.ok(checked > 5000)
   })
 })
 
@@ -84,9 +84,9 @@ describe("[A88 S-2] a failed scan query never restarts the rotation", () => {
   const isScanRead = (req) => req.method === "GET" && req.path === "/rest/v1/orders" && /order=created_at\.asc%2Cid\.asc/.test(req.search)
 
   for (const rate of [0.005, 0.02, 0.1]) {
-    test(`503 on ${rate * 100} % of cycles (100 rows, scan scaled to 25): the scan continues where it was, every row within ceil(M/25) + fallback cycles`, async () => {
-      const k = await loadKeeper({ constants: { SCAN_CAP: 25 } })
-      const rows = rowsOf(100)
+    test(`503 on ${rate * 100} % of cycles (200 rows, scan scaled to 50): the scan continues where it was, every row within ceil(M/50) + fallback cycles`, async () => {
+      const k = await loadKeeper({ constants: { SCAN_CAP: 50 } })
+      const rows = rowsOf(200)
       const db = createFakePostgrest(rows)
       const chain = createFakeChain(db, () => [false, "Price below floor"])
       const cycles = 200
@@ -124,11 +124,31 @@ describe("[A88 S-2] a failed scan query never restarts the rotation", () => {
         }
         lastScanned = asked[asked.length - 1]
       }
-      const { checked } = checkScreenBound({ ...run, scan: 25, label: `503 on ${rate * 100} % of cycles` })
+      const { checked } = checkScreenBound({ ...run, scan: 50, label: `503 on ${rate * 100} % of cycles` })
       assert.ok(checked > 5000)
     })
   }
 
+  test("10 % of cycles at full size (2000 rows, SCAN_CAP 1000): every row within ceil(M/1000) + fallback cycles", async () => {
+    const k = await loadKeeper()
+    const db = createFakePostgrest(rowsOf(2000))
+    const chain = createFakeChain(db, () => [false, "Price below floor"])
+    const failAt = evenSchedule(30, 0.1)
+    let current = -1
+    let failed = false
+    db.failWhen((req) => (failAt.has(current) && !failed && isScanRead(req) ? ((failed = true), { status: 503, body: "" }) : null))
+    const fallbackAt = []
+    const run = await drive(k, db, chain, 30, {
+      random: mulberry32(2000),
+      before: (c) => {
+        current = c
+        failed = false
+        fallbackAt[c] = failAt.has(c)
+      },
+    })
+    run.fallbackAt = fallbackAt
+    checkScreenBound({ ...run, scan: SCAN, label: "503 on 10 % at SCAN_CAP 1000" })
+  })
 })
 
 describe("[A88 S-3] two overlapping cycles never prune an active row's ADR-026 streak", () => {
@@ -264,21 +284,21 @@ describe("[A88 S-5] a gas SKIP for one cycle: the ready order executes the next 
 })
 
 describe("[A88 S-8] restart loops never starve the rows behind the first pages", () => {
-  test("200 rows, a restart every 10 cycles for 30 cycles: every row is asked every cycle (200 <= SCAN_CAP)", async () => {
-    const rows = rowsOf(200)
+  test("500 rows, a restart every 10 cycles for 50 cycles: every row is asked every cycle (500 <= SCAN_CAP)", async () => {
+    const rows = rowsOf(500)
     const db = createFakePostgrest(rows)
     const chain = createFakeChain(db, () => [false, "Price below floor"])
     const random = mulberry32(500)
     const presentAt = []
     const askedAt = []
     let k = null
-    for (let c = 0; c < 30; c++) {
+    for (let c = 0; c < 50; c++) {
       if (c % 10 === 0) k = await loadKeeper() // a new module instance = a restarted process (state in memory only)
       presentAt.push(activeIds(db))
       askedAt.push((await runCycle(k, db, chain, c, { random })).asked)
     }
     const never = rows.filter((r) => !askedAt.some((ids) => ids.includes(r.id))).length
-    assert.equal(never, 0, `${never} of 200 rows never asked across 3 processes`)
+    assert.equal(never, 0, `${never} of 500 rows never asked across 5 processes`)
     checkScreenBound({ presentAt, askedAt, scan: SCAN, label: "restart every 10 cycles" })
   })
 
