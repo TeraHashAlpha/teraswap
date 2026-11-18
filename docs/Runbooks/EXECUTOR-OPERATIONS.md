@@ -26,6 +26,12 @@ The executor is a long-running Node.js process that:
 | Active orders scanned per cycle | 1000 | `SCAN_CAP` in `executor.js` (§ 9) |
 | Pre-screen: calls per Multicall3 chunk / time limit | 50 / 5 s | `PRESCREEN_CHUNK`, `PRESCREEN_CHUNK_TIMEOUT_MS` |
 | Time limit of every Supabase read | 5 s | `SUPABASE_READ_TIMEOUT_MS` |
+| Time limit of every Supabase write (the lock included) | 10 s | `SUPABASE_WRITE_TIMEOUT_MS` |
+| Time limit of POST `/api/swap` / of a KMS request | 65 s / 10 s | `SWAP_API_TIMEOUT_MS` / `kms-signer.js` `KMS_REQUEST_TIMEOUT_MS` |
+| Extra pre-screen calls to bisect failed chunks | 40 per cycle | `BISECT_CALL_BUDGET` (§ 9) |
+| Gas cap of an order asked alone | 3,000,000 | `SINGLE_ASK_GAS` |
+| Quarantined orders asked again alone | every 30 min, 10 per cycle | `QUARANTINE_REASK_MS`, `QUARANTINE_REASK_BUDGET`; alert at `QUARANTINE_ALERT_AT` = 5 |
+| Cycle watchdog (alert, never kills) | 5 min | `CYCLE_WATCHDOG_MS` |
 | Orders asked one by one when the pre-screen cannot answer them | 15 per cycle, rotating | `ONE_BY_ONE` |
 | Fills per cycle | 5 | `MAX_BATCH` |
 | Gas tier — NORMAL ceiling | 30 gwei | `executor.js:101` |
