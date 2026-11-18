@@ -733,20 +733,51 @@ export async function POST(req: NextRequest) {
 
     // [fix/orders-server-side-order-hash, audit 2026-11-16 S-5] OBSERVE mode. A caller whose orderHash
     // text is not the server's hash (compared after lower-casing and one leading 0x) is NOT refused in
-    // this release: the row is stored under the server's hash, one structured line is logged (never the
-    // signature), and the answer is the same as for a matching text. How to switch to reject later:
+    // this release: the row is stored under the server's hash, one structured line is logged, and the
+    // answer is the same as for a matching text. How to switch to reject later:
     // docs/feedback/fix-orders-server-side-order-hash.md.
-    if (normalizeOrderHashText(body.orderHash) !== serverOrderHash) {
+    // [A86 S-7] The line is written once the request's outcome is known (stored / exists / error), so it never
+    // names a row this request did not store: `serverHash` is the hash of the signed order, `outcome` says what
+    // happened to it. It never carries the signature or the wallet; the caller's text appears only when it has the
+    // shape of a hash (0x/0X/no prefix + 64 hex), anything else as `<string len N>` (a caller that put its
+    // signature in orderHash leaves no fragment of it in the log), a non-string by its type.
+    const callerHashMismatch = normalizeOrderHashText(body.orderHash) !== serverOrderHash
+    const logHashMismatch = (outcome: 'stored' | 'exists' | 'error') => {
+      if (!callerHashMismatch) return
+      const text: unknown = body.orderHash
       console.warn(JSON.stringify({
         event: 'orders_order_hash_mismatch',
         mode: 'observe',
+        outcome,
         chainId,
         version: isV3Order ? 3 : 2,
         orderType: orderTypeLabel,
-        storedHash: serverOrderHash,
-        // The caller's text as sent (bounded); a non-string is logged by its type only.
-        callerHash: typeof body.orderHash === 'string' ? body.orderHash.slice(0, 80) : `<${typeof body.orderHash}>`,
+        serverHash: serverOrderHash,
+        callerHash: typeof text !== 'string'
+          ? `<${typeof text}>`
+          : /^(?:0[xX])?[0-9a-fA-F]{64}$/.test(text) ? text : `<string len ${text.length}>`,
       }))
+    }
+
+    // [A86 S-3] One signed order is stored once, whatever order_hash text an older row carries. Rows written before
+    // PR #708 kept the caller's text (a UUID, upper case, 0X, no prefix, another hash), so unique_order_hash cannot see
+    // them; their signature column can. Any row whose signature is one of the 4 texts that recover the same signer
+    // (orderSignatureEncodings: v 27/28 or 0/1, s or its twin n − s) is this order: 409, nothing written. Each text is
+    // compared case-insensitively and exactly: it is 0x + 130 hex (checked above, and rebuilt from the parsed bytes),
+    // so no LIKE/PostgREST pattern character (% _ *) reaches the filter. Fail closed if the lookup cannot answer.
+    // (Imported here, not in the import block, to keep this change inside POST.)
+    const { orderSignatureEncodings } = await import('@/lib/order-engine/order-hash')
+    const sameSignature = (orderSignatureEncodings(body.signature) ?? [body.signature.toLowerCase()])
+      .map((text) => `signature.ilike.${text}`)
+      .join(',')
+    const existing = await supabase.from('orders').select('id').or(sameSignature).limit(1)
+    if (existing.error) {
+      logHashMismatch('error')
+      return NextResponse.json({ error: 'Could not check for an existing order. Try again shortly.' }, { status: 503 })
+    }
+    if ((existing.data ?? []).length > 0) {
+      logHashMismatch('exists')
+      return NextResponse.json({ error: 'Order already exists' }, { status: 409 })
     }
 
     // Insert
@@ -767,8 +798,9 @@ export async function POST(req: NextRequest) {
         expiry: body.expiry,
         nonce: body.nonce,
         signature: body.signature,
-        // [S-5] The server's hash of the signed order, never body.orderHash: one signed order has one
-        // order_hash, so the unique_order_hash constraint refuses it a second time whatever text is sent.
+        // [S-5] The server's hash of the signed order, never body.orderHash. A row written by this code carries that
+        // hash, so unique_order_hash refuses a second row for it whatever text is sent; a row written before PR #708
+        // may carry other text, and the signature lookup above is what refuses a second row for it [A86 S-3].
         order_hash: serverOrderHash,
         dca_interval: body.dcaInterval ?? 0,
         dca_total: body.dcaTotal ?? 1,
@@ -791,14 +823,18 @@ export async function POST(req: NextRequest) {
       .single()
 
     if (error) {
-      // [S-5] unique_order_hash (schema.sql) now fires on the SERVER's hash: the same signed order is
-      // refused here whatever orderHash text accompanies it.
+      // [S-5] unique_order_hash (schema.sql) fires when a row already holds this SERVER hash: one written by this
+      // code, including a concurrent request for the same order that passed the signature lookup at the same time.
+      // A row written before PR #708 under other text does not fire it; the lookup above refuses that case [A86 S-3].
       if (error.code === '23505') {
+        logHashMismatch('exists')
         return NextResponse.json({ error: 'Order already exists (duplicate hash)' }, { status: 409 })
       }
+      logHashMismatch('error')
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
+    logHashMismatch('stored')
     return NextResponse.json({ order: data }, { status: 201 })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Internal error'

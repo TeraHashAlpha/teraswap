@@ -1,3 +1,5 @@
+// SUPERSEDED (A86 S-10): not served, imported nowhere, kept for history. The served routes are src/app/api/orders/**;
+// do not copy from this file: its POST stores the caller's body.orderHash (the served POST stores the server's hash).
 /**
  * Order Management API Routes v2
  *
