@@ -156,7 +156,7 @@ export function seedsFor(chainId: number): Map<string, SeedToken> {
  * CONTINUITY_DROP_ON_VERIFIED_TRUST_LOSS. Addresses are post-correctSeed (a remap moves the
  * address) and lowercased, matching the key space build-chain.ts compares against.
  */
-function handCuratedSeedsFor(chainId: number): Set<string> {
+export function handCuratedSeedsFor(chainId: number): Set<string> {
   const out = new Set<string>()
   const push = (raw: SeedToken) => {
     const s = correctSeed(chainId, raw)
