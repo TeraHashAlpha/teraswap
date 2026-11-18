@@ -19,6 +19,7 @@ const PASSWORD = "A93userPass3Er8Ty" // BACKFILL_RPC_URL userinfo password
 const SHORT_SEGMENT = "rpc12345678" // BACKFILL_RPC_URL path segment: 11 characters, below the floor
 const PASTED = "A93pastedIntoTheUrlVar0001" // SUPABASE_URL holding something that is not a URL
 const AWS_SECRET = "A93awsSecret/Dummy/Value0001" // a secret with `/` in it
+const AWS_SECRET_SLASH_ESCAPED = "A93awsSecret\\/Dummy\\/Value0001" // the same, as an encoder that writes `/` as `\/` prints it
 const HOST_LIKE = "A93hc.zqxhost/Tok3nValue01" // AWS_SESSION_TOKEN: a secret that reads as a host and a path
 const ESC_TWELVE = "A93twelve12\\" // VAULT_ADDR (not a URL): 12 characters, the last one a backslash
 const ESC_TAIL = "A93tail>Secret-0001\\" // TERASWAP_API_URL (not a URL): a `>` inside, a backslash at the end
@@ -137,7 +138,7 @@ describe("[A93 R2-1] a configured secret never survives, in any form, in any sin
   })
 
   test("a secret holding `/`, JSON-escaped in an error body (`\\/`)", async () => {
-    await assertNoSecret(`{"message":"bad signature for ${AWS_SECRET.replace(/\//g, "\\/")}"}`)
+    await assertNoSecret(`{"message":"bad signature for ${AWS_SECRET_SLASH_ESCAPED}"}`)
     await assertNoSecret(`{"message":"bad signature for ${AWS_SECRET}"}`)
   })
 
