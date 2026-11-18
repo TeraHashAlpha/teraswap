@@ -9,6 +9,7 @@ import { fmtDate, fmtGas, fmtPct, fmtToken as fmtTokenValue } from '@/lib/format
 import { Button } from '../primitives'
 import { Sheet } from '../modals/Sheet'
 import { ReviewRow } from '../modals/parts'
+import { fetchOrderExecutions } from '@/lib/order-engine/executions-client'
 
 // v1 SettlementReceiptModal's formatters, verbatim (module-private there).
 function fmtToken(raw: string, decimals: number, symbol: string): string {
@@ -117,12 +118,13 @@ export function ReceiptSheet({ order, onClose }: { order: AutonomousOrder; onClo
 
   useEffect(() => {
     let cancelled = false
-    if (blocked) return
+    if (blocked || !address) return
+    const wallet = address // narrowed here; the async closure below cannot see the guard above
     async function run() {
       setLoading(true)
       setError(null)
       try {
-        const res = await fetch(`/api/orders/${order.id}/executions?wallet=${address}`)
+        const res = await fetchOrderExecutions(order.id, wallet)
         if (!res.ok) throw new Error('Could not load fill history.')
         const data = await res.json()
         const fills: FetchedFill[] = Array.isArray(data.executions) ? data.executions : []

@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { formatUnits } from 'viem'
 import { explorerTxUrl } from '@/lib/chains/tokens'
 import { fmtToken, fmtUsd, fmtGas } from '@/lib/format'
+import { fetchOrderExecutions } from '@/lib/order-engine/executions-client'
 
 /** Raw row shape returned by GET /api/orders/:id/executions. */
 interface Execution {
@@ -159,7 +160,7 @@ export default function ExecutionTimeline({
     if (!orderId || !wallet) return
 
     setLoading(true)
-    fetch(`/api/orders/${orderId}/executions?wallet=${wallet}`)
+    fetchOrderExecutions(orderId, wallet)
       .then(res => res.json())
       .then(data => {
         setExecutions(Array.isArray(data.executions) ? data.executions : [])

@@ -173,7 +173,7 @@ export function ordersReadHeaders(wallet: string): Record<string, string> | null
   }
 }
 
-type SignTypedDataFn = (typed: ReturnType<typeof buildOrdersReadTypedData>) => Promise<string>
+export type SignTypedDataFn = (typed: ReturnType<typeof buildOrdersReadTypedData>) => Promise<string>
 
 /** In-flight dedupe: N concurrent panels → ONE wallet prompt. */
 const inflight = new Map<string, Promise<'ok' | 'denied'>>()
@@ -217,6 +217,20 @@ export async function ensureOrdersReadAuth(
   return attempt
 }
 
+/**
+ * [A87b R2-1] The wallet's signer, registered by useOrderEngine (the one place that holds wagmi's signTypedDataAsync for
+ * the Orders tab). Other readers of live-order data (the fills fetch, executions-client.ts) reach the SAME sign-once path
+ * through it, so they share the list's in-flight dedupe and denial memory and never need a wagmi hook of their own.
+ * Null until an Orders surface has mounted: a reader then simply gets the server's 401 and shows nothing.
+ */
+let registeredSigner: SignTypedDataFn | null = null
+export function setOrdersReadSigner(fn: SignTypedDataFn | null): void {
+  registeredSigner = fn
+}
+export function getOrdersReadSigner(): SignTypedDataFn | null {
+  return registeredSigner
+}
+
 /** Forget a session denial so the UI can offer an explicit "sign to view" retry. */
 export function retryOrdersReadAuth(wallet: string): void {
   denied.delete(wallet.toLowerCase())
@@ -230,5 +244,8 @@ export const _readAuthInternal = {
   },
   clearDenial(wallet: string) {
     denied.delete(wallet.toLowerCase())
+  },
+  clearSigner() {
+    registeredSigner = null
   },
 }

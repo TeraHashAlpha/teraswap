@@ -14,6 +14,11 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import {
+  setOrdersReadSigner,
+  getOrdersReadSigner,
+  type SignTypedDataFn,
+} from '@/lib/order-engine/read-auth'
 import { useAccount, useChainId, useSignTypedData, useReadContract, useWriteContract, useSwitchChain } from 'wagmi'
 import { keccak256, encodeAbiParameters, toBytes } from 'viem'
 import {
@@ -443,6 +448,15 @@ export function useOrderEngine() {
   // below is exercised exactly as before.
   const orderExecutorV3 = getOrderExecutorV3(chainId)
   const { signTypedDataAsync } = useSignTypedData()
+  // [A87b R2-1] The fills of a LIVE order need the same read signature as the list: hand the other readers
+  // (executions-client.ts) this hook's signer, so they take the list's sign-once path instead of prompting on their own.
+  useEffect(() => {
+    const signer: SignTypedDataFn = (typed) => signTypedDataAsync(typed as Parameters<typeof signTypedDataAsync>[0])
+    setOrdersReadSigner(signer)
+    return () => {
+      if (getOrdersReadSigner() === signer) setOrdersReadSigner(null)
+    }
+  }, [signTypedDataAsync])
   const { writeContractAsync } = useWriteContract()
   // [fix/cross-chain-order-cancel] Cancel resolves its executor/domain from the ORDER's chain, never
   // the wallet's active one — when they differ this requests a switch instead of falling through.

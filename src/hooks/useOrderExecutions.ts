@@ -13,6 +13,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import type { OrderEngineEvent } from '@/lib/order-engine'
+import { fetchOrderExecutions } from '@/lib/order-engine/executions-client'
 
 export interface FillRow {
   id: string
@@ -57,7 +58,10 @@ export function useOrderExecutions(
     if (!enabled || !orderId || !wallet) return
     if (!force && typeof document !== 'undefined' && document.hidden) return
     try {
-      const res = await fetch(`/api/orders/${orderId}/executions?wallet=${wallet}`)
+      const res = await fetchOrderExecutions(orderId, wallet)
+      // [A87b R2-1] A live order's fills need the read signature. Still 401 after the sign-once path (refused, or no
+      // Orders surface mounted): keep what is on screen, never blank it as if the order had no fills.
+      if (res.status === 401) return
       const data = await res.json()
       setExecutions(Array.isArray(data.executions) ? data.executions : [])
       setOrderMeta(data.order ?? null)
