@@ -87,13 +87,16 @@ function stripComments(s) {
 }
 
 describe("1. both legs are quoted and resolved through the quorum", () => {
-  test("per-cycle context created ONCE before the order loop, with every active DCA token registered", () => {
+  test("per-cycle context created ONCE before the order loop, with the DCA tokens of the rows the path walks registered", () => {
     const ctxAt = src.indexOf("createCycleQuoteContext({")
     const loopAt = src.indexOf("for (const dbOrder of orders)")
     assert.notEqual(ctxAt, -1)
     assert.ok(ctxAt < loopAt, "the quote context must exist before the loop")
     assert.equal(src.split("createCycleQuoteContext(").length - 1, 1, "exactly one context per cycle")
-    assert.match(src, /quoteCtx\.registerTokens\(\s*orders\.filter\(\(o\) => o\.order_type === "dca"\)\.flatMap\(\(o\) => \[o\.order_data\?\.tokenIn, o\.order_data\?\.tokenOut\]\)/)
+    // [SEC-4 / fix/keeper-active-orders-window, owner answer 2026-11-18] `orders` is the 1000-row scan now: only
+    // the DCA rows the per-order path walks this cycle register their tokens (every scanned one would make a DCA
+    // fill ask CoinGecko for every DCA token on the chain).
+    assert.match(src, /quoteCtx\.registerTokens\(\s*orders\.filter\(\(o\) => o\.order_type === "dca" && walk\.ids\.has\(o\.id\)\)\.flatMap\(\(o\) => \[o\.order_data\?\.tokenIn, o\.order_data\?\.tokenOut\]\)/)
   })
   test("tokenIn and tokenOut are each quoted and resolved with their own leg", () => {
     const block = src.slice(src.indexOf("if (isDca) {"), src.indexOf("const dueSec = dcaDueSec(dbOrder)"))

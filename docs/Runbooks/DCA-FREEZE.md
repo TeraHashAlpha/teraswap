@@ -22,9 +22,17 @@ the **server** enforces the Bearer secret, exactly like `/api/admin/kill-switch`
 | Keeper (`executor.js`) | reads `circuit_breaker?id=eq.dca` each cycle | **skips** `order_type='dca'` execution; `limit` / `stop_loss` still execute |
 | Storage | Supabase table `circuit_breaker`, single row `id='dca'` | `frozen=true` is the switch |
 
-**Fail-open by design.** If the table is missing, the row is missing, or the read errors, **both** the API
-and the keeper treat the system as **NOT frozen**. The breaker can only *stop* execution when it is
-explicitly set and readable. The on-chain `pause()` (§4) is the real fail-safe.
+**The API fails open; the keeper fails CLOSED** (owner decision 2026-11-18, "error = frozen", PR #714 round 3).
+- **API** (create route, unchanged): if the table is missing, the row is missing, or the read errors, it treats the
+  system as **NOT frozen**.
+- **Keeper**: only a well-formed answer saying not frozen — HTTP 2xx, a list with exactly one row whose `frozen` is
+  the boolean `false` — lets a DCA order pass its freeze gate. A read that times out (5 s), an HTTP error (a missing
+  table answers 404), a network error, a malformed body, or **no `dca` row** holds every DCA order for that cycle,
+  exactly as a real freeze does (left `active`, nothing counted; limit / stop-loss still execute). The cycle logs
+  `freeze read … -- treating as FROZEN this cycle`, `/health` shows `stats.freezeReadFailedCycles` and
+  `stats.freezeReadFailure` (`timeout`, `http-<status>`, `network`, `malformed`, `row-missing`), and ops is paged
+  (`🛠️ Ops issue: freeze-read-failed`, warn) on the first such cycle, then at most hourly while it lasts.
+The on-chain `pause()` (§4) is still the real fail-safe.
 
 **What freeze does NOT do:** no order cancellation, no fund movement, no approval/allowance change, no
 contract state change. It is purely a "don't start new DCA chunks this cycle" gate.
@@ -47,8 +55,9 @@ SELECT id, frozen, reason, updated_at, updated_by FROM circuit_breaker WHERE id 
 -- expect: dca | f | (null) | <ts> | seed
 ```
 
-> The keeper and API both **fail open** until the table exists, so applying the SQL is what *enables* the
-> freeze capability — it does not change behaviour on its own (row seeds as `frozen=false`).
+> The API fails open until the table exists. **The keeper does not** (2026-11-18): without the table or the seeded
+> `dca` row it holds every DCA order and pages `freeze-read-failed` every hour. Run this check **before deploying or
+> restarting a keeper** with that change; the query must return exactly one row, `frozen = f`.
 
 ---
 
@@ -136,6 +145,7 @@ cast send <ORDER_EXECUTOR_ADDRESS> "unpause()" \
 ## 6. Invariants (do not violate)
 
 - **No auto-freeze.** The monitoring bot **never** sets the flag; freezing is always a human decision.
-- **Fail-open reads.** Missing table / missing row / read error ⇒ NOT frozen, on both API and keeper.
+- **API reads fail open; keeper reads fail closed** (2026-11-18). API: missing table / missing row / read error ⇒ NOT
+  frozen. Keeper: anything but a well-formed "not frozen" ⇒ DCA held that cycle, alerted, on `/health`.
 - **No secrets in this repo.** `DCA_FREEZE_SECRET` and admin keys live in env / KMS only.
 - **Freeze = delay, never loss.** No cancel, no fund movement, no approval change at any layer.

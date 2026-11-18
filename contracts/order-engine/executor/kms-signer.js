@@ -59,7 +59,13 @@ import { shouldRefuseUnwiredVault } from "./signer-guard.js"
  * Creates a viem-compatible account backed by AWS KMS.
  * The private key never leaves the HSM.
  */
-export async function createKmsAccount(keyId, region) {
+// [A91, owner answer 3 of 2026-11-18] A time limit on every KMS request. The AWS SDK sets none by default (smithy
+// node-http-handler: requestTimeout 0, socketTimeout 0), so a stalled connection held the keeper's one-at-a-time
+// cycle forever. At the limit the send rejects (AbortError): signTransaction throws, no tx is sent, and the
+// executor's per-order catch handles it as before — an infra miss, never counted (ADR-026).
+export const KMS_REQUEST_TIMEOUT_MS = 10_000
+
+export async function createKmsAccount(keyId, region, { requestTimeoutMs = KMS_REQUEST_TIMEOUT_MS } = {}) {
   let kmsClient = null
   let cachedAddress = null
 
@@ -76,7 +82,7 @@ export async function createKmsAccount(keyId, region) {
     const kms = await getKmsClient()
     const { GetPublicKeyCommand } = await import("@aws-sdk/client-kms")
 
-    const response = await kms.send(new GetPublicKeyCommand({ KeyId: keyId }))
+    const response = await kms.send(new GetPublicKeyCommand({ KeyId: keyId }), { abortSignal: AbortSignal.timeout(requestTimeoutMs) })
     const publicKeyDer = Buffer.from(response.PublicKey)
 
     // DER-encoded SubjectPublicKeyInfo -> uncompressed EC point
@@ -98,7 +104,7 @@ export async function createKmsAccount(keyId, region) {
       Message: digest,
       MessageType: "DIGEST",
       SigningAlgorithm: "ECDSA_SHA_256",
-    }))
+    }), { abortSignal: AbortSignal.timeout(requestTimeoutMs) })
 
     // KMS returns DER-encoded ECDSA signature -> decode to r, s
     const derSig = Buffer.from(response.Signature)
