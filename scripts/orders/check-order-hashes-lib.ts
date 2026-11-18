@@ -23,7 +23,7 @@
  * Read-only: no network, no database, no environment.
  */
 // @ts-expect-error TS5097 - Node's native type stripping requires the .ts extension; tsc is noEmit here
-import { computeOrderHash, canonicalOrderSignature } from '../../src/lib/order-engine/order-hash.ts'
+import { computeOrderHash, canonicalOrderSignature, orderSignatureEncodings } from '../../src/lib/order-engine/order-hash.ts'
 // @ts-expect-error TS5097 - same
 import { ORDER_EIP712_TYPES, ORDER_V3_EIP712_TYPES } from '../../src/lib/order-engine/order-eip712-types.ts'
 
@@ -53,11 +53,22 @@ export interface Groups {
  * A stored order_hash text as it may be printed: a hash-shaped or UUID-shaped text as is, any other string as
  * `<string len N>` (a pre-#708 row may hold a caller's arbitrary text, a signature included), null as null, another
  * type by its type.
+ * [A89 R2-2] A hash-shaped text that is a window of the row's OWN signature (r, s or any 64 hex of it, in any of the 4
+ * texts that recover the same signer) is printed as `<signature fragment len N>`: such a text has the shape of a hash.
  */
-export function safeText(value: unknown): unknown {
+export function safeText(value: unknown, signature?: unknown): unknown {
   if (value === null || value === undefined) return null
   if (typeof value !== 'string') return `<${typeof value}>`
+  if (HASH_SHAPE_RE.test(value) && isSignatureFragment(value, signature)) return `<signature fragment len ${value.length}>`
   return HASH_SHAPE_RE.test(value) || UUID_RE.test(value) ? value : `<string len ${value.length}>`
+}
+
+/** [A89 R2-2] Whether `text` (0x/0X/no prefix, any case) occurs inside `signature` in one of its recoverable texts. */
+function isSignatureFragment(text: string, signature: unknown): boolean {
+  if (typeof signature !== 'string' || signature === '') return false
+  const hex = text.replace(/^0[xX]/, '').toLowerCase()
+  const texts = orderSignatureEncodings(signature) ?? [signature.toLowerCase()]
+  return texts.some((sig) => sig.replace(/^0[xX]/, '').includes(hex))
 }
 
 /** The keeper's struct (executor.js orderStruct), as an EIP-712 message for the server function. */

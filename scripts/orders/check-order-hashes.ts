@@ -16,8 +16,9 @@
  * Exit: 0 at least one row, every row byte-equal, no group, every row signed · 1 anything else, including an empty
  * array [A86 S-8] · 2 unreadable input.
  *
- * A stored text is printed only when it has the shape of a hash or a UUID, otherwise as `<string len N>`; as a last
- * guard every printed line has any run of 130+ hex characters replaced.
+ * A stored text is printed only when it has the shape of a hash or a UUID, otherwise as `<string len N>`; a hash-shaped
+ * text that is a window of the row's own signature as `<signature fragment len N>` [A89 R2-2]; as a last guard every
+ * printed line has any run of 130+ hex characters replaced.
  *
  * Reads stdin only. No network, no database, no environment, no writes: rows found here are for the
  * owner to decide on (this change deliberately ships no migration and no backfill).
@@ -50,16 +51,22 @@ try {
 }
 
 const count = { match: 0, 'non-canonical': 0, differs: 0, uncomputable: 0 }
-for (const v of verdicts) {
-  count[v.verdict]++
-  if (v.verdict === 'differs') {
-    out({ verdict: 'differs', id: v.id, chain_id: v.chain_id, stored: safeText(v.stored), computed: v.computed, version: v.version })
-  } else if (v.verdict === 'non-canonical') {
-    out({ verdict: 'non-canonical', id: v.id, chain_id: v.chain_id, stored: safeText(v.stored), computed: v.computed })
-  } else if (v.verdict === 'uncomputable') {
-    err(`uncomputable ${JSON.stringify({ id: v.id, chain_id: v.chain_id, stored: safeText(v.stored), reason: v.reason })}`)
-  }
+// [A89 R2-2] Each row's own signature, so a stored text that is a window of it is never printed (safeText).
+const signatureOf = (i: number): unknown => {
+  const row = rows[i] as Record<string, unknown> | null
+  return row && typeof row === 'object' ? row.signature : undefined
 }
+verdicts.forEach((v, i) => {
+  count[v.verdict]++
+  const stored = safeText(v.stored, signatureOf(i))
+  if (v.verdict === 'differs') {
+    out({ verdict: 'differs', id: v.id, chain_id: v.chain_id, stored, computed: v.computed, version: v.version })
+  } else if (v.verdict === 'non-canonical') {
+    out({ verdict: 'non-canonical', id: v.id, chain_id: v.chain_id, stored, computed: v.computed })
+  } else if (v.verdict === 'uncomputable') {
+    err(`uncomputable ${JSON.stringify({ id: v.id, chain_id: v.chain_id, stored, reason: v.reason })}`)
+  }
+})
 const groups = groupRows(rows, verdicts)
 for (const g of groups.sameComputedHash) out({ group: 'same-computed-hash', computed: g.computed, ids: g.ids })
 for (const g of groups.sameSignature) out({ group: 'same-signature', ids: g.ids })

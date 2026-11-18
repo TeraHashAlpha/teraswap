@@ -219,3 +219,62 @@ describe('A86 S-2 / S-8 (fixture order-rows-a86.json)', () => {
     expect(safeText(null)).toBeNull()
   })
 })
+
+// [A89 R2-2, R2-5] A stored order_hash that is a window of the row's OWN signature has the shape of a hash, so the
+// shape rule alone printed it; and the CLI's last-resort redact (130+ hex) had no test of its own.
+describe('the row\'s own signature is never printed [A89 R2-2, R2-5]', () => {
+  const base = rows.find((r) => r.id === 'v3-dca-match')!
+  // Signature-shaped with distinct bytes (low s, v 27), so every 10-hex window is specific: built, not a signature of anything.
+  const R = keccak256(toBytes('A89 R2-2 r')).slice(2)
+  const S = (BigInt(keccak256(toBytes('A89 R2-2 s'))) % (SECP256K1_N / 2n)).toString(16).padStart(64, '0')
+  const TWIN_S = (SECP256K1_N - BigInt(`0x${S}`)).toString(16).padStart(64, '0')
+  const SIG = `0x${R}${S}1b`
+  const HEX = SIG.slice(2)
+  /** Every 10-hex window of the signature and of its high-s twin text that appears in `printed`. */
+  const leaked = (printed: string) => {
+    const lower = printed.toLowerCase()
+    return [HEX, `${R}${TWIN_S}1c`].flatMap((h) =>
+      Array.from({ length: h.length - 9 }, (_, i) => h.slice(i, i + 10)).filter((w) => lower.includes(w)))
+  }
+  const WINDOWS: [string, string][] = [
+    ['r', `0x${R}`],
+    ['s', `0x${S}`],
+    ['a middle window', `0x${HEX.slice(33, 97)}`],
+    ['the last 64 hex (end of s + v)', `0x${HEX.slice(66)}`],
+    ['r in upper case without 0x', R.toUpperCase()],
+    ['the s of the high-s twin', `0x${TWIN_S}`],
+  ]
+
+  it.each(WINDOWS)('a stored order_hash that is %s of the row\'s signature: <signature fragment len N>, on stdout and stderr', (_label, window) => {
+    const r = run(JSON.stringify([
+      { ...base, id: 'window-differs', order_hash: window, signature: SIG },
+      { ...base, id: 'window-uncomputable', order_hash: window, order_data: null, signature: SIG },
+    ]))
+    expect(lines(r.stdout).find((o) => o.id === 'window-differs')).toMatchObject({
+      verdict: 'differs', stored: `<signature fragment len ${window.length}>`,
+    })
+    expect(r.stderr).toContain(`uncomputable {"id":"window-uncomputable","chain_id":8453,"stored":"<signature fragment len ${window.length}>"`)
+    expect(leaked(r.stdout + r.stderr)).toEqual([])
+  })
+
+  it('safeText: a window of THIS row\'s signature is a fragment; the same text beside another signature, or none, is printed', () => {
+    const window = `0x${S}`
+    expect(safeText(window, SIG)).toBe('<signature fragment len 66>')
+    expect(safeText(window, `0x${'cd'.repeat(65)}`)).toBe(window)
+    expect(safeText(window)).toBe(window)
+    expect(safeText(`0x${'ab'.repeat(32)}`, SIG)).toBe(`0x${'ab'.repeat(32)}`)
+  })
+
+  it.each([
+    ['with 0x', SIG, 132],
+    ['without 0x', HEX, 130],
+  ])('R2-5 last-resort redact: a row whose id is a signature (%s) is printed as <redacted len N> on both streams', (_label, id, len) => {
+    const r = run(JSON.stringify([
+      { ...base, id, order_hash: `0x${'ab'.repeat(32)}`, signature: `0x${'cd'.repeat(64)}1b` },
+      { ...base, id, order_hash: null, order_data: null, signature: `0x${'ef'.repeat(64)}1b` },
+    ]))
+    expect(lines(r.stdout).find((o) => o.verdict === 'differs')).toMatchObject({ id: `<redacted len ${len}>` })
+    expect(r.stderr).toContain(`uncomputable {"id":"<redacted len ${len}>"`)
+    expect(leaked(r.stdout + r.stderr)).toEqual([])
+  })
+})
