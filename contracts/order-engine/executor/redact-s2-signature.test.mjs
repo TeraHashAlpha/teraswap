@@ -4,8 +4,8 @@
 // signature twice: in the Contract Call block (`args:`) and inside the hex of `Request body:` / `Raw Call
 // Arguments` (`data:`). That text reached:
 //   - the keeper log line            executor.js:2156  console.error(`Order …… error:`, redactError(err))
-//   - stats.lastError.message        executor.js:2161  → monitor.js:62 "Last error:" (onCycleEnd)
-//   - the Telegram alert             executor.js:2644  monitor.onCycleError(err) → monitor.js:118
+//   - stats.lastError.message        executor.js:2161  → monitor.js:70 "Last error:" (onCycleEnd)
+//   - the Telegram alert             executor.js:2644  monitor.onCycleError(err) → monitor.js:126
 // and the write site's text ran past 4,096 characters, which Telegram refuses: the alert was lost.
 //
 // Step 0 builds the REAL viem 2.47.10 errors (viem-wrapped-errors.fixture.mjs: viem's own clients against a local
@@ -103,7 +103,7 @@ describe("Step 0 [A87 S-2]: no signature in the keeper log line (executor.js:215
 describe("Step 0 [A87 S-2]: the Telegram alert carries no signature and stays under 4,096 characters", () => {
   for (const site of Object.keys(SITES)) {
     for (const mode of Object.keys(MODES)) {
-      test(`${site} / ${mode}: onCycleError (executor.js:2644 → monitor.js:118)`, async () => {
+      test(`${site} / ${mode}: onCycleError (executor.js:2644 → monitor.js:126)`, async () => {
         const { err } = cases.find((c) => c.site === site && c.mode === mode)
         const text = await alertText((m) => {
           for (let i = 0; i < 3; i++) m.onCycleError(err)
@@ -111,7 +111,7 @@ describe("Step 0 [A87 S-2]: the Telegram alert carries no signature and stays un
         assert.ok(!leaks(text), `signature in the alert: ${text.slice(0, 300)}…`)
         assert.ok(text.length <= TELEGRAM_MAX, `alert text is ${text.length} characters`)
       })
-      test(`${site} / ${mode}: onCycleEnd with stats.lastError (executor.js:2161 → monitor.js:62)`, async () => {
+      test(`${site} / ${mode}: onCycleEnd with stats.lastError (executor.js:2161 → monitor.js:70)`, async () => {
         const { err } = cases.find((c) => c.site === site && c.mode === mode)
         const text = await alertText((m, stats) => {
           stats.lastError = { orderId: "0b3c9e1a-0000-4000-8000-000000000000", message: redactError(err), at: new Date().toISOString() }
