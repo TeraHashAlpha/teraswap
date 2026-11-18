@@ -164,6 +164,12 @@ export function createFakePostgrest(rows) {
   let failWhen = null // (req) => null | { status, body } | "hang" | "throw"
   let version = 0
   const sortedCache = new Map() // order string -> { version, rows }
+  const jsonCache = new WeakMap() // row -> its JSON text (dropped when a PATCH writes the row)
+  const jsonOf = (r) => {
+    let j = jsonCache.get(r)
+    if (j === undefined) jsonCache.set(r, (j = JSON.stringify(r)))
+    return j
+  }
 
   function sortedBy(order) {
     const hit = sortedCache.get(order)
@@ -220,7 +226,10 @@ export function createFakePostgrest(rows) {
     if (method === "PATCH") {
       const matched = table.filter(filter)
       const patch = JSON.parse(init.body || "{}")
-      for (const r of matched) Object.assign(r, patch)
+      for (const r of matched) {
+        Object.assign(r, patch)
+        jsonCache.delete(r)
+      }
       const range = matched.length === 0 ? "*/0" : `0-${matched.length - 1}/*`
       return new Response(null, { status: 204, headers: { "content-range": range } })
     }
@@ -236,7 +245,7 @@ export function createFakePostgrest(rows) {
     const page = matched.slice(offset, offset + limit)
     const counted = /count=exact/.test(headers.get("prefer") || "")
     const range = page.length === 0 ? `*/${counted ? total : "*"}` : `${offset}-${offset + page.length - 1}/${counted ? total : "*"}`
-    const body = method === "HEAD" ? null : JSON.stringify(page.map((r) => ({ ...r, order_data: { ...r.order_data } })))
+    const body = method === "HEAD" ? null : `[${page.map(jsonOf).join(",")}]`
     return new Response(body, { status: 200, headers: { "content-range": range, "content-type": "application/json" } })
   }
 
