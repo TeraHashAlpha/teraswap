@@ -71,27 +71,42 @@ export function evenSchedule(n, rate) {
 }
 
 /**
- * The design's bound (120b §7): every active row is screened at least once every ceil(M / SCAN) cycles, plus one
- * cycle per fallback cycle. For every start cycle s, K(s) is the smallest k with k >= ceil(M(s,k) / scan) + F(s,k),
- * where M(s,k) counts the distinct rows present in cycles s..s+k-1 and F(s,k) the fallback cycles among them; every
- * row present throughout s..s+K-1 must be asked (by either route) in that window.
+ * The design's bound (120b §7, restated in round 3 — active-window.js header): every active row that is not
+ * quarantined is screened at least once every ceil(M / SCAN) cycles, plus one cycle per fallback cycle (a failed scan
+ * query or wrap read), plus ceil(M / SCAN) cycles per cycle that left pre-screen rows unresolved (the scan no longer
+ * holds its position, so such a row waits for the scan to come round). For every start cycle s, K(s) is the smallest
+ * k with k >= ceil(M(s,k) / scan) * (1 + P(s,k)) + F(s,k) + E(s,k), where M(s,k) counts the distinct rows present in
+ * cycles s..s+k-1, F(s,k) the fallback cycles, P(s,k) the unresolved-pre-screen cycles and E(s,k) the cycles in
+ * `extraAt` among them; every row present throughout s..s+K-1 must be asked (by either route) in that window.
+ * `extraAt` is for the attempted variant: a ready row is attempted by the path within the screen bound plus one cycle
+ * per cycle whose loop stopped early (MAX_BATCH fills or a gas SKIP: the carry-over goes first the next cycle).
  *
- * @param {{ presentAt: Set<string>[], askedAt: Iterable<string>[], fallbackAt?: boolean[], scan: number, label: string }} p
+ * @param {{ presentAt: Set<string>[], askedAt: Iterable<string>[], fallbackAt?: boolean[], passPenaltyAt?: boolean[], extraAt?: boolean[], scan: number, label: string, what?: string }} p
  * @returns {{ checked: number, worstK: number }}
  */
-export function checkScreenBound({ presentAt, askedAt, fallbackAt = [], scan, label }) {
+export function checkScreenBound({ presentAt, countAt = presentAt, askedAt, fallbackAt = [], passPenaltyAt = [], extraAt = [], scan, label, what = "asked canExecute" }) {
+  // presentAt: the rows CHECKED; countAt (default the same): the rows the scan reads, which make M (round 3: the
+  // quarantined rows are read by the scan, so they count in M, but they are not checked).
   const n = presentAt.length
   const born = new Map()
   const end = new Map()
+  const counted = new Set()
   const newAt = new Array(n).fill(0)
   const asked = new Map()
   const fPrefix = [0]
+  const pPrefix = [0]
+  const ePrefix = [0]
   for (let t = 0; t < n; t++) {
+    pPrefix.push(pPrefix[t] + (passPenaltyAt[t] ? 1 : 0))
+    ePrefix.push(ePrefix[t] + (extraAt[t] ? 1 : 0))
+    for (const id of countAt[t]) {
+      if (counted.has(id)) continue
+      counted.add(id)
+      if (t > 0) newAt[t]++
+    }
     for (const id of presentAt[t]) {
-      if (!born.has(id)) {
-        born.set(id, t)
-        if (t > 0) newAt[t]++
-      } else assert.ok(!end.has(id), `${label}: row ${id.slice(-6)} came back after leaving (the checker assumes it cannot)`)
+      if (!born.has(id)) born.set(id, t)
+      else assert.ok(!end.has(id), `${label}: row ${id.slice(-6)} came back after leaving (the checker assumes it cannot)`)
     }
     if (t > 0) for (const id of presentAt[t - 1]) if (!presentAt[t].has(id) && !end.has(id)) end.set(id, t)
     for (const id of askedAt[t]) {
@@ -104,11 +119,11 @@ export function checkScreenBound({ presentAt, askedAt, fallbackAt = [], scan, la
   let checked = 0
   let worstK = 0
   for (let s = 0; s < n; s++) {
-    let M = presentAt[s].size
+    let M = countAt[s].size
     let K = 0
     for (let k = 1; s + k - 1 < n; k++) {
       if (k > 1) M += newAt[s + k - 1]
-      if (k >= Math.ceil(M / scan) + (fPrefix[s + k] - fPrefix[s])) {
+      if (k >= Math.ceil(M / scan) * (1 + pPrefix[s + k] - pPrefix[s]) + (fPrefix[s + k] - fPrefix[s]) + (ePrefix[s + k] - ePrefix[s])) {
         K = k
         break
       }
@@ -129,7 +144,7 @@ export function checkScreenBound({ presentAt, askedAt, fallbackAt = [], scan, la
       const first = list[lo]
       assert.ok(
         first !== undefined && first < s + K,
-        `${label}: row …${id.slice(-6)} present in cycles ${s}..${s + K - 1} (M=${M}, fallback cycles=${fPrefix[s + K] - fPrefix[s]}, bound ${K}) was never asked canExecute; next ask at ${first ?? "never"}`,
+        `${label}: row …${id.slice(-6)} present in cycles ${s}..${s + K - 1} (M=${M}, fallback cycles=${fPrefix[s + K] - fPrefix[s]}, unresolved-pre-screen cycles=${pPrefix[s + K] - pPrefix[s]}, extra=${ePrefix[s + K] - ePrefix[s]}, bound ${K}) was never ${what}; next at ${first ?? "never"}`,
       )
     }
   }

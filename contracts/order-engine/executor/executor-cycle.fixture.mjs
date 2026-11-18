@@ -21,9 +21,16 @@
 // in `unexpected` and answered 501. `failWhen(fn)` makes any request fail, hang (until its AbortSignal
 // fires) or throw like undici's "fetch failed".
 //
-// The fake chain answers canExecute asked directly (the per-order path) and through Multicall3's
-// aggregate3 (the pre-screen), records every ask, and — when a test gives it a wallet — really executes:
-// writeContract records the fill, the receipt is a success, and that nonce is used from then on.
+// The fake chain answers canExecute asked directly (the per-order path), alone with an explicit gas cap (the
+// pre-screen's single ask, round 3) and through Multicall3's aggregate3 (the pre-screen), records every ask,
+// and — when a test gives it a wallet — really executes: writeContract records the fill, the receipt is a
+// success, and that nonce is used from then on.
+//
+// Round 3 (A91 R2-1): a row may be a gas BURNER ({ burn: true }: its canExecute burns all the gas it gets, as a
+// hostile tokenIn.balanceOf or priceFeed.latestRoundData would). Asked alone or by the path it fails "out of
+// gas"; inside aggregate3 the call's fate comes from multicallGasModel (calibrated against the real Multicall3
+// bytecode and the V3 executor in Foundry — PrescreenBisect.t.sol / the round-3 feedback), or from a `replay`
+// table whose every entry Foundry verified.
 
 import assert from "node:assert/strict"
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
@@ -31,7 +38,7 @@ import { builtinModules } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
-import { encodeFunctionResult, keccak256 } from "viem"
+import { encodeFunctionResult, keccak256, RpcRequestError, TimeoutError } from "viem"
 
 const EXECUTOR_DIR = new URL("./", import.meta.url)
 
@@ -162,6 +169,9 @@ export function createFakePostgrest(rows) {
   const telegram = []
   let failNext = null // { match: RegExp, status, body } — fail the next matching request once
   let failWhen = null // (req) => null | { status, body } | "hang" | "throw"
+  // The DCA freeze flag's table (one row, id='dca'): { status, body } answered after delayMs (unless the caller's
+  // signal fires first), or "hang" / "throw". Default: a well-formed "not frozen".
+  let freeze = { status: 200, body: '[{"frozen":false,"reason":null}]', delayMs: 0 }
   let version = 0
   const sortedCache = new Map() // order string -> { version, rows }
   const jsonCache = new WeakMap() // row -> its JSON text (dropped when a PATCH writes the row)
@@ -203,6 +213,12 @@ export function createFakePostgrest(rows) {
       const f = failNext
       failNext = null
       return new Response(f.body, { status: f.status })
+    }
+    if (url.pathname === "/rest/v1/circuit_breaker" && method === "GET") {
+      if (freeze === "hang") return hang(init.signal)
+      if (freeze === "throw") throw new TypeError("fetch failed")
+      if (freeze.delayMs > 0) await delay(freeze.delayMs, init.signal)
+      return new Response(freeze.body, { status: freeze.status, headers: { "content-type": "application/json" } })
     }
     if (url.pathname === "/rest/v1/order_executions") {
       if (method === "POST") {
@@ -267,6 +283,8 @@ export function createFakePostgrest(rows) {
     },
     failNextMatching: (match, status, body, method) => (failNext = { match, status, body, method }),
     failWhen: (fn) => (failWhen = fn),
+    /** The freeze flag's answer: { status, body, delayMs } | "hang" | "throw". */
+    setFreeze: (spec) => (freeze = typeof spec === "string" ? spec : { status: 200, delayMs: 0, ...spec }),
   }
 }
 
@@ -276,6 +294,15 @@ function hang(signal) {
     if (!signal) return
     if (signal.aborted) return reject(signal.reason)
     signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+  })
+}
+
+/** Wait `ms` (real time), or reject with the signal's reason when it fires first. */
+function delay(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason)
+    const t = setTimeout(resolve, ms)
+    signal?.addEventListener("abort", () => (clearTimeout(t), reject(signal.reason)), { once: true })
   })
 }
 
@@ -429,25 +456,81 @@ const CAN_EXECUTE_OUT = [
 const AGGREGATE3_SELECTOR = "0x82ad56cb"
 
 /**
+ * The fate of one aggregate3 call over rows of kinds `burns[i]` (true = a gas burner) under an eth_call gas cap,
+ * calibrated in Foundry on the real Multicall3 bytecode and the V3 executor (round-3 feedback tables): an honest
+ * row costs ~11,000 gas; a burner reverts after burning 63/64 of 63/64 of what it was given, so ~1/32 is left;
+ * an honest row given too little gas fails the same way; returning n results needs ~550·n gas. It reproduces the
+ * measured minimum caps for two burners in 50 rows (0,49: 47M; 47,49: 31M; 3,41: 133M; 24,25: 300M; 0,1: 571M)
+ * within a few %, and 1 burner never fails a 50-row call at caps >= 30M. Exact cases go through `replay`.
+ * @param {boolean[]} burns
+ * @param {number} cap
+ * @returns {{ ok: boolean, success: boolean[] }}
+ */
+export function multicallGasModel(burns, cap) {
+  const HONEST = 11_000
+  let g = cap - 21_000 - 1_200 * burns.length // intrinsic + calldata, roughly
+  const success = []
+  for (const burn of burns) {
+    if (g < 2_000) return { ok: false, success: [] } // Multicall3's own loop runs out
+    if (burn || g * (63 / 64) < HONEST) {
+      g = Math.floor(g / 32)
+      success.push(false)
+    } else {
+      g -= HONEST
+      success.push(true)
+    }
+  }
+  return g >= 550 * burns.length ? { ok: true, success } : { ok: false, success: [] }
+}
+
+/** What a node answers when a call runs out of gas, the way viem wraps it (JSON-RPC -32000, HTTP 200). */
+export function outOfGasError(fn) {
+  const rpc = new RpcRequestError({ body: { method: "eth_call" }, error: { code: -32000, message: "out of gas" }, url: "http://127.0.0.1:9" })
+  return Object.assign(new Error(`The contract function "${fn}" reverted.`), { name: "ContractFunctionExecutionError", cause: rpc })
+}
+
+/**
  * A chain whose canExecute answers come from `answerFor(row, state, route)` → [bool, reason], where route is
- * "screen" (through Multicall3, the pre-screen) or "path" (asked directly by the per-order path). An answer
- * may also be { revert: true } (the call reverts) or { throw: error } (the path's call throws it; the
- * pre-screen sees a revert). Every ask is recorded, in order: `screenCalls`, `pathCalls` and
- * `canExecuteCalls` (both).
+ * "screen" (through Multicall3, the pre-screen), "single" (the pre-screen asking one row alone with an explicit
+ * gas cap) or "path" (asked directly by the per-order path). An answer may also be { revert: true } (the call
+ * reverts), { throw: error } (the path's and a single ask's call throws it; the pre-screen sees a revert),
+ * { burn: true } (a gas burner, see above) or { hang: true } (a single ask never answers). Every ask is
+ * recorded, in order: `screenCalls`, `singleCalls` ({ id, gas }), `pathCalls` and `canExecuteCalls` (all).
  *
  * opts.wallet: also return a wallet client whose writeContract really executes (the fill is recorded in
  * `executions`; a non-DCA nonce is used from then on and answers "Nonce used"), with a successful receipt.
+ * opts.account: the wallet client has an account (executeCycle then runs its cycle-start observability: the
+ * balance, the DCA freeze flag, ETH/USD); getBalance answers 1 ETH.
  * opts.gasPriceWei: () => bigint, the gas price each read returns (default 0.01 gwei: Base's NORMAL tier).
  * opts.aggregate: ({ chunkIndex, ids }) => null | "throw" | "hang" | "absent" — how one aggregate3 call fails.
+ * opts.gasCap: the eth_call gas cap multicallGasModel uses (default 50,000,000: geth's RPCGasCap).
+ * opts.replay: ("aggregate" | "single", ids) => { ok, success? } — Foundry-verified outcomes instead of the model.
  * opts.receiptGate: () => Promise — awaited before every receipt (a test holds a cycle inside its receipt wait).
+ * opts.rpcHang + opts.rpcLimitMs: every RPC method for which rpcHang(method) is true never answers; with
+ * rpcLimitMs it rejects after that long with viem's TimeoutError — standing in for viem's http transport limit
+ * (10 s per try, 3 retries), which the fake bypasses.
  */
-export function createFakeChain(db, answerFor, { wallet = false, gasPriceWei = () => 10_000_000n, aggregate = null, receiptGate = null } = {}) {
+export function createFakeChain(
+  db,
+  answerFor,
+  { wallet = false, account = false, gasPriceWei = () => 10_000_000n, aggregate = null, gasCap = 50_000_000, replay = null, receiptGate = null, rpcHang = null, rpcLimitMs = null } = {},
+) {
   const canExecuteCalls = []
   const screenCalls = []
+  const singleCalls = []
   const pathCalls = []
   const executions = []
   const aggregateCalls = []
+  // Pre-screen answers the keeper actually RECEIVED (an answered aggregate3's results, a single ask that answered):
+  // { id, route: "screen" | "single", result: "true" | "false" | "unanswered" }, in order.
+  const delivered = []
   const state = { usedNonces: new Set(), dcaFills: new Map() }
+  const hangs = (method) => {
+    if (!rpcHang || !rpcHang(method)) return null
+    return new Promise((_resolve, reject) => {
+      if (rpcLimitMs !== null) setTimeout(() => reject(new TimeoutError({ body: { method }, url: "http://127.0.0.1:9" })), rpcLimitMs)
+    })
+  }
   const byNonce = () => {
     const m = new Map()
     for (const r of db.table) m.set(String(r.order_data?.nonce), r)
@@ -462,15 +545,33 @@ export function createFakeChain(db, answerFor, { wallet = false, gasPriceWei = (
   let aggregateIndex = 0
 
   const publicClient = {
-    async readContract({ address, functionName, args }) {
+    async readContract({ address, functionName, args, gas }) {
+      const hung = hangs(functionName)
+      if (hung) return hung
       if (functionName === "latestRoundData") return [1n, 200_000_000_000n, 0n, 0n, 1n]
       if (functionName === "canExecute") {
         const nonce = String(args[0].nonce)
         const row = db.table.find((r) => r.order_data?.nonce === nonce)
         assert.ok(row, `canExecute for an unknown nonce ${nonce}`)
         canExecuteCalls.push(row.id)
+        if (gas !== undefined) {
+          // The pre-screen asking one row ALONE, with an explicit gas cap (round 3).
+          singleCalls.push({ id: row.id, gas })
+          if (replay) {
+            const r = replay("single", [row.id])
+            if (!r.ok) throw outOfGasError("canExecute")
+          }
+          const a = answer(row, "single")
+          if (a && a.hang) return new Promise(() => {})
+          if (a && a.burn) throw outOfGasError("canExecute")
+          if (a && a.throw) throw a.throw
+          if (a && a.revert) throw new Error("execution reverted")
+          delivered.push({ id: row.id, route: "single", result: a[0] ? "true" : "false" })
+          return a
+        }
         pathCalls.push(row.id)
         const a = answer(row, "path")
+        if (a && a.burn) throw outOfGasError("canExecute") // the node's own eth_call cap
         if (a && a.throw) throw a.throw
         if (a && a.revert) throw new Error("execution reverted")
         return a
@@ -486,30 +587,45 @@ export function createFakeChain(db, answerFor, { wallet = false, gasPriceWei = (
         if (failure === "hang") return new Promise(() => {})
         if (failure === "throw") throw new Error("HTTP request failed. Status: 503")
         if (failure === "absent") throw new Error('The contract function "aggregate3" returned no data ("0x").')
-        return rows.map((row) => {
+        const answers = rows.map((row) => answer(row, "screen"))
+        const fate = replay ? replay("aggregate", rows.map((r) => r.id)) : answers.some((a) => a && a.burn) ? multicallGasModel(answers.map((a) => Boolean(a && a.burn)), gasCap) : null
+        if (fate && !fate.ok) throw outOfGasError("aggregate3")
+        return rows.map((row, j) => {
           canExecuteCalls.push(row.id)
           screenCalls.push(row.id)
-          const a = answer(row, "screen")
-          if (a && (a.revert || a.throw)) return { success: false, returnData: "0x" }
+          const a = answers[j]
+          if ((fate && !fate.success[j]) || (a && (a.revert || a.throw || a.burn || a.hang))) {
+            delivered.push({ id: row.id, route: "screen", result: "unanswered" })
+            return { success: false, returnData: "0x" }
+          }
+          delivered.push({ id: row.id, route: "screen", result: a[0] ? "true" : "false" })
           return { success: true, returnData: encodeFunctionResult({ abi: CAN_EXECUTE_OUT, functionName: "canExecute", result: [a[0], a[1]] }) }
         })
       }
       throw new Error(`fake chain: unexpected readContract ${functionName}`)
     },
+    async getBalance() {
+      return hangs("getBalance") ?? 10n ** 18n
+    },
     async getGasPrice() {
-      return gasPriceWei()
+      return hangs("getGasPrice") ?? gasPriceWei()
     },
     async getBlock() {
-      return { baseFeePerGas: 1_000_000n }
+      return hangs("getBlock") ?? { baseFeePerGas: 1_000_000n }
     },
     async waitForTransactionReceipt() {
+      const hung = hangs("waitForTransactionReceipt")
+      if (hung) return hung
       if (receiptGate) await receiptGate()
       return { status: "success", gasUsed: 100_000n, effectiveGasPrice: 1n, logs: [] }
     },
   }
   const walletClient = wallet
     ? {
+        ...(account ? { account: { address: "0x00000000000000000000000000000000000ce111" } } : {}),
         async writeContract({ functionName, args }) {
+          const hung = hangs("writeContract")
+          if (hung) return hung
           assert.equal(functionName, "executeOrder")
           const nonce = String(args[0].nonce)
           const row = db.table.find((r) => r.order_data?.nonce === nonce)
@@ -522,7 +638,7 @@ export function createFakeChain(db, answerFor, { wallet = false, gasPriceWei = (
         },
       }
     : null
-  return { publicClient, walletClient, canExecuteCalls, screenCalls, pathCalls, executions, aggregateCalls, state }
+  return { publicClient, walletClient, canExecuteCalls, screenCalls, singleCalls, pathCalls, executions, aggregateCalls, delivered, state }
 }
 
 /**

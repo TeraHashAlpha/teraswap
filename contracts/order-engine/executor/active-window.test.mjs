@@ -11,10 +11,16 @@
 // those mechanisms (listed in the branch's feedback file); the selection tests below are round 1's, moved
 // from advanceActiveWindow to advanceScan.
 //
+// Round 3 (A91 R2-1): truncateScan (a failed chunk HELD the scan) is gone, and its test with it; added:
+// prescreenFailureKind on REAL viem errors (a real client against a stubbed fetch), bisectFailedChunks (calls,
+// budget, order, transport, the <= 7P cost on the calibrated gas model), createQuarantine, scan-wrap and
+// quarantined= in the line.
+//
 // Run: node --test contracts/order-engine/executor/active-window.test.mjs
 
 import { test, describe } from "node:test"
 import assert from "node:assert/strict"
+import { createPublicClient, http } from "viem"
 
 import {
   activeWindowParams,
@@ -23,7 +29,6 @@ import {
   isUuid,
   selectActiveWindow,
   advanceScan,
-  truncateScan,
   keepIdsAfterScans,
   planWalk,
   carryAfterLoop,
@@ -31,8 +36,12 @@ import {
   fallbackFlag,
   activeScanLogLine,
   logBody,
+  prescreenFailureKind,
+  bisectFailedChunks,
+  createQuarantine,
 } from "./active-window.js"
-import { compareTimestamps, mulberry32 } from "./executor-cycle.fixture.mjs"
+import { classifyRpcError, RPC_AUTH } from "./rpc-auth.js"
+import { compareTimestamps, mulberry32, multicallGasModel } from "./executor-cycle.fixture.mjs"
 import { checkScreenBound } from "./active-scan.testlib.mjs"
 
 const W = 15 // a small scan, so the unit tests rotate (SCAN_CAP is 1000 in executor.js)
@@ -325,19 +334,159 @@ describe("advanceScan — the scan's position and its complete scans", () => {
     assert.equal(next.cursor, null)
     assert.equal(next.complete.size, 40)
   })
-  test("truncateScan: a failed chunk holds the scan at its first row (the next page starts there)", () => {
+  test("ROUND 3 (A91 R2-1): the scan never holds — the next page starts after the last row READ, whatever the pre-screen answered", () => {
     const db = createDb(rows)
     const k = createKeeper()
     const scan = fetchWindow(db, k)
-    const held = truncateScan(scan, 6)
-    assert.equal(held.rows.length, 6)
-    advance(k, held)
-    assert.equal(fetchWindow(db, k).rows[0].id, rows[6].id)
-    const none = truncateScan(scan, 0)
-    const k2 = createKeeper()
-    advance(k2, none)
-    assert.equal(k2.cursor, null, "nothing screened: the position does not move")
-    assert.equal(truncateScan(scan, 99), scan)
+    advance(k, scan) // executor.js advances on the scan as read (truncateScan is gone)
+    assert.equal(fetchWindow(db, k).rows[0].id, rows[W].id)
+  })
+})
+
+describe("prescreenFailureKind — real viem errors (a real client, a stubbed fetch)", () => {
+  /** One readContract through a real viem http transport whose fetch is `answer`. */
+  async function viemError(answer, { timeout = 10_000 } = {}) {
+    const realFetch = globalThis.fetch
+    globalThis.fetch = answer
+    try {
+      const client = createPublicClient({ transport: http("http://rpc.fake.test/v2/KEY", { retryCount: 0, timeout }) })
+      await client.readContract({
+        address: "0xcA11bde05977b3631167028862bE2a173976CA11",
+        abi: [{ name: "getBlockNumber", type: "function", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] }],
+        functionName: "getBlockNumber",
+      })
+      return null
+    } catch (err) {
+      return err
+    } finally {
+      globalThis.fetch = realFetch
+    }
+  }
+  const rpc = (error, status = 200) => async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 0, error }), { status, headers: { "content-type": "application/json" } })
+  const isAuth = (e) => classifyRpcError(e).kind === RPC_AUTH
+
+  test("out of gas (JSON-RPC -32000, HTTP 200) and a revert (code 3 with data) are execution", async () => {
+    assert.equal(prescreenFailureKind(await viemError(rpc({ code: -32000, message: "out of gas" })), { isAuth }), "execution")
+    assert.equal(prescreenFailureKind(await viemError(rpc({ code: 3, message: "execution reverted", data: "0x08c379a0" + "0".repeat(56) + "20" })), { isAuth }), "execution")
+  })
+  test("HTTP 503 / 429, a network error and an auth refusal are transport", async () => {
+    assert.equal(prescreenFailureKind(await viemError(async () => new Response("upstream", { status: 503 })), { isAuth }), "transport")
+    assert.equal(prescreenFailureKind(await viemError(async () => new Response("slow down", { status: 429 })), { isAuth }), "transport")
+    assert.equal(prescreenFailureKind(await viemError(async () => { throw new TypeError("fetch failed") }), { isAuth }), "transport")
+    assert.equal(prescreenFailureKind(await viemError(async () => new Response("Unspecified origin not on whitelist", { status: 403 })), { isAuth }), "transport")
+    assert.equal(prescreenFailureKind(await viemError(async () => new Response("<html>502: execution reverted upstream</html>", { status: 502 })), { isAuth }), "transport", "an HTTP status decides first: a provider page may say reverted")
+    // viem keeps no status when a 5xx carries a JSON-RPC body: it builds ExecutionRevertedError from it (ADR-026 A73c S-12).
+    assert.equal(prescreenFailureKind(await viemError(rpc({ code: -32000, message: "execution reverted" }, 503)), { isAuth }), "execution")
+  })
+  test("the keeper's own time limit is time-limit; viem's own transport timeout is transport", async () => {
+    assert.equal(prescreenFailureKind(Object.assign(new Error("no answer within 5000 ms"), { name: "TimeoutError", prescreenTimeLimit: true })), "time-limit")
+    const viemTimeout = await viemError((_u, init) => new Promise((_r, rej) => init.signal.addEventListener("abort", () => rej(init.signal.reason))), { timeout: 30 })
+    assert.equal(prescreenFailureKind(viemTimeout, { isAuth }), "transport")
+  })
+  test("anything else is other; a hostile error object never throws", () => {
+    assert.equal(prescreenFailureKind(new Error('The contract function "aggregate3" returned no data ("0x").')), "other")
+    assert.equal(prescreenFailureKind(undefined), "other")
+    const hostile = new Proxy({}, { get() { throw new Error("no") } })
+    assert.equal(prescreenFailureKind(hostile), "other")
+    assert.equal(prescreenFailureKind(new Error("x"), { isAuth: () => { throw new Error("no") } }), "other")
+  })
+})
+
+describe("bisectFailedChunks — the failed chunk is split until the failing rows are alone, within the budget", () => {
+  /** Asks answered by the calibrated gas model at `cap`; rows are { i, burn }. */
+  function modelAsks(cap, log) {
+    return {
+      askChunk: async (rs) => {
+        log.push(["chunk", rs.map((r) => r.i)])
+        const fate = multicallGasModel(rs.map((r) => r.burn), cap)
+        return fate.ok ? { ok: true, results: rs.map((r, j) => (fate.success[j] ? { answered: true, answer: r.i } : { answered: false })) } : { ok: false, kind: "execution" }
+      },
+      askOne: async (r) => {
+        log.push(["one", [r.i]])
+        return r.burn ? { ok: false, kind: "execution" } : { ok: true, answer: r.i }
+      },
+    }
+  }
+  const chunk = (n, burns) => Array.from({ length: n }, (_, i) => ({ i, burn: burns.includes(i) }))
+
+  test("two burners split across the halves: 4 calls (two halves, two alone-asks); both isolated; the 48 others answered", async () => {
+    const log = []
+    const r = await bisectFailedChunks({ sets: [chunk(50, [3, 41])], ...modelAsks(50e6, log), budget: 40 })
+    assert.deepEqual(log, [["chunk", Array.from({ length: 25 }, (_, i) => i)], ["chunk", Array.from({ length: 25 }, (_, i) => i + 25)], ["one", [3]], ["one", [41]]])
+    assert.deepEqual(r.isolated.map((x) => x.row.i), [3, 41])
+    assert.equal(r.answered.length, 48)
+    assert.equal(r.calls, 4)
+  })
+  test("depth-first from the oldest row; a half of one row is asked alone, never as a one-call batch", async () => {
+    const log = []
+    await bisectFailedChunks({ sets: [chunk(3, [0, 1])], askChunk: async (rs) => (log.push(["chunk", rs.map((r) => r.i)]), { ok: false, kind: "execution" }), askOne: async (r) => (log.push(["one", [r.i]]), { ok: true, answer: 1 }), budget: 40 })
+    assert.deepEqual(log, [["chunk", [0, 1]], ["one", [0]], ["one", [1]], ["one", [2]]])
+  })
+  test("the budget: never more calls than it allows; what it did not reach is unresolved", async () => {
+    const log = []
+    const sets = Array.from({ length: 12 }, () => chunk(50, [3, 9, 17, 22, 30, 38, 44]))
+    const r = await bisectFailedChunks({ sets, ...modelAsks(50e6, log), budget: 40 })
+    assert.equal(log.length, 40)
+    assert.equal(r.calls, 40)
+    assert.equal(r.answered.length + r.isolated.length + r.unresolved.length, 600, "every row accounted for exactly once")
+  })
+  test("a transport failure is not split: its rows are unresolved, the next set goes on", async () => {
+    const r = await bisectFailedChunks({
+      sets: [chunk(10, []), chunk(4, [])],
+      askChunk: async (rs) => (rs[0].i === 0 && rs.length === 5 ? { ok: false, kind: "transport" } : { ok: true, results: rs.map((x) => ({ answered: true, answer: x.i })) }),
+      askOne: async () => ({ ok: true, answer: 0 }),
+      budget: 40,
+    })
+    assert.deepEqual(r.unresolved.map((x) => x.i), [0, 1, 2, 3, 4])
+    assert.equal(r.answered.length, 5 + 4)
+  })
+  test("a row that fails alone for a reason other than execution / time limit is unresolved, not isolated", async () => {
+    const r = await bisectFailedChunks({ sets: [chunk(1, [])], askChunk: async () => assert.fail(), askOne: async () => ({ ok: false, kind: "other" }), budget: 40 })
+    assert.deepEqual([r.isolated.length, r.unresolved.length], [0, 1])
+  })
+  test("cost on the calibrated model: isolating P burners in a 50-row chunk takes <= 7P calls (500 seeded layouts, caps 31M-550M)", async () => {
+    const rand = mulberry32(0x7b)
+    let worst = 0
+    for (let run = 0; run < 500; run++) {
+      const p = 2 + Math.floor(rand() * 15)
+      const burns = []
+      while (burns.length < p) {
+        const i = Math.floor(rand() * 50)
+        if (!burns.includes(i)) burns.push(i)
+      }
+      const cap = [31e6, 50e6, 150e6, 550e6][run % 4]
+      if (multicallGasModel(chunk(50, burns).map((r) => r.burn), cap).ok) continue // that chunk does not fail
+      const r = await bisectFailedChunks({ sets: [chunk(50, burns)], ...modelAsks(cap, []), budget: 10_000 })
+      assert.deepEqual(r.isolated.map((x) => x.row.i).sort((a, b) => a - b), [...burns].sort((a, b) => a - b), `run ${run}: the burners isolated`)
+      assert.equal(r.answered.length, 50 - p, `run ${run}: every healthy row answered`)
+      assert.ok(r.calls <= 7 * p, `run ${run}: ${r.calls} calls for ${p} burners at ${cap / 1e6}M`)
+      worst = Math.max(worst, r.calls / p)
+    }
+    assert.ok(worst > 1, `worst ${worst.toFixed(2)} calls per burner`)
+  })
+})
+
+describe("createQuarantine — in memory, re-asked at most once per reaskMs, released when it answers", () => {
+  test("due: only rows asked at least reaskMs ago, least recently asked first; a failed re-ask waits again; release; prune", () => {
+    const q = createQuarantine({ reaskMs: 1_800_000 })
+    q.add("a", 0, "execution")
+    q.add("b", 60_000, "time-limit")
+    q.add("c", 0, "execution")
+    assert.equal(q.size(), 3)
+    assert.deepEqual(q.due(["a", "b", "c"], 1_799_999), [])
+    assert.deepEqual(q.due(["c", "b", "a"], 1_800_000), ["c", "a"], "ties in scan order")
+    assert.deepEqual(q.due(["a", "b", "c"], 1_860_000), ["a", "c", "b"])
+    q.asked("a", 1_860_000)
+    assert.deepEqual(q.due(["a", "b", "c"], 1_860_000), ["c", "b"])
+    q.release("c")
+    assert.equal(q.has("c"), false)
+    assert.deepEqual(q.counts(), { total: 3, released: 1 })
+    q.add("a", 2_000_000, "execution")
+    assert.equal(q.counts().total, 3, "a re-quarantine is not a new row")
+    q.prune(null)
+    assert.equal(q.size(), 2)
+    q.prune(new Set(["b"]))
+    assert.deepEqual([...q.snapshot().keys()], ["b"])
   })
 })
 
@@ -421,13 +570,13 @@ test("createEpisodeGate: alert on the first failed cycle, then at most once per 
 describe("the cycle line (S-11): counts and flags only, numbers validated", () => {
   test("format", () => {
     assert.equal(
-      activeScanLogLine({ active: 1340, scanned: 1000, ready: 7, attempted: 5, carried: 2, rotate: true, fallback: "none" }),
-      "Active scan: active=1340 scanned=1000 true=7 attempted=5 carried=2 rotate=yes fallback=none",
+      activeScanLogLine({ active: 1340, scanned: 1000, ready: 7, attempted: 5, carried: 2, quarantined: 3, rotate: true, fallback: "none" }),
+      "Active scan: active=1340 scanned=1000 true=7 attempted=5 carried=2 quarantined=3 rotate=yes fallback=none",
     )
   })
   test("an absurd or missing number is '?', a fallback flag outside the vocabulary is '?'", () => {
-    const line = activeScanLogLine({ active: 1e21, scanned: -1, ready: 2.5, attempted: Number.NaN, carried: null, rotate: false, fallback: "scan-503 or 1=1" })
-    assert.equal(line, "Active scan: active=? scanned=? true=? attempted=? carried=? rotate=no fallback=?")
+    const line = activeScanLogLine({ active: 1e21, scanned: -1, ready: 2.5, attempted: Number.NaN, carried: null, quarantined: -2, rotate: false, fallback: "scan-503 or 1=1" })
+    assert.equal(line, "Active scan: active=? scanned=? true=? attempted=? carried=? quarantined=? rotate=no fallback=?")
   })
   test("fallbackFlag vocabulary", () => {
     assert.equal(fallbackFlag({}), "none")
@@ -437,7 +586,10 @@ describe("the cycle line (S-11): counts and flags only, numbers validated", () =
     assert.equal(fallbackFlag({ scan: "<script>" }), "scan-error")
     assert.equal(fallbackFlag({ prescreenFailed: 2, prescreenChunks: 20 }), "prescreen-2of20")
     assert.equal(fallbackFlag({ scan: "network", prescreenFailed: 1, prescreenChunks: 1 }), "scan-network+prescreen-1of1")
-    for (const f of ["none", "scan-503", "prescreen-2of20", "scan-network+prescreen-1of1"]) assert.match(activeScanLogLine({ active: 1, scanned: 1, ready: 0, attempted: 0, carried: 0, rotate: false, fallback: f }), new RegExp(`fallback=${f.replace("+", "\\+")}$`))
+    assert.equal(fallbackFlag({ wrap: true }), "scan-wrap")
+    assert.equal(fallbackFlag({ wrap: true, prescreenFailed: 1, prescreenChunks: 3 }), "scan-wrap+prescreen-1of3")
+    assert.equal(fallbackFlag({ wrap: "yes" }), "none", "only a boolean true")
+    for (const f of ["none", "scan-503", "prescreen-2of20", "scan-network+prescreen-1of1", "scan-wrap", "scan-wrap+prescreen-1of3"]) assert.match(activeScanLogLine({ active: 1, scanned: 1, ready: 0, attempted: 0, carried: 0, rotate: false, fallback: f }), new RegExp(`fallback=${f.replace("+", "\\+")}$`))
   })
   test("logBody: no uuid, no 0x-hex of 40+ digits, no URL; one line; at most 200 characters", () => {
     const body = `{"message":"failed to parse filter (created_at.gt.\\"2026-11-17T10:00:00+00:00\\",id.gt.\\"${idN(9)}\\")","hint":"0x${"ab".repeat(32)} see https://supabase.example/rest/v1/orders?id=eq.${idN(9)}"}\n${"x".repeat(400)}`

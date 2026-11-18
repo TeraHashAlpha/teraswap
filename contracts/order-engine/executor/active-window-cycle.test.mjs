@@ -99,7 +99,7 @@ describe("[SEC-4] shipped cycle — edges", () => {
     assert.deepEqual(returned, [0, 0])
     assert.ok(lines.some((l) => l.includes("No active orders")))
     assert.deepEqual(windowLines.map((w) => w.length), [1, 1])
-    assert.match(windowLines[0][0], /Active scan: active=0 scanned=0 true=0 attempted=0 carried=0 rotate=no fallback=none$/)
+    assert.match(windowLines[0][0], /Active scan: active=0 scanned=0 true=0 attempted=0 carried=0 quarantined=0 rotate=no fallback=none$/)
   })
 
   test("one row: examined every cycle", async () => {
@@ -118,8 +118,8 @@ describe("[SEC-4] shipped cycle — edges", () => {
     const chain = createFakeChain(db, () => [false, "DCA interval not reached"])
     const { perCycle, windowLines } = await runCycles(k, db, chain, 4)
     for (const ids of perCycle) assert.deepEqual(ids, rows.map((r) => r.id))
-    assert.match(windowLines[0][0], /active=15 scanned=15 true=0 attempted=0 carried=0 rotate=no fallback=none$/, "the count says the page holds the whole chain")
-    assert.match(windowLines[1][0], /active=15 scanned=15 true=0 attempted=0 carried=0 rotate=no fallback=none$/)
+    assert.match(windowLines[0][0], /active=15 scanned=15 true=0 attempted=0 carried=0 quarantined=0 rotate=no fallback=none$/, "the count says the page holds the whole chain")
+    assert.match(windowLines[1][0], /active=15 scanned=15 true=0 attempted=0 carried=0 quarantined=0 rotate=no fallback=none$/)
   })
 
   test("equal created_at: 40 rows sharing one timestamp are all examined within ceil(40/15) = 3 cycles, none twice first", async () => {
@@ -190,7 +190,7 @@ describe("[SEC-4] shipped cycle — one window line per cycle, counts only", () 
     assert.deepEqual(windowLines.map((w) => w.length), [1, 1, 1, 1, 1])
     for (const [w] of windowLines) {
       // ROUND 2: the whole chain (20 rows) is scanned and pre-screened every cycle; none answered true.
-      assert.match(w, /Active scan: active=20 scanned=20 true=0 attempted=0 carried=0 rotate=no fallback=none$/)
+      assert.match(w, /Active scan: active=20 scanned=20 true=0 attempted=0 carried=0 quarantined=0 rotate=no fallback=none$/)
       assert.doesNotMatch(w, /0x|[0-9a-f]{8}-[0-9a-f]{4}-/i, "no address, signature or id")
     }
     assert.equal(lines.some((l) => /Querying:|Supabase returned|First order:/.test(l)), false)

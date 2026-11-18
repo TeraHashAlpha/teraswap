@@ -213,6 +213,10 @@ true through the per-order path, where this ADR's quorum runs unchanged. For `SK
   the row is asked again at its next scan, and the streak counts scans. The alert after 3 skips comes after about
   3 × ceil(M / 1000) cycles (2000 rows: 6 cycles, 3 minutes, instead of 1.5). Still never cancelled, never filled
   blind. Runbook: `EXECUTOR-OPERATIONS.md` § 9.
+- **Round 3 (A91, same PR).** A DCA row the pre-screen QUARANTINES (its `canExecute` fails when asked alone: out of
+  gas, a revert or a time limit) is not walked, so its quorum is not asked and its skip streak neither moves nor
+  resets while it is quarantined. And the DCA freeze read the cycle makes before this gate now fails CLOSED (owner
+  decision 2026-11-18): anything but a well-formed "not frozen" holds DCA for that cycle (`DCA-FREEZE.md`).
 
 ## Verification
 

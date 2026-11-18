@@ -27,7 +27,7 @@ describe("[S-6] shipped cycles that really execute", () => {
     const chain = createFakeChain(db, (row) => (ready.has(row.id) ? [true, ""] : [false, "Price below floor"]), { wallet: true })
     const c0 = await runCycle(k, db, chain, 0)
     assert.deepEqual(c0.executed, [2, 4, 5, 8, 11].map((i) => rows[i].id), "the 5 oldest ready rows, oldest first")
-    assert.match(c0.scanLine, /active=20 scanned=20 true=8 attempted=5 carried=3 rotate=no fallback=none$/)
+    assert.match(c0.scanLine, /active=20 scanned=20 true=8 attempted=5 carried=3 quarantined=0 rotate=no fallback=none$/)
     const c1 = await runCycle(k, db, chain, 1)
     assert.deepEqual(c1.executed, [13, 17, 19].map((i) => rows[i].id))
     assert.match(c1.scanLine, /active=15 scanned=15 true=3 attempted=3 carried=0/)
@@ -88,42 +88,53 @@ describe("[pre-screen] failures never leave a cycle that examines nothing", () =
     assert.equal(c0.screened.length, 10)
     assert.deepEqual(c0.path, [odd])
     assert.deepEqual(c0.executed, [odd])
-    assert.match(c0.scanLine, /scanned=10 true=0 attempted=1 carried=0 rotate=no fallback=none$/, "one row's revert is not a chunk failure")
+    assert.match(c0.scanLine, /scanned=10 true=0 attempted=1 carried=0 quarantined=0 rotate=no fallback=none$/, "one row's revert is not a chunk failure")
   })
 
-  test("a chunk times out: its rows join the 15-row budget, the cycle is flagged, and the scan holds at that chunk", async () => {
+  // [A91 R2-1] ROUND 3 CHANGED THIS TEST. Round 2 pinned "the scan holds at that chunk" (the next scan started at the
+  // failed chunk's first row, and its rows went to the 15-row budget); a hostile row could make that chunk fail every
+  // cycle and freeze the rotation. Now the failed chunk is BISECTED in the same cycle and the scan moves on.
+  test("ROUND 3: a chunk times out: it is bisected in the same cycle (every row answered by the pre-screen, none left for the 15-row budget), the cycle is flagged, and the scan does NOT hold — the next page starts after the last row read", async () => {
     const k = await loadKeeper({ constants: { SCAN_CAP: 150, PRESCREEN_CHUNK_TIMEOUT_MS: 100 } })
     const rows = rowsOf(200)
     const db = createFakePostgrest(rows)
     let hang = true
     const chain = createFakeChain(db, () => [false, "Price below floor"], { aggregate: ({ chunkIndex }) => (hang && chunkIndex === 1 ? "hang" : null) })
+    const index = new Map(rows.map((r, i) => [r.id, i]))
     // Seed 7's random first page; whatever it is, chunk 1 holds rows 50..99 of that page.
     const random = mulberry32(7)
     const c0 = await runCycle(k, db, chain, 0, { random })
-    assert.equal(c0.screened.length, 100, "chunks 0 and 2 answered")
-    assert.equal(c0.path.length, 15, "15 of chunk 1's rows asked one by one")
-    assert.match(c0.scanLine, /fallback=prescreen-1of3$/)
+    assert.equal(new Set(c0.screened).size, 150, "chunks 0 and 2 answered, and chunk 1's rows through its two halves")
+    assert.deepEqual(chain.aggregateCalls.slice(3).map((c) => c.size), [25, 25], "the timed-out chunk: two halves of 25, both answered")
+    assert.equal(c0.path.length, 0, "no row left for the 15-row budget")
+    assert.match(c0.scanLine, /quarantined=0 rotate=yes fallback=prescreen-1of3$/)
     assert.equal(k.stats.prescreenFallbackCycles, 1)
-    const heldAt = chain.aggregateCalls[1].ids[0]
+    const lastRead = chain.aggregateCalls[2].ids.at(-1)
     hang = false
     const c1 = await runCycle(k, db, chain, 1, { random })
-    assert.equal(c1.screened[0], heldAt, "the next scan starts at the failed chunk's first row")
+    assert.equal(index.get(c1.screened[0]), (index.get(lastRead) + 1) % rows.length, "the next scan starts after the last row read, not at the failed chunk")
     assert.match(c1.scanLine, /fallback=none$/)
   })
 
-  test("Multicall3 absent: every cycle still examines 15 rows one by one, rotating, so 40 rows are all asked within 3 cycles", async () => {
+  // [A91 R2-1] ROUND 3 CHANGED THE COUNT: "absent" is not an RPC transport error, so the chunk is bisected and the
+  // bisect's gas-capped single asks (direct canExecute calls: no Multicall3 needed) answer about 20 of the 40 rows
+  // each cycle; the path still asks 15 rows one by one. "All 40 asked" now counts both routes, not the path alone.
+  test("Multicall3 absent: every cycle still examines 15 rows one by one, rotating, and the bisect asks others alone, so 40 rows are all asked within 3 cycles", async () => {
     const k = await loadKeeper()
     const rows = rowsOf(40)
     const db = createFakePostgrest(rows)
     const chain = createFakeChain(db, () => [false, "Price below floor"], { aggregate: () => "absent" })
     const asked = new Set()
     for (let c = 0; c < 3; c++) {
+      const b0 = k.stats.bisectCalls
       const r = await runCycle(k, db, chain, c)
       assert.equal(r.path.length, 15, `cycle ${c} asked ${r.path.length} rows one by one`)
-      assert.match(r.scanLine, /scanned=40 true=0 attempted=15 carried=0 rotate=no fallback=prescreen-1of1$/)
-      for (const id of r.path) asked.add(id)
+      assert.match(r.scanLine, /scanned=40 true=0 attempted=15 carried=0 quarantined=0 rotate=no fallback=prescreen-1of1$/)
+      assert.ok(k.stats.bisectCalls - b0 <= 40)
+      for (const id of r.asked) asked.add(id)
     }
     assert.equal(asked.size, 40)
+    assert.equal(k.stats.quarantinedRows, 0, "rows that answer alone are never quarantined")
   })
 })
 

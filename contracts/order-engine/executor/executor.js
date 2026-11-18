@@ -258,7 +258,6 @@ import {
   activeWindowParams,
   contentRangeTotal,
   selectActiveWindow,
-  truncateScan,
   advanceScan,
   keepIdsAfterScans,
   planWalk,
@@ -268,6 +267,9 @@ import {
   activeScanLogLine,
   logBody,
   isUuid,
+  prescreenFailureKind,
+  bisectFailedChunks,
+  createQuarantine,
 } from "./active-window.js"
 
 // ---- Configuration -----------------------------------------------------
@@ -353,6 +355,23 @@ const PRESCREEN_CHUNK = 50
 const PRESCREEN_CHUNK_TIMEOUT_MS = 5_000
 const SUPABASE_READ_TIMEOUT_MS = 5_000
 const ONE_BY_ONE = MAX_BATCH * 3
+// [A91 R2-1 / design 120c, owner answers 2026-11-18] A failed chunk is bisected within BISECT_CALL_BUDGET extra
+// calls per cycle; a row asked alone gets an explicit eth_call gas cap (an honest V3 canExecute needs 16k-31k:
+// PrescreenBisect.t.sol); a row that fails alone is quarantined and asked again alone at most once every
+// QUARANTINE_REASK_MS, QUARANTINE_REASK_BUDGET asks per cycle outside the bisect budget (owner answer 4); ops is
+// paged once QUARANTINE_ALERT_AT rows are quarantined.
+const BISECT_CALL_BUDGET = 40
+const SINGLE_ASK_GAS = 3_000_000n
+const QUARANTINE_REASK_MS = 30 * 60_000
+const QUARANTINE_REASK_BUDGET = 10
+const QUARANTINE_ALERT_AT = 5
+// [A91 watchdog] One cycle at a time (S-3) means a cycle that never ends would stop the keeper silently: a cycle
+// running longer than this pages ops once (warn) and shows on /health; it is not killed.
+const CYCLE_WATCHDOG_MS = 5 * 60_000
+// [A91, owner answer 3] Every external await of the cycle has a limit set here or in its client: Supabase writes
+// (the lock PATCH included: its time limit only), and POST /api/swap (the route stops at 60 s, maxDuration).
+const SUPABASE_WRITE_TIMEOUT_MS = 10_000
+const SWAP_API_TIMEOUT_MS = 65_000
 // Multicall3: one contract at this address on every EVM chain; code and one aggregate3 call checked read-only
 // on Base (8453) and Arbitrum One (42161) on 2026-11-18 (3808 bytes, identical code hash on both).
 const MULTICALL3_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11"
@@ -419,6 +438,16 @@ let scanFailureLogged = false
 // and then at most hourly while it lasts — the infra-miss-streak cadence.
 const scanFallbackAlerts = createEpisodeGate({ repeatMs: 60 * 60_000 })
 const prescreenFallbackAlerts = createEpisodeGate({ repeatMs: 60 * 60_000 })
+// [A91 R2-4] A failed wrap read is alerted like a failed scan query: first cycle, then hourly while it lasts.
+const scanWrapAlerts = createEpisodeGate({ repeatMs: 60 * 60_000 })
+// [A91 R2-1] The pre-screen's quarantine (active-window.js createQuarantine): rows whose canExecute failed ALONE.
+// Never a status, a miss, or ADR-024 / ADR-026 state. Paged (warn) when it first holds QUARANTINE_ALERT_AT rows
+// and hourly while it does.
+const rowQuarantine = createQuarantine({ reaskMs: QUARANTINE_REASK_MS })
+const quarantineAlerts = createEpisodeGate({ repeatMs: 60 * 60_000 })
+// [A91 R2-2, owner decision "error = frozen"] A freeze read that did not answer "not frozen" holds DCA for that
+// cycle: paged (warn) on its first cycle, then hourly while it lasts.
+const freezeReadAlerts = createEpisodeGate({ repeatMs: 60 * 60_000 })
 // [SEC-4 / S-3] Set while a tick runs: the next tick is skipped instead of overlapping it.
 let tickInFlight = null
 
@@ -746,12 +775,15 @@ function orderTypeToEnum(type) {
 async function supabaseFetch(path, options = {}) {
   const url = `${SUPABASE_URL}/rest/v1/${path}`
   // [SEC-4 / S-4] Every Supabase READ (GET, HEAD) has a time limit: a hung read now rejects — every caller
-  // already catches — instead of holding the cycle forever. Writes are sent exactly as before.
+  // already catches — instead of holding the cycle forever.
+  // [A91, owner answer 3] …and every WRITE (PATCH, POST: the lock, the unlocks, the status patches, the execution
+  // record) has one too. Node's fetch alone waits up to 300 s for headers. A write that times out rejects into
+  // the catch path it already had for a network error: same outcome, sooner. The request is otherwise unchanged.
   const method = String(options.method || "GET").toUpperCase()
-  const readLimit = method === "GET" || method === "HEAD" ? { signal: options.signal ?? AbortSignal.timeout(SUPABASE_READ_TIMEOUT_MS) } : {}
+  const limitMs = method === "GET" || method === "HEAD" ? SUPABASE_READ_TIMEOUT_MS : SUPABASE_WRITE_TIMEOUT_MS
   const res = await fetch(url, {
     ...options,
-    ...readLimit,
+    signal: options.signal ?? AbortSignal.timeout(limitMs),
     headers: {
       apikey: SUPABASE_KEY,
       Authorization: `Bearer ${SUPABASE_KEY}`,
@@ -830,10 +862,12 @@ async function fetchActiveOrders() {
   }
   const pageOnly = selectActiveWindow({ chainId: CHAIN_ID, windowSize: SCAN_CAP, cursor, offset, tail: page.rows, tailTotal: page.total })
   let head = null
+  let wrapFailed = null
   let total = cursor === null ? page.total : null // a page without a keyset filter counts the whole chain
   if (pageOnly.endReached && !pageOnly.fromOldest && page.rows.length < SCAN_CAP) {
     // The page reached the newest row: wrap to the oldest for the rest of this scan. [S-4] A failed wrap read
-    // only shortens this scan; it never stops the cycle.
+    // only shortens this scan; it never stops the cycle. [A91 R2-4] It costs one cycle of coverage, so it is
+    // flagged on the cycle line (fallback=scan-wrap), counted on /health and alerted like a failed scan query.
     const wrap = await readActiveRows(`${activeOrders}&${activeWindowParams({ cursor: null, limit: SCAN_CAP - page.rows.length })}`)
     if (wrap.ok) {
       head = wrap.rows
@@ -842,6 +876,7 @@ async function fetchActiveOrders() {
       console.error(`  Supabase fetch error (scan wrap): ${wrap.status} -- ${logBody(wrap.body)}`)
       // An empty page whose wrap failed knows nothing about the chain: never "No active orders" on that.
       if (page.rows.length === 0) return fallbackScan(wrap)
+      wrapFailed = String(wrap.status)
     }
   }
   if (total === null && !pageOnly.coversAll) {
@@ -863,7 +898,7 @@ async function fetchActiveOrders() {
     if (reread.ok) carried.push(...reread.rows.filter((r) => Number(r.chain_id) === CHAIN_ID && !inScan.has(r.id)))
     else carryUnread.push(...ids)
   }
-  lastActiveScan = { ...scan, total, fallback: null, failed: false, offset, carriedIds: carried.map((r) => r.id), carryUnread }
+  lastActiveScan = { ...scan, total, fallback: null, failed: false, wrapFailed, offset, carriedIds: carried.map((r) => r.id), carryUnread }
   return [...carried, ...scan.rows]
 }
 
@@ -914,90 +949,189 @@ function canExecuteCallFor(dbOrder) {
   if (!routing.ok || (!routing.isV3 && !CONTRACT_ADDRESS)) return null
   try {
     const orderStruct = buildOrderStruct(od, routing.isV3)
-    const callData = encodeFunctionData({ abi: routing.execAbi, functionName: "canExecute", args: [orderStruct, dbOrder.signature] })
-    return { target: routing.execAddress, abi: routing.execAbi, callData }
+    const args = [orderStruct, dbOrder.signature]
+    const callData = encodeFunctionData({ abi: routing.execAbi, functionName: "canExecute", args })
+    return { target: routing.execAddress, abi: routing.execAbi, args, callData }
   } catch {
     return null
   }
 }
 
+/** The pre-screen's own time limit on one call; its error carries `prescreenTimeLimit` (prescreenFailureKind). */
 function withTimeout(promise, ms) {
   let timer
   const limit = new Promise((_resolve, reject) => {
-    timer = setTimeout(() => reject(Object.assign(new Error(`no answer within ${ms} ms`), { name: "TimeoutError" })), ms)
+    timer = setTimeout(() => reject(Object.assign(new Error(`no answer within ${ms} ms`), { name: "TimeoutError", prescreenTimeLimit: true })), ms)
   })
   return Promise.race([promise, limit]).finally(() => clearTimeout(timer))
+}
+
+/** [A91 R2-1, owner answer 2] Why one pre-screen call failed: an RPC auth refusal is transport (never bisected). */
+const prescreenKind = (err) => prescreenFailureKind(err, { isAuth: (e) => classifyRpcError(e).kind === RPC_AUTH })
+
+/**
+ * One Multicall3 aggregate3 call over `calls` (allowFailure on every call), with the chunk time limit. Never throws.
+ * @returns {Promise<{ ok: true, results: ({ answered: true, answer: { canExec: boolean, reason: string } } | { answered: false })[] } | { ok: false, kind: string, err: unknown }>}
+ */
+async function askAggregate(publicClient, calls) {
+  try {
+    const results = await withTimeout(
+      publicClient.readContract({
+        address: MULTICALL3_ADDRESS,
+        abi: MULTICALL3_ABI,
+        functionName: "aggregate3",
+        args: [calls.map((c) => ({ target: c.target, allowFailure: true, callData: c.callData }))],
+      }),
+      PRESCREEN_CHUNK_TIMEOUT_MS,
+    )
+    if (!Array.isArray(results) || results.length !== calls.length) {
+      return { ok: false, kind: "other", err: new Error(`aggregate3 answered ${Array.isArray(results) ? results.length : "no"} results for ${calls.length} calls`) }
+    }
+    return {
+      ok: true,
+      results: calls.map((c, j) => {
+        const r = results[j]
+        if (r?.success !== true) return { answered: false } // its own call failed (a revert, out of gas)
+        try {
+          const [canExec, reason] = decodeFunctionResult({ abi: c.abi, functionName: "canExecute", data: r.returnData })
+          return { answered: true, answer: { canExec: canExec === true, reason: String(reason) } }
+        } catch {
+          return { answered: false } // undecodable answer
+        }
+      }),
+    }
+  } catch (err) {
+    return { ok: false, kind: prescreenKind(err), err }
+  }
+}
+
+/**
+ * [A91 R2-1] One row asked ALONE: a direct canExecute eth_call with an explicit gas cap (SINGLE_ASK_GAS) and the
+ * chunk time limit. Never throws.
+ * @returns {Promise<{ ok: true, answer: { canExec: boolean, reason: string } } | { ok: false, kind: string, err: unknown }>}
+ */
+async function askAlone(publicClient, c) {
+  try {
+    const [canExec, reason] = await withTimeout(
+      publicClient.readContract({ address: c.target, abi: c.abi, functionName: "canExecute", args: c.args, gas: SINGLE_ASK_GAS }),
+      PRESCREEN_CHUNK_TIMEOUT_MS,
+    )
+    return { ok: true, answer: { canExec: canExec === true, reason: String(reason) } }
+  } catch (err) {
+    return { ok: false, kind: prescreenKind(err), err }
+  }
 }
 
 /**
  * [SEC-4 / fix/keeper-active-orders-window] The PRE-SCREEN: canExecute for every scanned row, WITHOUT a lock,
  * through Multicall3's aggregate3 in chunks of PRESCREEN_CHUNK calls, each with PRESCREEN_CHUNK_TIMEOUT_MS. It
- * never executes, never writes and never replaces the path's own canExecute. A row is answered (canExec,
- * reason), or not: its struct cannot be built, its own call reverted, or its chunk failed (reverted, timed out,
- * Multicall3 absent). Never throws.
- * @returns {Promise<{ answers: Map<string, object>, chunks: number, failedChunks: number, firstFailedId: string|null }>}
+ * never executes, never writes and never replaces the path's own canExecute. Never throws.
+ *
+ * [A91 R2-1, design 120c, owner answers 2 and 4 of 2026-11-18] Every row is hostile:
+ *   1. A quarantined row is left out of every chunk (answer { quarantined: true }: never walked unless expired).
+ *   2. A chunk that failed for any reason but an RPC transport error is BISECTED (bisectFailedChunks) within
+ *      BISECT_CALL_BUDGET calls; its healthy rows get their answer this cycle. A transport-failed chunk, and
+ *      whatever the budget did not reach, is unanswered ("chunk"): the one-by-one budget, as in round 2.
+ *   3. A row the bisect asked ALONE that failed with out of gas, a revert or its own time limit is QUARANTINED —
+ *      only if another pre-screen call of this cycle answered (an RPC that answers nothing proves nothing about
+ *      a row); otherwise it is unanswered.
+ *   4. Quarantined rows due a re-ask (QUARANTINE_REASK_MS) are asked alone, least recently asked first, at most
+ *      QUARANTINE_REASK_BUDGET per cycle: an answer releases the row (and is used this cycle).
+ * A row is answered (canExec, reason), quarantined, or unanswered: its struct cannot be built ("build"), its
+ * own call failed in an answered chunk ("revert"), or its chunk failed and it was not resolved ("chunk").
+ * @returns {Promise<{ answers: Map<string, object>, chunks: number, failedChunks: number, bisect: { calls: number, answered: number, isolated: number, unresolved: number }, reasks: { asked: number, released: number }, quarantinedNow: string[] }>}
  */
-async function prescreenRows(publicClient, rows) {
+async function prescreenRows(publicClient, rows, nowMs = Date.now()) {
   const answers = new Map()
   const calls = []
+  const quarantined = []
   for (const dbOrder of rows) {
     const call = canExecuteCallFor(dbOrder)
-    if (call) calls.push({ id: dbOrder.id, ...call })
-    else answers.set(dbOrder.id, { unanswered: "build" })
+    if (!call) answers.set(dbOrder.id, { unanswered: "build" })
+    else if (rowQuarantine.has(dbOrder.id)) {
+      answers.set(dbOrder.id, { quarantined: true })
+      quarantined.push({ id: dbOrder.id, ...call })
+    } else calls.push({ id: dbOrder.id, ...call })
   }
+  let anyAnswered = false
   let chunks = 0
   let failedChunks = 0
-  let firstFailedId = null
+  const toBisect = []
   for (let i = 0; i < calls.length; i += PRESCREEN_CHUNK) {
     const chunk = calls.slice(i, i + PRESCREEN_CHUNK)
     chunks++
-    try {
-      const results = await withTimeout(
-        publicClient.readContract({
-          address: MULTICALL3_ADDRESS,
-          abi: MULTICALL3_ABI,
-          functionName: "aggregate3",
-          args: [chunk.map((c) => ({ target: c.target, allowFailure: true, callData: c.callData }))],
-        }),
-        PRESCREEN_CHUNK_TIMEOUT_MS,
-      )
-      if (!Array.isArray(results) || results.length !== chunk.length) throw new Error(`aggregate3 answered ${Array.isArray(results) ? results.length : "no"} results for ${chunk.length} calls`)
-      for (const [j, c] of chunk.entries()) {
-        const r = results[j]
-        let answer = { unanswered: "revert" }
-        if (r?.success === true) {
-          try {
-            const [canExec, reason] = decodeFunctionResult({ abi: c.abi, functionName: "canExecute", data: r.returnData })
-            answer = { canExec: canExec === true, reason: String(reason) }
-          } catch { /* undecodable answer: unanswered */ }
-        }
-        answers.set(c.id, answer)
-      }
-    } catch (err) {
-      failedChunks++
-      if (firstFailedId === null) firstFailedId = chunk[0].id
-      for (const c of chunk) answers.set(c.id, { unanswered: "chunk" })
-      if (failedChunks === 1) console.error(`  Pre-screen chunk ${chunks} FAILED (${logBody(redactError(err))}) — its rows join the one-by-one budget this cycle`)
+    const r = await askAggregate(publicClient, chunk)
+    if (r.ok) {
+      anyAnswered = true
+      chunk.forEach((c, j) => answers.set(c.id, r.results[j].answered ? r.results[j].answer : { unanswered: "revert" }))
+      continue
     }
+    failedChunks++
+    for (const c of chunk) answers.set(c.id, { unanswered: "chunk" })
+    if (failedChunks === 1) console.error(`  Pre-screen chunk ${chunks} FAILED (${r.kind}: ${logBody(redactError(r.err))}) — ${r.kind === "transport" ? "an RPC transport error: its rows join the one-by-one budget this cycle" : "bisected in this cycle"}`)
+    if (r.kind !== "transport") toBisect.push(chunk)
   }
-  return { answers, chunks, failedChunks, firstFailedId }
+
+  const bisect = await bisectFailedChunks({
+    sets: toBisect,
+    askChunk: (cs) => askAggregate(publicClient, cs),
+    askOne: (c) => askAlone(publicClient, c),
+    budget: BISECT_CALL_BUDGET,
+  })
+  stats.bisectCalls += bisect.calls
+  if (bisect.answered.length > 0) anyAnswered = true
+  for (const [c, answer] of bisect.answered) answers.set(c.id, answer)
+  const quarantinedNow = []
+  for (const { row: c, kind } of bisect.isolated) {
+    if (!anyAnswered) continue // stays { unanswered: "chunk" }
+    rowQuarantine.add(c.id, nowMs, kind)
+    answers.set(c.id, { quarantined: true })
+    quarantinedNow.push(c.id)
+  }
+
+  let asked = 0
+  let released = 0
+  const byId = new Map(quarantined.map((c) => [c.id, c]))
+  for (const id of rowQuarantine.due(quarantined.map((c) => c.id), nowMs).slice(0, QUARANTINE_REASK_BUDGET)) {
+    asked++
+    const r = await askAlone(publicClient, byId.get(id))
+    if (r.ok) {
+      rowQuarantine.release(id)
+      answers.set(id, r.answer)
+      released++
+    } else rowQuarantine.asked(id, nowMs)
+  }
+  stats.reaskCalls += asked
+  // Rows this cycle's pre-screen could not resolve (a transport-failed chunk, the bisect budget spent, a row that
+  // failed alone without evidence): the one-by-one budget's, and — when rotating — the next pass's.
+  let unresolved = 0
+  for (const a of answers.values()) if (a.unanswered === "chunk") unresolved++
+  stats.prescreenUnresolvedRows += unresolved
+  if (quarantinedNow.length > 0 || released > 0) {
+    log(`  Pre-screen quarantine: +${quarantinedNow.length} row(s) that fail alone, ${released} released, ${rowQuarantine.size()} quarantined (bisect ${bisect.calls}/${BISECT_CALL_BUDGET} calls, ${bisect.unresolved.length} row(s) unresolved)`)
+  }
+  return {
+    answers,
+    chunks,
+    failedChunks,
+    bisect: { calls: bisect.calls, answered: bisect.answered.length, isolated: bisect.isolated.length, unresolved },
+    reasks: { asked, released },
+    quarantinedNow,
+  }
 }
 
 /**
- * [SEC-4] After the pre-screen: move the scan (a failed chunk holds the position at its first row) and return
- * the ids that keep an ADR-026 infra streak — only after a complete scan, and only those absent from both the
- * last two complete scans lose it (S-3); null = prune nothing. A fallback scan moves nothing (S-2).
+ * [SEC-4] After the pre-screen: move the scan and return the ids that keep an ADR-026 infra streak — only after a
+ * complete scan, and only those absent from both the last two complete scans lose it (S-3); null = prune nothing.
+ * A fallback scan moves nothing (S-2). [A91 R2-1] The scan NEVER holds its position on a failed chunk (round 2's
+ * truncateScan did, and one row's creator could freeze the rotation): the cursor moves past every row it read,
+ * and a scan is complete on what it read, quarantined rows included. The quarantine and the one-by-one budget's
+ * memory follow the same two-complete-scans rule.
  */
-function advanceActiveScan(scan, rowIds, screen) {
+function advanceActiveScan(scan, rowIds) {
   if (!scan || scan.fallback) return null
   const extraIds = scan.carriedIds ?? []
-  let screened = scan
-  if (screen.firstFailedId !== null) {
-    const k = scan.rows.findIndex((r) => r.id === screen.firstFailedId)
-    // A carried row's chunk failing holds the whole scan; a scan row's chunk holds it at that row.
-    screened = truncateScan(scan, k < 0 ? 0 : k)
-  }
-  const next = advanceScan({ cursor: activeCursor, pass: activePass }, screened, { extraIds })
+  const next = advanceScan({ cursor: activeCursor, pass: activePass }, scan, { extraIds })
   activeCursor = next.cursor
   activePass = next.pass
   activeScanStarted = true
@@ -1006,26 +1140,64 @@ function advanceActiveScan(scan, rowIds, screen) {
   lastCompleteScanIds = next.complete
   // The one-by-one budget's memory follows the same rule (bounded by the rows still around).
   if (keep) for (const id of [...oneByOneLastWalked.keys()]) if (!keep.has(id)) oneByOneLastWalked.delete(id)
+  rowQuarantine.prune(keep)
   return keep
 }
 
-/** [SEC-4 / S-7] Count a fallback cycle on /health and page ops (warn) on the first cycle of a run, then hourly. */
+const FALLBACK_KINDS = {
+  scan: { gate: scanFallbackAlerts, stat: "scanFallbackCycles", alert: "active-scan-fallback" },
+  prescreen: { gate: prescreenFallbackAlerts, stat: "prescreenFallbackCycles", alert: "prescreen-fallback" },
+  wrap: { gate: scanWrapAlerts, stat: "scanWrapFailedCycles", alert: "active-scan-wrap-failed" },
+}
+
+/**
+ * [SEC-4 / S-7] Count a fallback cycle on /health and page ops (warn) on the first cycle of a run, then hourly.
+ * [A91 R2-4] `wrap`: the scan's wrap read failed (one cycle of coverage lost), alerted like a failed scan query.
+ */
 async function noteActiveScanFallback(kind, failed, detail) {
-  const gate = kind === "scan" ? scanFallbackAlerts : prescreenFallbackAlerts
+  const k = FALLBACK_KINDS[kind]
   const now = Date.now()
-  const g = gate.onCycle(failed, now)
+  const g = k.gate.onCycle(failed, now)
   if (!failed) return
-  if (kind === "scan") stats.scanFallbackCycles++
-  else stats.prescreenFallbackCycles++
+  stats[k.stat]++
   if (!g.alert) return
   try {
     await alertOps(
       {
-        kind: kind === "scan" ? "active-scan-fallback" : "prescreen-fallback",
+        kind: k.alert,
         detail:
           `${detail} on chain ${CHAIN_ID} — ${g.cycles} consecutive cycle(s) since ${new Date(g.sinceMs).toISOString()}. ` +
-          `The keeper still examines ${MAX_BATCH * 3} rows one by one each such cycle, so newer orders can wait. ` +
+          (kind === "wrap"
+            ? `Each such cycle screens only the rows after the scan's position, so the oldest rows wait one more cycle. `
+            : `The keeper still examines ${MAX_BATCH * 3} rows one by one each such cycle, so newer orders can wait. `) +
           `docs/Runbooks/EXECUTOR-OPERATIONS.md § 9. Next reminder in >= 1 h while it persists.`,
+      },
+      TIER_WARN_THRESHOLD,
+    )
+  } catch { /* alert is best-effort, never blocks the cycle */ }
+}
+
+/**
+ * [A91 R2-1] /health's quarantine counters, and one ops alert (warn) when the quarantine first holds
+ * QUARANTINE_ALERT_AT rows on this chain, then hourly while it does. The count only, never an id or an address.
+ */
+async function noteQuarantine() {
+  const size = rowQuarantine.size()
+  const counts = rowQuarantine.counts()
+  stats.quarantinedRows = size
+  stats.quarantinedTotal = counts.total
+  stats.quarantineReleased = counts.released
+  const g = quarantineAlerts.onCycle(size >= QUARANTINE_ALERT_AT, Date.now())
+  if (!g.alert) return
+  try {
+    await alertOps(
+      {
+        kind: "prescreen-quarantine",
+        detail:
+          `${size} active order(s) on chain ${CHAIN_ID} are quarantined by the pre-screen: their canExecute fails when asked alone ` +
+          `(out of gas, a revert or a time limit — code chosen by whoever created the order). They are left out of every ` +
+          `batch, never executed while quarantined, asked again every 30 min; nothing about the order changes. ` +
+          `docs/Runbooks/EXECUTOR-OPERATIONS.md § 9. Next reminder in >= 1 h while >= ${QUARANTINE_ALERT_AT}.`,
       },
       TIER_WARN_THRESHOLD,
     )
@@ -1276,26 +1448,70 @@ async function unlockStaleOrders() {
 // CHECKS res.ok instead of swallowing failures. See the confirmed-success block below.
 
 // [DCA-OBS] Keeper-side freeze read. Reads the SAME circuit_breaker table the
-// admin route + create-order API use (single fixed row id='dca'). FAIL-OPEN:
-// any error / missing table / missing row ⇒ { frozen:false } so the keeper keeps
-// running (the on-chain pause() is the nuclear fail-safe; this only delays DCA).
+// admin route + create-order API use (single fixed row id='dca').
+// [A91 R2-2, owner decision 2026-11-18 "error = frozen"] FAIL-CLOSED for DCA: only a well-formed answer saying
+// not frozen — HTTP 2xx, a JSON list holding exactly one row whose `frozen` is the boolean false — lets a DCA
+// order pass the freeze gate this cycle. A time limit (SUPABASE_READ_TIMEOUT_MS: a hung read must never hang
+// the keeper), an HTTP error, a network error, a malformed body, or no `dca` row (owner answer 1) means FROZEN
+// for this cycle: DCA rows are left active and unlocked, no miss is counted, non-DCA orders are unaffected; the
+// cycle pages ops and /health shows it (noteFreezeRead). This deliberately changes main, which treated every
+// failure as NOT frozen. The keeper still never SETS the flag.
+// @returns {Promise<{ frozen: boolean, reason: string|null, readFailure: null | "timeout" | "http-<status>" | "network" | "malformed" | "row-missing" }>}
 async function readFreezeFlag() {
+  const failed = (readFailure, why) => {
+    log(`  WARNING: ${why} -- treating as FROZEN this cycle`)
+    return { frozen: true, reason: null, readFailure }
+  }
   try {
     const res = await supabaseFetch(
       "circuit_breaker?id=eq.dca&select=frozen,reason"
     )
-    if (!res.ok) {
-      log(`  WARNING: freeze read failed (HTTP ${res.status}) -- treating as NOT frozen`)
-      return { frozen: false }
+    if (!res.ok) return failed(`http-${res.status}`, `freeze read failed (HTTP ${res.status})`)
+    let rows
+    try {
+      rows = await res.json()
+    } catch (err) {
+      if (err?.name === "TimeoutError" || err?.name === "AbortError") throw err // the body timed out: a timeout
+      return failed("malformed", "freeze read answered a body that is not JSON")
     }
-    const rows = await res.json()
-    const row = Array.isArray(rows) ? rows[0] : null
-    if (!row) return { frozen: false }
-    return { frozen: row.frozen === true, reason: row.reason || null }
+    if (!Array.isArray(rows)) return failed("malformed", "freeze read answered something other than a list")
+    if (rows.length === 0) return failed("row-missing", "freeze read found no `dca` row in circuit_breaker (seed: supabase/circuit-breaker.sql)")
+    const row = rows[0]
+    if (rows.length !== 1 || row === null || typeof row !== "object" || typeof row.frozen !== "boolean") {
+      return failed("malformed", "freeze read answered a malformed row")
+    }
+    return { frozen: row.frozen, reason: row.frozen ? (typeof row.reason === "string" && row.reason ? row.reason : null) : null, readFailure: null }
   } catch (err) {
-    log(`  WARNING: freeze read error (${redactError(err)}) -- treating as NOT frozen`)
-    return { frozen: false }
+    if (err?.name === "TimeoutError" || err?.name === "AbortError") return failed("timeout", "freeze read timed out")
+    return failed("network", `freeze read error (${redactError(err)})`)
   }
+}
+
+/**
+ * [A91 R2-2] /health's freeze-read fields, and one ops alert (warn) on the first cycle the freeze read fails (DCA
+ * held as FROZEN), then hourly while it keeps failing. Never throws.
+ * @param {string|null} readFailure  readFreezeFlag's readFailure; null = the read answered
+ */
+async function noteFreezeRead(readFailure) {
+  stats.freezeReadFailure = readFailure
+  const g = freezeReadAlerts.onCycle(readFailure !== null, Date.now())
+  if (readFailure === null) return
+  stats.freezeReadFailedCycles++
+  if (!g.alert) return
+  try {
+    await alertOps(
+      {
+        kind: "freeze-read-failed",
+        detail:
+          `The DCA freeze flag could not be read on chain ${CHAIN_ID} (${readFailure}) — ${g.cycles} consecutive cycle(s) since ` +
+          `${new Date(g.sinceMs).toISOString()}. DCA orders are held as FROZEN every cycle it fails (left active, nothing counted); ` +
+          `limit / stop-loss orders still execute.` +
+          (readFailure === "row-missing" ? ` The circuit_breaker table has no 'dca' row: run the seed in supabase/circuit-breaker.sql.` : "") +
+          ` docs/Runbooks/DCA-FREEZE.md. Next reminder in >= 1 h while it persists.`,
+      },
+      TIER_WARN_THRESHOLD,
+    )
+  } catch { /* alert is best-effort, never blocks the cycle */ }
 }
 
 // [FIX-KEEPER-ETH-USD-FEED-CHAINAWARE] Warn ONCE per process when this keeper's chain has no
@@ -1361,12 +1577,16 @@ async function fetchSwapRoute(tokenIn, tokenOut, amount, from, chainId, srcDecim
     // chainId is a BODY field (per /api/swap + the frontend useSwap contract) so
     // Base chunks route on Base; omitted on mainnet (CHAIN_ID=1) → byte-identical.
     // Token decimals are required so non-18-dec outputs aren't 422'd by the guard.
+    // [A91, owner answer 3] A time limit on the whole call (headers and body): the route itself stops at 60 s
+    // (maxDuration), Node's fetch alone would wait 300 s for headers. A timeout is caught below as a network
+    // error — the same classified infra miss as before (swap-api:network).
     const res = await fetch(`${API_URL}/api/swap`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(
         buildSwapRoutePayload({ source, tokenIn, tokenOut, amount, from, srcDecimals, dstDecimals, chainId }),
       ),
+      signal: AbortSignal.timeout(SWAP_API_TIMEOUT_MS),
     })
 
     if (!res.ok) {
@@ -1561,8 +1781,9 @@ function scoreFromContext(ctx) {
 /**
  * Cycle START observability: capture the wallet ETH balance, read the freeze
  * flag ONCE, read ETH/USD ONCE, emit a one-shot freeze alert + a low-gas alert.
- * Returns a context object consumed at cycle end. Never throws; on any failure
- * it returns safe fail-open defaults (NOT frozen).
+ * Returns a context object consumed at cycle end. Never throws.
+ * [A91 R2-2] The freeze flag fails CLOSED: unless the read answered "not frozen", ctx.frozen is true (DCA held
+ * this cycle) and ctx.freezeReadFailure says why. Every other signal stays fail-open.
  */
 async function beginCycleObservability(publicClient, walletAddress, monitor) {
   const ctx = {
@@ -1571,6 +1792,7 @@ async function beginCycleObservability(publicClient, walletAddress, monitor) {
     walletBalanceEth: 0,
     frozen: false,
     freezeReason: null,
+    freezeReadFailure: null,
     ethUsd: null,
   }
 
@@ -1606,12 +1828,20 @@ async function beginCycleObservability(publicClient, walletAddress, monitor) {
     }
   }
 
-  // Freeze flag (fail-open). Alert ONCE per state transition (frozen<->unfrozen).
+  // Freeze flag. Alert ONCE per state transition of the OPERATOR's flag (frozen<->unfrozen).
+  // [A91 R2-2, owner decision "error = frozen"] FAIL-CLOSED: a read that did not answer "not frozen" holds DCA this
+  // cycle (ctx.frozen = true) and is reported by noteFreezeRead; it never moves the operator-transition state.
+  let flag
   try {
-    const flag = await readFreezeFlag()
-    ctx.frozen = flag.frozen === true
-    ctx.freezeReason = flag.reason || null
-    if (ctx.frozen !== freezeAlertedState) {
+    flag = await readFreezeFlag()
+  } catch {
+    flag = { frozen: true, reason: null, readFailure: "network" } // readFreezeFlag never throws; fail closed anyway
+  }
+  ctx.frozen = flag.frozen === true
+  ctx.freezeReason = flag.reason || null
+  ctx.freezeReadFailure = flag.readFailure ?? null
+  try {
+    if (ctx.freezeReadFailure === null && ctx.frozen !== freezeAlertedState) {
       freezeAlertedState = ctx.frozen
       if (ctx.frozen) {
         await alertOps(
@@ -1621,6 +1851,7 @@ async function beginCycleObservability(publicClient, walletAddress, monitor) {
       }
     }
   } catch { /* never throw */ }
+  await noteFreezeRead(ctx.freezeReadFailure)
 
   // ETH/USD for the low-gas signal (cached for the cycle; non-fatal on failure).
   // [fix/keeper-alert-cooldown-and-dca-debug-read] alertLowGas runs EVERY cycle the USD value is
@@ -1755,13 +1986,16 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   // the scan query failed and the 15 oldest rows came instead (S-2).
   const scan = lastActiveScan
   await noteActiveScanFallback("scan", Boolean(scan?.fallback), `Active scan query failed (${scan?.fallback}): the cycle examined the ${MAX_BATCH * 3} oldest rows instead`)
+  // [A91 R2-4] A failed wrap read: flagged, counted and alerted like a failed scan query.
+  await noteActiveScanFallback("wrap", Boolean(scan?.wrapFailed), `Active scan wrap read failed (${scan?.wrapFailed}): the oldest rows were not screened this cycle`)
 
   if (orders.length === 0) {
     log("  No active orders")
     // [SEC-4] An empty chain is a complete (empty) scan: the next one starts at the oldest row. A failed read
     // moves nothing.
-    if (scan && !scan.fallback && !scan.failed) advanceActiveScan(scan, [], { firstFailedId: null })
-    log(`  ${activeScanLogLine({ active: scan && !scan.fallback && !scan.failed ? 0 : null, scanned: 0, ready: 0, attempted: 0, carried: carryIds.length, rotate: activeCursor !== null, fallback: fallbackFlag({ scan: scan?.fallback ?? null }) })}`)
+    if (scan && !scan.fallback && !scan.failed) advanceActiveScan(scan, [])
+    await noteQuarantine()
+    log(`  ${activeScanLogLine({ active: scan && !scan.fallback && !scan.failed ? 0 : null, scanned: 0, ready: 0, attempted: 0, carried: carryIds.length, quarantined: rowQuarantine.size(), rotate: activeCursor !== null, fallback: fallbackFlag({ scan: scan?.fallback ?? null }) })}`)
     // [DCA-OBS] Still close out observability (outflow check) even with no orders.
     // [PERF-KEEPER-IDLE-BACKOFF] …without a second balance read: nothing was sent, so the next
     // cycle's start read closes this window (idle-backoff.js).
@@ -1779,7 +2013,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   if (pausedState) {
     log(`  PAUSED (${pausedState}): ${orders.length} active order(s) NOT attempted — no lock, no tx, no retry count (ADR-026)`)
     // [SEC-4] Nothing was screened, so the scan position, carry-over and streaks stay as they are.
-    log(`  ${activeScanLogLine({ active: scan?.total ?? null, scanned: 0, ready: 0, attempted: 0, carried: carryIds.length, rotate: activeCursor !== null, fallback: fallbackFlag({ scan: scan?.fallback ?? null }) })}`)
+    log(`  ${activeScanLogLine({ active: scan?.total ?? null, scanned: 0, ready: 0, attempted: 0, carried: carryIds.length, quarantined: rowQuarantine.size(), rotate: activeCursor !== null, fallback: fallbackFlag({ scan: scan?.fallback ?? null, wrap: Boolean(scan?.wrapFailed) }) })}`)
     stats.pausedCycles++
     await endCycleObservability(obsCtx, publicClient, ownGasSpentWei, { idle: true })
     return orders.length
@@ -1788,16 +2022,18 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   // [SEC-4 / fix/keeper-active-orders-window] 2. PRE-SCREEN: canExecute for every scanned row, no lock, through
   // Multicall3 (prescreenRows). It changes no row and decides nothing on its own: a row it says true still goes
   // through the lock and the path's own canExecute below.
-  const screen = await prescreenRows(publicClient, orders)
-  await noteActiveScanFallback("prescreen", screen.failedChunks > 0, `Pre-screen failed for ${screen.failedChunks} of ${screen.chunks} Multicall3 chunk(s)`)
+  // [A91 R2-1] A failed chunk is bisected in this cycle; rows that fail alone are quarantined (prescreenRows).
+  const screen = await prescreenRows(publicClient, orders, Date.now())
+  await noteActiveScanFallback("prescreen", screen.failedChunks > 0, `Pre-screen failed for ${screen.failedChunks} of ${screen.chunks} Multicall3 chunk(s) (bisect: ${screen.bisect.calls} call(s), ${screen.bisect.unresolved} row(s) left unresolved)`)
+  await noteQuarantine()
 
   // [A73b S-9] An order that left the active set (cancelled / filled / failed elsewhere) takes its
   // in-memory infra streak with it — the keeper has no cancel path of its own, so absence from the
   // set just fetched is the signal (an empty set leaves the map alone: see pruneInfraMisses).
   // [SEC-4 / S-3] …absence from two consecutive COMPLETE scans: a cycle that read the whole chain, or a full
-  // rotation when it holds more than SCAN_CAP rows. advanceActiveScan also moves the scan (a failed chunk holds
-  // it at that chunk) and returns null — prune nothing — on every other cycle.
-  pruneInfraMisses(orderInfraMisses, advanceActiveScan(scan, orders.map((o) => o.id), screen))
+  // rotation when it holds more than SCAN_CAP rows. advanceActiveScan also moves the scan — past every row it
+  // read, never held by a failed chunk (A91 R2-1) — and returns null — prune nothing — on every other cycle.
+  pruneInfraMisses(orderInfraMisses, advanceActiveScan(scan, orders.map((o) => o.id)))
 
   // [SEC-4] 3. WALK: the rows that answered true, rows whose off-chain expiry passed (the path marks them
   // `expired`), and ONE_BY_ONE rows the pre-screen could not answer, least recently walked first (planWalk).
@@ -2577,7 +2813,9 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   // [SEC-4] 4. CARRY-OVER: ready rows the loop did not reach (MAX_BATCH executions, a gas SKIP — the row it
   // stopped on included) are attempted next cycle (S-5); carried rows this cycle could not re-read stay
   // carried. The one-by-one budget remembers who used it, so the next cycle starts with the others.
-  carryIds = [...new Set([...(scan?.carryUnread ?? []), ...carryAfterLoop(walk, reached, gasSkipStoppedOn, SCAN_CAP)])].slice(0, SCAN_CAP)
+  // [A91 R2-3] A FALLBACK cycle (the scan query failed: the 15 oldest rows were examined) keeps the previous
+  // carry-over list untouched, as S-2 and the ADR-026 note say: its 15 rows are not the scan.
+  if (!scan?.fallback) carryIds = [...new Set([...(scan?.carryUnread ?? []), ...carryAfterLoop(walk, reached, gasSkipStoppedOn, SCAN_CAP)])].slice(0, SCAN_CAP)
   for (const id of walk.oneByOne) if (reached.has(id) && id !== gasSkipStoppedOn) oneByOneLastWalked.set(id, activeCycleSeq)
 
   // Update stats
@@ -2602,7 +2840,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   // [SEC-4 / S-11] ONE scan line per cycle: active rows on the chain, rows scanned and pre-screened, how many
   // answered true, how many times the path asked canExecute, rows carried to the next cycle, whether the scan
   // rotates (more rows than SCAN_CAP) and the fallback flag. Counts and flags only.
-  log(`  ${activeScanLogLine({ active: scan?.total ?? null, scanned: orders.length, ready: walk.ready.length, attempted, carried: carryIds.length, rotate: activeCursor !== null, fallback: fallbackFlag({ scan: scan?.fallback ?? null, prescreenFailed: screen.failedChunks, prescreenChunks: screen.chunks }) })}`)
+  log(`  ${activeScanLogLine({ active: scan?.total ?? null, scanned: orders.length, ready: walk.ready.length, attempted, carried: carryIds.length, quarantined: rowQuarantine.size(), rotate: activeCursor !== null, fallback: fallbackFlag({ scan: scan?.fallback ?? null, wrap: Boolean(scan?.wrapFailed), prescreenFailed: screen.failedChunks, prescreenChunks: screen.chunks }) })}`)
   log(`  Cycle done: ${executed} executed, ${skipped} skipped`)
   // [PERF-KEEPER-IDLE-BACKOFF] The count drives the loop's idle/active mode (main's runTick).
   return orders.length
@@ -2631,12 +2869,49 @@ const stats = {
   scanFallbackCycles: 0,
   prescreenFallbackCycles: 0,
   overlapSkippedTicks: 0,
+  // [A91 R2-4] cycles whose scan wrap read failed (one cycle of coverage each) — per process, for /health.
+  scanWrapFailedCycles: 0,
+  // [A91 R2-1] the pre-screen's quarantine now / ever / released, and its extra calls (bisect, re-asks).
+  quarantinedRows: 0,
+  quarantinedTotal: 0,
+  quarantineReleased: 0,
+  bisectCalls: 0,
+  reaskCalls: 0,
+  prescreenUnresolvedRows: 0,
+  // [A91 R2-2] cycles whose freeze read failed (DCA held as FROZEN), and the last cycle's failure (null = read ok).
+  freezeReadFailedCycles: 0,
+  freezeReadFailure: null,
+  // [A91 watchdog] cycles that ran longer than CYCLE_WATCHDOG_MS (each paged once).
+  longCycles: 0,
+}
+
+/**
+ * [A91 watchdog] A cycle still running after CYCLE_WATCHDOG_MS: counted, logged and paged (warn) ONCE for that
+ * cycle. The cycle is not killed — every external await in it has a limit (the runbook's table), so it ends.
+ */
+async function onLongCycle(startedAt) {
+  stats.longCycles++
+  const sec = Math.round((Date.now() - startedAt) / 1000)
+  log(`  WATCHDOG: the current cycle has run ${sec}s (limit ${CYCLE_WATCHDOG_MS / 1000}s) — not killed; ticks are skipped until it ends`)
+  try {
+    await alertOps(
+      {
+        kind: "cycle-watchdog",
+        detail:
+          `A keeper cycle on chain ${CHAIN_ID} has been running for ${sec}s (> ${CYCLE_WATCHDOG_MS / 1000}s). One cycle runs at a time, ` +
+          `so no other order is attempted until it ends; it is not killed. /health → cycleRunningSec. ` +
+          `docs/Runbooks/EXECUTOR-OPERATIONS.md § 9.`,
+      },
+      TIER_WARN_THRESHOLD,
+    )
+  } catch { /* alert is best-effort */ }
 }
 
 /**
  * [SEC-4 / S-3] Runs one tick unless the previous one is still running. setInterval starts a tick every
  * POLL_INTERVAL_MS whether or not the last one finished; a skipped tick is counted on /health and logged once
  * per long cycle. The flag clears whatever the tick does (finally), so a throwing tick never blocks the next.
+ * [A91 watchdog] Each tick arms a CYCLE_WATCHDOG_MS timer (onLongCycle, once per cycle), cleared when it ends.
  * @param {() => Promise<unknown>} tick
  * @returns {Promise<boolean>} whether the tick ran
  */
@@ -2649,11 +2924,17 @@ async function runOneCycleAtATime(tick) {
     }
     return false
   }
-  tickInFlight = { startedAt: Date.now(), logged: false }
+  const startedAt = Date.now()
+  tickInFlight = { startedAt, logged: false }
+  const watchdog = setTimeout(() => {
+    void onLongCycle(startedAt)
+  }, CYCLE_WATCHDOG_MS)
+  watchdog?.unref?.()
   try {
     await tick()
     return true
   } finally {
+    clearTimeout(watchdog)
     tickInFlight = null
   }
 }
@@ -2702,6 +2983,20 @@ function startHealthServer() {
           scanFallbackCycles: stats.scanFallbackCycles,
           prescreenFallbackCycles: stats.prescreenFallbackCycles,
           overlapSkippedTicks: stats.overlapSkippedTicks,
+          // [A91] additive: failed wrap reads; the pre-screen's quarantine and extra calls; freeze reads that
+          // failed (DCA held as FROZEN) and the last failure; cycles past the watchdog, and how long the current
+          // cycle has run (null between cycles)
+          scanWrapFailedCycles: stats.scanWrapFailedCycles,
+          quarantinedRows: stats.quarantinedRows,
+          quarantinedTotal: stats.quarantinedTotal,
+          quarantineReleased: stats.quarantineReleased,
+          bisectCalls: stats.bisectCalls,
+          reaskCalls: stats.reaskCalls,
+          prescreenUnresolvedRows: stats.prescreenUnresolvedRows,
+          freezeReadFailedCycles: stats.freezeReadFailedCycles,
+          freezeReadFailure: stats.freezeReadFailure,
+          longCycles: stats.longCycles,
+          cycleRunningSec: tickInFlight ? Math.round((Date.now() - tickInFlight.startedAt) / 1000) : null,
         },
       }, null, 2))
     } else if (req.url === "/") {
@@ -3035,8 +3330,9 @@ async function main() {
     if (cadence.isIdle()) log(`  Idle: next RPC cycle in ${IDLE_POLL_INTERVAL_MS / 1000}s (Supabase probe every ${POLL_INTERVAL_MS / 1000}s)`)
   }
 
-  // Run immediately, then on interval
-  await runTick()
+  // Run immediately, then on interval. [A91 watchdog] The first cycle runs under the same guard (and watchdog)
+  // as every later one; a throw still ends main() exactly as before.
+  await runOneCycleAtATime(runTick)
 
   setInterval(async () => {
     try {

@@ -320,7 +320,7 @@ hid every newer one.
 **The cycle line** — one per cycle, after `Found N active order(s)` (or `No active orders`):
 
 ```
-  Active scan: active=37 scanned=37 true=2 attempted=2 carried=0 rotate=no fallback=none
+  Active scan: active=37 scanned=37 true=2 attempted=2 carried=0 quarantined=0 rotate=no fallback=none
 ```
 
 | Field | Meaning |
@@ -329,14 +329,50 @@ hid every newer one.
 | `scanned` | orders read and pre-screened this cycle (0 on a `PAUSED` cycle) |
 | `true` | of those, how many answered `canExecute` = true |
 | `attempted` | how many times the per-order path itself asked `canExecute` (each one locked first) |
-| `carried` | ready orders the loop did not reach: attempted next cycle |
+| `carried` | ready orders the loop did not reach: attempted next cycle (a fallback cycle keeps the list) |
+| `quarantined` | orders the pre-screen has quarantined (their `canExecute` fails when asked alone — below) |
 | `rotate` | `yes` = more than 1000 active orders: the scan reads the next 1000 each cycle (one pass every ceil(N/1000) cycles) |
-| `fallback` | `none`; `scan-<status>` = the scan query failed, the 15 oldest orders were examined instead; `prescreen-<k>of<n>` = k of n Multicall3 chunks failed, their orders were asked one by one (15 per cycle, rotating) |
+| `fallback` | `none`; `scan-<status>` = the scan query failed, the 15 oldest orders were examined instead; `scan-wrap` = the read that wraps the scan to the oldest orders failed (those wait one more cycle); `prescreen-<k>of<n>` = k of n Multicall3 chunks failed (bisected in the cycle, or — an RPC transport error — their orders asked one by one, 15 per cycle, rotating) |
 
-**A fallback pages ops.** `🛠️ Ops issue: active-scan-fallback` (scan query failed) or `prescreen-fallback` (a
-Multicall3 chunk failed): warn tier, on the first cycle, then at most hourly while it lasts. `/health` →
-`stats.scanFallbackCycles` / `stats.prescreenFallbackCycles` (this process). While it lasts only 15 orders are
-examined per cycle, so newer orders can wait.
+**A fallback pages ops.** `🛠️ Ops issue: active-scan-fallback` (scan query failed), `active-scan-wrap-failed` (the wrap
+read failed) or `prescreen-fallback` (a Multicall3 chunk failed): warn tier, on the first cycle, then at most hourly
+while it lasts. `/health` → `stats.scanFallbackCycles` / `stats.scanWrapFailedCycles` / `stats.prescreenFallbackCycles`
+/ `stats.prescreenUnresolvedRows` (this process). While a scan fallback lasts only 15 orders are examined per cycle,
+so newer orders can wait.
+
+**A failed chunk is bisected; an order that fails alone is quarantined** (round 3, A91 R2-1). An order's
+`canExecute` runs code chosen by whoever created it (its `tokenIn`, its `priceFeed`); two orders whose code burns all
+the gas it gets can make a whole Multicall3 call fail. So, in the same cycle, a chunk that failed for any reason but an
+RPC transport error (HTTP status, network, key refused) is split in halves and asked again, down to single orders,
+within 40 extra calls per cycle (`BISECT_CALL_BUDGET`); the healthy orders of that chunk get their answer that cycle,
+and what the 40 calls do not reach goes to the one-by-one budget. An order asked ALONE (a direct `canExecute` with an
+explicit gas cap of 3,000,000 — an honest one needs 14k–29k) that fails with out of gas, a revert or its own time
+limit, while other calls of the cycle answer, is **quarantined in memory**: left out of every Multicall3 call and of
+the walk (never locked, written, executed or counted as a miss), asked alone again every 30 minutes (10 per cycle at
+most, outside the 40), released as soon as it answers. An expired quarantined order is still marked `expired`. A
+restart empties the quarantine (the orders are found again in their first cycle). The cycle logs
+`Pre-screen quarantine: +n row(s) that fail alone, m released, q quarantined (bisect c/40 calls, u row(s) unresolved)`
+when it changes; `/health` → `stats.quarantinedRows` (now), `stats.quarantinedTotal`, `stats.quarantineReleased`,
+`stats.bisectCalls`, `stats.reaskCalls`. `🛠️ Ops issue: prescreen-quarantine` (warn) when 5 or more orders are
+quarantined on the chain, then hourly while they are — the count only. What to do: nothing for the other orders (they
+are not slowed); a growing count is someone creating orders whose token or feed burns gas — read the order rows
+(`orders` where `status = 'active'`), their `order_data.tokenIn` / `priceFeed`, from the database, not from the log.
+Measured on the cycle rig: 24 such orders among 600–1200 delay a healthy order at most 1 cycle; 200 of them, 12 cycles
+(the 40 calls quarantine ~16 per cycle until all are isolated). A lone gas-burning order in a chunk does not fail it:
+only its own answer is lost, and it is asked one by one like any order the pre-screen could not answer.
+
+**The DCA freeze read fails closed** (owner decision 2026-11-18). Unless `circuit_breaker` answers a well-formed
+"not frozen" for `dca`, DCA orders are held that cycle exactly as under a freeze: `freeze read … -- treating as FROZEN
+this cycle`, `🛠️ Ops issue: freeze-read-failed` (warn, then hourly), `/health` → `stats.freezeReadFailedCycles`,
+`stats.freezeReadFailure`. Before deploying, check the row exists (`DCA-FREEZE.md` § 1). Limit / stop-loss unaffected.
+
+**Every wait in a cycle has a limit, and a watchdog** (round 3). Supabase reads 5 s, Supabase writes 10 s (the lock
+included), each Multicall3 call or single ask 5 s, POST `/api/swap` 65 s, a KMS signature 10 s, each RPC request viem's
+10 s × 4 tries, the receipt wait 180 s, Telegram 10 s (the full table: the branch's round-3 feedback tables, T-R3-4).
+One cycle runs at a time, so a cycle still running after 5 minutes pages ops once: `🛠️ Ops issue: cycle-watchdog`
+(warn), `WATCHDOG: the current cycle has run <s>s` in the log, `/health` → `stats.longCycles` and
+`stats.cycleRunningSec` (null between cycles). The cycle is not killed. A hung RPC (every call timing out) makes a
+cycle long — up to (chunks + 40 + 10) × 5 s in the pre-screen alone — and trips the watchdog; fix the RPC (§ 7).
 - `scan-<status>`: read the line `Active scan query FAILED (<status>: <body>)`, logged once per process (bodies
   capped at 200 characters, ids and URLs masked). `400` = PostgREST refused the keyset filter or the count;
   `5xx` / `timeout` / `network` = Supabase itself. The cycle used main's exact query (no count header).
@@ -349,8 +385,14 @@ examined per cycle, so newer orders can wait.
 once per long cycle: `Tick skipped: the previous cycle is still running (<s>s) — one cycle at a time`; `/health` →
 `stats.overlapSkippedTicks`. A few are normal; a steady stream means cycles take longer than 30 s.
 
-**More than 1000 active orders on a chain** (`rotate=yes`): every order is still pre-screened at least once every
-ceil(N/1000) cycles, plus one cycle per fallback cycle; a flood of new orders must add 1000 per cycle to hide one.
+**More than 1000 active orders on a chain** (`rotate=yes`): every order that is not quarantined is still pre-screened
+at least once every ceil(N/1000) cycles, plus one cycle per fallback cycle (`scan-<status>`) or failed wrap read
+(`scan-wrap`), plus ceil(N/1000) cycles for each cycle that left pre-screen orders unresolved
+(`stats.prescreenUnresolvedRows` moved: the scan no longer holds its position on a failed chunk, so such an order waits
+for the scan to come round); a flood of new orders must add 1000 per cycle to hide one. **Restarts are outside that
+bound:** a restarted process starts at a random page (S-8), and the rotation begins again. Measured worst gap between
+two screenings of an order: 2,500 orders — 3 cycles without restarts, 14 with a restart every cycle, 12 with one every
+2 cycles; 1,500 orders — 2, 7 and 3.
 But an order the path ATTEMPTED and deferred (gas tier, price-quorum skip, deviation defer, an infra miss) is tried
 again at its next scan, not the next cycle, so per-order streaks count scans, not cycles: the ADR-024 skip alert
 after 3 skips comes after about 3 × ceil(N/1000) cycles, and ADR-026's 20-miss rule takes longer (its ~10-minute
@@ -358,12 +400,18 @@ rule does not). A restarted process starts at a random page. An in-memory infra 
 order is absent from two consecutive complete scans (ADR-026 note 2026-11-18).
 
 **Host check after deploying this change** (`pm2 logs <app> --lines 200 --nostream`, each app):
-- present, one per cycle: `Active scan: active=<n> scanned=<n> true=<n> attempted=<n> carried=<n> rotate=no fallback=none`
+- before restarting: `SELECT id, frozen FROM circuit_breaker WHERE id = 'dca';` returns one row, `frozen = f`
+  (otherwise every DCA order is held — `DCA-FREEZE.md` § 1);
+- present, one per cycle: `Active scan: active=<n> scanned=<n> true=<n> attempted=<n> carried=<n> quarantined=0 rotate=no fallback=none`
   — `scanned` equals `active` while `active` <= 1000;
-- absent: `Active scan query FAILED (`, `Pre-screen chunk`, `fallback=scan-`, `fallback=prescreen-`;
+- absent: `Active scan query FAILED (`, `Pre-screen chunk`, `Pre-screen quarantine`, `fallback=scan-`,
+  `fallback=prescreen-`, `treating as FROZEN`, `WATCHDOG:`;
 - not repeating: `Supabase fetch error (scan wrap):`, `Tick skipped:`, `Cycle error:`;
-- gone (older code): `Active window:`, `Querying:`, `Supabase returned`, `First order:`;
-- `/health` → `stats.scanFallbackCycles`, `stats.prescreenFallbackCycles`, `stats.overlapSkippedTicks` present (0).
+- gone (older code): `Active window:`, `Querying:`, `Supabase returned`, `First order:`, `treating as NOT frozen`;
+- `/health` → `stats.scanFallbackCycles`, `stats.scanWrapFailedCycles`, `stats.prescreenFallbackCycles`,
+  `stats.prescreenUnresolvedRows`, `stats.overlapSkippedTicks`, `stats.quarantinedRows`, `stats.quarantinedTotal`,
+  `stats.quarantineReleased`, `stats.bisectCalls`, `stats.reaskCalls`, `stats.freezeReadFailedCycles`, `stats.longCycles`
+  present (0), `stats.freezeReadFailure` and `stats.cycleRunningSec` null.
 
 ---
 
