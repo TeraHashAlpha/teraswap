@@ -20,21 +20,31 @@ async function fresh(browser: Browser, opts: Parameters<Browser['newContext']>[0
   return { context, page }
 }
 
-/** Start a requestAnimationFrame sampler at document start: word opacities and the mask offset, per frame, while the overlay exists. */
+/**
+ * Start a requestAnimationFrame sampler at document start: word opacities and the mask offset, per frame, while the overlay exists.
+ *
+ * [fix/flaky-tests-root-cause] Times are on the intro's OWN clock: `t` = the frame's timestamp minus the curtain animation's
+ * `startTime`, both on the document timeline the CSS animations run on. The sampler used to start its clock at the first frame
+ * that saw the overlay and read `performance.now()` inside the callback, but the animations stay `pending` for a few frames after
+ * the overlay mounts, and the callback runs up to tens of ms after its frame: measured 25-60 ms off on an idle Mac, 175-263 ms
+ * with the renderer CPU throttled 10x (CI: 142 against the 120 ms tolerance, PR #696). Those were page-load and scheduling delays,
+ * not the timeline. Frames before the start (the animations still pending) are not on the timeline and are not sampled.
+ */
 async function sampleFromStart(context: BrowserContext) {
   await context.addInitScript(() => {
     const w = window as unknown as { __intro: Array<{ t: number; o: number[]; y: number }> }
     w.__intro = []
-    let t0 = -1
-    const tick = () => {
+    const tick = (frameTime: number) => {
       const root = document.querySelector('[data-ts-intro]')
       if (root) {
-        const now = performance.now()
-        if (t0 < 0) t0 = now
-        const cs = getComputedStyle(root.querySelector('[data-ts-intro-curtain]') as Element)
-        const y = parseFloat((cs.maskPosition || cs.webkitMaskPosition || '0 0').split(' ')[1] ?? '0') || 0
-        const o = Array.from(root.querySelectorAll('.ts-intro__word')).map((n) => Number(getComputedStyle(n).opacity))
-        w.__intro.push({ t: now - t0, o, y })
+        const curtain = root.querySelector('[data-ts-intro-curtain]') as Element
+        const start = curtain.getAnimations()[0]?.startTime
+        if (typeof start === 'number') {
+          const cs = getComputedStyle(curtain)
+          const y = parseFloat((cs.maskPosition || cs.webkitMaskPosition || '0 0').split(' ')[1] ?? '0') || 0
+          const o = Array.from(root.querySelectorAll('.ts-intro__word')).map((n) => Number(getComputedStyle(n).opacity))
+          w.__intro.push({ t: frameTime - start, o, y })
+        }
       }
       requestAnimationFrame(tick)
     }

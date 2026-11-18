@@ -750,16 +750,34 @@ describe("chain-verify — no secret survives a refusal, whatever shape it arriv
   // noise cannot inflate. Each repetition itself times a small batch of calls and divides by the
   // batch size, which keeps the per-call time well above timer-resolution noise even for inputs
   // fast enough that a single call would measure as 0ms.
+  //
+  // [fix/flaky-tests-root-cause] That holds for the code's own noise, not for other processes: a
+  // wall clock also counts the time this process WAITED for a core, and the minimum only cancels it
+  // if both sizes had an equally clean batch. They did not: all small batches ran first, each a tenth
+  // as long as a large one, so load that arrived after them inflated the large side alone (CI: 54.2x
+  // once on Node 20). Now each batch is timed in this process's CPU time (process.cpuUsage, user +
+  // system: waiting for a core is not counted), the two sizes are INTERLEAVED, and both get the SAME
+  // WORK per batch (SCALE times the calls on the input SCALE times smaller). Measured with these rows
+  // on Node 20, 100 rounds under bursts of 60 busy loops (2-5 s on, 2-5 s off): old shape 12 rounds
+  // over the bound (max 106.8), interleaved + equal work on the wall clock 2 (max 51.3), the same on
+  // CPU time 0 (max 13.8); interleaving alone did not help (20 of 20 over at load average ~85).
+  // Total work per row is unchanged; process.cpuUsage resolves 1 µs on Node 20 and 22.
   const RATIO_BOUND = 30
-  function timeMinOf(input, { batches = 5, callsPerBatch = 10 } = {}) {
-    let min = Infinity
+  const SCALE = 10
+  function perCallMs(input, calls) {
+    const started = process.cpuUsage()
+    for (let c = 0; c < calls; c++) redactUrls(input)
+    const used = process.cpuUsage(started)
+    return (used.user + used.system) / 1000 / calls
+  }
+  function timeMinPair(small, large, { batches = 5, largeCallsPerBatch = 5 } = {}) {
+    let tSmall = Infinity
+    let tLarge = Infinity
     for (let b = 0; b < batches; b++) {
-      const started = performance.now()
-      for (let c = 0; c < callsPerBatch; c++) redactUrls(input)
-      const perCall = (performance.now() - started) / callsPerBatch
-      if (perCall < min) min = perCall
+      tSmall = Math.min(tSmall, perCallMs(small, largeCallsPerBatch * SCALE))
+      tLarge = Math.min(tLarge, perCallMs(large, largeCallsPerBatch))
     }
-    return min
+    return { tSmall, tLarge }
   }
 
   test(
@@ -777,10 +795,11 @@ describe("chain-verify — no secret survives a refusal, whatever shape it arriv
       ]
       for (const [label, make, base] of EVIL) {
         const small = make(base)
-        const large = make(base * 10)
+        const large = make(base * SCALE)
+        const timed = timeMinPair(small, large)
         // The 0.001 floor only guards divide-by-zero; batching keeps it from firing in practice.
-        const tSmall = Math.max(timeMinOf(small), 0.001)
-        const tLarge = timeMinOf(large)
+        const tSmall = Math.max(timed.tSmall, 0.001)
+        const tLarge = timed.tLarge
         const ratio = tLarge / tSmall
         assert.ok(
           ratio < RATIO_BOUND,

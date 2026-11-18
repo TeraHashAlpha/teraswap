@@ -1,0 +1,167 @@
+[
+  {
+    "id": "v3-dca-match",
+    "chain_id": 8453,
+    "order_hash": "0x8b629062c37befabb9a1871754f647f76ef6d7fe5a37ec0f67d5a31231ba4d39",
+    "order_data": {
+      "owner": "0x1111111111111111111111111111111111111111",
+      "tokenIn": "0x2222222222222222222222222222222222222222",
+      "tokenOut": "0x3333333333333333333333333333333333333333",
+      "amountIn": "1000000000000000000",
+      "minAmountOut": "100000000000000000000",
+      "maxSlippageBps": 300,
+      "orderType": 2,
+      "condition": 0,
+      "targetPrice": "0",
+      "priceFeed": "0x0000000000000000000000000000000000000000",
+      "expiry": "1795000000",
+      "nonce": "1",
+      "router": "0x4444444444444444444444444444444444444444",
+      "routerDataHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "dcaInterval": "3600",
+      "dcaTotal": "3"
+    }
+  },
+  {
+    "id": "v3-dca-upper-case",
+    "chain_id": 42161,
+    "order_hash": "0x46C361A339FD224521EE54DA1D9661C73598645CE15E06D4DEB34FC17245260E",
+    "order_data": {
+      "owner": "0x1111111111111111111111111111111111111111",
+      "tokenIn": "0x2222222222222222222222222222222222222222",
+      "tokenOut": "0x3333333333333333333333333333333333333333",
+      "amountIn": "1000000000000000000",
+      "minAmountOut": "100000000000000000000",
+      "maxSlippageBps": 300,
+      "orderType": 2,
+      "condition": 0,
+      "targetPrice": "0",
+      "priceFeed": "0x0000000000000000000000000000000000000000",
+      "expiry": "1795000000",
+      "nonce": "2",
+      "router": "0x4444444444444444444444444444444444444444",
+      "routerDataHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "dcaInterval": "3600",
+      "dcaTotal": "365"
+    }
+  },
+  {
+    "id": "v2-limit-match",
+    "chain_id": 1,
+    "order_hash": "0xc4b9a5f6a54cdd416b3133f3ed3e60489cccad3da29e9af850e1c8a0afadd83c",
+    "order_data": {
+      "owner": "0x1111111111111111111111111111111111111111",
+      "tokenIn": "0x2222222222222222222222222222222222222222",
+      "tokenOut": "0x3333333333333333333333333333333333333333",
+      "amountIn": "5000000000000000000",
+      "minAmountOut": "1",
+      "orderType": 0,
+      "condition": 1,
+      "targetPrice": "250000000000",
+      "priceFeed": "0x5555555555555555555555555555555555555555",
+      "expiry": "1795000000",
+      "nonce": "3",
+      "router": "0x4444444444444444444444444444444444444444",
+      "routerDataHash": "0x1212121212121212121212121212121212121212121212121212121212121212",
+      "dcaInterval": "0",
+      "dcaTotal": "1"
+    }
+  },
+  {
+    "id": "v3-caller-text",
+    "chain_id": 8453,
+    "order_hash": "0xabababababababababababababababababababababababababababababababab",
+    "order_data": {
+      "owner": "0x1111111111111111111111111111111111111111",
+      "tokenIn": "0x2222222222222222222222222222222222222222",
+      "tokenOut": "0x3333333333333333333333333333333333333333",
+      "amountIn": "1000000000000000000",
+      "minAmountOut": "100000000000000000000",
+      "maxSlippageBps": 300,
+      "orderType": 2,
+      "condition": 0,
+      "targetPrice": "0",
+      "priceFeed": "0x0000000000000000000000000000000000000000",
+      "expiry": "1795000000",
+      "nonce": "4",
+      "router": "0x4444444444444444444444444444444444444444",
+      "routerDataHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "dcaInterval": "3600",
+      "dcaTotal": "3"
+    }
+  },
+  {
+    "id": "v3-hash-of-another-order",
+    "chain_id": 8453,
+    "order_hash": "0x08010756b85f9a98221b7279f51c6de5d51f992a6176504f8b7458e2f1572527",
+    "order_data": {
+      "owner": "0x1111111111111111111111111111111111111111",
+      "tokenIn": "0x2222222222222222222222222222222222222222",
+      "tokenOut": "0x3333333333333333333333333333333333333333",
+      "amountIn": "1000000000000000000",
+      "minAmountOut": "100000000000000000000",
+      "maxSlippageBps": 300,
+      "orderType": 2,
+      "condition": 0,
+      "targetPrice": "0",
+      "priceFeed": "0x0000000000000000000000000000000000000000",
+      "expiry": "1795000000",
+      "nonce": "5",
+      "router": "0x4444444444444444444444444444444444444444",
+      "routerDataHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "dcaInterval": "3600",
+      "dcaTotal": "3"
+    }
+  },
+  {
+    "id": "legacy-uuid-hash",
+    "chain_id": 8453,
+    "order_hash": "6f1c2a90-3b7e-4c1d-9a55-2f0e8b7d4c11",
+    "order_data": {
+      "owner": "0x1111111111111111111111111111111111111111",
+      "tokenIn": "0x2222222222222222222222222222222222222222",
+      "tokenOut": "0x3333333333333333333333333333333333333333",
+      "amountIn": "1000000000000000000",
+      "minAmountOut": "100000000000000000000",
+      "maxSlippageBps": 300,
+      "orderType": 2,
+      "condition": 0,
+      "targetPrice": "0",
+      "priceFeed": "0x0000000000000000000000000000000000000000",
+      "expiry": "1795000000",
+      "nonce": "6",
+      "router": "0x4444444444444444444444444444444444444444",
+      "routerDataHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "dcaInterval": "3600",
+      "dcaTotal": "1"
+    }
+  },
+  {
+    "id": "no-order-data",
+    "chain_id": 8453,
+    "order_hash": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+    "order_data": null
+  },
+  {
+    "id": "order-data-missing-nonce",
+    "chain_id": 8453,
+    "order_hash": "0xefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+    "order_data": {
+      "owner": "0x1111111111111111111111111111111111111111",
+      "tokenIn": "0x2222222222222222222222222222222222222222",
+      "tokenOut": "0x3333333333333333333333333333333333333333",
+      "amountIn": "1000000000000000000",
+      "minAmountOut": "100000000000000000000",
+      "maxSlippageBps": 300,
+      "orderType": 2,
+      "condition": 0,
+      "targetPrice": "0",
+      "priceFeed": "0x0000000000000000000000000000000000000000",
+      "expiry": "1795000000",
+      "router": "0x4444444444444444444444444444444444444444",
+      "routerDataHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "dcaInterval": "3600",
+      "dcaTotal": "3"
+    }
+  }
+]

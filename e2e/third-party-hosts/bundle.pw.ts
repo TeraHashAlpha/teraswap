@@ -2,7 +2,8 @@
  * [fix/user-ip-privacy] Values that must never be shipped to a visitor are not in the built client chunks.
  *
  * `CAPTURE_BUNDLE_MARKERS` is a comma-separated list of strings the BUILD was given as env values — the deprecated L2
- * provider URLs, the public Supabase URL / anon key, a Sentry DSN (see .github/workflows/e2e.yml). The test searches
+ * provider URLs, the retired mainnet RPC + two fallback URLs ([SEC-5] fix/mainnet-rpc-out-of-client), the public
+ * Supabase URL / anon key, a Sentry DSN (see .github/workflows/e2e.yml). The test searches
  * every file under `.next/static` for them. A hit means a browser-bundled module reads that env again with a literal
  * `process.env.NEXT_PUBLIC_*`, which Next inlines into the client. Skipped when the variable is not set.
  */

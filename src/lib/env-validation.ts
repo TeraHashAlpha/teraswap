@@ -17,20 +17,18 @@ type EnvRule = {
 
 const RULES: EnvRule[] = [
   // ── RPC ──
-  {
-    key: 'NEXT_PUBLIC_RPC_URL',
-    required: true,
-    label: 'Primary RPC URL (Alchemy/Infura)',
-    pattern: /^https?:\/\//,
-  },
+  // [fix/mainnet-rpc-out-of-client, SEC-5] There is no browser RPC name to validate any more: the browser reads
+  // every chain through /api/rpc, and the old required mainnet browser rule named a variable no code reads now
+  // (its value used to be inlined into a client chunk). The server names below are the whole RPC configuration.
+  //
   // [FEAT-SERVER-RPC-ENV-SPLIT] Server-only RPC per chain. Optional: when absent the server falls
-  // back to the browser env (then the public default), which the browser Alchemy domain allowlist
-  // rejects — so set these in production. The label names the fallback per chain.
+  // back as the label says per chain (ending at the rate-limited public default) — so set these in
+  // production. RPC_URL_<id> is also the /api/rpc upstream, i.e. every browser read on that chain.
   {
     key: 'RPC_URL_1',
     required: false,
     serverOnly: true,
-    label: 'Server-only Ethereum RPC — falls back to RPC_URL, then NEXT_PUBLIC_RPC_URL, then the public default',
+    label: 'Server-only Ethereum RPC (also the /api/rpc upstream) — falls back to RPC_URL, then the public default',
   },
   {
     key: 'RPC_URL_8453',

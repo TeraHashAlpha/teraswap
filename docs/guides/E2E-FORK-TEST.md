@@ -36,8 +36,9 @@ PK:      0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 ```bash
 npm run dev:fork
 ```
-Isto arranca o Next.js com `NEXT_PUBLIC_RPC_URL=http://127.0.0.1:8545`.
-O Wagmi/Viem vai ligar-se automaticamente ao Anvil em vez do Alchemy.
+Isto arranca o Next.js com `RPC_URL_1=http://127.0.0.1:8545` (o nome server-only; desde SEC-5,
+`fix/mainnet-rpc-out-of-client`, o servidor já não lê `NEXT_PUBLIC_RPC_URL`).
+O browser lê a mainnet por `/api/rpc`, cujo upstream passa a ser o Anvil em vez do Alchemy.
 
 ### Terminal 3 — Financiar carteira
 ```bash

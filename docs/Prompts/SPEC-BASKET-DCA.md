@@ -79,12 +79,22 @@ At tick `t`:
 - State is rebuilt from rows at every decision, as after a restart: `last_i` = the latest journal row with a price for that leg (reference row included); `entry_i` = the first TICK row with a price (never the reference row); `cooldown` = the stored next-cooldown of the previous tick's row (none if that tick has no row); `done_i` from the order rows, never from the picks.
 - Decide once: a (basket, tick) row that exists is read, never decided again. The row is written before any pick is returned as executable; if the write fails nothing executes.
 - A pick is executable from its slot time (slot 1 = tick time, slot 2 = tick time + `T ÷ 2`) until the next tick's time. A pick that did not execute is due again by the calendar.
-- A tick whose time passed with no row is never decided late; the next tick treats it as a tick with no prices.
+- A tick may be decided only from its time until its time + `T ÷ 2` (owner, 2026-11-16; the same deadline as the reference row). After that it is a missed tick: never decided late, and the next tick treats it as a tick with no prices. Reason: a late decision would compare prices over a fraction of a cycle and bunch two purchases together, which is not what was modelled; the calendar and the three grace cycles recover the chunk.
+- A reason for a blocked poll is returned to the caller for its log and is not a journal row (a row would stop the next poll from deciding). The wiring keeps the last blocked reason per basket somewhere the closing report can read.
+- The tables are read-only for users (own wallet); a basket is created and cancelled only through the API. `baskets.stable_leg` names the leg the band applies to.
+- The keeper has no due-time gate of its own for DCA orders (it locks every active one and lets the contract's `canExecute` decide), so the journal check for a leg order sits BEFORE the lock, and no basket may exist on a chain before that wiring is deployed there.
 - No decision for tick `t + 1` while a pick of tick `t` has a transaction in flight.
 - The journal stores, per leg, the decision price (double precision), its source, `bandAdd`, and the selection module's per-leg output exactly as returned ("paused" is reason `rule9`; a null variation means no previous price, not 0).
 - Fail closed: a missing or unreadable basket row, a leg order that does not match the basket (token, `n`, owner, chain), or an error thrown by the selection module means nothing executes for that basket in that poll, with a recorded reason. It never falls back to the ordinary DCA path.
 - `'now'` mode delivers the user's token first only if leg 0 has a price at tick 0 and, when it is the stable leg, is inside its band: the API refuses to create such a basket otherwise. The API also enforces a minimum protection threshold above 0 and a minimum capital.
 - Status: `completed` when every leg is complete; `expired` after the last grace tick.
+- Added after the audit of 2026-11-16 (blocked, 0C/3H), binding:
+  - **The clock is read again after every wait and before the journal write.** A tick or a reference row is written only if that second reading is still before the deadline; `decided_at` is that reading; a pick is returned only if its tick is still the current one. A read that straddles the deadline ends as a missed tick.
+  - **A leg must be executable.** If a leg with chunks left is not `active` or `executing`, or its signed `expiry` has passed, the whole basket is refused for that poll (no decision, no pick, a reason). A cancelled, expired or failed leg is never returned as executable.
+  - **The coordinator is told its chain.** It refuses, before any read or write, a basket whose `chain_id` is not the keeper's, and passes the chain to the price resolver.
+  - **Every injected call has a time limit**, stated in the coordinator's contract and enforced by the wiring; a call that does not answer in time is a price or store error with a reason, never a silent stall of the keeper loop.
+  - The reference row is refused when first sight is earlier than `t0` by more than a small clock skew. The wiring's clock never steps back.
+  - A leg is recognised from its signed order (the order hash computed from the signed fields), not only from the `basket_id` column: the same signed order stored again as an ordinary order must never run on the ordinary DCA path. The API computes order hashes on the server.
 
 A chunk that was picked and did not execute (no route, floor, revert, infra) stays due: the calendar counts executed chunks, so the next tick picks it up. ADR-024 and ADR-026 apply unchanged to each leg order: a skipped cycle or an infra miss never counts against the order.
 
