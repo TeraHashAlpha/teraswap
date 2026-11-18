@@ -6,6 +6,10 @@ origin/main 85a6f9cb merged as `269dd983` (PR #709; no keeper file). Code: `358e
 
 ## Owner answers (2026-11-18; they supersede the goal text and the details file)
 
+Asked ONCE: one AskUserQuestion with four parts (1–4: the missing-row case, outages, the await-limit premise found
+false, the re-ask budget), before the code that depended on them; no other question was asked. Answer 0 is not an
+answer to a question: it is the owner's own message, sent after the goal started.
+
 0. **Freeze read (message after the goal started): "error = frozen".** Only a well-formed answer saying not frozen lets a
    DCA order pass; a timeout, any error or any malformed answer means frozen for that cycle, with an ops alert and a
    /health field; this deliberately changes main. (The details file on disk, saved 17:48, still had the timeout-only
@@ -34,7 +38,8 @@ origin/main 85a6f9cb merged as `269dd983` (PR #709; no keeper file). Code: `358e
    quarantine `active-window.js:371`, `executor.js:1087,1099`; tests `active-scan-poison` (3), `active-scan-round3` R2-1 (8),
    `prescreen-bisect-replay` (5), Foundry `PrescreenBisect.t.sol` (6). R2-2 fixed `executor.js:1460-1495,1835-1854`, tests
    R2-2 (12). R2-3 fixed `:2818` + ADR-026 note, test R2-3. R2-4 fixed `:879,1990`, `active-window.js:519`, test R2-4.
-   All 30 new behaviour tests FAIL on 16fb740c (T-R3-2; two only on the new /health field, behaviour equal to main).
+   All 30 new behaviour tests FAIL on 16fb740c (T-R3-2; two only on the new /health field, behaviour equal to main);
+   the output, verbatim: T-R3-2b.
 2. **Bisect** (T-R3-3, gas model at 50M): worst delay of a healthy row — 24 burners among 600/1000/1200: **1/1/1** cycle
    (16fb740c: 26/27/never); 200 burners: **12/12/12** (16fb740c: 39/66/never). Budget: <= 7P calls per P burners
    (property), measured ~2.5 ⇒ ~16 isolated per cycle, >= 5 guaranteed; 10 burners in one chunk: 25 calls (50M), 21
@@ -58,8 +63,8 @@ origin/main 85a6f9cb merged as `269dd983` (PR #709; no keeper file). Code: `358e
    1-min load 7.13 with no other verify/CodeQL run (waited from load ~19), ended 19:20:19Z: **RESULT: PASS** — suite
    11170/0 failed (525 files), lint-delta +0/+0, tsc 0, build ok, v1v2-parity 123, rpc-budget 36, CodeQL security-extended
    head 13 = base 13 (0 new), keeper Node 20 2183/0/0 and Node 22 2183/0/0. Gitleaks on this round's commits: no leaks.
-   One docs-only commit follows it (this file, the tables, the runbook § 1 tunables rows). Diff since 16fb740c: 43
-   files, +4306/−273 at `ce55e768`.
+   Docs-only commits follow it (this file, the tables, the runbook § 1 tunables rows). Diff since 16fb740c: 43
+   files, +4306/−273 at `ce55e768`. No CI command was run (no polling); no PR action.
    Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/keeper-active-orders-window. **Not verified:** a real
    provider's eth_call gas cap and its error shapes (gas model + Foundry at 50M/550M only); KMS against AWS (local
    stand-in); the Supabase write limit against a real PostgREST; whether production has the `dca` row (runbook check);

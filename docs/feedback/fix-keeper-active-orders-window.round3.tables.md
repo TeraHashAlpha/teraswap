@@ -31,6 +31,160 @@ Code commits: `358e62a7` (round 3) and `ce55e768` (a stale comment). Lines are a
 | R2-4 failed wrap read | `no cycle flagged fallback=scan-wrap` |
 | KMS endpoint never answers | `the KMS request was still waiting after 8 s` |
 
+### T-R3-2b The output on 16fb740c, verbatim
+
+Each failing test with its error / expected / actual lines, as `node --test` printed them (leading indentation trimmed, lines
+cut at 200 characters); the run's summary at the end. The freeze cases print the cycle log as their message; their
+`freeze read` lines (from the same log) follow the block.
+
+```
+not ok 1 - rows \#300, \#350 and \#420, ready from cycle 10, execute within ceil(1200/1000) = 2 cycles; the burners are quarantined, never executed
+  error: |-
+  row #300 ready from cycle 10 executed at cycle never (within 12 cycles); lines:
+  [18:31:57]   Active scan: active=1200 scanned=1000 true=0 attempted=13 carried=0 rotate=yes fallback=prescreen-1of20
+  [18:32:27]   Active scan: active=1200 scanned=1000 true=0 attempted=15 carried=0 rotate=yes fallback=prescreen-1of20
+  [18:32:57]   Active scan: active=1200 scanned=1000 true=0 attempted=15 carried=0 rotate=yes fallback=prescreen-1of20
+  [18:33:27]   Active scan: active=1200 scanned=1000 true=0 attempted=15 carried=0 rotate=yes fallback=prescreen-1of20
+  expected: true
+  actual: false
+not ok 1 - 600 rows, two burners in each of the first 12 chunks: the ready row \#591 executes within ceil(600/1000) + ceil(7*24/40) = 6 cycles
+  error: |-
+  the ready row #591 was not executed within 6 cycles; lines:
+  [18:27:57]   Active scan: active=600 scanned=600 true=0 attempted=14 carried=0 rotate=no fallback=prescreen-12of12
+  [18:28:27]   Active scan: active=600 scanned=600 true=0 attempted=15 carried=0 rotate=no fallback=prescreen-12of12
+  [18:28:57]   Active scan: active=600 scanned=600 true=0 attempted=14 carried=0 rotate=no fallback=prescreen-12of12
+  [18:29:27]   Active scan: active=600 scanned=600 true=0 attempted=15 carried=0 rotate=no fallback=prescreen-12of12
+  [18:29:57]   Active scan: active=600 scanned=600 true=0 attempted=14 carried=0 rotate=no fallback=prescreen-12of12
+  [18:30:27]   Active scan: active=600 scanned=600 true=0 attempted=14 carried=0 rotate=no fallback=prescreen-12of12
+  expected: true
+  actual: false
+not ok 2 - 1000 rows, two burners in each of the first 12 chunks: the ready row \#591 executes within ceil(1000/1000) + ceil(7*24/40) = 6 cycles
+  error: |-
+  the ready row #591 was not executed within 6 cycles; lines:
+  [18:27:57]   Active scan: active=1000 scanned=1000 true=0 attempted=14 carried=0 rotate=no fallback=prescreen-12of20
+  [18:28:27]   Active scan: active=1000 scanned=1000 true=0 attempted=15 carried=0 rotate=no fallback=prescreen-12of20
+  [18:28:57]   Active scan: active=1000 scanned=1000 true=0 attempted=14 carried=0 rotate=no fallback=prescreen-12of20
+  [18:29:27]   Active scan: active=1000 scanned=1000 true=0 attempted=15 carried=0 rotate=no fallback=prescreen-12of20
+  [18:29:57]   Active scan: active=1000 scanned=1000 true=0 attempted=14 carried=0 rotate=no fallback=prescreen-12of20
+  [18:30:27]   Active scan: active=1000 scanned=1000 true=0 attempted=14 carried=0 rotate=no fallback=prescreen-12of20
+  expected: true
+  actual: false
+not ok 1 - two burners in one chunk: both quarantined in the same cycle (cycle line, /health); the other 58 rows answered; no write, miss or streak for them
+  error: |-
+  The input did not match the regular expression /active=60 scanned=60 true=1 attempted=1 carried=0 quarantined=2 rotate=no fallback=prescreen-1of2$/. Input:
+  expected:
+  actual: '[18:27:57]   Active scan: active=60 scanned=60 true=0 attempted=14 carried=0 rotate=no fallback=prescreen-1of2'
+not ok 2 - asked again alone at most once every 30 minutes; released when it answers (back in the chunks the next cycle)
+  error: |-
+  cycle 0 (0 min): row a asked alone 0 time(s)
+  expected: 1
+  actual: 0
+not ok 3 - ten re-asks per cycle at most: 20 rows quarantined together are asked again 10, then 10, the cycles after 30 minutes
+  error: |-
+  all 20 isolated in one cycle (4 calls per chunk, 40 in all)
+  expected: 20
+not ok 4 - an expired quarantined row is still walked: the path marks it `expired` without asking canExecute
+  error: |-
+  Expected values to be strictly equal:
+  expected: 2
+not ok 5 - ops is paged when the quarantine first holds 5 rows, quiet within the hour, again after it; the count only, never an id or address
+  error: |-
+  Expected values to be strictly equal:
+  expected: 6
+not ok 1 - a chunk that fails with an HTTP 503 is not bisected: no single ask, its rows go to the 15-row budget, nothing quarantined
+  error: |-
+  The input did not match the regular expression /quarantined=0 rotate=no fallback=prescreen-1of2$/. Input:
+  expected:
+  actual: '[18:27:57]   Active scan: active=60 scanned=60 true=0 attempted=15 carried=0 rotate=no fallback=prescreen-1of2'
+not ok 2 - nothing answers (every call hits its time limit): the bisect stays within its budget and quarantines nothing
+  error: 'undefined bisect calls'
+  expected: true
+  actual: false
+not ok 3 - 200 burners among 600 rows: never more than 40 bisect calls and 10 re-asks in a cycle
+  error: 'cycle 0: NaN bisect calls'
+  expected: true
+  actual: false
+not ok 1 - a slow freeze read (5.5 s, answering frozen=true): the DCA row is held (never asked by the path, left active); the limit order still executes
+  error: |-
+  [18:27:57]   Active scan: active=2 scanned=2 true=2 attempted=2 carried=0 rotate=no fallback=none
+  expected: true
+not ok 2 - answer frozen=false ⇒ not frozen for DCA this cycle
+  error: |-
+  Expected values to be strictly equal:
+  expected: ~
+not ok 3 - answer frozen=true ⇒ FROZEN for DCA this cycle
+  error: |-
+  Expected values to be strictly equal:
+  expected: ~
+not ok 4 - HTTP 503 * ⇒ FROZEN for DCA this cycle
+  error: |-
+  [18:27:57]   Active scan: active=2 scanned=2 true=2 attempted=2 carried=0 rotate=no fallback=none
+not ok 5 - HTTP 404, no table * ⇒ FROZEN for DCA this cycle
+  error: |-
+  [18:27:57]   Active scan: active=2 scanned=2 true=2 attempted=2 carried=0 rotate=no fallback=none
+not ok 6 - network error * ⇒ FROZEN for DCA this cycle
+  error: |-
+  [18:27:57]   Active scan: active=2 scanned=2 true=2 attempted=2 carried=0 rotate=no fallback=none
+not ok 7 - body not JSON * ⇒ FROZEN for DCA this cycle
+  error: |-
+  [18:27:57]   Active scan: active=2 scanned=2 true=2 attempted=2 carried=0 rotate=no fallback=none
+not ok 8 - body not a list * ⇒ FROZEN for DCA this cycle
+  error: |-
+  [18:27:57]   Active scan: active=2 scanned=2 true=2 attempted=2 carried=0 rotate=no fallback=none
+not ok 9 - frozen not a boolean * ⇒ FROZEN for DCA this cycle
+  error: |-
+  [18:27:57]   Active scan: active=2 scanned=2 true=2 attempted=2 carried=0 rotate=no fallback=none
+not ok 10 - no dca row * ⇒ FROZEN for DCA this cycle
+  error: |-
+  [18:27:57]   Active scan: active=2 scanned=2 true=2 attempted=2 carried=0 rotate=no fallback=none
+not ok 11 - time limit (scaled: 100 ms limit, 300 ms answer) * ⇒ FROZEN for DCA this cycle
+  error: |-
+  [18:27:57]   Active scan: active=2 scanned=2 true=2 attempted=2 carried=0 rotate=no fallback=none
+not ok 12 - /health shows freezeReadFailedCycles and freezeReadFailure (source anchor: additive fields of stats)
+  error: 'freezeReadFailedCycles'
+  expected: true
+  actual: false
+not ok 1 - fake clock: a cycle still running at 5 minutes pages ops once (warn) and counts on /health; it is not killed; a cycle that ends in time pages nothing
+  error: |-
+  one page at 5 minutes
+  expected: 1
+  actual: 0
+not ok 2 - source: the boot cycle runs under the same guard (and watchdog) as the interval's
+  error: |-
+  The input did not match the regular expression /await runOneCycleAtATime\(runTick\)/. Input:
+not ok 3 - every external call hangs: the cycle ends (it throws at the stale-unlock write) within balance + freeze + ETH/USD + write limits
+  error: 'a cycle with every call hanging did not finish within 10000 ms (hung)'
+not ok 4 - every call after the scan read hangs (RPC, writes, the swap API): the pre-screen, the bisect and the path each stop at their limits and the cycle ends
+  error: 'a cycle whose every call after the scan hangs did not finish within 15000 ms (hung)'
+not ok 1 - rotating (scan 20 of 60): 3 ready rows carried; the next cycle's scan query fails (503); the cycle after, the carried rows execute first
+  error: 'the fallback cycle shows the kept list'
+  expected:
+  actual: '[18:28:57]   Active scan: active=? scanned=15 true=0 attempted=0 carried=0 rotate=yes fallback=scan-503'
+not ok 1 - scan 50 of 120: the page reaches the newest row, the wrap read fails ⇒ fallback=scan-wrap, /health counts it, ops is paged once; the next cycle starts at the oldest row
+  error: 'no cycle flagged fallback=scan-wrap'
+  expected: true
+  actual: ~
+not ok 9 - a KMS endpoint that never answers: the request is aborted at its limit (10 s by default; 300 ms here), never a hang
+  error: 'the KMS request was still waiting after 8 s'
+# tests 30
+# pass 0
+# fail 30
+```
+
+The freeze cases' own `freeze read` lines in that log (16fb740c logs nothing for "not a list", "not a boolean" and "no row": it
+passes the DCA row silently — `true=2 attempted=2` above):
+
+```
+(5.5 s, frozen=true)  [18:27:57]   WARNING: freeze read error (The operation was aborted due to timeout) -- treating as NOT frozen
+(HTTP 503)            [18:27:57]   WARNING: freeze read failed (HTTP 503) -- treating as NOT frozen
+(HTTP 404)            [18:27:57]   WARNING: freeze read failed (HTTP 404) -- treating as NOT frozen
+(network error)       [18:27:57]   WARNING: freeze read error (fetch failed) -- treating as NOT frozen
+(body not JSON)       [18:27:57]   WARNING: freeze read error (Unexpected token '<', "<html>" is not valid JSON) -- treating as NOT frozen
+(time limit, scaled)  [18:27:57]   WARNING: freeze read error (The operation was aborted due to timeout) -- treating as NOT frozen
+```
+
+The same 30 tests on `ce55e768`: `# tests 30`, `# pass 30`, `# fail 0` (and inside the full keeper suite, 2183/2183, Node 20 and 22).
+
 ## T-R3-3 The bisect (design 120c §6), gas model at an eth_call cap of 50M; `active-scan-poison.measure.mjs`, 5 seeds × 40 cycles (16fb740c: × 80)
 
 | M (rows) | P (burners) | worst delay of a healthy row, head | 16fb740c | head: no chunk fails from cycle | max bisect calls / cycle | quarantined at the end |
