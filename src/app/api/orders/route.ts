@@ -557,30 +557,37 @@ export async function POST(req: NextRequest) {
     // Scoped to v3 specifically: v3 is where pinned routes exist and where the executor enforces
     // the hash. The legacy v2 non-DCA path is left byte-identical (it is separately unexecutable
     // — threat-model P1c — but that is not this sprint's to change).
-    if (isV3Order && orderTypeEnum !== ORDER_TYPE_DCA) {
-      const storedRouterData = body.orderData?.routerData
+    // [A86 S-4] Straight-line, so the hash check below runs ONCE for every order: a pinned (v3 non-DCA) order is refused
+    // on it exactly as before (same checks, same order, same answers); for every order, the stored order_data keeps the
+    // caller's routerData only when it holds (routerDataMatchesSigned, used where order_data is built).
+    const pinnedOrder = isV3Order && orderTypeEnum !== ORDER_TYPE_DCA
+    const storedRouterData = body.orderData?.routerData
 
-      // codeql[js/user-controlled-bypass] — routerDataHash is part of the EIP-712 message just
-      // verified, so this reads a signature-bound value; the contract re-enforces RouterDataRequired.
-      if (!body.routerDataHash || body.routerDataHash === zeroHash) {
-        return NextResponse.json(
-          {
-            error:
-              'Non-DCA orders must commit to a real routerDataHash — the executor rejects ZeroHash ' +
-              '(RouterDataRequired), so such an order could never execute.',
-          },
-          { status: 400 },
-        )
-      }
-      // codeql[js/user-controlled-bypass] — presence precondition for the cryptographic check on the
-      // next lines: verifyRouterDataHash compares these unsigned bytes against the SIGNED hash.
-      if (!storedRouterData) {
-        return NextResponse.json(
-          { error: 'Non-DCA orders must include the pinned calldata in orderData.routerData' },
-          { status: 400 },
-        )
-      }
-      if (!verifyRouterDataHash(storedRouterData, body.routerDataHash)) {
+    // codeql[js/user-controlled-bypass] — routerDataHash is part of the EIP-712 message just
+    // verified, so this reads a signature-bound value; the contract re-enforces RouterDataRequired.
+    if (pinnedOrder && (!body.routerDataHash || body.routerDataHash === zeroHash)) {
+      return NextResponse.json(
+        {
+          error:
+            'Non-DCA orders must commit to a real routerDataHash — the executor rejects ZeroHash ' +
+            '(RouterDataRequired), so such an order could never execute.',
+        },
+        { status: 400 },
+      )
+    }
+    // codeql[js/user-controlled-bypass] — presence precondition for the cryptographic check on the
+    // next lines: verifyRouterDataHash compares these unsigned bytes against the SIGNED hash.
+    if (pinnedOrder && !storedRouterData) {
+      return NextResponse.json(
+        { error: 'Non-DCA orders must include the pinned calldata in orderData.routerData' },
+        { status: 400 },
+      )
+    }
+    // signedData.routerDataHash is the signed text: for a pinned order it is body.routerDataHash (non-zero, checked above).
+    const routerDataMatchesSigned = typeof storedRouterData === 'string' &&
+      verifyRouterDataHash(storedRouterData as `0x${string}`, signedData.routerDataHash as `0x${string}`)
+    if (pinnedOrder) {
+      if (!routerDataMatchesSigned) {
         return NextResponse.json(
           { error: 'orderData.routerData does not hash to the signed routerDataHash' },
           { status: 400 },
@@ -840,19 +847,16 @@ export async function POST(req: NextRequest) {
     }
 
     // [A86 S-4/S-5] The order_data this row stores: the signed fields (signedData, from the verified message), plus the
-    // caller's routerData only when it hashes to the SIGNED routerDataHash: the check the pinned-route block above makes
-    // (and refuses on) for a v3 non-DCA order; for every other order a routerData that fails it is dropped, never refused.
-    // A caller orderData that differs is not refused (the request is answered as before): one line names the keys.
+    // caller's routerData only when it hashes to the SIGNED routerDataHash (routerDataMatchesSigned: the one check of the
+    // pinned-route block above, which refuses on it for a v3 non-DCA order; for every other order a routerData that fails
+    // it is dropped, never refused). A caller orderData that differs is not refused (the request is answered as before):
+    // one line names the keys.
     const callerOrderData = body.orderData && typeof body.orderData === 'object' && !Array.isArray(body.orderData)
       ? (body.orderData as Record<string, unknown>)
       : null
-    const callerRouterData = callerOrderData?.routerData
     const orderData: SignedOrderData = {
       ...signedData,
-      ...(typeof callerRouterData === 'string' &&
-        verifyRouterDataHash(callerRouterData as `0x${string}`, signedData.routerDataHash as `0x${string}`)
-        ? { routerData: callerRouterData }
-        : {}),
+      ...(routerDataMatchesSigned ? { routerData: storedRouterData as string } : {}),
     }
     const orderDataDiff = orderDataDifferences(callerOrderData, orderData)
     const logOrderDataDiffers = (outcome: 'stored' | 'exists' | 'error') => {
