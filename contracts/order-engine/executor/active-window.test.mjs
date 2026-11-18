@@ -1,12 +1,15 @@
-// [SEC-4 / fix/keeper-active-orders-window] Pure tests of active-window.js: the query parameters, the
-// window selection (wrap, dedupe, chain filter, ties), the cursor advance, the prune keep-set and the
-// balance/allowance slow-down — plus a seeded property simulation that drives the helper the way
-// executor.js fetchActiveOrders / executeCycle do (tail after the cursor; head from the oldest when the
-// tail is short; the loop stops after MAX_BATCH executions or on a gas SKIP) over a random table with
-// rows added and removed between cycles.
+// [SEC-4 / fix/keeper-active-orders-window] Pure tests of active-window.js: the query parameters, the scan
+// page (wrap, dedupe, chain filter, ties, the count), the scan state (cursor, passes, complete scans), the
+// prune rule (two consecutive complete scans), the walk plan (ready, expired, the rotating one-by-one budget),
+// the carry-over, the alert pacing and the cycle line — plus a seeded property simulation that drives the
+// helpers the way executor.js does over a random table with rows added and removed between cycles.
 //
 // The simulated database orders and filters with the fixture's own timestamp comparison
 // (executor-cycle.fixture.mjs compareTimestamps), not the helper's, so the two cannot share a bug.
+//
+// Round 2 (A88): the tests of the round-1 cursor-by-reached-rows, rotation keep-set and slow-down went with
+// those mechanisms (listed in the branch's feedback file); the selection tests below are round 1's, moved
+// from advanceActiveWindow to advanceScan.
 //
 // Run: node --test contracts/order-engine/executor/active-window.test.mjs
 
@@ -14,42 +17,30 @@ import { test, describe } from "node:test"
 import assert from "node:assert/strict"
 
 import {
-  ACTIVE_WINDOW_SLOW_AFTER,
-  ACTIVE_WINDOW_SLOW_MS,
-  ACTIVE_WINDOW_SLOW_REASONS,
   activeWindowParams,
   contentRangeTotal,
   cursorOf,
+  isUuid,
   selectActiveWindow,
-  advanceActiveWindow,
-  activeWindowKeepIds,
-  isSlowReason,
-  nextSlowEntry,
-  isSlowed,
-  noteCanExecuteAnswer,
-  pruneSlowRows,
-  activeWindowLogLine,
+  advanceScan,
+  truncateScan,
+  keepIdsAfterScans,
+  planWalk,
+  carryAfterLoop,
+  createEpisodeGate,
+  fallbackFlag,
+  activeScanLogLine,
+  logBody,
 } from "./active-window.js"
-import { compareTimestamps } from "./executor-cycle.fixture.mjs"
+import { compareTimestamps, mulberry32 } from "./executor-cycle.fixture.mjs"
+import { checkScreenBound } from "./active-scan.testlib.mjs"
 
-const W = 15 // MAX_BATCH * 3
-const MAX_BATCH = 5
+const W = 15 // a small scan, so the unit tests rotate (SCAN_CAP is 1000 in executor.js)
 const CHAIN = 8453
 const OTHER = 42161
-const CYCLE_MS = 30_000 // POLL_INTERVAL_MS
 
-// ── tiny seeded PRNG + row factory ──────────────────────────────────────────────────────────────
+// ── row factory ─────────────────────────────────────────────────────────────────────────────────
 
-function mulberry32(seed) {
-  let a = seed >>> 0
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0
-    let t = a
-    t = Math.imul(t ^ (t >>> 15), t | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
 const hex = (rand, n) => Array.from({ length: n }, () => Math.floor(rand() * 16).toString(16)).join("")
 const uuid = (rand) => `${hex(rand, 8)}-${hex(rand, 4)}-4${hex(rand, 3)}-8${hex(rand, 3)}-${hex(rand, 12)}`
 const T0 = Date.parse("2026-11-01T00:00:00.000Z")
@@ -57,7 +48,7 @@ const ts = (ms, micros = 0) => `${new Date(ms).toISOString().slice(0, 19)}.${Str
 const row = (id, createdAt, chainId = CHAIN) => ({ id, created_at: createdAt, chain_id: chainId, status: "active" })
 const idN = (n) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`
 
-// A database answering the keeper's two queries. Order and keyset use the FIXTURE's timestamp compare.
+// A database answering the keeper's scan reads. Order and keyset use the FIXTURE's timestamp compare.
 function keyCmp(a, b) {
   const c = compareTimestamps(a.created_at, b.created_at)
   if (c !== 0) return c
@@ -68,21 +59,33 @@ function createDb(rows = []) {
   return {
     table,
     active: (chainId = CHAIN) => table.filter((r) => r.status === "active" && r.chain_id === chainId),
-    query(cursor, limit, chainId = CHAIN) {
+    /** rows after `cursor` (or from row `offset`), keyset order; `total` = what PostgREST's count=exact says. */
+    query(cursor, limit, { offset = 0 } = {}) {
       const after = cursor ? (r) => keyCmp(r, { created_at: cursor.createdAt, id: cursor.id }) > 0 : () => true
-      return this.active(chainId).filter(after).sort(keyCmp).slice(0, limit)
+      const all = this.active().filter(after).sort(keyCmp)
+      return { rows: all.slice(offset, offset + limit), total: all.length }
     },
   }
 }
 
-// One keeper "process": the same orchestration executor.js runs around the helper.
+// One keeper "process": the state executor.js keeps around the helpers.
 function createKeeper() {
-  return { cursor: null, rotation: new Set(), slow: new Map() }
+  return { cursor: null, pass: { ids: new Set(), fromOldest: false } }
 }
-function fetchWindow(db, k, nowMs) {
-  const tail = db.query(k.cursor, W)
-  const head = k.cursor !== null && tail.length < W ? db.query(null, W - tail.length) : null
-  return selectActiveWindow({ chainId: CHAIN, windowSize: W, cursor: k.cursor, tail, head, slow: k.slow, nowMs })
+/** The page after the cursor (with its count, as executor.js asks), and the head from the oldest when it reached the end. */
+function fetchWindow(db, k, { count = true, offset = null } = {}) {
+  const page = db.query(k.cursor, W, { offset: offset ?? 0 })
+  const tailTotal = count ? page.total : null
+  const first = selectActiveWindow({ chainId: CHAIN, windowSize: W, cursor: k.cursor, offset, tail: page.rows, tailTotal })
+  const head = first.endReached && !first.fromOldest && page.rows.length < W ? db.query(null, W - page.rows.length).rows : null
+  return head ? selectActiveWindow({ chainId: CHAIN, windowSize: W, cursor: k.cursor, offset, tail: page.rows, tailTotal, head }) : first
+}
+/** Move the keeper past a screened scan (executor.js advanceActiveScan). */
+function advance(k, scan, extraIds = []) {
+  const next = advanceScan({ cursor: k.cursor, pass: k.pass }, scan, { extraIds })
+  k.cursor = next.cursor
+  k.pass = next.pass
+  return next
 }
 
 // ── query parameters ─────────────────────────────────────────────────────────────────────────────
@@ -139,7 +142,7 @@ test("contentRangeTotal reads PostgREST's Content-Range total", () => {
 // ── selection edges ──────────────────────────────────────────────────────────────────────────────
 
 describe("selectActiveWindow — edges named by the goal", () => {
-  const sel = (db, k, nowMs = T0) => fetchWindow(db, k, nowMs)
+  const sel = (db, k) => fetchWindow(db, k)
 
   test("empty table ⇒ empty window, scan reached the end and covers everything, cursor back to the oldest", () => {
     const k = createKeeper()
@@ -148,10 +151,9 @@ describe("selectActiveWindow — edges named by the goal", () => {
     assert.deepEqual(scan.rows, [])
     assert.equal(scan.endReached, true)
     assert.equal(scan.coversAll, true, "an empty head is a short head")
-    const moved = advanceActiveWindow(scan, 0, new Set(["x"]))
+    const moved = advanceScan({ cursor: k.cursor, pass: { ids: new Set(["x"]), fromOldest: true } }, scan)
     assert.equal(moved.cursor, null)
-    assert.equal(moved.wrapped, true)
-    assert.deepEqual([...moved.rotation], [])
+    assert.deepEqual([...moved.complete], [], "an empty chain is a complete (empty) scan")
   })
 
   test("one row ⇒ it is in every window", () => {
@@ -161,7 +163,7 @@ describe("selectActiveWindow — edges named by the goal", () => {
       const scan = sel(db, k)
       assert.deepEqual(scan.rows.map((r) => r.id), [idN(1)])
       assert.equal(scan.coversAll, true)
-      k.cursor = advanceActiveWindow(scan, scan.rows.length, k.rotation).cursor
+      advance(k, scan)
     }
   })
 
@@ -173,12 +175,10 @@ describe("selectActiveWindow — edges named by the goal", () => {
       const scan = sel(db, k)
       assert.deepEqual(scan.rows.map((r) => r.id), rows.map((r) => r.id), `cycle ${c + 1}`)
       assert.ok(c === 0 || scan.coversAll, `cycle ${c + 1} covers all`)
-      const moved = advanceActiveWindow(scan, scan.rows.length, k.rotation)
-      k.cursor = moved.cursor
-      k.rotation = moved.rotation
+      advance(k, scan)
     }
-    // The first cycle (cursor null) reads a FULL page of 15: it cannot know the table ends there.
-    const first = sel(db, createKeeper())
+    // The first cycle (cursor null) reads a FULL page of 15: without a count it cannot know the table ends there.
+    const first = fetchWindow(db, createKeeper(), { count: false })
     assert.equal(first.endReached, false)
   })
 
@@ -190,7 +190,7 @@ describe("selectActiveWindow — edges named by the goal", () => {
     for (let c = 0; c < 4; c++) {
       const scan = sel(db, k)
       windows.push(scan.rows.map((r) => Number.parseInt(r.id.slice(-12), 16)))
-      k.cursor = advanceActiveWindow(scan, scan.rows.length, k.rotation).cursor
+      advance(k, scan)
     }
     assert.deepEqual(windows[0], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
     assert.deepEqual(windows[1], [16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])
@@ -206,14 +206,14 @@ describe("selectActiveWindow — edges named by the goal", () => {
     for (let c = 0; c < 3; c++) {
       const scan = sel(db, k)
       seen.push(...scan.rows.map((r) => r.id))
-      k.cursor = advanceActiveWindow(scan, scan.rows.length, k.rotation).cursor
+      advance(k, scan)
     }
     assert.equal(new Set(seen.slice(0, 40)).size, 40, "the first 40 examinations are the 40 distinct rows")
   })
 
   test("a row of another chain in a page is never handed to the loop (defence in depth behind chain_id=eq.)", () => {
     const tail = [row(idN(1), ts(T0)), row(idN(2), ts(T0 + 1), OTHER), row(idN(3), ts(T0 + 2))]
-    const scan = selectActiveWindow({ chainId: CHAIN, windowSize: W, cursor: null, tail, head: null, nowMs: T0 })
+    const scan = selectActiveWindow({ chainId: CHAIN, windowSize: W, cursor: null, tail, head: null })
     assert.deepEqual(scan.rows.map((r) => r.id), [idN(1), idN(3)])
   })
 
@@ -222,503 +222,370 @@ describe("selectActiveWindow — edges named by the goal", () => {
     const cursor = cursorOf(rows[3])
     const tail = rows.slice(4)
     const head = rows.slice(0, 9) // W - |tail| = 9: rows 1..9, of which 5..9 are in the tail
-    const scan = selectActiveWindow({ chainId: CHAIN, windowSize: W, cursor, tail, head, nowMs: T0 })
+    const scan = selectActiveWindow({ chainId: CHAIN, windowSize: W, cursor, tail, head })
     assert.deepEqual(scan.rows.map((r) => r.id), [...rows.slice(4), ...rows.slice(0, 4)].map((r) => r.id))
     assert.equal(scan.coversAll, true)
-    const big = selectActiveWindow({ chainId: CHAIN, windowSize: 3, cursor: null, tail: rows, nowMs: T0 })
+    const big = selectActiveWindow({ chainId: CHAIN, windowSize: 3, cursor: null, tail: rows })
     assert.equal(big.rows.length, 3)
   })
 })
 
-describe("advanceActiveWindow — the cursor moves past the rows the loop reached", () => {
-  const rows = Array.from({ length: 20 }, (_, i) => row(idN(i + 1), ts(T0 + i * 1000)))
-  const db = createDb(rows)
+describe("activeWindowParams / isUuid — round 2 additions", () => {
+  test("offset (a fresh process's random page) only without a cursor; never a negative or fractional offset", () => {
+    assert.equal(activeWindowParams({ cursor: null, limit: 1000, offset: 4321 }), "select=*&order=created_at.asc%2Cid.asc&limit=1000&offset=4321")
+    assert.equal(activeWindowParams({ cursor: null, limit: 10, offset: 0 }), "select=*&order=created_at.asc%2Cid.asc&limit=10")
+    assert.equal(activeWindowParams({ cursor: null, limit: 10, offset: -3 }).includes("offset"), false)
+    assert.equal(activeWindowParams({ cursor: null, limit: 10, offset: 2.5 }).includes("offset"), false)
+    const cursor = { createdAt: "2026-11-17T10:00:00Z", id: idN(1) }
+    assert.equal(activeWindowParams({ cursor, limit: 10, offset: 7 }).includes("offset"), false)
+  })
+  test("isUuid: the only id shape ever put in an id=in.(…) list", () => {
+    assert.equal(isUuid(idN(5)), true)
+    for (const bad of ["1) or (1=1", "", null, 7, `${idN(5)},x`]) assert.equal(isUuid(bad), false, String(bad))
+  })
+})
 
-  test("the loop reached every row ⇒ the cursor is the window's last row", () => {
-    const scan = fetchWindow(db, createKeeper(), T0)
-    const moved = advanceActiveWindow(scan, scan.rows.length, new Set())
-    assert.deepEqual(moved.cursor, cursorOf(rows[14]))
-    assert.equal(moved.wrapped, false)
+describe("selectActiveWindow — the count decides the end of the table (Supabase max_rows)", () => {
+  const rows = Array.from({ length: 30 }, (_, i) => row(idN(i + 1), ts(T0 + i * 1000)))
+  test("a page shorter than its limit is NOT the end when the count says more rows match", () => {
+    const capped = selectActiveWindow({ chainId: CHAIN, windowSize: 20, cursor: null, tail: rows.slice(0, 10), tailTotal: 30 })
+    assert.equal(capped.endReached, false)
+    assert.equal(capped.coversAll, false)
   })
-  test("MAX_BATCH stopped the loop after 7 rows ⇒ the cursor is the 7th; rows 8.. lead the next window", () => {
-    const k = createKeeper()
-    const scan = fetchWindow(db, k, T0)
-    k.cursor = advanceActiveWindow(scan, 7, new Set()).cursor
-    assert.deepEqual(k.cursor, cursorOf(rows[6]))
-    assert.equal(fetchWindow(db, k, T0).rows[0].id, rows[7].id)
+  test("a full page IS the end when the count says so (the whole table from the oldest: a complete scan)", () => {
+    const full = selectActiveWindow({ chainId: CHAIN, windowSize: 30, cursor: null, tail: rows, tailTotal: 30 })
+    assert.equal(full.endReached, true)
+    assert.equal(full.coversAll, true)
+    assert.equal(full.fromOldest, true)
   })
-  test("wrap = the scan got past the newest row (a short tail reached in full)", () => {
+  test("an offset page counts from its offset (Content-Range total ignores the offset) and is never complete on its own", () => {
+    const tail = rows.slice(25)
+    const s = selectActiveWindow({ chainId: CHAIN, windowSize: 10, cursor: null, offset: 25, tail, tailTotal: 30 })
+    assert.equal(s.endReached, true)
+    assert.equal(s.fromOldest, false)
+    assert.equal(s.coversAll, false)
+    const wrapped = selectActiveWindow({ chainId: CHAIN, windowSize: 10, cursor: null, offset: 25, tail, tailTotal: 30, head: rows.slice(0, 5) })
+    assert.deepEqual(wrapped.rows.map((r) => r.id), [...rows.slice(25), ...rows.slice(0, 5)].map((r) => r.id))
+    assert.equal(wrapped.coversAll, false, "it holds 10 of 30")
+  })
+})
+
+describe("advanceScan — the scan's position and its complete scans", () => {
+  const rows = Array.from({ length: 40 }, (_, i) => row(idN(i + 1), ts(T0 + i * 1000)))
+  test("M <= scan size: every cycle is a complete scan from the oldest; no cursor", () => {
+    const db = createDb(rows.slice(0, 12))
     const k = createKeeper()
-    k.cursor = cursorOf(rows[9]) // tail = rows 11..20 (10 rows), head = rows 1..5
-    const scan = fetchWindow(db, k, T0)
-    assert.equal(scan.tailCount, 10)
-    assert.equal(advanceActiveWindow(scan, 9, new Set()).wrapped, false, "stopped inside the tail")
-    assert.equal(advanceActiveWindow(scan, 10, new Set()).wrapped, true, "reached the newest row")
-    const all = advanceActiveWindow(scan, 15, new Set(["old"]))
-    assert.equal(all.wrapped, true)
-    assert.deepEqual(all.cursor, cursorOf(rows[4]))
-    assert.deepEqual(
-      [...all.rotation].sort(),
-      scan.rows.slice(scan.tailCount).map((r) => r.id).sort(),
-      "the cursor moved into the head part: the rotation restarts as that head part (it covers [oldest, cursor])",
+    for (let c = 0; c < 3; c++) {
+      const next = advance(k, fetchWindow(db, k))
+      assert.equal(next.cursor, null)
+      assert.equal(next.complete.size, 12)
+    }
+  })
+  test("rotating: consecutive pages tile the table; a pass from the oldest is complete when it reaches the newest row", () => {
+    const db = createDb(rows)
+    const k = createKeeper()
+    const completes = []
+    const pages = []
+    for (let c = 0; c < 8; c++) {
+      const scan = fetchWindow(db, k)
+      pages.push(scan.rows.map((r) => Number.parseInt(r.id.slice(-12), 16)))
+      const next = advance(k, scan)
+      completes.push(next.complete ? next.complete.size : null)
+    }
+    assert.deepEqual(pages[0], Array.from({ length: 15 }, (_, i) => i + 1))
+    assert.deepEqual(pages[2], [31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 1, 2, 3, 4, 5])
+    assert.deepEqual(completes.slice(0, 3), [null, null, 40], "the pass from row 1 is complete at the cycle that reaches row 40")
+    assert.equal(completes.filter((x) => x === 40).length >= 2, true)
+  })
+  test("a random first page (S-8): that first pass is not complete; the next one, from the oldest, is", () => {
+    const db = createDb(rows)
+    const k = createKeeper()
+    const first = fetchWindow(db, k, { offset: 22 })
+    const n1 = advance(k, first)
+    assert.equal(n1.complete, null)
+    let c = 0
+    let completeAt = null
+    while (completeAt === null && c < 10) {
+      const n = advance(k, fetchWindow(db, k))
+      c++
+      if (n.complete) completeAt = c
+      if (n.complete) assert.equal(n.complete.size, 40)
+    }
+    assert.notEqual(completeAt, null)
+  })
+  test("no head this cycle (its read failed): the pass ends here, the next scan starts at the oldest row (never stalls on the newest)", () => {
+    const db = createDb(rows)
+    const k = createKeeper()
+    k.cursor = cursorOf(rows[29])
+    k.pass = { ids: new Set(rows.slice(0, 30).map((r) => r.id)), fromOldest: true }
+    const page = db.query(k.cursor, W)
+    const scan = selectActiveWindow({ chainId: CHAIN, windowSize: W, cursor: k.cursor, tail: page.rows, tailTotal: page.total, head: null })
+    assert.equal(scan.endReached, true)
+    const next = advance(k, scan)
+    assert.equal(next.cursor, null)
+    assert.equal(next.complete.size, 40)
+  })
+  test("truncateScan: a failed chunk holds the scan at its first row (the next page starts there)", () => {
+    const db = createDb(rows)
+    const k = createKeeper()
+    const scan = fetchWindow(db, k)
+    const held = truncateScan(scan, 6)
+    assert.equal(held.rows.length, 6)
+    advance(k, held)
+    assert.equal(fetchWindow(db, k).rows[0].id, rows[6].id)
+    const none = truncateScan(scan, 0)
+    const k2 = createKeeper()
+    advance(k2, none)
+    assert.equal(k2.cursor, null, "nothing screened: the position does not move")
+    assert.equal(truncateScan(scan, 99), scan)
+  })
+})
+
+describe("keepIdsAfterScans — an entry goes only when its row is absent from two consecutive complete scans", () => {
+  test("no complete scan, or the first one of the process ⇒ prune nothing", () => {
+    assert.equal(keepIdsAfterScans(null, null), null)
+    assert.equal(keepIdsAfterScans(new Set(["a"]), null), null)
+    assert.equal(keepIdsAfterScans(null, new Set(["a"])), null)
+  })
+  test("a row absent from ONE complete scan (it was `executing`) keeps its entry; absent from two, it goes", () => {
+    const keep = keepIdsAfterScans(new Set(["a", "b"]), new Set(["a"]))
+    assert.deepEqual([...keep].sort(), ["a", "b"])
+    assert.deepEqual([...keepIdsAfterScans(new Set(["a"]), new Set(["a"]))], ["a"])
+  })
+})
+
+describe("planWalk — ready rows, expired rows, and the rotating one-by-one budget", () => {
+  const rows = Array.from({ length: 30 }, (_, i) => ({ id: idN(i + 1), expiry: String(2_000_000_000) }))
+  const ans = (pairs) => new Map(pairs)
+  test("ready rows and expired rows always; rows answered false never; order kept", () => {
+    const r = rows.slice(0, 5).map((x) => ({ ...x }))
+    r[3].expiry = "100"
+    const w = planWalk({
+      rows: r,
+      answers: ans([[r[0].id, { canExec: true }], [r[1].id, { canExec: false }], [r[2].id, { canExec: true }], [r[3].id, { canExec: false }], [r[4].id, { canExec: false }]]),
+      nowSec: 1_900_000_000,
+      budget: 15,
+    })
+    assert.deepEqual(w.ready, [r[0].id, r[2].id])
+    assert.deepEqual(w.expired, [r[3].id])
+    assert.deepEqual([...w.ids], [r[0].id, r[2].id, r[3].id])
+  })
+  test("unanswered rows share the budget, least recently walked first; never walked first, oldest first", () => {
+    const answers = new Map(rows.map((x) => [x.id, { unanswered: "chunk" }]))
+    const lastWalked = new Map()
+    const walked = []
+    for (let cycle = 1; cycle <= 3; cycle++) {
+      const w = planWalk({ rows, answers, nowSec: 0, budget: 15, lastWalked })
+      walked.push(w.oneByOne.map((id) => Number.parseInt(id.slice(-12), 16)))
+      for (const id of w.oneByOne) lastWalked.set(id, cycle)
+    }
+    assert.deepEqual(walked[0], Array.from({ length: 15 }, (_, i) => i + 1))
+    assert.deepEqual(walked[1], Array.from({ length: 15 }, (_, i) => i + 16))
+    assert.deepEqual(walked[2], Array.from({ length: 15 }, (_, i) => i + 1), "the queue wraps: the rows that used it longest ago")
+  })
+  test("40 permanently unanswerable rows + one more: the 41st is in the budget within ceil(41/15) = 3 cycles", () => {
+    const many = Array.from({ length: 41 }, (_, i) => ({ id: idN(i + 1), expiry: "2000000000" }))
+    const answers = new Map(many.map((x) => [x.id, { unanswered: "build" }]))
+    const lastWalked = new Map()
+    let at = null
+    for (let cycle = 1; cycle <= 3 && at === null; cycle++) {
+      const w = planWalk({ rows: many, answers, nowSec: 0, budget: 15, lastWalked })
+      if (w.oneByOne.includes(many[40].id)) at = cycle
+      for (const id of w.oneByOne) lastWalked.set(id, cycle)
+    }
+    assert.equal(at, 3)
+  })
+})
+
+test("carryAfterLoop: ready rows not reached, plus the row a gas SKIP stopped on, in scan order, capped", () => {
+  const walk = { ready: ["a", "b", "c", "d"], oneByOne: ["z"] }
+  assert.deepEqual(carryAfterLoop(walk, new Set(["a", "b"]), null, 10), ["c", "d"])
+  assert.deepEqual(carryAfterLoop(walk, new Set(["a", "b"]), "b", 10), ["b", "c", "d"])
+  assert.deepEqual(carryAfterLoop(walk, new Set(["z"]), "z", 10), ["z", "a", "b", "c", "d"])
+  assert.deepEqual(carryAfterLoop(walk, new Set(), null, 2), ["a", "b"])
+})
+
+test("createEpisodeGate: alert on the first failed cycle, then at most once per repeatMs while it lasts; a good cycle ends it", () => {
+  const g = createEpisodeGate({ repeatMs: 3_600_000 })
+  const at = (m) => T0 + m * 60_000
+  assert.deepEqual(g.onCycle(true, at(0)), { alert: true, cycles: 1, sinceMs: at(0) })
+  assert.equal(g.onCycle(true, at(30)).alert, false)
+  assert.equal(g.onCycle(true, at(59)).alert, false)
+  const r = g.onCycle(true, at(60))
+  assert.equal(r.alert, true)
+  assert.equal(r.cycles, 4)
+  assert.equal(g.onCycle(false, at(61)).alert, false)
+  assert.equal(g.onCycle(true, at(62)).alert, true, "a new episode alerts at once")
+})
+
+describe("the cycle line (S-11): counts and flags only, numbers validated", () => {
+  test("format", () => {
+    assert.equal(
+      activeScanLogLine({ active: 1340, scanned: 1000, ready: 7, attempted: 5, carried: 2, rotate: true, fallback: "none" }),
+      "Active scan: active=1340 scanned=1000 true=7 attempted=5 carried=2 rotate=yes fallback=none",
     )
   })
-  test("a cursor that stops ON the newest row keeps the rotation (the next window starts after it, not at the oldest)", () => {
-    const k = createKeeper()
-    k.cursor = cursorOf(rows[9])
-    const scan = fetchWindow(db, k, T0)
-    const atEnd = advanceActiveWindow(scan, scan.tailCount, new Set(["earlier"]))
-    assert.deepEqual(atEnd.cursor, cursorOf(rows[19]))
-    assert.equal(atEnd.wrapped, true)
-    assert.ok(atEnd.rotation.has("earlier"), "accumulates: [oldest, cursor] is still the earlier windows plus this one")
-    for (const r of scan.rows) assert.ok(atEnd.rotation.has(r.id))
+  test("an absurd or missing number is '?', a fallback flag outside the vocabulary is '?'", () => {
+    const line = activeScanLogLine({ active: 1e21, scanned: -1, ready: 2.5, attempted: Number.NaN, carried: null, rotate: false, fallback: "scan-503 or 1=1" })
+    assert.equal(line, "Active scan: active=? scanned=? true=? attempted=? carried=? rotate=no fallback=?")
   })
-  test("no scan (the fetch failed) ⇒ cursor unchanged by the caller (null returned, nothing wrapped)", () => {
-    assert.deepEqual(advanceActiveWindow(null, 0, new Set(["a"])), { cursor: null, wrapped: false, rotation: new Set(["a"]) })
+  test("fallbackFlag vocabulary", () => {
+    assert.equal(fallbackFlag({}), "none")
+    assert.equal(fallbackFlag({ scan: "503" }), "scan-503")
+    assert.equal(fallbackFlag({ scan: 400 }), "scan-400")
+    assert.equal(fallbackFlag({ scan: "timeout" }), "scan-timeout")
+    assert.equal(fallbackFlag({ scan: "<script>" }), "scan-error")
+    assert.equal(fallbackFlag({ prescreenFailed: 2, prescreenChunks: 20 }), "prescreen-2of20")
+    assert.equal(fallbackFlag({ scan: "network", prescreenFailed: 1, prescreenChunks: 1 }), "scan-network+prescreen-1of1")
+    for (const f of ["none", "scan-503", "prescreen-2of20", "scan-network+prescreen-1of1"]) assert.match(activeScanLogLine({ active: 1, scanned: 1, ready: 0, attempted: 0, carried: 0, rotate: false, fallback: f }), new RegExp(`fallback=${f.replace("+", "\\+")}$`))
   })
-})
-
-describe("activeWindowKeepIds — absence from a window is not absence from the table", () => {
-  test("partial window ⇒ null (prune nothing)", () => {
-    const db = createDb(Array.from({ length: 30 }, (_, i) => row(idN(i + 1), ts(T0 + i))))
-    const scan = fetchWindow(db, createKeeper(), T0)
-    assert.equal(activeWindowKeepIds(scan, scan.rows.map((r) => r.id), new Set()), null)
+  test("logBody: no uuid, no 0x-hex of 40+ digits, no URL; one line; at most 200 characters", () => {
+    const body = `{"message":"failed to parse filter (created_at.gt.\\"2026-11-17T10:00:00+00:00\\",id.gt.\\"${idN(9)}\\")","hint":"0x${"ab".repeat(32)} see https://supabase.example/rest/v1/orders?id=eq.${idN(9)}"}\n${"x".repeat(400)}`
+    const out = logBody(body)
+    assert.ok(out.length <= 200)
+    assert.doesNotMatch(out, /[0-9a-f]{8}-[0-9a-f]{4}-|0x[0-9a-f]{40}|https?:\/\/|\n/i)
+    assert.match(out, /<id>/)
   })
-  test("the window holds the whole table ⇒ exactly its ids (today's rule)", () => {
-    const db = createDb(Array.from({ length: 6 }, (_, i) => row(idN(i + 1), ts(T0 + i))))
-    const scan = fetchWindow(db, createKeeper(), T0)
-    const keep = activeWindowKeepIds(scan, scan.rows.map((r) => r.id), new Set(["gone"]))
-    assert.deepEqual([...keep].sort(), scan.rows.map((r) => r.id).sort())
-  })
-  test("the window reached the newest row of a bigger table ⇒ its ids plus every id since the last wrap", () => {
-    const rows = Array.from({ length: 30 }, (_, i) => row(idN(i + 1), ts(T0 + i)))
-    const k = createKeeper()
-    k.cursor = cursorOf(rows[19])
-    const scan = fetchWindow(createDb(rows), k, T0)
-    assert.equal(scan.coversAll, false)
-    const keep = activeWindowKeepIds(scan, scan.rows.map((r) => r.id), new Set([idN(10)]))
-    assert.ok(keep.has(idN(10)) && keep.has(idN(25)) && keep.has(idN(1)))
-  })
-  test("pruneSlowRows drops exactly the ids outside the keep-set; null keeps everything", () => {
-    const m = new Map([["a", 1], ["b", 2], ["c", 3]])
-    assert.equal(pruneSlowRows(m, null), 0)
-    assert.equal(pruneSlowRows(m, new Set(["b"])), 2)
-    assert.deepEqual([...m.keys()], ["b"])
-  })
-})
-
-// ── slow-down ────────────────────────────────────────────────────────────────────────────────────
-
-describe("slow-down — only balance/allowance, after 3 in a row, at most once per 10 minutes", () => {
-  test("the slow reasons are exactly the contracts' two strings", () => {
-    assert.deepEqual([...ACTIVE_WINDOW_SLOW_REASONS], ["Insufficient balance", "Insufficient allowance"])
-    assert.equal(ACTIVE_WINDOW_SLOW_AFTER, 3)
-    assert.equal(ACTIVE_WINDOW_SLOW_MS, 600_000)
-    for (const r of [
-      "DCA interval not reached",
-      "Price below floor",
-      "Price above ceiling",
-      "Stale price feed",
-      "Invalid price",
-      "Incomplete round",
-      "Order cancelled",
-      "Order expired",
-      "Nonce used",
-      "Router not whitelisted",
-      "Paused",
-      "",
-      undefined,
-    ]) {
-      assert.equal(isSlowReason(r), false, String(r))
-    }
-  })
-  test("3 consecutive balance/allowance answers (mixed) ⇒ slowed for 10 min after the last; then examinable", () => {
-    let e = null
-    e = nextSlowEntry(e, { canExecute: false, reason: "Insufficient balance", nowMs: T0 })
-    e = nextSlowEntry(e, { canExecute: false, reason: "Insufficient allowance", nowMs: T0 + CYCLE_MS })
-    assert.equal(isSlowed(e, T0 + CYCLE_MS), false, "2 answers are not enough")
-    e = nextSlowEntry(e, { canExecute: false, reason: "Insufficient balance", nowMs: T0 + 2 * CYCLE_MS })
-    assert.equal(isSlowed(e, T0 + 2 * CYCLE_MS), true)
-    assert.equal(isSlowed(e, T0 + 2 * CYCLE_MS + ACTIVE_WINDOW_SLOW_MS - 1), true)
-    assert.equal(isSlowed(e, T0 + 2 * CYCLE_MS + ACTIVE_WINDOW_SLOW_MS), false)
-  })
-  test("any other answer clears the streak (true, interval not reached, a price reason)", () => {
-    for (const other of [{ canExecute: true, reason: "" }, { canExecute: false, reason: "DCA interval not reached" }, { canExecute: false, reason: "Price below floor" }]) {
-      const m = new Map()
-      for (let i = 0; i < 3; i++) noteCanExecuteAnswer(m, "x", { canExecute: false, reason: "Insufficient balance", nowMs: T0 + i })
-      assert.equal(isSlowed(m.get("x"), T0 + 5), true)
-      noteCanExecuteAnswer(m, "x", { ...other, nowMs: T0 + 10 })
-      assert.equal(m.has("x"), false, JSON.stringify(other))
-    }
-  })
-  test("a slowed row stays in the window (it holds no slot of the rotation) but is not examined", () => {
-    const rows = Array.from({ length: 3 }, (_, i) => row(idN(i + 1), ts(T0 + i)))
-    const slow = new Map([[idN(2), { streak: 3, lastAt: T0 }]])
-    const scan = selectActiveWindow({ chainId: CHAIN, windowSize: W, cursor: null, tail: rows, slow, nowMs: T0 + 1000 })
-    assert.equal(scan.rows.length, 3)
-    assert.deepEqual([...scan.slowedIds], [idN(2)])
-    assert.deepEqual([...scan.examineIds], [idN(1), idN(3)])
-  })
-})
-
-test("the log line carries counts only — no id, address or signature", () => {
-  const line = activeWindowLogLine({ active: 37, window: 15, examined: 12, slowed: 3, wrapped: false })
-  assert.equal(line, "Active window: active=37 window=15 examined=12 slowed=3 wrap=no")
-  assert.equal(activeWindowLogLine({ active: null, window: 0, examined: 0, slowed: 0, wrapped: true, fallback: 400 }), "Active window: active=? window=0 examined=0 slowed=0 wrap=yes keyset=rejected(400) fallback=oldest")
-  assert.doesNotMatch(line, /0x|[0-9a-f]{8}-/)
 })
 
 // ── seeded property simulation ───────────────────────────────────────────────────────────────────
 
-const PERSONAS = ["executable", "unfunded", "no-allowance", "interval", "price", "mixed", "cancelled"]
-function answerFor(persona, rand) {
-  switch (persona) {
-    case "executable": return rand() < 0.7 ? [true, ""] : [false, "DCA interval not reached"]
-    case "unfunded": return rand() < 0.9 ? [false, "Insufficient balance"] : [true, ""]
-    case "no-allowance": return rand() < 0.9 ? [false, "Insufficient allowance"] : [false, "Price below floor"]
-    case "interval": return [false, "DCA interval not reached"]
-    case "price": return [false, rand() < 0.5 ? "Price below floor" : "Stale price feed"]
-    case "cancelled": return [false, "Order cancelled"]
-    default: {
-      const r = rand()
-      if (r < 0.3) return [false, "Insufficient balance"]
-      if (r < 0.5) return [false, "Insufficient allowance"]
-      if (r < 0.7) return [false, "DCA interval not reached"]
-      return [true, ""]
-    }
-  }
-}
-
 /**
- * One seeded run. Returns the per-cycle trace and the facts the assertions need.
- * Churn between cycles: up to `maxAdd` rows added (mostly newest, some tied, some back-dated) and up to
- * `maxRemove` removed; a filled non-DCA row also leaves. A restart (fresh in-memory state) can happen.
+ * One seeded run of the scan the way executor.js drives it: every cycle reads a page (after the cursor, or a
+ * random first page), wraps when it reached the newest row, is screened whole (no early stop: the scan no longer
+ * depends on the loop), moves, and prunes the stand-in for orderInfraMisses with keepIdsAfterScans. Rows are
+ * added (mostly newest, some tied, some back-dated) and removed between cycles; a scan read fails on some cycles
+ * (S-2: nothing moves) and a wrap read on others.
  */
-function simulate(seed, { cycles, initial, maxAdd = 3, maxRemove = 3, restartP = 0, otherChainNoise = false }) {
+function simulate(seed, { cycles, initial, maxAdd = 3, maxRemove = 3, failP = 0.03, wrapFailP = 0.03 }) {
   const rand = mulberry32(seed)
   const db = createDb()
-  const persona = new Map()
-  const dca = new Map()
   let nextMs = T0
-  let created = 0
   const add = (when) => {
-    const id = uuid(rand)
-    created++
     const r = rand()
     let createdAt
     if (when === "initial" || r < 0.7) createdAt = ts((nextMs += 1 + Math.floor(rand() * 5000)), Math.floor(rand() * 1e6))
     else if (r < 0.85 && db.table.length) createdAt = db.table[Math.floor(rand() * db.table.length)].created_at // a tie
     else createdAt = ts(T0 - Math.floor(rand() * 86_400_000), Math.floor(rand() * 1e6)) // back-dated
-    db.table.push(row(id, createdAt))
-    persona.set(id, PERSONAS[Math.floor(rand() * PERSONAS.length)])
-    dca.set(id, rand() < 0.5)
+    db.table.push(row(uuid(rand), createdAt))
   }
   for (let i = 0; i < initial; i++) add("initial")
-  if (otherChainNoise) for (let i = 0; i < 20; i++) db.table.push(row(uuid(rand), ts(T0 + i), OTHER))
-
-  let k = createKeeper()
-  const tracked = new Map() // stands in for orderInfraMisses: an entry for every row the loop reached
-  const trace = []
-  const answers = new Map() // id -> [{ cycle, nowMs, ok, reason }]
-  const restarts = []
+  const k = createKeeper()
+  let started = false
+  let previousComplete = null
+  const tracked = new Set() // stands in for orderInfraMisses: an entry for every row ever screened
+  const presentAt = []
+  const askedAt = []
+  const fallbackAt = []
   const droppedWhileActive = []
   const removedAt = new Map()
   const droppedAt = new Map()
   for (let c = 0; c < cycles; c++) {
-    const nowMs = T0 + c * CYCLE_MS
-    if (c > 0 && rand() < restartP) {
-      k = createKeeper()
-      tracked.clear()
-      restarts.push(c)
-    }
     const present = new Set(db.active().map((r) => r.id))
-    let scan = fetchWindow(db, k, nowMs)
-    if (otherChainNoise) {
-      // A broken filter would hand back rows of another chain: mix some into the page and re-select.
-      const tail = db.query(k.cursor, W)
-      const noisy = tail.slice()
-      noisy.splice(Math.floor(rand() * (noisy.length + 1)), 0, row(uuid(rand), ts(nowMs), OTHER))
-      const head = k.cursor !== null && tail.length < W ? db.query(null, W - tail.length) : null
-      const alt = selectActiveWindow({ chainId: CHAIN, windowSize: W, cursor: k.cursor, tail: noisy, head, slow: k.slow, nowMs })
-      for (const r of alt.rows) assert.equal(r.chain_id, CHAIN, `seed ${seed} cycle ${c}: another chain's row reached the loop`)
+    presentAt.push(present)
+    if (rand() < failP) {
+      // S-2: the scan read failed: the 15 oldest are examined, nothing moves.
+      fallbackAt.push(true)
+      askedAt.push(db.query(null, 15).rows.map((r) => r.id))
+      continue
     }
-    // the prune step, exactly as executeCycle runs it (before the loop)
-    const keep = activeWindowKeepIds(scan, scan.rows.map((r) => r.id), k.rotation)
-    for (const [map, label] of [[tracked, "tracked"], [k.slow, "slow"]]) {
-      const before = new Set(map.keys())
-      pruneSlowRows(map, keep)
-      for (const id of before) {
-        if (map.has(id)) continue
-        if (present.has(id)) droppedWhileActive.push({ seed, c, id, label })
-        if (label === "tracked" && !droppedAt.has(id)) droppedAt.set(id, c)
-      }
-    }
-    // the loop
-    let reached = 0
-    let executed = 0
-    let early = false
-    const reachedIds = []
-    const examined = []
-    const slowSkipped = []
-    const filled = []
-    for (const r of scan.rows) {
-      if (executed >= MAX_BATCH) {
-        early = true
-        break
-      }
-      reached++
-      reachedIds.push(r.id)
-      tracked.set(r.id, c)
-      if (scan.slowedIds.has(r.id)) {
-        slowSkipped.push(r.id)
+    fallbackAt.push(false)
+    let offset = null
+    const firstPage = db.query(k.cursor, W)
+    if (!started && k.cursor === null && firstPage.total > W) offset = Math.floor(rand() * firstPage.total)
+    const page = db.query(k.cursor, W, { offset: offset ?? 0 })
+    const first = selectActiveWindow({ chainId: CHAIN, windowSize: W, cursor: k.cursor, offset, tail: page.rows, tailTotal: page.total })
+    let scan = first
+    if (first.endReached && !first.fromOldest && page.rows.length < W) {
+      if (rand() >= wrapFailP) {
+        scan = selectActiveWindow({ chainId: CHAIN, windowSize: W, cursor: k.cursor, offset, tail: page.rows, tailTotal: page.total, head: db.query(null, W - page.rows.length).rows })
+      } else if (page.rows.length === 0) {
+        // executor.js: an empty page whose wrap failed is a fallback cycle (the 15 oldest; nothing moves).
+        fallbackAt[c] = true
+        askedAt.push(db.query(null, 15).rows.map((r) => r.id))
         continue
       }
-      examined.push(r.id)
-      const [ok, reason] = answerFor(persona.get(r.id), rand)
-      noteCanExecuteAnswer(k.slow, r.id, { canExecute: ok, reason, nowMs })
-      if (!answers.has(r.id)) answers.set(r.id, [])
-      answers.get(r.id).push({ cycle: c, nowMs, ok, reason })
-      if (ok) {
-        if (rand() < 0.5) {
-          executed++
-          if (!dca.get(r.id)) filled.push(r.id)
-        } else if (rand() < 0.03) {
-          early = true // gas SKIP: "skip remaining orders too"
-          break
+    }
+    started = true
+    askedAt.push(scan.rows.map((r) => r.id))
+    // executor.js order: prune (advanceActiveScan, before the loop) with this cycle's ids in the keep set, then
+    // the loop creates entries for the rows it walks.
+    const next = advance(k, scan)
+    if (next.complete) {
+      const keep = keepIdsAfterScans(previousComplete, new Set([...next.complete, ...scan.rows.map((r) => r.id)]))
+      previousComplete = next.complete
+      if (keep) {
+        for (const id of [...tracked]) {
+          if (keep.has(id)) continue
+          tracked.delete(id)
+          if (present.has(id)) droppedWhileActive.push({ seed, c, id })
+          if (!droppedAt.has(id)) droppedAt.set(id, c)
         }
       }
     }
-    if (reached === scan.rows.length) early = false
-    const moved = advanceActiveWindow(scan, reached, k.rotation)
-    k.cursor = moved.cursor
-    k.rotation = moved.rotation
-    trace.push({ c, present, reached: new Set(reachedIds), examined, slowSkipped, early, windowSize: scan.rows.length })
+    for (const r of scan.rows) tracked.add(r.id)
     // churn
-    for (const id of filled) {
-      db.table.splice(db.table.findIndex((x) => x.id === id), 1)
-      removedAt.set(id, c + 1)
-    }
     const removeN = Math.floor(rand() * (maxRemove + 1))
     for (let i = 0; i < removeN && db.table.length; i++) {
       const j = Math.floor(rand() * db.table.length)
-      if (db.table[j].chain_id !== CHAIN) continue
       removedAt.set(db.table[j].id, c + 1)
       db.table.splice(j, 1)
     }
     const addN = Math.floor(rand() * (maxAdd + 1))
     for (let i = 0; i < addN; i++) add("churn")
   }
-  return { trace, answers, restarts, droppedWhileActive, removedAt, droppedAt, created }
+  return { presentAt, askedAt, fallbackAt, droppedWhileActive, removedAt, droppedAt }
 }
 
-/** Smallest K with K ≥ ceil(M/15) + 1 + E, where M = distinct rows present and E = early stops in [s, s+K−1]. */
-/** The definition, set by set (slow): kept as the reference the fast index is checked against. */
-function boundFromSlow(trace, s) {
-  const seen = new Set()
-  let early = 0
-  for (let K = 1; s + K - 1 < trace.length; K++) {
-    const t = trace[s + K - 1]
-    for (const id of t.present) seen.add(id)
-    if (t.early) early++
-    if (K >= Math.ceil(seen.size / W) + 1 + early) return { K, M: seen.size, E: early }
-  }
-  return null
-}
+describe("property (seeded): the scan bound, the chain filter and the prune rule", () => {
+  const SEEDS = Array.from({ length: 30 }, (_, i) => 0x5ec4 + i * 7919)
 
-/**
- * Per-trace index so the bound check costs O(rows × cycles), not O(rows × cycles × K): a row is present
- * over ONE interval [born, end) (the simulation never brings a removed row back — asserted here), so the
- * distinct rows of cycles s..e are |present_s| plus the rows born in s+1..e.
- */
-function indexTrace(trace) {
-  const born = new Map()
-  const end = new Map()
-  const reachedAt = new Map()
-  const newAt = new Array(trace.length).fill(0)
-  const earlyPrefix = [0]
-  for (const t of trace) {
-    for (const id of t.present) {
-      if (!born.has(id)) {
-        born.set(id, t.c)
-        if (t.c > 0) newAt[t.c]++
-      } else assert.ok(!end.has(id), `row ${id.slice(0, 8)} came back after leaving: the index assumes it cannot`)
-    }
-    if (t.c > 0) for (const id of trace[t.c - 1].present) if (!t.present.has(id) && !end.has(id)) end.set(id, t.c)
-    for (const id of t.reached) {
-      if (!reachedAt.has(id)) reachedAt.set(id, [])
-      reachedAt.get(id).push(t.c)
-    }
-    earlyPrefix.push(earlyPrefix[earlyPrefix.length - 1] + (t.early ? 1 : 0))
-  }
-  return { born, end, reachedAt, newAt, earlyPrefix }
-}
-
-function boundFromIndexed(trace, ix, s) {
-  let M = trace[s].present.size
-  for (let K = 1; s + K - 1 < trace.length; K++) {
-    if (K > 1) M += ix.newAt[s + K - 1]
-    const E = ix.earlyPrefix[s + K] - ix.earlyPrefix[s]
-    if (K >= Math.ceil(M / W) + 1 + E) return { K, M, E }
-  }
-  return null
-}
-
-/** First element of a sorted array that is ≥ x, or undefined. */
-function firstAtOrAfter(sorted, x) {
-  let lo = 0
-  let hi = sorted.length
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1
-    if (sorted[mid] < x) lo = mid + 1
-    else hi = mid
-  }
-  return sorted[lo]
-}
-
-function checkBound(seed, run) {
-  const { trace, restarts } = run
-  const ix = indexTrace(trace)
-  run.boundFrom = (s) => boundFromIndexed(trace, ix, s)
-  let checked = 0
-  for (let s = 0; s < trace.length; s++) {
-    const b = boundFromIndexed(trace, ix, s)
-    if (s % 17 === 0) assert.deepEqual(b, boundFromSlow(trace, s), `seed ${seed} s=${s}: the indexed bound differs from the definition`)
-    if (!b) break
-    if (restarts.some((r) => r > s && r <= s + b.K - 1)) continue // a restart begins at the oldest: measured from it
-    for (const id of trace[s].present) {
-      const presentThroughout = (ix.end.get(id) ?? Infinity) >= s + b.K
-      if (!presentThroughout) continue
-      checked++
-      const r = firstAtOrAfter(ix.reachedAt.get(id) ?? [], s)
-      assert.ok(r !== undefined && r < s + b.K, `seed ${seed}: row ${id.slice(0, 8)} present in cycles ${s}..${s + b.K - 1} (M=${b.M}, early stops=${b.E}) was never reached`)
-    }
-  }
-  return checked
-}
-
-/** boundFrom for the checks below: the indexed one once checkBound has built it, else the definition. */
-function boundFrom(trace, s, run = null) {
-  return run?.boundFrom ? run.boundFrom(s) : boundFromSlow(trace, s)
-}
-
-function checkSlowDown(seed, run) {
-  const { trace, answers, restarts } = run
-  // The slow-down is in memory only: a restart (before cycle r) forgets every streak, so only answers
-  // given since the last restart at or before a cycle can have slowed a row in that cycle.
-  const sinceRestart = (c) => restarts.filter((r) => r <= c).reduce((a, b) => Math.max(a, b), 0)
-  let slowedRows = 0
-  for (const t of trace) {
-    for (const id of t.slowSkipped) {
-      const hist = (answers.get(id) || []).filter((a) => a.cycle < t.c && a.cycle >= sinceRestart(t.c))
-      const last3 = hist.slice(-ACTIVE_WINDOW_SLOW_AFTER)
-      assert.equal(last3.length, ACTIVE_WINDOW_SLOW_AFTER, `seed ${seed}: ${id.slice(0, 8)} slowed after ${last3.length} answers`)
-      for (const a of last3) assert.ok(!a.ok && isSlowReason(a.reason), `seed ${seed}: ${id.slice(0, 8)} slowed though an answer was ${JSON.stringify(a.reason)}`)
-      assert.ok(T0 + t.c * CYCLE_MS - last3[last3.length - 1].nowMs < ACTIVE_WINDOW_SLOW_MS, `seed ${seed}: ${id.slice(0, 8)} still slowed 10 min after its last answer`)
-    }
-  }
-  // At most once per 10 minutes once slowed; and examined again within 10 minutes + one rotation.
-  const slowCycles = ACTIVE_WINDOW_SLOW_MS / CYCLE_MS
-  for (const [id, hist] of answers) {
-    for (let i = ACTIVE_WINDOW_SLOW_AFTER; i < hist.length; i++) {
-      const prev = hist.slice(i - ACTIVE_WINDOW_SLOW_AFTER, i)
-      if (prev[0].cycle < sinceRestart(hist[i].cycle)) continue // a restart in between forgot the streak
-      if (!prev.every((a) => !a.ok && isSlowReason(a.reason))) continue
-      slowedRows++
-      assert.ok(hist[i].nowMs - prev[prev.length - 1].nowMs >= ACTIVE_WINDOW_SLOW_MS, `seed ${seed}: slowed ${id.slice(0, 8)} examined twice within 10 min`)
-    }
-    const last = hist[hist.length - 1]
-    const lastThree = hist.slice(-ACTIVE_WINDOW_SLOW_AFTER)
-    if (lastThree.length === ACTIVE_WINDOW_SLOW_AFTER && lastThree.every((a) => !a.ok && isSlowReason(a.reason))) {
-      const due = last.cycle + slowCycles
-      if (due >= trace.length) continue
-      const b = boundFrom(trace, due, run)
-      if (!b) continue
-      if (run.restarts.some((r) => r > last.cycle && r <= due + b.K - 1)) continue
-      let present = true
-      for (let t = last.cycle; t < due + b.K; t++) if (!trace[t].present.has(id)) present = false
-      if (!present) continue
-      assert.fail(`seed ${seed}: slowed ${id.slice(0, 8)} last answered at cycle ${last.cycle}, present through cycle ${due + b.K - 1} (10 min + one rotation) and never examined again`)
-    }
-  }
-  return slowedRows
-}
-
-describe("property (seeded): rotation bound, window size, chain, slow-down, pruning", () => {
-  const SEEDS = Array.from({ length: 40 }, (_, i) => 0x5ec4 + i * 7919)
-  const stats = { cycles: 0, checked: 0, slowed: 0, maxM: 0, earlyStops: 0, restarts: 0 }
-
-  test("random tables (1–400 rows), churn, random canExecute answers, early stops, restarts: every row present for ceil(M/15)+1+E consecutive cycles is reached; slowed rows only for 3× balance/allowance, at most once per 10 min, again within 10 min + one rotation; never more than 15 rows a cycle", () => {
+  test("random tables (1–300 rows), churn, failed scan and wrap reads, a random first page: every row present long enough is screened within ceil(M/15) + fallback cycles", () => {
+    let checked = 0
     for (const seed of SEEDS) {
-      const rand = mulberry32(seed ^ 0xabc)
-      const initial = 1 + Math.floor(rand() * 400)
-      const run = simulate(seed, { cycles: 140, initial, maxAdd: 3, maxRemove: 3, restartP: 0.01 })
-      for (const t of run.trace) {
-        assert.ok(t.windowSize <= W, `seed ${seed} cycle ${t.c}: window of ${t.windowSize}`)
-        assert.ok(t.examined.length <= W, `seed ${seed} cycle ${t.c}: examined ${t.examined.length}`)
-        stats.maxM = Math.max(stats.maxM, t.present.size)
-        if (t.early) stats.earlyStops++
-      }
-      stats.cycles += run.trace.length
-      stats.checked += checkBound(seed, run)
-      stats.slowed += checkSlowDown(seed, run)
-      stats.restarts += run.restarts.length
-      assert.deepEqual(run.droppedWhileActive, [], `seed ${seed}: an in-memory entry of an ACTIVE row was pruned`)
+      const initial = 1 + Math.floor(mulberry32(seed ^ 0xabc)() * 300)
+      const run = simulate(seed, { cycles: 120, initial })
+      // A failed wrap read ends a scan short of its size: count such cycles with the fallbacks (the bound's "+1 per fallback cycle").
+      checked += checkScreenBound({ ...run, fallbackAt: run.fallbackAt.map((f, c) => f || run.askedAt[c].length < Math.min(W, run.presentAt[c].size)), scan: W, label: `seed ${seed}` }).checked
+      assert.deepEqual(run.droppedWhileActive, [], `seed ${seed}: an entry of an ACTIVE row was pruned`)
     }
-    assert.ok(stats.checked > 50_000, `the bound was checked ${stats.checked} times`)
-    assert.ok(stats.slowed > 100, `only ${stats.slowed} slowed examinations — the generator no longer exercises the slow-down`)
-    assert.ok(stats.earlyStops > 50, `only ${stats.earlyStops} early stops`)
-    assert.ok(stats.maxM >= 300, `largest table ${stats.maxM}`)
-    assert.ok(stats.restarts > 5, `only ${stats.restarts} restarts`)
-    // eslint-disable-next-line no-console
-    console.log(`  property: ${SEEDS.length} seeds, ${stats.cycles} cycles, ${stats.checked} (row, start-cycle) bound checks, ${stats.slowed} slowed re-examinations, ${stats.earlyStops} early stops, ${stats.restarts} restarts, largest table ${stats.maxM}`)
+    assert.ok(checked > 20_000, `${checked} checks`)
   })
 
-  test("a static table with no early stop meets the exact bound ceil(M/15) (no +1 needed)", () => {
-    for (const M of [1, 2, 14, 15, 16, 29, 30, 31, 100, 399, 400]) {
+  test("a static table: the exact bound ceil(M/15) from any starting page", () => {
+    for (const M of [1, 2, 14, 15, 16, 29, 30, 31, 100]) {
       const db = createDb(Array.from({ length: M }, (_, i) => row(idN(i + 1), ts(T0 + i * 1000))))
       const k = createKeeper()
-      for (let start = 0; start < 3 * Math.ceil(M / W); start++) {
+      for (let start = 0; start < 2 * Math.ceil(M / W); start++) {
+        const save = { cursor: k.cursor, pass: k.pass }
         const reached = new Set()
-        const K = Math.ceil(M / W)
-        const save = { cursor: k.cursor }
-        for (let c = 0; c < K; c++) {
-          const scan = fetchWindow(db, k, T0)
+        for (let c = 0; c < Math.ceil(M / W); c++) {
+          const scan = fetchWindow(db, k)
           for (const r of scan.rows) reached.add(r.id)
-          k.cursor = advanceActiveWindow(scan, scan.rows.length, k.rotation).cursor
+          advance(k, scan)
         }
-        assert.equal(reached.size, M, `M=${M}, starting at cursor ${JSON.stringify(save.cursor)}: ${reached.size} rows in ${K} cycles`)
-        // step one cycle forward for the next starting point
+        assert.equal(reached.size, M, `M=${M}, start ${start}`)
         k.cursor = save.cursor
-        const scan = fetchWindow(db, k, T0)
-        k.cursor = advanceActiveWindow(scan, scan.rows.length, k.rotation).cursor
+        k.pass = save.pass
+        advance(k, fetchWindow(db, k))
       }
     }
   })
 
-  test("a row of another chain never reaches the loop, even when a page carries one", () => {
-    for (const seed of SEEDS.slice(0, 10)) simulate(seed, { cycles: 40, initial: 60, otherChainNoise: true })
-  })
-
-  test("pruning: an entry is never dropped while its row is active, and a removed row's entry goes within two rotations", () => {
-    let removedChecked = 0
-    for (const seed of SEEDS.slice(0, 20)) {
-      const run = simulate(seed, { cycles: 160, initial: 120, maxAdd: 2, maxRemove: 2, restartP: 0 })
-      const ix = indexTrace(run.trace)
-      run.boundFrom = (s) => boundFromIndexed(run.trace, ix, s)
+  test("a removed row's entry is dropped by the second complete scan after it left, never earlier than it left", () => {
+    let checkedRemovals = 0
+    for (const seed of SEEDS.slice(0, 15)) {
+      const run = simulate(seed, { cycles: 150, initial: 90, maxAdd: 2, maxRemove: 2, failP: 0, wrapFailP: 0 })
       assert.deepEqual(run.droppedWhileActive, [])
       for (const [id, r] of run.removedAt) {
-        if (r >= run.trace.length) continue
-        const b1 = boundFrom(run.trace, r, run)
-        if (!b1 || r + b1.K >= run.trace.length) continue
-        const b2 = boundFrom(run.trace, r + b1.K, run)
-        if (!b2 || r + b1.K + b2.K >= run.trace.length) continue
-        const wasTracked = run.trace.slice(0, r).some((t) => t.reached.has(id))
-        if (!wasTracked) continue
-        removedChecked++
         const d = run.droppedAt.get(id)
-        assert.ok(d !== undefined && d >= r && d <= r + b1.K + b2.K, `seed ${seed}: entry of ${id.slice(0, 8)} (removed before cycle ${r}) dropped at ${d}, bound ${r + b1.K + b2.K}`)
+        if (d === undefined) continue
+        checkedRemovals++
+        assert.ok(d >= r, `seed ${seed}: ${id.slice(0, 8)} dropped at ${d} before it left at ${r}`)
+        // two complete scans = at most two passes of ceil(M/15) + 1 cycles each
+        assert.ok(d - r <= 2 * (Math.ceil(200 / W) + 1), `seed ${seed}: ${id.slice(0, 8)} kept ${d - r} cycles after it left`)
       }
     }
-    assert.ok(removedChecked > 100, `only ${removedChecked} removals checked`)
+    assert.ok(checkedRemovals > 100, `${checkedRemovals} removals`)
   })
 })

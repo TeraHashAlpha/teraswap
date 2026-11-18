@@ -1,50 +1,42 @@
 /**
- * [SEC-4 / fix/keeper-active-orders-window] The keeper's rotating active-orders window (pure; unit-tested
- * in active-window.test.mjs, wired in executor.js fetchActiveOrders + executeCycle; cycle-level tests in
- * active-window-cycle.test.mjs).
+ * [SEC-4 / fix/keeper-active-orders-window] The keeper's active-orders scan, pre-screen and walk (pure;
+ * unit-tested in active-window.test.mjs, wired in executor.js fetchActiveOrders + executeCycle; shipped-cycle
+ * tests in active-window-cycle.test.mjs and active-scan-probes.test.mjs).
  *
- * Before: every cycle read the 15 OLDEST active rows of the chain (order=created_at.asc,
- * limit=MAX_BATCH*3). A row whose canExecute is false is unlocked back to `active` without a miss and
- * keeps its place, so 15 rows that cannot execute yet (unfunded, no allowance, a DCA between chunks) hid
- * every newer order on that chain until they expired — up to 90 days, no attacker needed.
+ * Before (origin/main): every cycle read the 15 OLDEST active rows of the chain and locked each one to ask
+ * canExecute. A row whose canExecute is false is unlocked back to `active` without a miss and keeps its
+ * place, so 15 rows that could not execute yet hid every newer order on that chain until they expired.
+ * Round 1 (a9f12d9a) rotated a 15-row window; the A88 audit showed a flood of 15+ rows per cycle still hid
+ * rows, a query error restarted the rotation, and overlapping cycles pruned ADR-026 streaks.
  *
- * Now: the same per-cycle budget (W = MAX_BATCH*3 = 15 rows) is a WINDOW that rotates over the whole table.
- *   - Keyset by (created_at, id), both ascending — the order PostgREST is asked for. The cursor is the key
- *     of the last row the previous cycle reached; it lives in memory only, so a restart begins at the
- *     oldest row.
- *   - tail = up to W rows after the cursor. If the tail comes back short, the scan has reached the newest
- *     row and WRAPS: head = up to W − |tail| rows from the oldest, ids already in the tail dropped. A table
- *     of ≤ W rows is therefore read whole every cycle, oldest first once the cursor settles — today's
- *     behaviour for a small table.
- *   - The cursor moves past the rows the order loop REACHED (owner reading 2026-11-17: the loop still stops
- *     after MAX_BATCH executions and on a gas SKIP; the rows it did not reach lead the next window).
+ * Now (design 120b, owner answers 2026-11-18): asking is separated from locking.
+ *   1. Scan. Each cycle reads up to SCAN_CAP (1000) active rows of the chain in keyset pages
+ *      (created_at, id). With M <= SCAN_CAP the scan starts at the oldest row every cycle and holds the
+ *      whole table: no cursor. With M > SCAN_CAP it rotates: the next page starts after the previous page's
+ *      last row and wraps to the oldest. The page's Content-Range count says whether it reached the newest
+ *      row, so a server that caps rows per request (Supabase max_rows) is never mistaken for the end.
+ *      A fresh process with M > SCAN_CAP starts at a random page (S-8).
+ *   2. Pre-screen. Every scanned row is asked canExecute WITHOUT a lock, batched through Multicall3
+ *      (executor.js). The struct is built by the per-order path's own builder.
+ *   3. Walk. The rows that answered true go, oldest first, through the EXISTING per-order path (lock,
+ *      canExecute again, every gate, the retry ladder). Also walked: rows whose off-chain expiry has passed
+ *      (the path's first step marks them `expired`; nothing else does), and up to ONE_BY_ONE rows the
+ *      pre-screen could not answer (struct not buildable, own call reverted, chunk failed or timed out),
+ *      chosen least-recently-walked first so the same rows can never hold that budget (owner answer 3).
+ *      MAX_BATCH executions per cycle, unchanged.
+ *   4. Carry-over. Ready rows the loop did not reach (MAX_BATCH, a gas SKIP — the row the SKIP stopped on
+ *      included) are attempted next cycle: re-read by id when the next page does not hold them, and then
+ *      they go first; otherwise they keep their oldest-first place (owner answer 1).
  *
- * Bound. With M rows on the chain and no early stop, consecutive windows tile the table in keyset order
- * (each starts right after the previous one's last row, wrapping), so every row is in some window within
- * ceil(M / W) cycles. Each cycle the loop stops early (MAX_BATCH executed, or gas SKIP) moves the cursor
- * past at least the rows it reached instead of W, adding at most one cycle. Rows added or removed between
- * cycles: a row passes at most once before the scan returns to any given row, so M counts the distinct
- * rows active during those cycles (owner reading 2026-11-17).
+ * Bound. Every active row is screened at least once every ceil(M / SCAN_CAP) cycles, plus one cycle per
+ * fallback cycle (a scan query that failed, a pre-screen chunk that failed): consecutive pages tile the
+ * table in keyset order, a fallback cycle moves nothing. To hide a row a flood must add SCAN_CAP rows per
+ * cycle.
  *
- * Slow-down. A row whose canExecute answered "Insufficient balance" / "Insufficient allowance" (the
- * contracts' exact strings, V2 and V3) ACTIVE_WINDOW_SLOW_AFTER times in a row is examined at most once per
- * ACTIVE_WINDOW_SLOW_MS: it stays in the window (the cursor passes it, it never holds a slot) but the loop
- * skips it until the period has passed since its last answer. In memory only — no status change, no
- * database counter, no alert. Any other answer (true, interval not reached, a price reason, …) clears it;
- * no other reason is ever slowed.
- *
- * Pruning. executor.js used to drop an order's in-memory infra streak (ADR-026 / A73b S-9) when the order
- * was absent from the rows just fetched. A window is not the table, so absence from it proves nothing by
- * itself: an id keeps its streak (and its slow-down entry) until a whole pass of the table has not seen it.
- * A window that holds the whole table keeps today's rule exactly.
+ * Pruning (S-3). An in-memory per-order entry (ADR-026 infra streak) is dropped only for a row absent from
+ * two consecutive COMPLETE scans: a cycle whose scan held the whole table, or, when rotating, a pass from
+ * the oldest row to the newest. A row that was `executing` during one scan therefore keeps its streak.
  */
-
-/** Consecutive balance/allowance answers before a row is slowed. */
-export const ACTIVE_WINDOW_SLOW_AFTER = 3
-/** A slowed row is examined at most once per this many ms. */
-export const ACTIVE_WINDOW_SLOW_MS = 10 * 60_000
-/** canExecute's reasons that slow a row down — exact strings of TeraSwapOrderExecutor(V3).canExecute. */
-export const ACTIVE_WINDOW_SLOW_REASONS = Object.freeze(["Insufficient balance", "Insufficient allowance"])
 
 // PostgREST's timestamptz output ("2026-11-17T10:00:00.123456+00:00") and a uuid. Anything else is never
 // put in a URL: a row without a usable key cannot become the cursor.
@@ -64,16 +56,21 @@ export function cursorOf(row) {
   return { createdAt, id }
 }
 
+/** True for a uuid — the only id shape ever put in an `id=in.(…)` list. */
+export function isUuid(id) {
+  return typeof id === "string" && UUID_RE.test(id)
+}
+
 /**
- * The query parameters of one page of the window, appended by executor.js to its chain-scoped base
+ * The query parameters of one scan page, appended by executor.js to its chain-scoped base
  * (`orders?status=eq.active&chain_id=eq.${CHAIN_ID}`): rows in (created_at, id) order, after `cursor` when
- * one is given (the tail), else from the oldest (the head). The timestamp and the id are double-quoted
- * (PostgREST's rule for values holding reserved characters) and everything is form-encoded, so the '+' of
- * "+00:00" travels as %2B and is never read as a space.
- * @param {{ cursor?: { createdAt: string, id: string } | null, limit: number }} p
- * @returns {string}  e.g. "or=%28created_at.gt.%22…%22%2C…%29&select=*&order=created_at.asc%2Cid.asc&limit=15"
+ * one is given, else from the oldest — or from row `offset` of that order (a fresh process's random page).
+ * The timestamp and the id are double-quoted (PostgREST's rule for values holding reserved characters) and
+ * everything is form-encoded, so the '+' of "+00:00" travels as %2B and is never read as a space.
+ * @param {{ cursor?: { createdAt: string, id: string } | null, limit: number, offset?: number | null }} p
+ * @returns {string}  e.g. "or=%28created_at.gt.%22…%22%2C…%29&select=*&order=created_at.asc%2Cid.asc&limit=1000"
  */
-export function activeWindowParams({ cursor = null, limit }) {
+export function activeWindowParams({ cursor = null, limit, offset = null }) {
   const q = new URLSearchParams()
   if (cursor) {
     const ts = `"${cursor.createdAt}"`
@@ -83,6 +80,7 @@ export function activeWindowParams({ cursor = null, limit }) {
   q.set("select", "*")
   q.set("order", "created_at.asc,id.asc")
   q.set("limit", String(Math.max(1, Math.floor(limit))))
+  if (!cursor && Number.isInteger(offset) && offset > 0) q.set("offset", String(offset))
   return q.toString()
 }
 
@@ -97,33 +95,34 @@ export function contentRangeTotal(header) {
 }
 
 /**
- * Build this cycle's window from the database's answers. Pure.
+ * Build this cycle's scan from the database's answers. Pure.
  *
  * @param {{
  *   chainId: number,
- *   windowSize: number,
- *   cursor: { createdAt: string, id: string } | null,  // where this window starts (exclusive)
- *   tail: object[],              // rows after `cursor` (or from the oldest when it is null), as returned
- *   head?: object[] | null,      // rows from the oldest, fetched only when the tail came back short
- *   slow?: Map<string, { streak: number, lastAt: number }>,
- *   nowMs: number,
+ *   windowSize: number,          // SCAN_CAP
+ *   cursor: { createdAt: string, id: string } | null,  // where the page starts (exclusive); null = oldest / offset
+ *   offset?: number | null,      // a random-page start (cursor null); the page is rows offset.. of the table
+ *   tail: object[],              // the page's rows, as returned
+ *   tailTotal?: number | null,   // its Content-Range count: rows matching the page's filter (offset ignored)
+ *   head?: object[] | null,      // rows from the oldest, fetched only when the page reached the newest row
  * }} p
  * @returns {{
- *   rows: object[],              // the window, in scan order (tail, then head): what the loop walks
- *   tailCount: number,           // how many of `rows` came from the tail
- *   slowedIds: Set<string>,      // rows of the window the loop must skip this cycle (slow-down)
- *   examineIds: Set<string>,     // rows of the window to examine: rows minus slowedIds
- *   endReached: boolean,         // the tail was short: this window reaches the newest row
- *   coversAll: boolean,          // the window holds every active row of the chain
+ *   rows: object[],              // the scan, in keyset order from where it started (page, then head)
+ *   tailCount: number,           // how many of `rows` came from the page
+ *   endReached: boolean,         // the page reached the newest row
+ *   coversAll: boolean,          // the scan holds every active row of the chain (a complete scan)
+ *   fromOldest: boolean,         // the page started at the oldest row (no cursor, no offset)
  *   cursor: { createdAt: string, id: string } | null,      // where it started
- *   nextCursor: { createdAt: string, id: string } | null,  // where the next one starts if the loop reaches every row
+ *   nextCursor: { createdAt: string, id: string } | null,  // the key of its last row
  * }}
  */
-export function selectActiveWindow({ chainId, windowSize, cursor, tail, head = null, slow = new Map(), nowMs }) {
+export function selectActiveWindow({ chainId, windowSize, cursor, offset = null, tail, tailTotal = null, head = null }) {
   const size = Math.max(1, Math.floor(windowSize))
   const tailRows = Array.isArray(tail) ? tail : []
   const headRows = Array.isArray(head) ? head : null
-  const endReached = tailRows.length < size
+  const start = Number.isInteger(offset) && offset > 0 && !cursor ? offset : 0
+  // The count (when the server gave one) decides; without it, a short page is the end.
+  const endReached = Number.isInteger(tailTotal) ? start + tailRows.length >= tailTotal : tailRows.length < size
 
   const rows = []
   const seen = new Set()
@@ -145,25 +144,23 @@ export function selectActiveWindow({ chainId, windowSize, cursor, tail, head = n
     }
   }
 
-  // The whole table is in this window when the tail reached the newest row AND the head (if any)
-  // came back to the cursor: it ran short, met a tail row, or ended on the cursor row itself.
+  // The whole table is in this scan when the page started at the oldest row and reached the newest, or
+  // when the head (from the oldest) came back to where the page started: it ran short, met a page row, or
+  // ended on the cursor row itself.
+  const fromOldest = cursor === null && start === 0
   const headLimit = size - tailRows.length
   const coversAll =
     endReached &&
-    (cursor === null ||
+    (fromOldest ||
       (headRows !== null &&
-        (headRows.length < headLimit || headDuplicated || headRows[headRows.length - 1]?.id === cursor.id)))
+        (headRows.length < headLimit || headDuplicated || (cursor !== null && headRows[headRows.length - 1]?.id === cursor.id))))
 
-  const slowedIds = new Set()
-  for (const row of rows) if (isSlowed(slow?.get(row.id), nowMs)) slowedIds.add(row.id)
-  const examineIds = new Set(rows.filter((r) => !slowedIds.has(r.id)).map((r) => r.id))
-
-  return { rows, tailCount, slowedIds, examineIds, endReached, coversAll, cursor, nextCursor: lastCursor(rows, rows.length) }
+  return { rows, tailCount, endReached, coversAll, fromOldest, cursor, nextCursor: lastCursor(rows) }
 }
 
-/** The key of the last of the first `count` rows that has one; null when none does. */
-function lastCursor(rows, count) {
-  for (let i = Math.min(count, rows.length) - 1; i >= 0; i--) {
+/** The key of the last row that has one; null when none does. */
+function lastCursor(rows) {
+  for (let i = rows.length - 1; i >= 0; i--) {
     const c = cursorOf(rows[i])
     if (c) return c
   }
@@ -171,101 +168,199 @@ function lastCursor(rows, count) {
 }
 
 /**
- * After the loop: where the next window starts, whether the scan wrapped (passed the newest row), and the
- * rotation's ids (for activeWindowKeepIds). Pure.
+ * The scan state after one SCREENED scan (a fallback or paused cycle changes nothing). Pure.
  *
- * The rotation set holds ids fetched since the scan last started from the oldest row, and it always
- * covers the keyset range [oldest row, cursor]: every row that was active when the scan passed its
- * position in that range is in it. It restarts (as the head part of this window) only when the cursor
- * moves INTO that head part; otherwise this window's ids are added (the cursor moved within the range they
- * cover). A cursor that stops on the newest row keeps accumulating: the next window starts after it.
+ *   cursor   -- where the next page starts; null = the oldest row (no rotation).
+ *   pass     -- rotating only: ids seen since the scan last left the oldest row, and whether this pass
+ *               really began there (false after a random start or a missed wrap read: such a pass is never
+ *               counted complete).
+ *   complete -- the ids of a COMPLETE scan finished by this cycle, or null. With M <= SCAN_CAP every cycle
+ *               is one; when rotating, a pass from the oldest row to the newest.
  *
- * @param {ReturnType<typeof selectActiveWindow> | null} scan
- * @param {number} reached  rows of scan.rows the loop got to (scan.rows.length unless it stopped early)
- * @param {Set<string>} rotation  ids covering [oldest row, scan.cursor]
- * @returns {{ cursor: { createdAt: string, id: string } | null, wrapped: boolean, rotation: Set<string> }}
+ * @param {{ cursor: object|null, pass: { ids: Set<string>, fromOldest: boolean } }} state
+ * @param {ReturnType<typeof selectActiveWindow>} scan  (or truncateScan's prefix of it)
+ * @param {{ extraIds?: string[] }} [opts]  extraIds: carried rows re-read by id this cycle
+ * @returns {{ cursor: object|null, pass: { ids: Set<string>, fromOldest: boolean }, complete: Set<string>|null }}
  */
-export function advanceActiveWindow(scan, reached, rotation = new Set()) {
-  if (!scan) return { cursor: null, wrapped: false, rotation }
-  const n = Math.max(0, Math.min(Math.floor(reached), scan.rows.length))
-  const all = n >= scan.rows.length
-  // Reaching every row moves the cursor to the window's end; an early stop moves it past the reached
-  // rows only. Reaching none (a stop on the first row cannot happen: MAX_BATCH ≥ 1) keeps it.
-  const cursor = all ? scan.nextCursor : n === 0 ? scan.cursor : lastCursor(scan.rows, n) ?? scan.cursor
-  // Wrapped = this cycle's scan got past the newest row: the tail was short and the loop reached all of it.
-  const wrapped = scan.endReached && n >= scan.tailCount
+export function advanceScan(state, scan, { extraIds = [] } = {}) {
   const ids = scan.rows.map((r) => r.id)
-  const intoHead = scan.endReached && n > scan.tailCount
-  const next = cursor === null ? new Set() : intoHead ? new Set(ids.slice(scan.tailCount)) : new Set([...rotation, ...ids])
-  return { cursor, wrapped, rotation: next }
-}
-
-/**
- * The ids that may keep an in-memory per-order entry (ADR-026 infra streak, slow-down) this cycle, or null
- * to prune NOTHING. Pure.
- *   - the window holds the whole table ⇒ exactly its ids (today's rule: absent from the active set ⇒ gone);
- *   - the window's tail reached the newest row ⇒ the rotation's ids (covering [oldest, cursor]) plus this
- *     window's (covering (cursor, newest]) — a full pass of the table, so an id missing from both was not
- *     active when the scan went past its position;
- *   - otherwise ⇒ null: this cycle saw only part of the table and proves no absence.
- * @param {ReturnType<typeof selectActiveWindow> | null} scan
- * @param {string[]} windowIds  ids of the rows the loop is handed (scan.rows)
- * @param {Set<string>} rotation  ids covering [oldest row, scan.cursor] (advanceActiveWindow)
- * @returns {Set<string> | null}
- */
-export function activeWindowKeepIds(scan, windowIds, rotation = new Set()) {
-  if (!scan || !scan.endReached) return null
-  const ids = Array.isArray(windowIds) ? windowIds.map(String) : []
-  if (scan.coversAll) return new Set(ids)
-  return new Set([...rotation, ...ids])
-}
-
-/** True for canExecute reasons that slow a row down. */
-export function isSlowReason(reason) {
-  return typeof reason === "string" && ACTIVE_WINDOW_SLOW_REASONS.includes(reason.trim())
-}
-
-/**
- * The row's slow-down entry after one canExecute answer, or null (no entry). Pure.
- * @param {{ streak: number, lastAt: number } | null | undefined} prev
- * @param {{ canExecute: boolean, reason?: string, nowMs: number }} answer
- */
-export function nextSlowEntry(prev, { canExecute, reason, nowMs }) {
-  if (canExecute || !isSlowReason(reason)) return null
-  return { streak: (prev?.streak ?? 0) + 1, lastAt: nowMs }
-}
-
-/** A row is slowed after ACTIVE_WINDOW_SLOW_AFTER consecutive slow answers, until ACTIVE_WINDOW_SLOW_MS after the last. */
-export function isSlowed(entry, nowMs) {
-  return Boolean(entry) && entry.streak >= ACTIVE_WINDOW_SLOW_AFTER && nowMs - entry.lastAt < ACTIVE_WINDOW_SLOW_MS
-}
-
-/** Record one canExecute answer in the slow-down map (the map executor.js holds). */
-export function noteCanExecuteAnswer(slow, id, answer) {
-  const next = nextSlowEntry(slow.get(id), answer)
-  if (next) slow.set(id, next)
-  else slow.delete(id)
-}
-
-/** Drop slow-down entries whose id is not in `keepIds` (null ⇒ drop nothing). Returns how many were dropped. */
-export function pruneSlowRows(slow, keepIds) {
-  if (!keepIds) return 0
-  let dropped = 0
-  for (const id of [...slow.keys()]) {
-    if (!keepIds.has(id)) {
-      slow.delete(id)
-      dropped++
-    }
+  // Rows past the page are the head (from the oldest): read, and screened.
+  const headFetched = ids.length > scan.tailCount
+  if (scan.coversAll) {
+    return { cursor: null, pass: { ids: new Set(), fromOldest: true }, complete: new Set([...ids, ...extraIds]) }
   }
-  return dropped
+  // A page that starts at the oldest row begins a pass (the table just outgrew one scan, or a random start
+  // fell back to the oldest page); otherwise the pass in progress goes on.
+  const pass = scan.fromOldest ? { ids: new Set(), fromOldest: true } : state?.pass ?? { ids: new Set(), fromOldest: false }
+  const tailIds = ids.slice(0, scan.tailCount)
+  const headIds = ids.slice(scan.tailCount)
+  if (!scan.endReached) {
+    // Mid-table: the pass goes on.
+    return { cursor: scan.nextCursor, pass: { ids: new Set([...pass.ids, ...tailIds, ...extraIds]), fromOldest: pass.fromOldest }, complete: null }
+  }
+  // The page reached the newest row: this pass ends here.
+  const complete = pass.fromOldest ? new Set([...pass.ids, ...tailIds, ...extraIds]) : null
+  if (headFetched) {
+    // The head (from the oldest) begins the next pass.
+    return { cursor: scan.nextCursor, pass: { ids: new Set(headIds), fromOldest: true }, complete }
+  }
+  // No head this cycle (its read failed, or the page reached the newest row with no room left): the next scan
+  // starts at the oldest row with its own first read, so a failing wrap read can never stall the scan on the
+  // newest row.
+  return { cursor: null, pass: { ids: new Set(), fromOldest: true }, complete }
 }
 
 /**
- * The one per-cycle log line. Counts and flags only — never an address, a signature or an id.
- * @param {{ active: number | null, window: number, examined: number, slowed: number, wrapped: boolean, fallback?: number | null }} p
+ * The prefix of a scan the pre-screen really answered: its first `k` rows. A failed Multicall3 chunk holds
+ * the scan's position at its first row, so no row is passed over unscreened (one more cycle per fallback
+ * cycle, as the bound says). Pure.
+ * @param {ReturnType<typeof selectActiveWindow>} scan
+ * @param {number} k
+ * @returns {ReturnType<typeof selectActiveWindow>}
  */
-export function activeWindowLogLine({ active, window, examined, slowed, wrapped, fallback = null }) {
-  const a = Number.isInteger(active) ? String(active) : "?"
-  const tail = fallback ? ` keyset=rejected(${fallback}) fallback=oldest` : ""
-  return `Active window: active=${a} window=${window} examined=${examined} slowed=${slowed} wrap=${wrapped ? "yes" : "no"}${tail}`
+export function truncateScan(scan, k) {
+  const n = Math.max(0, Math.min(Math.floor(k), scan.rows.length))
+  if (n >= scan.rows.length) return scan
+  const rows = scan.rows.slice(0, n)
+  return {
+    rows,
+    tailCount: Math.min(scan.tailCount, n),
+    endReached: scan.endReached && n >= scan.tailCount,
+    coversAll: false,
+    fromOldest: scan.fromOldest,
+    cursor: scan.cursor,
+    nextCursor: lastCursor(rows) ?? scan.cursor,
+  }
+}
+
+/**
+ * The ids that keep an in-memory per-order entry (ADR-026 infra streak) after a complete scan, or null to
+ * prune NOTHING: an entry goes only when its row is absent from this complete scan AND the previous one.
+ * @param {Set<string>|null} previousComplete
+ * @param {Set<string>|null} complete
+ * @returns {Set<string>|null}
+ */
+export function keepIdsAfterScans(previousComplete, complete) {
+  if (!complete || !previousComplete) return null
+  return new Set([...previousComplete, ...complete])
+}
+
+/**
+ * Which scanned rows the per-order path walks this cycle. Pure.
+ *
+ * @param {{
+ *   rows: object[],                 // what executeCycle iterates, in order (carried re-reads first, then the scan)
+ *   answers: Map<string, { canExec: boolean } | { unanswered: string }>,  // the pre-screen, per row id
+ *   nowSec: number,
+ *   budget: number,                 // ONE_BY_ONE: rows the pre-screen could not answer, per cycle
+ *   lastWalked?: Map<string, number>,  // id -> sequence of the cycle it last used the budget
+ * }} p
+ * @returns {{ ids: Set<string>, ready: string[], expired: string[], oneByOne: string[], unanswered: number }}
+ */
+export function planWalk({ rows, answers, nowSec, budget, lastWalked = new Map() }) {
+  const ready = []
+  const expired = []
+  const unanswered = []
+  for (const [i, row] of rows.entries()) {
+    const id = row?.id
+    if (typeof id !== "string") continue
+    // The path's own pre-filter, unchanged: an expired row is marked `expired` there.
+    if (Number(row.expiry) < nowSec) {
+      expired.push(id)
+      continue
+    }
+    const a = answers.get(id)
+    if (a && a.canExec === true) ready.push(id)
+    else if (!a || a.unanswered) unanswered.push({ id, i, last: lastWalked.get(id) ?? -1 })
+  }
+  // Least recently walked first; never walked = -1; ties in scan order (oldest first).
+  unanswered.sort((x, y) => x.last - y.last || x.i - y.i)
+  const oneByOne = unanswered.slice(0, Math.max(0, Math.floor(budget))).map((u) => u.id)
+  return { ids: new Set([...ready, ...expired, ...oneByOne]), ready, expired, oneByOne, unanswered: unanswered.length }
+}
+
+/**
+ * Carry-over after the loop: the ready rows it did not reach, plus the row a gas SKIP stopped on, in scan
+ * order. Pure.
+ * @param {ReturnType<typeof planWalk>} walk
+ * @param {Set<string>} reached  ids the loop got to
+ * @param {string | null} stoppedOn  the ready row a gas SKIP broke the loop on, or null
+ * @param {number} cap
+ * @returns {string[]}
+ */
+export function carryAfterLoop(walk, reached, stoppedOn, cap) {
+  const out = walk.ready.filter((id) => !reached.has(id) || id === stoppedOn)
+  // A row walked from the one-by-one budget that the SKIP stopped on was ready too: it leads.
+  if (stoppedOn && !out.includes(stoppedOn)) out.unshift(stoppedOn)
+  return out.slice(0, Math.max(0, Math.floor(cap)))
+}
+
+/**
+ * Ops-alert pacing for a fallback that persists (S-7): alert on the first cycle of an episode, then again
+ * at most once per `repeatMs` while it persists; one quiet cycle ends the episode.
+ * @param {{ repeatMs: number }} p
+ */
+export function createEpisodeGate({ repeatMs }) {
+  let since = null
+  let lastAlertAt = null
+  let cycles = 0
+  return {
+    /** @returns {{ alert: boolean, cycles: number, sinceMs: number | null }} */
+    onCycle(failed, nowMs) {
+      if (!failed) {
+        since = null
+        lastAlertAt = null
+        cycles = 0
+        return { alert: false, cycles: 0, sinceMs: null }
+      }
+      if (since === null) since = nowMs
+      cycles++
+      const alert = lastAlertAt === null || nowMs - lastAlertAt >= repeatMs
+      if (alert) lastAlertAt = nowMs
+      return { alert, cycles, sinceMs: since }
+    },
+  }
+}
+
+const MAX_COUNT = 10_000_000
+const count = (n) => (Number.isInteger(n) && n >= 0 && n <= MAX_COUNT ? String(n) : "?")
+
+/**
+ * The fallback flag of the cycle line, from a fixed vocabulary only: none, scan-<3-digit status | timeout |
+ * network>, prescreen-<failed>of<chunks>, joined by "+".
+ * @param {{ scan?: string | number | null, prescreenFailed?: number, prescreenChunks?: number }} p
+ */
+export function fallbackFlag({ scan = null, prescreenFailed = 0, prescreenChunks = 0 } = {}) {
+  const parts = []
+  if (scan !== null && scan !== undefined) {
+    const s = String(scan)
+    parts.push(`scan-${/^\d{3}$/.test(s) || s === "timeout" || s === "network" ? s : "error"}`)
+  }
+  if (Number.isInteger(prescreenFailed) && prescreenFailed > 0) parts.push(`prescreen-${count(prescreenFailed)}of${count(prescreenChunks)}`)
+  return parts.length ? parts.join("+") : "none"
+}
+
+/**
+ * The one per-cycle line (S-11). Counts and flags only — never an order id, an address, a signature or a URL;
+ * every number is a validated non-negative integer, else "?".
+ * @param {{ active: number|null, scanned: number, ready: number, attempted: number, carried: number, rotate: boolean, fallback?: string }} p
+ */
+export function activeScanLogLine({ active, scanned, ready, attempted, carried, rotate, fallback = "none" }) {
+  const flag = /^(none|(scan-(\d{3}|timeout|network|error)|prescreen-\d+of\d+)(\+(scan-(\d{3}|timeout|network|error)|prescreen-\d+of\d+))*)$/.test(fallback) ? fallback : "?"
+  return `Active scan: active=${count(active)} scanned=${count(scanned)} true=${count(ready)} attempted=${count(attempted)} carried=${count(carried)} rotate=${rotate ? "yes" : "no"} fallback=${flag}`
+}
+
+/**
+ * A response body or error text fit for one log line (S-11): uuids, 0x-hex of 40+ digits and URLs replaced,
+ * whitespace collapsed, capped at 200 characters.
+ * @param {unknown} text
+ */
+export function logBody(text) {
+  return String(text ?? "")
+    .replace(/[a-z][a-z0-9+.-]*:\/\/[^\s"'<>]+/gi, "<url>")
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<id>")
+    .replace(/0x[0-9a-f]{40,}/gi, "<hex>")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200)
 }

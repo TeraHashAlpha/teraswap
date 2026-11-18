@@ -10,15 +10,19 @@
  * |  Self-hosted Executor (runs every 30s)                   |
  * |                                                          |
  * |  1. Unlock stale "executing" orders (>60s stuck)         |
- * |  2. Fetch active orders from Supabase (oldest first)     |
- * |  3. For each order (up to MAX_BATCH):                    |
+ * |  2. Scan up to 1000 active orders (keyset pages, oldest  |
+ * |     first; rotating when there are more)  [SEC-4]        |
+ * |  3. Pre-screen canExecute for every scanned order, no    |
+ * |     lock, batched through Multicall3  [SEC-4]            |
+ * |  4. For each order that answered true, oldest first      |
+ * |     (up to MAX_BATCH executions):                        |
  * |     a. Atomic lock: set status -> "executing"            |
  * |     b. Call contract.canExecute() on-chain               |
  * |     c. Fetch swap route from TeraSwap API                |
  * |     d. Send executeOrder() transaction                   |
  * |     e. Record execution in order_executions table        |
  * |     f. Update order status                               |
- * |  4. Log results, wait, repeat                            |
+ * |  5. Log results, wait, repeat                            |
  * +---------------------------------------------------------+
  *
  * DEPLOYMENT:
@@ -93,6 +97,8 @@ import {
   getContract,
   getAddress,
   keccak256,
+  encodeFunctionData,
+  decodeFunctionResult,
   formatUnits,
   formatEther,
   zeroHash,
@@ -246,17 +252,22 @@ import {
 // (feed resolution, the viem chain object) — a bad value must exit before any of that, and before
 // any client exists.
 import { parseChainIdEnv } from "./boot-config.js"
-// [SEC-4 / fix/keeper-active-orders-window] The active-orders window rotates over the whole table instead
-// of always reading the 15 oldest rows (pure selection, cursor and slow-down rules; active-window.js).
+// [SEC-4 / fix/keeper-active-orders-window] The active-orders scan: up to SCAN_CAP rows per cycle, asked
+// canExecute without a lock (Multicall3), only the rows that answer true locked (pure rules in active-window.js).
 import {
   activeWindowParams,
   contentRangeTotal,
   selectActiveWindow,
-  advanceActiveWindow,
-  activeWindowKeepIds,
-  noteCanExecuteAnswer,
-  pruneSlowRows,
-  activeWindowLogLine,
+  truncateScan,
+  advanceScan,
+  keepIdsAfterScans,
+  planWalk,
+  carryAfterLoop,
+  createEpisodeGate,
+  fallbackFlag,
+  activeScanLogLine,
+  logBody,
+  isUuid,
 } from "./active-window.js"
 
 // ---- Configuration -----------------------------------------------------
@@ -334,6 +345,17 @@ const LOW_GAS_USD_THRESHOLD = parseFloat(process.env.LOW_GAS_USD_THRESHOLD || "5
 // POLL_INTERVAL_MS (30s) + IDLE_POLL_INTERVAL_MS (300s) come from ./idle-backoff.js (imported above).
 const MAX_BATCH = 5             // Max orders per cycle
 const LOCK_TIMEOUT_MS = 60_000  // 60s -- unlock stale orders
+// [SEC-4 / fix/keeper-active-orders-window] The active-orders scan (active-window.js): rows read and asked
+// canExecute (no lock) per cycle, the Multicall3 chunk size and time limit, the time limit of every Supabase
+// read, and how many rows the pre-screen could not answer go down the per-order path per cycle (rotating).
+const SCAN_CAP = 1000
+const PRESCREEN_CHUNK = 50
+const PRESCREEN_CHUNK_TIMEOUT_MS = 5_000
+const SUPABASE_READ_TIMEOUT_MS = 5_000
+const ONE_BY_ONE = MAX_BATCH * 3
+// Multicall3: one contract at this address on every EVM chain; code and one aggregate3 call checked read-only
+// on Base (8453) and Arbitrum One (42161) on 2026-11-18 (3808 bytes, identical code hash on both).
+const MULTICALL3_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11"
 // ── Gas Strategy Tiers ──────────────────────────────────────
 // [FIX-KEEPER-GAS-TIER-BASE] Per-chain now (gas-tier.js) — mainnet keeps its original hardcoded
 // values (30/80/100 gwei thresholds, 1.5/2.5/4 gwei priority, 2/2.5/3 base-fee multipliers,
@@ -370,19 +392,35 @@ const pinnedRouteReverts = new Map()
 // failure-ladder input: a skip leaves the order untouched. Alert at SKIP_ALERT_CYCLES (order-
 // floor.js); cleared the first cycle a price resolves again, and on any successful fill.
 const quorumSkips = new Map()
-// [SEC-4 / fix/keeper-active-orders-window] The rotating active-orders window (active-window.js). In memory
-// only, never persisted: a restart begins at the oldest row.
-//   activeCursor      -- keyset (created_at, id) of the last row the previous cycle reached; null = oldest.
-//   activeRotationIds -- ids fetched since the scan last started from the oldest row; they cover
-//                        [oldest, activeCursor] (advanceActiveWindow) and drive the prune (activeWindowKeepIds).
-//   activeSlowRows    -- orderId -> { streak, lastAt }: consecutive "Insufficient balance/allowance"
-//                        answers; at 3 the row is examined at most once per 10 min. No status, no count, no alert.
-//   lastActiveScan    -- the window fetchActiveOrders built (read by executeCycle right after the fetch).
+// [SEC-4 / fix/keeper-active-orders-window] The active-orders scan (active-window.js). In memory only, never
+// persisted.
+//   activeCursor        -- keyset (created_at, id) where the next page starts; null = the oldest row (always
+//                          null while the chain has <= SCAN_CAP active rows: every cycle reads them all).
+//   activeScanStarted   -- false until this process screens its first scan: a fresh process with more than
+//                          SCAN_CAP rows starts at a random page, so a crash loop cannot starve the rest (S-8).
+//   activePass          -- rotating only: ids seen since the scan left the oldest row (advanceScan).
+//   lastCompleteScanIds -- the previous complete scan's ids: an ADR-026 infra streak is dropped only for a row
+//                          absent from two consecutive complete scans (S-3).
+//   carryIds            -- ready rows the previous cycle did not reach (MAX_BATCH, gas SKIP): attempted this
+//                          cycle, first when the scan does not hold them (owner answer 2026-11-18).
+//   oneByOneLastWalked  -- orderId -> the cycle it last used the one-by-one budget; least recent first, so the
+//                          same unanswerable rows never hold it (owner answer 2026-11-18).
+//   lastActiveScan      -- the scan fetchActiveOrders built (read by executeCycle right after the fetch).
 let activeCursor = null
-let activeRotationIds = new Set()
-const activeSlowRows = new Map()
+let activeScanStarted = false
+let activePass = { ids: new Set(), fromOldest: false }
+let lastCompleteScanIds = null
+let carryIds = []
+const oneByOneLastWalked = new Map()
+let activeCycleSeq = 0
 let lastActiveScan = null
-let activeWindowRejectionLogged = false
+let scanFailureLogged = false
+// [SEC-4 / S-7] A scan query that fails, or a pre-screen chunk that fails, pages ops (warn) on the first cycle
+// and then at most hourly while it lasts — the infra-miss-streak cadence.
+const scanFallbackAlerts = createEpisodeGate({ repeatMs: 60 * 60_000 })
+const prescreenFallbackAlerts = createEpisodeGate({ repeatMs: 60 * 60_000 })
+// [SEC-4 / S-3] Set while a tick runs: the next tick is skipped instead of overlapping it.
+let tickInFlight = null
 
 // [DCA-OBS] Cross-cycle freeze-observability state (in-memory only; never persisted).
 //   seenDcaOrderIds          -- DCA order ids already announced via alertNewDcaPosition.
@@ -661,6 +699,37 @@ const PRICE_FEED_ABI = [
   },
 ]
 
+// [SEC-4 / fix/keeper-active-orders-window] Multicall3's aggregate3, read through eth_call (the pre-screen).
+// Every call carries allowFailure = true, so one row's revert never fails its chunk.
+const MULTICALL3_ABI = [
+  {
+    name: "aggregate3",
+    type: "function",
+    stateMutability: "payable",
+    inputs: [
+      {
+        name: "calls",
+        type: "tuple[]",
+        components: [
+          { name: "target", type: "address" },
+          { name: "allowFailure", type: "bool" },
+          { name: "callData", type: "bytes" },
+        ],
+      },
+    ],
+    outputs: [
+      {
+        name: "returnData",
+        type: "tuple[]",
+        components: [
+          { name: "success", type: "bool" },
+          { name: "returnData", type: "bytes" },
+        ],
+      },
+    ],
+  },
+]
+
 // ---- Types -------------------------------------------------------------
 
 function orderTypeToEnum(type) {
@@ -676,8 +745,13 @@ function orderTypeToEnum(type) {
 
 async function supabaseFetch(path, options = {}) {
   const url = `${SUPABASE_URL}/rest/v1/${path}`
+  // [SEC-4 / S-4] Every Supabase READ (GET, HEAD) has a time limit: a hung read now rejects — every caller
+  // already catches — instead of holding the cycle forever. Writes are sent exactly as before.
+  const method = String(options.method || "GET").toUpperCase()
+  const readLimit = method === "GET" || method === "HEAD" ? { signal: options.signal ?? AbortSignal.timeout(SUPABASE_READ_TIMEOUT_MS) } : {}
   const res = await fetch(url, {
     ...options,
+    ...readLimit,
     headers: {
       apikey: SUPABASE_KEY,
       Authorization: `Bearer ${SUPABASE_KEY}`,
@@ -688,16 +762,23 @@ async function supabaseFetch(path, options = {}) {
   return res
 }
 
-// [SEC-4] One PostgREST read with `Prefer: count=exact`: rows (none for HEAD) + the Content-Range total.
-async function readActiveRows(path, { head = false } = {}) {
-  const res = await supabaseFetch(path, { method: head ? "HEAD" : "GET", headers: { Prefer: "count=exact" } })
-  if (!res.ok) {
-    let body = ""
-    try { body = await res.text() } catch { /* body is diagnostic only */ }
-    return { ok: false, status: res.status, body, rows: [], total: null }
+// [SEC-4] One PostgREST read of active rows: rows (none for HEAD) + the Content-Range total. Never throws: a
+// non-2xx, a network error or the read time limit comes back as { ok: false, status } (S-4). `count` sends
+// Prefer: count=exact; the fallback request goes without it, exactly as main sends it (S-9).
+async function readActiveRows(path, { head = false, count = true } = {}) {
+  try {
+    const res = await supabaseFetch(path, { method: head ? "HEAD" : "GET", ...(count ? { headers: { Prefer: "count=exact" } } : {}) })
+    if (!res.ok) {
+      let body = ""
+      try { body = await res.text() } catch { /* body is diagnostic only */ }
+      return { ok: false, status: res.status, body, rows: [], total: null }
+    }
+    const rows = head ? [] : await res.json()
+    return { ok: true, status: res.status, body: "", rows: Array.isArray(rows) ? rows : [], total: contentRangeTotal(res.headers.get("content-range")) }
+  } catch (err) {
+    const status = err?.name === "TimeoutError" || err?.name === "AbortError" ? "timeout" : "network"
+    return { ok: false, status, body: redactError(err), rows: [], total: null }
   }
-  const rows = head ? [] : await res.json()
-  return { ok: true, status: res.status, body: "", rows: Array.isArray(rows) ? rows : [], total: contentRangeTotal(res.headers.get("content-range")) }
 }
 
 async function fetchActiveOrders() {
@@ -705,55 +786,250 @@ async function fetchActiveOrders() {
   // per-chain keeper only processes its OWN chain's rows. Without this filter a mainnet keeper would
   // pick up Base rows (and vice-versa) and execute them against the wrong OrderExecutor. Relies on the
   // create route persisting chain_id (deployed first); pre-existing rows default to chain_id=1.
-  // [SEC-4 / fix/keeper-active-orders-window] Same per-cycle budget (MAX_BATCH * 3 rows), but a WINDOW that
-  // rotates over every active row of the chain: up to 15 rows after the in-memory cursor (keyset on
-  // created_at, id), wrapping to the oldest when that runs short. It used to be the 15 OLDEST rows every
-  // cycle, so 15 rows that could not execute yet hid every newer order (active-window.js has the rules and
-  // the bound). Reads only: the cursor moves in executeCycle, after the loop, so the idle probe (runTick)
-  // can call this freely. Returns the window's rows; the window itself is left in lastActiveScan.
+  // [SEC-4 / fix/keeper-active-orders-window] The SCAN: up to SCAN_CAP active rows of the chain in keyset
+  // order (created_at, id). With <= SCAN_CAP rows it is the whole table from the oldest row, every cycle; with
+  // more it rotates: the page after the cursor, wrapping to the oldest. It used to be the 15 OLDEST rows, so 15
+  // rows that could not execute yet hid every newer order (active-window.js has the rules and the bound).
+  // Reads only: the position moves in executeCycle, once the rows are screened, so the idle probe (runTick)
+  // can call this freely. Returns carried rows the page did not hold (re-read by id, they go first), then the
+  // scan; the scan itself is left in lastActiveScan.
   const activeOrders = `orders?status=eq.active&chain_id=eq.${CHAIN_ID}` // every read below is chain-scoped
-  const windowSize = MAX_BATCH * 3
-  const nowMs = Date.now()
-  let cursor = activeCursor
-  let fallback = null
-  let tail = await readActiveRows(`${activeOrders}&${activeWindowParams({ cursor, limit: windowSize })}`)
-  if (!tail.ok) {
-    // Owner answer 2026-11-17: if Supabase rejects the window query, use today's exact query (the 15
-    // oldest rows) for this cycle — never worse than before this change. Its detail is logged once per
-    // process; every such cycle says so on its window line (keyset=rejected).
-    fallback = tail.status
-    if (!activeWindowRejectionLogged) {
-      activeWindowRejectionLogged = true
-      console.error(`  Active window query REJECTED (${tail.status}: ${tail.body.slice(0, 160)}) — using the ${windowSize} oldest rows instead for every cycle it fails (logged once per process)`)
+  // [S-2] The scan query failed (rejected, 5xx, network, time limit): this cycle examines the 15 oldest rows
+  // with main's exact request (S-9: no extra header) and moves nothing — scan position, pass and carry-over
+  // are kept, so the bound only gains this one cycle. The detail is logged once per process; every such cycle
+  // is flagged on its line, counted on /health and alerted (S-7).
+  const fallbackScan = async (failed) => {
+    if (!scanFailureLogged) {
+      scanFailureLogged = true
+      console.error(`  Active scan query FAILED (${failed.status}: ${logBody(failed.body)}) — this cycle and every cycle it fails examine the ${MAX_BATCH * 3} oldest rows instead; the scan position is kept (logged once per process)`)
     }
-    cursor = null
-    tail = await readActiveRows(`${activeOrders}&select=*&order=created_at.asc&limit=${MAX_BATCH * 3}`) // today's query, verbatim
-    if (!tail.ok) {
-      console.error(`  Supabase fetch error: ${tail.status} -- ${tail.body}`)
-      lastActiveScan = null
+    const legacy = await readActiveRows(`${activeOrders}&select=*&order=created_at.asc&limit=${MAX_BATCH * 3}`, { count: false }) // today's query, verbatim
+    if (!legacy.ok) {
+      console.error(`  Supabase fetch error: ${legacy.status} -- ${logBody(legacy.body)}`)
+      lastActiveScan = { fallback: String(failed.status), failed: true, rows: [], total: null, coversAll: false }
       return []
     }
+    lastActiveScan = { fallback: String(failed.status), failed: false, rows: legacy.rows, tailCount: legacy.rows.length, total: null, coversAll: false }
+    return legacy.rows
   }
+  const cursor = activeCursor
+  let offset = null
+  let page = await readActiveRows(`${activeOrders}&${activeWindowParams({ cursor, limit: SCAN_CAP })}`)
+  if (!page.ok) return fallbackScan(page)
+  // [S-8] A fresh process whose chain has more rows than one scan holds starts at a random page, so a crash
+  // loop cannot keep screening the same first pages. A failed read keeps the oldest page.
+  if (cursor === null && !activeScanStarted && Number.isInteger(page.total) && page.total > SCAN_CAP) {
+    const start = Math.floor(Math.random() * page.total)
+    if (start > 0) {
+      const random = await readActiveRows(`${activeOrders}&${activeWindowParams({ cursor: null, offset: start, limit: SCAN_CAP })}`)
+      if (random.ok) {
+        page = random
+        offset = start
+      }
+    }
+  }
+  const pageOnly = selectActiveWindow({ chainId: CHAIN_ID, windowSize: SCAN_CAP, cursor, offset, tail: page.rows, tailTotal: page.total })
   let head = null
-  let total = cursor === null ? tail.total : null
-  if (cursor !== null && tail.rows.length < windowSize) {
-    // The tail reached the newest row: wrap to the oldest for the rest of this window.
-    const wrap = await readActiveRows(`${activeOrders}&${activeWindowParams({ cursor: null, limit: windowSize - tail.rows.length })}`)
+  let total = cursor === null ? page.total : null // a page without a keyset filter counts the whole chain
+  if (pageOnly.endReached && !pageOnly.fromOldest && page.rows.length < SCAN_CAP) {
+    // The page reached the newest row: wrap to the oldest for the rest of this scan. [S-4] A failed wrap read
+    // only shortens this scan; it never stops the cycle.
+    const wrap = await readActiveRows(`${activeOrders}&${activeWindowParams({ cursor: null, limit: SCAN_CAP - page.rows.length })}`)
     if (wrap.ok) {
       head = wrap.rows
       total = wrap.total
     } else {
-      console.error(`  Supabase fetch error (window wrap): ${wrap.status} -- ${wrap.body}`)
+      console.error(`  Supabase fetch error (scan wrap): ${wrap.status} -- ${logBody(wrap.body)}`)
+      // An empty page whose wrap failed knows nothing about the chain: never "No active orders" on that.
+      if (page.rows.length === 0) return fallbackScan(wrap)
     }
   }
-  if (total === null && cursor !== null) {
-    // The window did not wrap, so neither page counted the whole chain: one HEAD for the total.
-    const count = await readActiveRows(`${activeOrders}&select=id&limit=1`, { head: true })
-    total = count.ok ? count.total : null
+  if (total === null && !pageOnly.coversAll) {
+    // Rotating mid-table: no read counted the whole chain. One HEAD for the line's active=; a failure is "?" (S-4).
+    const counted = await readActiveRows(`${activeOrders}&select=id&limit=1`, { head: true })
+    total = counted.ok ? counted.total : null
   }
-  const scan = selectActiveWindow({ chainId: CHAIN_ID, windowSize, cursor, tail: tail.rows, head, slow: activeSlowRows, nowMs })
-  lastActiveScan = { ...scan, total, fallback }
-  return scan.rows
+  const scan = head ? selectActiveWindow({ chainId: CHAIN_ID, windowSize: SCAN_CAP, cursor, offset, tail: page.rows, tailTotal: page.total, head }) : pageOnly
+  if (scan.coversAll) total = scan.rows.length
+  // [owner answer 2026-11-18] Ready rows the previous cycle did not reach and this scan does not hold are
+  // re-read by id (fresh, still active, this chain) and go first. A failed read keeps them carried.
+  const inScan = new Set(scan.rows.map((r) => r.id))
+  const missing = carryIds.filter((id) => !inScan.has(id) && isUuid(id))
+  const carried = []
+  const carryUnread = []
+  for (let i = 0; i < missing.length; i += 100) {
+    const ids = missing.slice(i, i + 100)
+    const reread = await readActiveRows(`${activeOrders}&id=in.(${ids.join(",")})&select=*&order=created_at.asc,id.asc`, { count: false })
+    if (reread.ok) carried.push(...reread.rows.filter((r) => Number(r.chain_id) === CHAIN_ID && !inScan.has(r.id)))
+    else carryUnread.push(...ids)
+  }
+  lastActiveScan = { ...scan, total, fallback: null, failed: false, offset, carriedIds: carried.map((r) => r.id), carryUnread }
+  return [...carried, ...scan.rows]
+}
+
+// [SEC-4 / fix/keeper-active-orders-window] The per-order path's own builders, extracted unchanged from
+// executeCycle so the pre-screen asks canExecute with exactly the address, struct and signature the path
+// sends. [SPRINT-V3-P2 / ADR-013 §1] Dual-executor routing (executor-routing.js) per order.
+function resolveOrderRouting(od) {
+  return resolveExecutorRouting({
+    orderData: od,
+    v2Address: CONTRACT_ADDRESS,
+    v2Abi: ORDER_EXECUTOR_ABI,
+    v3Address: V3_CONTRACT_ADDRESS,
+    v3Abi: ORDER_EXECUTOR_V3_ABI,
+  })
+}
+
+// Use order_data directly -- it has the exact values that were EIP-712 signed
+function buildOrderStruct(od, isV3) {
+  return {
+    owner: getAddress(od.owner),                         // checksum address
+    tokenIn: getAddress(od.tokenIn),
+    tokenOut: getAddress(od.tokenOut),
+    amountIn: BigInt(od.amountIn),                       // uint256
+    minAmountOut: BigInt(od.minAmountOut),
+    // [ADR-013 §1] Present ONLY for a v3 order — omitted entirely for v2 so the v2 tuple
+    // shape (and its ABI-encoding) stays byte-identical to before this sprint.
+    ...(isV3 ? { maxSlippageBps: Number(od.maxSlippageBps) } : {}),
+    orderType: Number(od.orderType),                     // uint8
+    condition: Number(od.condition),                     // uint8
+    targetPrice: BigInt(od.targetPrice),                 // uint256
+    priceFeed: getAddress(od.priceFeed),
+    expiry: BigInt(od.expiry),                           // uint256
+    nonce: BigInt(od.nonce),                             // uint256
+    router: getAddress(od.router),
+    routerDataHash: od.routerDataHash || zeroHash,       // [C-01] keccak256 of routerData
+    dcaInterval: BigInt(od.dcaInterval),                 // uint256
+    dcaTotal: BigInt(od.dcaTotal),                       // uint256
+  }
+}
+
+// [SEC-4] What the pre-screen asks for one row, built with the path's builders above. null when the path would
+// not reach canExecute (no order_data, no executor for its version on this keeper) or the struct / call cannot
+// be built: such a row is one the pre-screen cannot answer, and the path handles it as it always has.
+function canExecuteCallFor(dbOrder) {
+  const od = dbOrder.order_data
+  if (!od) return null
+  const routing = resolveOrderRouting(od)
+  if (!routing.ok || (!routing.isV3 && !CONTRACT_ADDRESS)) return null
+  try {
+    const orderStruct = buildOrderStruct(od, routing.isV3)
+    const callData = encodeFunctionData({ abi: routing.execAbi, functionName: "canExecute", args: [orderStruct, dbOrder.signature] })
+    return { target: routing.execAddress, abi: routing.execAbi, callData }
+  } catch {
+    return null
+  }
+}
+
+function withTimeout(promise, ms) {
+  let timer
+  const limit = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => reject(Object.assign(new Error(`no answer within ${ms} ms`), { name: "TimeoutError" })), ms)
+  })
+  return Promise.race([promise, limit]).finally(() => clearTimeout(timer))
+}
+
+/**
+ * [SEC-4 / fix/keeper-active-orders-window] The PRE-SCREEN: canExecute for every scanned row, WITHOUT a lock,
+ * through Multicall3's aggregate3 in chunks of PRESCREEN_CHUNK calls, each with PRESCREEN_CHUNK_TIMEOUT_MS. It
+ * never executes, never writes and never replaces the path's own canExecute. A row is answered (canExec,
+ * reason), or not: its struct cannot be built, its own call reverted, or its chunk failed (reverted, timed out,
+ * Multicall3 absent). Never throws.
+ * @returns {Promise<{ answers: Map<string, object>, chunks: number, failedChunks: number, firstFailedId: string|null }>}
+ */
+async function prescreenRows(publicClient, rows) {
+  const answers = new Map()
+  const calls = []
+  for (const dbOrder of rows) {
+    const call = canExecuteCallFor(dbOrder)
+    if (call) calls.push({ id: dbOrder.id, ...call })
+    else answers.set(dbOrder.id, { unanswered: "build" })
+  }
+  let chunks = 0
+  let failedChunks = 0
+  let firstFailedId = null
+  for (let i = 0; i < calls.length; i += PRESCREEN_CHUNK) {
+    const chunk = calls.slice(i, i + PRESCREEN_CHUNK)
+    chunks++
+    try {
+      const results = await withTimeout(
+        publicClient.readContract({
+          address: MULTICALL3_ADDRESS,
+          abi: MULTICALL3_ABI,
+          functionName: "aggregate3",
+          args: [chunk.map((c) => ({ target: c.target, allowFailure: true, callData: c.callData }))],
+        }),
+        PRESCREEN_CHUNK_TIMEOUT_MS,
+      )
+      if (!Array.isArray(results) || results.length !== chunk.length) throw new Error(`aggregate3 answered ${Array.isArray(results) ? results.length : "no"} results for ${chunk.length} calls`)
+      for (const [j, c] of chunk.entries()) {
+        const r = results[j]
+        let answer = { unanswered: "revert" }
+        if (r?.success === true) {
+          try {
+            const [canExec, reason] = decodeFunctionResult({ abi: c.abi, functionName: "canExecute", data: r.returnData })
+            answer = { canExec: canExec === true, reason: String(reason) }
+          } catch { /* undecodable answer: unanswered */ }
+        }
+        answers.set(c.id, answer)
+      }
+    } catch (err) {
+      failedChunks++
+      if (firstFailedId === null) firstFailedId = chunk[0].id
+      for (const c of chunk) answers.set(c.id, { unanswered: "chunk" })
+      if (failedChunks === 1) console.error(`  Pre-screen chunk ${chunks} FAILED (${logBody(redactError(err))}) — its rows join the one-by-one budget this cycle`)
+    }
+  }
+  return { answers, chunks, failedChunks, firstFailedId }
+}
+
+/**
+ * [SEC-4] After the pre-screen: move the scan (a failed chunk holds the position at its first row) and return
+ * the ids that keep an ADR-026 infra streak — only after a complete scan, and only those absent from both the
+ * last two complete scans lose it (S-3); null = prune nothing. A fallback scan moves nothing (S-2).
+ */
+function advanceActiveScan(scan, rowIds, screen) {
+  if (!scan || scan.fallback) return null
+  const extraIds = scan.carriedIds ?? []
+  let screened = scan
+  if (screen.firstFailedId !== null) {
+    const k = scan.rows.findIndex((r) => r.id === screen.firstFailedId)
+    // A carried row's chunk failing holds the whole scan; a scan row's chunk holds it at that row.
+    screened = truncateScan(scan, k < 0 ? 0 : k)
+  }
+  const next = advanceScan({ cursor: activeCursor, pass: activePass }, screened, { extraIds })
+  activeCursor = next.cursor
+  activePass = next.pass
+  activeScanStarted = true
+  if (!next.complete) return null
+  const keep = keepIdsAfterScans(lastCompleteScanIds, new Set([...next.complete, ...rowIds]))
+  lastCompleteScanIds = next.complete
+  // The one-by-one budget's memory follows the same rule (bounded by the rows still around).
+  if (keep) for (const id of [...oneByOneLastWalked.keys()]) if (!keep.has(id)) oneByOneLastWalked.delete(id)
+  return keep
+}
+
+/** [SEC-4 / S-7] Count a fallback cycle on /health and page ops (warn) on the first cycle of a run, then hourly. */
+async function noteActiveScanFallback(kind, failed, detail) {
+  const gate = kind === "scan" ? scanFallbackAlerts : prescreenFallbackAlerts
+  const now = Date.now()
+  const g = gate.onCycle(failed, now)
+  if (!failed) return
+  if (kind === "scan") stats.scanFallbackCycles++
+  else stats.prescreenFallbackCycles++
+  if (!g.alert) return
+  try {
+    await alertOps(
+      {
+        kind: kind === "scan" ? "active-scan-fallback" : "prescreen-fallback",
+        detail:
+          `${detail} on chain ${CHAIN_ID} — ${g.cycles} consecutive cycle(s) since ${new Date(g.sinceMs).toISOString()}. ` +
+          `The keeper still examines ${MAX_BATCH * 3} rows one by one each such cycle, so newer orders can wait. ` +
+          `docs/Runbooks/EXECUTOR-OPERATIONS.md § 9. Next reminder in >= 1 h while it persists.`,
+      },
+      TIER_WARN_THRESHOLD,
+    )
+  } catch { /* alert is best-effort, never blocks the cycle */ }
 }
 
 async function lockOrder(orderId) {
@@ -1475,14 +1751,17 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
 
   // 1. Fetch active orders
   const orders = await fetchActiveOrders()
-  // [SEC-4] The window behind `orders` (cursor, wrap, slowed rows); null when the fetch failed.
+  // [SEC-4] The scan behind `orders` (`orders` = carried rows re-read by id, then the scan); `fallback` set when
+  // the scan query failed and the 15 oldest rows came instead (S-2).
   const scan = lastActiveScan
+  await noteActiveScanFallback("scan", Boolean(scan?.fallback), `Active scan query failed (${scan?.fallback}): the cycle examined the ${MAX_BATCH * 3} oldest rows instead`)
 
   if (orders.length === 0) {
     log("  No active orders")
-    // [SEC-4] No active row on this chain: the cursor restarts at the oldest (a failed fetch keeps it).
-    if (scan) ({ cursor: activeCursor, rotation: activeRotationIds } = advanceActiveWindow(scan, 0, activeRotationIds))
-    log(`  ${activeWindowLogLine({ active: scan?.total ?? null, window: 0, examined: 0, slowed: 0, wrapped: Boolean(scan), fallback: scan?.fallback })}`)
+    // [SEC-4] An empty chain is a complete (empty) scan: the next one starts at the oldest row. A failed read
+    // moves nothing.
+    if (scan && !scan.fallback && !scan.failed) advanceActiveScan(scan, [], { firstFailedId: null })
+    log(`  ${activeScanLogLine({ active: scan && !scan.fallback && !scan.failed ? 0 : null, scanned: 0, ready: 0, attempted: 0, carried: carryIds.length, rotate: activeCursor !== null, fallback: fallbackFlag({ scan: scan?.fallback ?? null }) })}`)
     // [DCA-OBS] Still close out observability (outflow check) even with no orders.
     // [PERF-KEEPER-IDLE-BACKOFF] …without a second balance read: nothing was sent, so the next
     // cycle's start read closes this window (idle-backoff.js).
@@ -1492,16 +1771,6 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
 
   log(`  Found ${orders.length} active order(s)`)
 
-  // [A73b S-9] An order that left the active set (cancelled / filled / failed elsewhere) takes its
-  // in-memory infra streak with it — the keeper has no cancel path of its own, so absence from the
-  // set just fetched is the signal (an empty set leaves the map alone: see pruneInfraMisses).
-  // [SEC-4] `orders` is now one window of the table, so absence from it alone is not the signal: an id
-  // keeps its streak until a whole pass of the table has not seen it (activeWindowKeepIds; null ⇒ prune
-  // nothing this cycle). A window that holds the whole table keeps the rule above exactly. The slow-down
-  // map is pruned the same way.
-  pruneInfraMisses(orderInfraMisses, activeWindowKeepIds(scan, orders.map((o) => o.id), activeRotationIds))
-  pruneSlowRows(activeSlowRows, activeWindowKeepIds(scan, orders.map((o) => o.id), activeRotationIds))
-
   // [ADR-026 §3] While the provider rejects our credentials nothing can execute: attempt NOTHING —
   // no lock, no tx, no retry count, no patch. The balance read above and the event watcher keep
   // probing, so the pause clears by itself (rpc-auth.js onRpcSuccess) and the next cycle attempts
@@ -1509,12 +1778,32 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   const pausedState = rpcAuthMonitor ? rpcAuthMonitor.state().paused : null
   if (pausedState) {
     log(`  PAUSED (${pausedState}): ${orders.length} active order(s) NOT attempted — no lock, no tx, no retry count (ADR-026)`)
-    // [SEC-4] Nothing was examined, so the cursor stays where it is.
-    log(`  ${activeWindowLogLine({ active: scan?.total ?? null, window: orders.length, examined: 0, slowed: scan?.slowedIds.size ?? 0, wrapped: false, fallback: scan?.fallback })}`)
+    // [SEC-4] Nothing was screened, so the scan position, carry-over and streaks stay as they are.
+    log(`  ${activeScanLogLine({ active: scan?.total ?? null, scanned: 0, ready: 0, attempted: 0, carried: carryIds.length, rotate: activeCursor !== null, fallback: fallbackFlag({ scan: scan?.fallback ?? null }) })}`)
     stats.pausedCycles++
     await endCycleObservability(obsCtx, publicClient, ownGasSpentWei, { idle: true })
     return orders.length
   }
+
+  // [SEC-4 / fix/keeper-active-orders-window] 2. PRE-SCREEN: canExecute for every scanned row, no lock, through
+  // Multicall3 (prescreenRows). It changes no row and decides nothing on its own: a row it says true still goes
+  // through the lock and the path's own canExecute below.
+  const screen = await prescreenRows(publicClient, orders)
+  await noteActiveScanFallback("prescreen", screen.failedChunks > 0, `Pre-screen failed for ${screen.failedChunks} of ${screen.chunks} Multicall3 chunk(s)`)
+
+  // [A73b S-9] An order that left the active set (cancelled / filled / failed elsewhere) takes its
+  // in-memory infra streak with it — the keeper has no cancel path of its own, so absence from the
+  // set just fetched is the signal (an empty set leaves the map alone: see pruneInfraMisses).
+  // [SEC-4 / S-3] …absence from two consecutive COMPLETE scans: a cycle that read the whole chain, or a full
+  // rotation when it holds more than SCAN_CAP rows. advanceActiveScan also moves the scan (a failed chunk holds
+  // it at that chunk) and returns null — prune nothing — on every other cycle.
+  pruneInfraMisses(orderInfraMisses, advanceActiveScan(scan, orders.map((o) => o.id), screen))
+
+  // [SEC-4] 3. WALK: the rows that answered true, rows whose off-chain expiry passed (the path marks them
+  // `expired`), and ONE_BY_ONE rows the pre-screen could not answer, least recently walked first (planWalk).
+  // They go through the per-order path below in `orders` order: oldest first, carried re-reads first.
+  activeCycleSeq++
+  const walk = planWalk({ rows: orders, answers: screen.answers, nowSec: Math.floor(Date.now() / 1000), budget: ONE_BY_ONE, lastWalked: oneByOneLastWalked })
 
   // [ADR-024 / feat/keeper-price-quorum] ONE price-quote context per cycle: the off-chain sources
   // are fetched once for every active DCA token (one DefiLlama + one CoinGecko batch per 50
@@ -1526,21 +1815,26 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
     v3Address: V3_CONTRACT_ADDRESS,
     ethUsdFeed: ETH_USD_FEED,
   })
+  // [SEC-4] Only the DCA rows the path walks this cycle (owner answer 2026-11-18): every scanned DCA row would
+  // make one cycle ask CoinGecko for every DCA token on the chain.
   quoteCtx.registerTokens(
-    orders.filter((o) => o.order_type === "dca").flatMap((o) => [o.order_data?.tokenIn, o.order_data?.tokenOut]),
+    orders.filter((o) => o.order_type === "dca" && walk.ids.has(o.id)).flatMap((o) => [o.order_data?.tokenIn, o.order_data?.tokenOut]),
   )
 
   let executed = 0
   let skipped = 0
   let errors = 0
-  // [SEC-4] Rows of the window the loop got to (the cursor moves past these only) and, of those, the
-  // slowed rows it skipped.
-  let reached = 0
-  let slowedSkips = 0
+  // [SEC-4] The walked rows the loop got to, the ready row a gas SKIP stopped on (both feed the carry-over),
+  // and how many times the path itself asked canExecute (the line's attempted=, S-11).
+  const reached = new Set()
+  let gasSkipStoppedOn = null
+  let attempted = 0
 
   for (const dbOrder of orders) {
     if (executed >= MAX_BATCH) break
-    reached++
+    // [SEC-4] A row the walk did not choose answered false at the pre-screen: not locked, not touched.
+    if (!walk.ids.has(dbOrder.id)) continue
+    reached.add(dbOrder.id)
 
     // [ADR-026] Set the moment writeContract returns a hash: the catch below needs to know whether
     // a tx was SENT (receipt unavailable ⇒ infra) or the attempt died before any tx (simulated
@@ -1559,14 +1853,6 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         quorumSkips.delete(dbOrder.id) // [ADR-024] drop the skip streak too (no Map leak)
         clearInfraMisses(orderInfraMisses, dbOrder.id) // [A73b S-9] and the infra streak (no Map leak)
         log(`  Order ${dbOrder.id.slice(0, 8)}... expired (expiry: ${dbOrder.expiry})`)
-        continue
-      }
-
-      // [SEC-4] Slow-down: a row that answered "Insufficient balance" / "Insufficient allowance" 3 times in
-      // a row is examined at most once per 10 minutes (active-window.js). It is skipped here — after the
-      // expiry pre-filter, before any lock or RPC — and the cursor still moves past it. In memory only.
-      if (scan?.slowedIds.has(dbOrder.id)) {
-        slowedSkips++
         continue
       }
 
@@ -1627,13 +1913,9 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       // SKIPPED + FLAGGED (left active, retried later), NEVER mis-routed to v2 (wrong typehash
       // -> the v2 contract would either revert or, worse, silently ignore the intended
       // maxSlippageBps bound entirely).
-      const routing = resolveExecutorRouting({
-        orderData: od,
-        v2Address: CONTRACT_ADDRESS,
-        v2Abi: ORDER_EXECUTOR_ABI,
-        v3Address: V3_CONTRACT_ADDRESS,
-        v3Abi: ORDER_EXECUTOR_V3_ABI,
-      })
+      // [SEC-4] resolveOrderRouting / buildOrderStruct: this path's own builders, extracted unchanged so the
+      // pre-screen (canExecuteCallFor) asks with exactly what this path sends.
+      const routing = resolveOrderRouting(od)
       if (!routing.ok) {
         log(`  Order ${dbOrder.id.slice(0, 8)}... -- ${routing.reason}`)
         try {
@@ -1665,26 +1947,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
       const { isV3, execAddress, execAbi } = routing
 
       // Use order_data directly -- it has the exact values that were EIP-712 signed
-      const orderStruct = {
-        owner: getAddress(od.owner),                         // checksum address
-        tokenIn: getAddress(od.tokenIn),
-        tokenOut: getAddress(od.tokenOut),
-        amountIn: BigInt(od.amountIn),                       // uint256
-        minAmountOut: BigInt(od.minAmountOut),
-        // [ADR-013 §1] Present ONLY for a v3 order — omitted entirely for v2 so the v2 tuple
-        // shape (and its ABI-encoding) stays byte-identical to before this sprint.
-        ...(isV3 ? { maxSlippageBps: Number(od.maxSlippageBps) } : {}),
-        orderType: Number(od.orderType),                     // uint8
-        condition: Number(od.condition),                     // uint8
-        targetPrice: BigInt(od.targetPrice),                 // uint256
-        priceFeed: getAddress(od.priceFeed),
-        expiry: BigInt(od.expiry),                           // uint256
-        nonce: BigInt(od.nonce),                             // uint256
-        router: getAddress(od.router),
-        routerDataHash: od.routerDataHash || zeroHash,       // [C-01] keccak256 of routerData
-        dcaInterval: BigInt(od.dcaInterval),                 // uint256
-        dcaTotal: BigInt(od.dcaTotal),                       // uint256
-      }
+      const orderStruct = buildOrderStruct(od, isV3)
 
       log(`  Order struct: owner=${orderStruct.owner?.slice(0,10)}, type=${orderStruct.orderType}, cond=${orderStruct.condition}, target=${orderStruct.targetPrice}, expiry=${orderStruct.expiry}, nonce=${orderStruct.nonce}, executor=${isV3 ? 'v3' : 'v2'}`)
 
@@ -1716,8 +1979,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         functionName: "canExecute",
         args: [orderStruct, dbOrder.signature],
       })
-      // [SEC-4] Feed the slow-down: balance/allowance answers count up, any other answer clears the row.
-      noteCanExecuteAnswer(activeSlowRows, dbOrder.id, { canExecute: canExec, reason, nowMs: Date.now() })
+      attempted++ // [SEC-4 / S-11] the line's attempted= counts the path's own canExecute calls
 
       if (!canExec) {
         log(`  Order ${dbOrder.id.slice(0, 8)}... -- ${reason}`)
@@ -2071,6 +2333,7 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
         log(`  Order ${dbOrder.id.slice(0, 8)}... skipped by gas tier (${gasTier.tier}, urgency: ${urgency})`)
         await updateOrderStatus(dbOrder.id, "active") // Unlock
         if (monitor) monitor.onGasSkip(gasTier.tier)
+        if (gasTier.tier === "SKIP") gasSkipStoppedOn = dbOrder.id // [SEC-4 / S-5] carried: it leads next cycle
         if (gasTier.tier === "SKIP") break  // Above max — skip remaining orders too
         continue  // ELEVATED/URGENT_ONLY — skip this order, try next
       }
@@ -2311,10 +2574,11 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
     }
   }
 
-  // [SEC-4] Move the cursor past the rows this cycle reached — all of them, unless MAX_BATCH executions or a
-  // gas SKIP stopped the loop early, in which case the rows it did not reach lead the next window.
-  const moved = advanceActiveWindow(scan, reached, activeRotationIds)
-  if (scan) ({ cursor: activeCursor, rotation: activeRotationIds } = moved)
+  // [SEC-4] 4. CARRY-OVER: ready rows the loop did not reach (MAX_BATCH executions, a gas SKIP — the row it
+  // stopped on included) are attempted next cycle (S-5); carried rows this cycle could not re-read stay
+  // carried. The one-by-one budget remembers who used it, so the next cycle starts with the others.
+  carryIds = [...new Set([...(scan?.carryUnread ?? []), ...carryAfterLoop(walk, reached, gasSkipStoppedOn, SCAN_CAP)])].slice(0, SCAN_CAP)
+  for (const id of walk.oneByOne) if (reached.has(id) && id !== gasSkipStoppedOn) oneByOneLastWalked.set(id, activeCycleSeq)
 
   // Update stats
   stats.totalCycles++
@@ -2335,8 +2599,10 @@ async function executeCycle(publicClient, walletClient, contract, flashbotsPubli
   const sourceLine = await quoteCtx.summaryLine()
   if (sourceLine) log(`  ${sourceLine}`)
 
-  // [SEC-4] ONE window line per cycle: active rows on the chain, rows examined, cursor wrap. Counts only.
-  log(`  ${activeWindowLogLine({ active: scan?.total ?? null, window: orders.length, examined: reached - slowedSkips, slowed: slowedSkips, wrapped: moved.wrapped, fallback: scan?.fallback })}`)
+  // [SEC-4 / S-11] ONE scan line per cycle: active rows on the chain, rows scanned and pre-screened, how many
+  // answered true, how many times the path asked canExecute, rows carried to the next cycle, whether the scan
+  // rotates (more rows than SCAN_CAP) and the fallback flag. Counts and flags only.
+  log(`  ${activeScanLogLine({ active: scan?.total ?? null, scanned: orders.length, ready: walk.ready.length, attempted, carried: carryIds.length, rotate: activeCursor !== null, fallback: fallbackFlag({ scan: scan?.fallback ?? null, prescreenFailed: screen.failedChunks, prescreenChunks: screen.chunks }) })}`)
   log(`  Cycle done: ${executed} executed, ${skipped} skipped`)
   // [PERF-KEEPER-IDLE-BACKOFF] The count drives the loop's idle/active mode (main's runTick).
   return orders.length
@@ -2360,6 +2626,36 @@ const stats = {
   // nothing because the keeper was paused — per process, for /health.
   infraMisses: 0,
   pausedCycles: 0,
+  // [SEC-4 / S-7, S-3] cycles whose scan query failed (the 15 oldest examined instead), cycles with a failed
+  // pre-screen chunk, and ticks skipped because the previous cycle was still running — per process, for /health.
+  scanFallbackCycles: 0,
+  prescreenFallbackCycles: 0,
+  overlapSkippedTicks: 0,
+}
+
+/**
+ * [SEC-4 / S-3] Runs one tick unless the previous one is still running. setInterval starts a tick every
+ * POLL_INTERVAL_MS whether or not the last one finished; a skipped tick is counted on /health and logged once
+ * per long cycle. The flag clears whatever the tick does (finally), so a throwing tick never blocks the next.
+ * @param {() => Promise<unknown>} tick
+ * @returns {Promise<boolean>} whether the tick ran
+ */
+async function runOneCycleAtATime(tick) {
+  if (tickInFlight) {
+    stats.overlapSkippedTicks++
+    if (!tickInFlight.logged) {
+      tickInFlight.logged = true
+      log(`  Tick skipped: the previous cycle is still running (${Math.round((Date.now() - tickInFlight.startedAt) / 1000)}s) — one cycle at a time (logged once per long cycle)`)
+    }
+    return false
+  }
+  tickInFlight = { startedAt: Date.now(), logged: false }
+  try {
+    await tick()
+    return true
+  } finally {
+    tickInFlight = null
+  }
 }
 
 // ---- Health check HTTP server ------------------------------------------
@@ -2402,6 +2698,10 @@ function startHealthServer() {
           // [ADR-026] additive: misses that were ours (not counted) / cycles that attempted nothing
           infraMisses: stats.infraMisses,
           pausedCycles: stats.pausedCycles,
+          // [SEC-4] additive: fallback cycles of the active scan / pre-screen, ticks skipped while a cycle ran
+          scanFallbackCycles: stats.scanFallbackCycles,
+          prescreenFallbackCycles: stats.prescreenFallbackCycles,
+          overlapSkippedTicks: stats.overlapSkippedTicks,
         },
       }, null, 2))
     } else if (req.url === "/") {
@@ -2740,7 +3040,11 @@ async function main() {
 
   setInterval(async () => {
     try {
-      await runTick()
+      // [SEC-4 / S-3] One cycle at a time: a tick that finds the previous one still running (a receipt wait, a
+      // slow RPC) is skipped, not overlapped — two overlapping cycles broke the scan's bookkeeping.
+      await runOneCycleAtATime(async () => {
+        await runTick()
+      })
     } catch (err) {
       console.error("Cycle error:", redactError(err))
       // [fix/executor-alert-masking-rpc-auth] An auth rejection is alerted once by rpcAuthMonitor.

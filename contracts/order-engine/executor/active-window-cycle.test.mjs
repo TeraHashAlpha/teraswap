@@ -6,16 +6,22 @@
 //
 // These tests run the SHIPPED executeCycle / fetchActiveOrders (executor-cycle.fixture.mjs copies
 // executor.js with its imports made absolute and main() cut) against a fake PostgREST and a fake chain.
-// "Examined" at this level = canExecute was asked for that row.
+// "Examined" at this level = canExecute was asked for that row (round 2: by the pre-screen or by the path).
+//
+// Round 2 (A88): the expectations that encoded round 1's 15-row window, its `Active window:` line and the
+// balance/allowance slow-down changed with the design (listed in CAPITALS in the branch's feedback file); a
+// test that needs a rotating scan rewrites SCAN_CAP to 15 in the temp copy. The seeded property moved to
+// active-scan-property.test.mjs.
 //
 // Run: node --test contracts/order-engine/executor/active-window-cycle.test.mjs
 
 import { test, describe } from "node:test"
 import assert from "node:assert/strict"
 
-import { loadShippedExecutor, createFakePostgrest, createFakeChain, makeRow, withFakes, OTHER_CHAIN_ID } from "./executor-cycle.fixture.mjs"
+import { loadShippedExecutor, createFakePostgrest, createFakeChain, makeRow, withFakes, mulberry32, OTHER_CHAIN_ID } from "./executor-cycle.fixture.mjs"
 
-const WINDOW = 15 // MAX_BATCH * 3 — today's per-cycle row budget
+const WINDOW = 15 // MAX_BATCH * 3 — main's per-cycle row budget, and the scaled scan below
+const SCAN = 1000 // SCAN_CAP
 
 /** 15 old rows that cannot execute (5 unfunded, 5 without allowance, 5 DCA between chunks). */
 function fifteenStuckRows() {
@@ -34,22 +40,26 @@ const CYCLE_MS = 30_000 // POLL_INTERVAL_MS
 const T0 = Date.now()
 
 /** `cycles` full cycles of the shipped keeper; the fake clock advances one poll per cycle from `startMs`. */
-async function runCycles(k, db, chain, cycles, { startMs = T0, onBeforeCycle = null } = {}) {
+async function runCycles(k, db, chain, cycles, { startMs = T0, onBeforeCycle = null, random = null } = {}) {
   const perCycle = []
+  const pathPerCycle = []
   const lines = []
   const windowLines = []
   const returned = []
   for (let c = 0; c < cycles; c++) {
     if (onBeforeCycle) onBeforeCycle(c)
     const before = chain.canExecuteCalls.length
-    const out = await withFakes(db, () => k.executeCycle(chain.publicClient, null, null, null, null, null), { nowMs: startMs + c * CYCLE_MS })
+    const pathBefore = chain.pathCalls.length
+    const out = await withFakes(db, () => k.executeCycle(chain.publicClient, null, null, null, null, null), { nowMs: startMs + c * CYCLE_MS, random })
     lines.push(...out.lines)
-    windowLines.push(out.lines.filter((l) => l.includes("Active window:")))
+    windowLines.push(out.lines.filter((l) => l.includes("Active scan:")))
     returned.push(out.result)
     perCycle.push(chain.canExecuteCalls.slice(before))
+    pathPerCycle.push(chain.pathCalls.slice(pathBefore))
   }
-  return { perCycle, lines, windowLines, returned }
+  return { perCycle, pathPerCycle, lines, windowLines, returned }
 }
+const scaled = () => loadShippedExecutor({ constants: { SCAN_CAP: WINDOW } })
 
 describe("[SEC-4] Step 0 — the 15 oldest non-executable rows must not hide a newer order", () => {
   test("15 old rows whose canExecute is false + 1 newer executable row: the newer row is examined within 20 cycles", async () => {
@@ -58,10 +68,12 @@ describe("[SEC-4] Step 0 — the 15 oldest non-executable rows must not hide a n
     const db = createFakePostgrest([...fifteenStuckRows(), newer])
     const chain = createFakeChain(db, (row) => (row.id === newer.id ? [true, ""] : [false, STUCK_REASON(row)]))
 
-    const { perCycle } = await runCycles(k, db, chain, 20)
+    const { perCycle, pathPerCycle } = await runCycles(k, db, chain, 20)
 
     for (const [i, ids] of perCycle.entries()) {
-      assert.ok(ids.length <= WINDOW, `cycle ${i + 1} examined ${ids.length} rows (> ${WINDOW})`)
+      // ROUND 2: every row is screened each cycle (16 <= SCAN_CAP); the path asks only the row that answered true.
+      assert.ok(ids.length <= SCAN + WINDOW, `cycle ${i + 1} asked ${ids.length} times`)
+      assert.ok(pathPerCycle[i].every((id) => id === newer.id), `cycle ${i + 1}: the path asked a row that answered false`)
     }
     assert.deepEqual(db.unexpected, [], `requests the fake did not expect: ${db.unexpected.join(" | ")}`)
     const firstSeen = perCycle.findIndex((ids) => ids.includes(newer.id))
@@ -87,7 +99,7 @@ describe("[SEC-4] shipped cycle — edges", () => {
     assert.deepEqual(returned, [0, 0])
     assert.ok(lines.some((l) => l.includes("No active orders")))
     assert.deepEqual(windowLines.map((w) => w.length), [1, 1])
-    assert.match(windowLines[0][0], /Active window: active=0 window=0 examined=0 slowed=0 wrap=yes$/)
+    assert.match(windowLines[0][0], /Active scan: active=0 scanned=0 true=0 attempted=0 carried=0 rotate=no fallback=none$/)
   })
 
   test("one row: examined every cycle", async () => {
@@ -106,8 +118,8 @@ describe("[SEC-4] shipped cycle — edges", () => {
     const chain = createFakeChain(db, () => [false, "DCA interval not reached"])
     const { perCycle, windowLines } = await runCycles(k, db, chain, 4)
     for (const ids of perCycle) assert.deepEqual(ids, rows.map((r) => r.id))
-    assert.match(windowLines[0][0], /active=15 window=15 examined=15 slowed=0 wrap=no$/, "cycle 1 read a full page: it cannot know the table ends there")
-    assert.match(windowLines[1][0], /active=15 window=15 examined=15 slowed=0 wrap=yes$/)
+    assert.match(windowLines[0][0], /active=15 scanned=15 true=0 attempted=0 carried=0 rotate=no fallback=none$/, "the count says the page holds the whole chain")
+    assert.match(windowLines[1][0], /active=15 scanned=15 true=0 attempted=0 carried=0 rotate=no fallback=none$/)
   })
 
   test("equal created_at: 40 rows sharing one timestamp are all examined within ceil(40/15) = 3 cycles, none twice first", async () => {
@@ -122,28 +134,31 @@ describe("[SEC-4] shipped cycle — edges", () => {
     assert.deepEqual(db.unexpected, [])
   })
 
-  test("restart mid-rotation: a fresh process begins at the oldest row and still covers the table within ceil(M/15) cycles", async () => {
+  test("restart mid-rotation (scan scaled to 15): a fresh process begins at a random page (S-8) and still covers the table within ceil(M/15) cycles", async () => {
     const rows = rowsOf(50)
     const db = createFakePostgrest(rows)
     const chain = createFakeChain(db, () => [false, "DCA interval not reached"])
-    const before = await loadShippedExecutor()
-    const first = await runCycles(before, db, chain, 2) // the cursor is now 30 rows in
-    assert.equal(first.perCycle[1][0], rows[15].id)
-    const after = await loadShippedExecutor() // new module instance = a restarted process (state in memory only)
-    const { perCycle } = await runCycles(after, db, chain, Math.ceil(50 / WINDOW))
-    assert.equal(perCycle[0][0], rows[0].id, "a restart begins at the oldest row")
+    const index = new Map(rows.map((r, i) => [r.id, i]))
+    const random = mulberry32(50)
+    const before = await scaled()
+    const first = await runCycles(before, db, chain, 2, { random })
+    assert.equal(index.get(first.perCycle[1][0]), (index.get(first.perCycle[0].at(-1)) + 1) % 50, "the second page continues after the first")
+    const after = await scaled() // new module instance = a restarted process (state in memory only)
+    const { perCycle } = await runCycles(after, db, chain, Math.ceil(50 / WINDOW), { random })
+    assert.notEqual(perCycle[0][0], rows[0].id, "ROUND 2: a restart with more rows than one scan starts at a random page (this seed's is not the oldest)")
     assert.equal(new Set(perCycle.flat()).size, 50)
   })
 
   test("the idle probe's fetchActiveOrders() never moves the cursor (only a full cycle does)", async () => {
-    const k = await loadShippedExecutor()
+    const k = await scaled()
     const rows = rowsOf(40)
     const db = createFakePostgrest(rows)
     const chain = createFakeChain(db, () => [false, "DCA interval not reached"])
-    await runCycles(k, db, chain, 1)
+    const first = await runCycles(k, db, chain, 1, { random: mulberry32(40) })
     const probes = []
     for (let i = 0; i < 3; i++) probes.push((await withFakes(db, () => k.fetchActiveOrders())).result.map((r) => r.id))
-    assert.deepEqual(probes[0], rows.slice(15, 30).map((r) => r.id))
+    const after = (rows.findIndex((r) => r.id === first.perCycle[0].at(-1)) + 1) % 40
+    assert.deepEqual(probes[0], Array.from({ length: WINDOW }, (_, i) => rows[(after + i) % 40].id), "ROUND 2: the page after the first (random) page")
     assert.deepEqual(probes[1], probes[0])
     assert.deepEqual(probes[2], probes[0])
     const { perCycle } = await runCycles(k, db, chain, 1)
@@ -165,44 +180,8 @@ describe("[SEC-4] shipped cycle — edges", () => {
   })
 })
 
-describe("[SEC-4] shipped cycle — slow-down (balance / allowance only, 3 in a row, at most once per 10 min)", () => {
-  test("unfunded and allowance-less rows are asked 3 times, then once per 10 min; interval/price rows are asked every pass", async () => {
-    const k = await loadShippedExecutor()
-    const rows = rowsOf(6)
-    const answers = new Map([
-      [rows[0].id, [false, "Insufficient balance"]],
-      [rows[1].id, [false, "Insufficient allowance"]],
-      [rows[2].id, [false, "DCA interval not reached"]],
-      [rows[3].id, [false, "Price below floor"]],
-      [rows[4].id, [false, "Stale price feed"]],
-      [rows[5].id, [true, ""]],
-    ])
-    const db = createFakePostgrest(rows)
-    const chain = createFakeChain(db, answerBy(answers))
-    const cycles = 45 // 22.5 minutes at 30 s
-    const { perCycle, windowLines } = await runCycles(k, db, chain, cycles)
-    const askedAt = (id) => perCycle.flatMap((ids, c) => (ids.includes(id) ? [c] : []))
-    // 3 answers (cycles 0,1,2) ⇒ slowed until 10 min after the 3rd ⇒ asked again at cycle 22, then 42.
-    assert.deepEqual(askedAt(rows[0].id), [0, 1, 2, 22, 42])
-    assert.deepEqual(askedAt(rows[1].id), [0, 1, 2, 22, 42])
-    for (const r of rows.slice(2)) assert.equal(askedAt(r.id).length, cycles, `${answers.get(r.id)[1] || "true"} must never be slowed`)
-    assert.match(windowLines[5][0], /window=6 examined=4 slowed=2 wrap=yes$/)
-  })
-
-  test("a slowed row that is funded again is examined at the next due pass and leaves the slow-down", async () => {
-    const k = await loadShippedExecutor()
-    const rows = rowsOf(2)
-    const answers = new Map([[rows[0].id, [false, "Insufficient balance"]], [rows[1].id, [false, "DCA interval not reached"]]])
-    const db = createFakePostgrest(rows)
-    const chain = createFakeChain(db, answerBy(answers))
-    const { perCycle } = await runCycles(k, db, chain, 30, { onBeforeCycle: (c) => c === 10 && answers.set(rows[0].id, [false, "DCA interval not reached"]) })
-    const askedAt = perCycle.flatMap((ids, c) => (ids.includes(rows[0].id) ? [c] : []))
-    assert.deepEqual(askedAt.slice(0, 5), [0, 1, 2, 22, 23], "funded at cycle 10, seen at the next due pass (22), then every pass")
-  })
-})
-
 describe("[SEC-4] shipped cycle — one window line per cycle, counts only", () => {
-  test("exactly one `Active window:` line per cycle; no address, no signature, no id; fetch's old per-query lines are gone", async () => {
+  test("exactly one `Active scan:` line per cycle; no address, no signature, no id; fetch's old per-query lines are gone", async () => {
     const k = await loadShippedExecutor()
     const rows = [...rowsOf(10), ...rowsOf(10, 20, { type: "dca" })]
     const db = createFakePostgrest(rows)
@@ -210,198 +189,77 @@ describe("[SEC-4] shipped cycle — one window line per cycle, counts only", () 
     const { windowLines, lines } = await runCycles(k, db, chain, 5)
     assert.deepEqual(windowLines.map((w) => w.length), [1, 1, 1, 1, 1])
     for (const [w] of windowLines) {
-      assert.match(w, /Active window: active=20 window=15 examined=\d+ slowed=\d+ wrap=(yes|no)$/)
+      // ROUND 2: the whole chain (20 rows) is scanned and pre-screened every cycle; none answered true.
+      assert.match(w, /Active scan: active=20 scanned=20 true=0 attempted=0 carried=0 rotate=no fallback=none$/)
       assert.doesNotMatch(w, /0x|[0-9a-f]{8}-[0-9a-f]{4}-/i, "no address, signature or id")
     }
-    assert.match(windowLines[0][0], /examined=15 slowed=0 wrap=no$/)
-    assert.match(windowLines[1][0], /window=15 examined=15 slowed=0 wrap=yes$/, "5 tail rows + 10 head rows: the scan passed the newest row")
     assert.equal(lines.some((l) => /Querying:|Supabase returned|First order:/.test(l)), false)
   })
 })
 
-describe("[SEC-4] shipped cycle — the window query rejected by Supabase (owner answer: fall back to the oldest 15)", () => {
-  test("a 400 on the keyset query ⇒ today's exact query for that cycle, flagged on the window line, detail logged once", async () => {
-    const k = await loadShippedExecutor()
-    const rows = rowsOf(20)
-    const db = createFakePostgrest(rows)
-    const chain = createFakeChain(db, () => [false, "DCA interval not reached"])
-    await runCycles(k, db, chain, 1) // cursor now set ⇒ the next read carries or=(…)
-    db.failNextMatching(/[?&]or=/, 400, '{"code":"PGRST100","message":"failed to parse logic tree"}', "GET")
-    const second = await runCycles(k, db, chain, 1)
-    assert.deepEqual(second.perCycle[0], rows.slice(0, 15).map((r) => r.id), "the 15 oldest, as before this change")
-    const legacy = db.requests.filter((r) => r.search === "?status=eq.active&chain_id=eq.8453&select=*&order=created_at.asc&limit=15")
-    assert.equal(legacy.length, 1, "today's query, byte for byte")
-    assert.match(second.windowLines[0][0], /keyset=rejected\(400\) fallback=oldest$/)
-    assert.equal(second.lines.filter((l) => l.includes("Active window query REJECTED")).length, 1)
-    db.failNextMatching(/[?&]or=/, 400, "again", "GET")
-    const third = await runCycles(k, db, chain, 1)
-    assert.equal(third.lines.filter((l) => l.includes("Active window query REJECTED")).length, 0, "logged once per process")
-    assert.match(third.windowLines[0][0], /keyset=rejected\(400\)/)
-  })
-
-  test("both the window query and today's query fail ⇒ today's handling: log, no rows, the cursor is kept", async () => {
+describe("[SEC-4] shipped cycle — the scan query rejected by Supabase (owner answer: fall back to the oldest 15)", () => {
+  test("a 400 on the scan query ⇒ today's exact query for that cycle, flagged on the scan line, detail logged once", async () => {
     const k = await loadShippedExecutor()
     const rows = rowsOf(20)
     const db = createFakePostgrest(rows)
     const chain = createFakeChain(db, () => [false, "DCA interval not reached"])
     await runCycles(k, db, chain, 1)
+    // ROUND 2: with 20 rows the scan reads from the oldest (no or=(…)): the scan read is the keyset-ordered one.
+    db.failNextMatching(/order=created_at\.asc%2Cid\.asc/, 400, '{"code":"PGRST100","message":"failed to parse logic tree"}', "GET")
+    const second = await runCycles(k, db, chain, 1)
+    assert.deepEqual(second.perCycle[0], rows.slice(0, 15).map((r) => r.id), "the 15 oldest, as before this change")
+    const legacy = db.requests.filter((r) => r.search === "?status=eq.active&chain_id=eq.8453&select=*&order=created_at.asc&limit=15")
+    assert.equal(legacy.length, 1, "today's query, byte for byte")
+    assert.equal(legacy[0].prefer, "", "S-9: and without the scan's Prefer: count=exact")
+    assert.match(second.windowLines[0][0], /fallback=scan-400$/)
+    assert.equal(second.lines.filter((l) => l.includes("Active scan query FAILED")).length, 1)
+    db.failNextMatching(/order=created_at\.asc%2Cid\.asc/, 400, "again", "GET")
+    const third = await runCycles(k, db, chain, 1)
+    assert.equal(third.lines.filter((l) => l.includes("Active scan query FAILED")).length, 0, "logged once per process")
+    assert.match(third.windowLines[0][0], /fallback=scan-400/)
+  })
+
+  test("both the scan query and today's query fail ⇒ today's handling: log, no rows, the cursor is kept (scan scaled to 15)", async () => {
+    const k = await scaled()
+    const rows = rowsOf(20)
+    const db = createFakePostgrest(rows)
+    const chain = createFakeChain(db, () => [false, "DCA interval not reached"])
+    const random = mulberry32(20)
+    const first = await runCycles(k, db, chain, 1, { random })
     const realFetch = db.fetch
     let failures = 0
     db.fetch = async (input, init) => (String(input).includes("/rest/v1/orders?") && (init?.method ?? "GET") === "GET" && failures++ < 2 ? new Response("down", { status: 503 }) : realFetch(input, init))
-    const down = await runCycles(k, db, chain, 1)
+    const down = await runCycles(k, db, chain, 1, { random })
     assert.deepEqual(down.returned, [0])
     assert.ok(down.lines.some((l) => l.includes("Supabase fetch error: 503")))
     db.fetch = realFetch
-    const next = await runCycles(k, db, chain, 1)
-    assert.equal(next.perCycle[0][0], rows[15].id, "the cursor survived the failed cycle")
-  })
-})
-
-// ── shipped cycle: seeded property ────────────────────────────────────────────────────────────────
-
-function mulberry32(seed) {
-  let a = seed >>> 0
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0
-    let t = a
-    t = Math.imul(t ^ (t >>> 15), t | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-describe("[SEC-4] shipped cycle — seeded property (random tables, churn, random answers)", () => {
-  const SEEDS = [0x51c4, 0x2b07, 0x9e3d, 0x0f11, 0x7a5a, 0x3c90]
-  test("every row present for ceil(M/15)+1 cycles is examined (slowed rows: within 10 min + one rotation); ≤ 15 per cycle; never another chain", async () => {
-    const summary = []
-    for (const seed of SEEDS) {
-      const rand = mulberry32(seed)
-      const M0 = 1 + Math.floor(rand() * 400)
-      let n = 1
-      const persona = new Map()
-      const pick = () => ["interval", "price", "unfunded", "no-allowance", "true", "mixed"][Math.floor(rand() * 6)]
-      const mk = (opts = {}) => {
-        const p = pick()
-        const row = makeRow(n++, { type: p === "interval" ? "dca" : "limit", ...opts })
-        persona.set(row.id, p)
-        return row
-      }
-      const initial = Array.from({ length: M0 }, () => mk())
-      const db = createFakePostgrest([...initial, ...rowsOf(25, 900_000, { chainId: OTHER_CHAIN_ID })])
-      const answer = (row) => {
-        switch (persona.get(row.id)) {
-          case "interval": return [false, "DCA interval not reached"]
-          case "price": return [false, "Price below floor"]
-          case "unfunded": return [false, "Insufficient balance"]
-          case "no-allowance": return [false, "Insufficient allowance"]
-          case "true": return [true, ""]
-          default: return rand() < 0.5 ? [false, "Insufficient balance"] : [false, "DCA interval not reached"]
-        }
-      }
-      const chain = createFakeChain(db, answer)
-      const k = await loadShippedExecutor()
-      const cycles = 2 * Math.ceil((M0 + 60) / WINDOW) + 24
-      const present = []
-      const run = await runCycles(k, db, chain, cycles, {
-        onBeforeCycle: (c) => {
-          if (c > 0) {
-            for (let i = Math.floor(rand() * 3); i > 0; i--) {
-              const mine = db.table.filter((r) => r.chain_id === 8453)
-              if (mine.length) db.remove(mine[Math.floor(rand() * mine.length)].id)
-            }
-            for (let i = Math.floor(rand() * 3); i > 0; i--) {
-              const r = rand()
-              const mine = db.table.filter((x) => x.chain_id === 8453)
-              const createdAt = r < 0.15 && mine.length ? mine[Math.floor(rand() * mine.length)].created_at : undefined // a tie
-              db.insert(mk(createdAt ? { createdAt } : { createdAt: isoAtFor(n + 100_000) }))
-            }
-          }
-          present.push(new Set(db.table.filter((r) => r.chain_id === 8453 && r.status === "active").map((r) => r.id)))
-        },
-      })
-      const theirs = new Set(db.table.filter((r) => r.chain_id !== 8453).map((r) => r.id))
-      let checks = 0
-      let slowChecks = 0
-      for (const [c, ids] of run.perCycle.entries()) {
-        assert.ok(ids.length <= WINDOW, `seed ${seed} cycle ${c}: ${ids.length} examined`)
-        assert.equal(ids.some((id) => theirs.has(id)), false, `seed ${seed}: another chain's row examined`)
-      }
-      // A row that answered balance/allowance can be legitimately slowed: its bound is 10 min (20 cycles) + one rotation.
-      const slowable = (id) => ["unfunded", "no-allowance", "mixed"].includes(persona.get(id))
-      // Index (cheap to check, so this test stays light beside timing-sensitive files): each row is present
-      // over one interval [first, last] (removed rows never come back — asserted), the distinct rows of
-      // cycles s..j are |present_s| plus the rows first present in s+1..j, and each row's examined cycles.
-      const first = new Map()
-      const last = new Map()
-      const newAt = new Array(cycles).fill(0)
-      const examinedAt = new Map()
-      for (let t = 0; t < cycles; t++) {
-        for (const id of present[t]) {
-          if (!first.has(id)) {
-            first.set(id, t)
-            if (t > 0) newAt[t]++
-          } else assert.equal(last.get(id), t - 1, `row ${id} came back after leaving`)
-          last.set(id, t)
-        }
-        for (const id of run.perCycle[t]) {
-          if (!examinedAt.has(id)) examinedAt.set(id, [])
-          examinedAt.get(id).push(t)
-        }
-      }
-      const boundK = (s) => {
-        let M = present[s].size
-        for (let j = s; j < cycles; j++) {
-          if (j > s) M += newAt[j]
-          if (j - s + 1 >= Math.ceil(M / WINDOW) + 1) return j - s + 1
-        }
-        return 0
-      }
-      const boundKBySets = (s) => {
-        const seen = new Set()
-        for (let j = s; j < cycles; j++) {
-          for (const id of present[j]) seen.add(id)
-          if (j - s + 1 >= Math.ceil(seen.size / WINDOW) + 1) return j - s + 1
-        }
-        return 0
-      }
-      for (let s = 0; s < cycles; s++) {
-        const K = boundK(s)
-        if (s % 13 === 0) assert.equal(K, boundKBySets(s), `seed ${seed} s=${s}: indexed K differs from the definition`)
-        if (!K) break
-        for (const id of present[s]) {
-          const span = slowable(id) ? 20 + K : K
-          if (s + span > cycles) continue
-          if (last.get(id) < s + span - 1) continue // not present throughout
-          if (slowable(id)) slowChecks++
-          else checks++
-          const examined = (examinedAt.get(id) ?? []).some((t) => t >= s && t < s + span)
-          assert.ok(examined, `seed ${seed}: ${persona.get(id)} row present in cycles ${s}..${s + span - 1} never examined`)
-        }
-      }
-      summary.push(`seed ${seed.toString(16)}: M0=${M0}, ${cycles} cycles, ${checks}+${slowChecks} checks`)
-      assert.ok(checks > 0)
-    }
-    console.log(`  shipped-cycle property: ${summary.join("; ")}`)
+    const next = await runCycles(k, db, chain, 1, { random })
+    const after = (rows.findIndex((r) => r.id === first.perCycle[0].at(-1)) + 1) % 20
+    assert.equal(next.perCycle[0][0], rows[after].id, "the cursor survived the failed cycle")
   })
 })
 
 describe("[SEC-4] executor.js wiring (source anchors)", () => {
-  test("the paused branch neither moves the cursor nor feeds the slow-down (it examined nothing)", async () => {
+  test("the paused branch neither screens nor moves the scan (it examined nothing)", async () => {
     const { readFileSync } = await import("node:fs")
     const src = readFileSync(new URL("./executor.js", import.meta.url), "utf8")
     const a = src.indexOf("const pausedState = rpcAuthMonitor ? rpcAuthMonitor.state().paused : null")
     const b = src.indexOf("return orders.length", a)
     const paused = src.slice(a, b)
     assert.ok(a > 0 && b > a)
-    assert.equal(paused.includes("advanceActiveWindow("), false)
-    assert.equal(paused.includes("noteCanExecuteAnswer("), false)
-    assert.ok(paused.includes("activeWindowLogLine("), "the paused cycle still prints its window line")
+    assert.equal(paused.includes("advanceActiveScan("), false)
+    assert.equal(paused.includes("prescreenRows("), false)
+    assert.ok(paused.includes("activeScanLogLine("), "the paused cycle still prints its scan line")
   })
-  test("the window size is today's: MAX_BATCH * 3 rows, MAX_BATCH = 5", async () => {
+  test("ROUND 2: MAX_BATCH = 5 unchanged; the scan is 1000 rows, chunks of 50, 5 s limits, a one-by-one budget of MAX_BATCH * 3", async () => {
     const { readFileSync } = await import("node:fs")
     const src = readFileSync(new URL("./executor.js", import.meta.url), "utf8")
     assert.match(src, /^const MAX_BATCH = 5 /m)
-    assert.match(src, /const windowSize = MAX_BATCH \* 3\n/)
+    assert.match(src, /^const SCAN_CAP = 1000$/m)
+    assert.match(src, /^const PRESCREEN_CHUNK = 50$/m)
+    assert.match(src, /^const PRESCREEN_CHUNK_TIMEOUT_MS = 5_000$/m)
+    assert.match(src, /^const SUPABASE_READ_TIMEOUT_MS = 5_000$/m)
+    assert.match(src, /^const ONE_BY_ONE = MAX_BATCH \* 3$/m)
   })
 })
 
