@@ -5,7 +5,7 @@ Branch off `origin/main` `64da340a`. `route.ts`: POST only (PR #709 edits GET an
 
 - [x] Read findings, POST, hash tests, `order-hash.ts`, check script + tests, `api/orders.ts`, PR #708 feedback
 - [x] Premise question asked once (below) · [x] C1 S-1 · [x] C2 S-3 · [x] C3 S-7 · [x] C4 S-2/S-8 · [x] C5 S-10
-- [x] Mutants · [ ] Verify, push, evidence 5
+- [x] Mutants · [x] Verify, push, evidence 5
 
 ## Owner answers (asked once, 2026-11-18; they supersede the goal text)
 - **S-3 lookup, signature encodings.** Measured: viem recovers one signature from 4 texts that pass the route's 0x +
@@ -47,7 +47,14 @@ priceFeed, expiry, nonce, dcaInterval, dcaTotal, all nine at once}". IM2r (route
 - S-6 (global uniqueness, no chain in the struct hash), S-9 (INTEGER columns vs uint256): no change, as asked.
 
 ## 5. Verify
-pending
+- `agent-verify.sh --codeql`, ONE run at `07458f51` (started 11:26:59, load1 5.92 after two quiet checks 30 s apart, no
+  other verify/CodeQL; `brew` stubbed): **RESULT PASS**, suite 11017/0 (514 files), lint +0/+0, tsc 0, build ok, parity
+  123/0, rpc-budget 36/0, CodeQL 13 = 13, 0 new. `gen-claude-state --check`: current. gitleaks (branch commits): clean.
+- diff `origin/main...HEAD`: 18 files, +1114/−94 (before this docs edit). Head = the commit adding this section.
+  Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/orders-hash-audit-fixes
+- **Not verified:** the lookup against real PostgREST/Supabase (`or` + `ilike` parsed by the fake only); the 7 s
+  retry wait with Supabase down (read from postgrest-js source); production rows through the check script; the tree
+  merged with main `bfe26155` (PR #713; no file overlap, `merge-tree` clean); keeper suite and forge (untouched); CI.
 
 ## Feedback — C2/C3 (`4a1311c8`, `0dda4837`)
 ### Concern
@@ -60,3 +67,5 @@ pending
 ### Edge case
 - Log consumers filtering on `storedHash` must use `serverHash` + `outcome`. The lookup helper is a dynamic import inside
   POST only to leave PR #709's import block alone; it can move to the import block after #709 merges.
+- The observe → reject switch in `fix-orders-server-side-order-hash.md` ("replace the `console.warn` just before the
+  insert") no longer matches: it is now `if (callerHashMismatch) return 400` right after `route.ts:744`, before the lookup.
