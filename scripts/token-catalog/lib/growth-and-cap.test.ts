@@ -313,6 +313,13 @@ describe('property (seeded): growth breaker + additions cap + size bound, over r
             if (r.sources.includes(s)) expect(o.world.previousMap.get(lc(r.address))?.sources.includes(s), `${ctx}: ${s} vote on a row it never had`).toBe(true)
           }
           expect(o.result.sourceCounts[s]).toBe(spec.prevCounts[s])
+          // ...and the previous snapshot stood in: a row that listed it before and is still verified (>= 2 votes; an
+          // unverified seed carries no votes at all) still lists it — the votes survive
+          const byAddr = new Map(o.decision.catalog.map((r) => [lc(r.address), r]))
+          for (const prev of o.world.previous) {
+            const now = byAddr.get(lc(prev.address))
+            if (now?.verified && prev.sources.includes(s)) expect(now.sources.includes(s), `${ctx}: ${prev.symbol} lost its ${s} vote`).toBe(true)
+          }
         }
         // the refresh itself is never blocked by any of this
         expect(o.decision.blocked, ctx).toBeNull()
