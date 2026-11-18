@@ -7,6 +7,8 @@
  * redactUrl(text)  — every URL keeps scheme + host[:port] (the operator still sees WHICH provider)
  *                    and loses userinfo, path, query and fragment: `https://host/REDACTED`; a `0x` hex run of
  *                    130+ digits (a signature, calldata, a raw transaction) becomes `0x<hex N>`.
+ * redactUrlOnly(t) — [A92 S-5] the same URL redaction WITHOUT the hex scrub, for text that is classified and never
+ *                    printed (rpc-auth.js): it reads exactly the text it read on origin/main.
  * redactError(err) — [fix/keeper-errors-no-signature, A87 S-2] a SHORT text built from the error's fields, never its
  *                    whole `message`: viem's message for a contract call prints the call's `args:` — the order's
  *                    EIP-712 signature — and its request `data:`. See redactError below for what it keeps.
@@ -167,12 +169,14 @@ export const AUTHORITY_DROPPED = "[authority-redacted]"
 const PLAIN_HOSTPORT = /^(?:[a-z0-9_.-]{1,255}|\[[0-9a-f:.]{2,45}\])(?::\d{1,5})?$/i
 
 /**
+ * [A92 S-5] The URL redaction alone, with no hex scrub: exactly what redactUrl returned on origin/main 7bd3ec12.
+ * Only for text that is classified and never printed (rpc-auth.js reads the provider's words in it); a printed text
+ * goes through redactUrl.
  * @param {unknown} text
- * @param {{ allowHosts?: readonly string[] }} [opts] — hosts whose path-bearing links survive
- *   (sendTelegramAlert passes ALERT_LINK_HOSTS; nothing else should)
+ * @param {{ allowHosts?: readonly string[] }} [opts]
  * @returns {string}
  */
-export function redactUrl(text, { allowHosts = [] } = {}) {
+export function redactUrlOnly(text, { allowHosts = [] } = {}) {
   const allow = new Set(allowHosts.map((h) => h.toLowerCase()))
   const decoded = normalise(text)
   if (decoded === null) return OVER_ENCODED // nested deeper than any real error: say nothing rather than half
@@ -191,11 +195,21 @@ export function redactUrl(text, { allowHosts = [] } = {}) {
     return `${scheme}://${authority}${REDACTED}`
   })
   // After the URL pass, so a scheme URL's own userinfo (already gone) is never this one's business.
-  // [fix/keeper-errors-no-signature] Then a `0x` hex run of 130+ digits: executor.js logs a fatal error as
-  // redactUrl(err.stack), and a viem stack repeats the whole message (the order signature in `args:`); every
+  return stripBareUserinfo(redacted)
+}
+
+/**
+ * @param {unknown} text
+ * @param {{ allowHosts?: readonly string[] }} [opts] — hosts whose path-bearing links survive
+ *   (sendTelegramAlert passes ALERT_LINK_HOSTS; nothing else should)
+ * @returns {string}
+ */
+export function redactUrl(text, opts) {
+  // [fix/keeper-errors-no-signature] The URL redaction, then a `0x` hex run of 130+ digits: executor.js logs a fatal
+  // error as redactUrl(err.stack), and a viem stack repeats the whole message (the order signature in `args:`); every
   // Telegram alert passes here last (sendTelegramAlert). Only the `0x` form: a bare run of the letters a-f is
   // ordinary text to this function (redact-s6-schemeless.test.mjs and redact-shapes.test.mjs pin such runs).
-  return stripBareUserinfo(redacted).replace(HEX_RUN_0X, (m) => `0x<hex ${m.length - 2}>`)
+  return redactUrlOnly(text, opts).replace(HEX_RUN_0X, (m) => `0x<hex ${m.length - 2}>`)
 }
 
 // ── [fix/keeper-errors-no-signature] A87 S-2: what an error may say in a log line or an alert ──────────────────────
