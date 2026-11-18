@@ -95,3 +95,107 @@ property files burned 8.9 s of CPU (6.51 s + 2.39 s user) beside it. Fix attempt
 timestamp once and index the bound checks; same seeds, same assertions, same check counts (613,857 and 33,415 +
 18,096), the set-based definition still asserted on a sample — 3.47 s (1.73 s + 1.74 s user). 1563 existing tests + 47
 new = 1610; no existing test file is modified (`git diff --name-status origin/main`).
+
+---
+
+# Round 2 (A88 audit, design 120b) — tables R1–R9
+
+## R1. The audit's probes as tests (`active-scan-probes.test.mjs`, Node 22). a9f12d9a = scratch worktree at the audited head with this round's fixture, testlib and probe file copied in
+
+| Probe | a9f12d9a | branch |
+|---|---|---|
+| S-1 flood 15 / 16 / 30 rows per cycle, scan scaled to 100, 40 cycles | ✖ ×3 `flood 15/cycle (oldest row asked at cycles 0): row …000010 present in cycles 0..0 (M=60 …, bound 1) was never asked` — the oldest row asked once in 40 cycles | ✔ ×3 |
+| S-1 flood 30/cycle at SCAN_CAP 1000 (980 → 1190 rows) | ✖ `(M=980, … bound 1) was never asked canExecute; next ask at 1` | ✔ |
+| S-2 503 on the scan read, 0.5 / 2 / 10 % of 200 cycles, 100 rows, scan 25 | ✖ ×3 `after the fallback cycle 99 the scan restarted at row 15 instead of continuing at row 85` (24 → row 60, 4 → row 60) | ✔ ×3 |
+| S-3 A (receipt held) – B (tick) – A ends – C, 45 rows, streak rows 16..25 | ✖ `after cycle 4, 10 of the 10 active rows lost their ADR-026 streak` (and 2 cycles ran at once) | ✔ (B skipped) |
+| S-4 count read throws / hangs; wrap read throws / hangs (5 s limit rewritten to 100 ms) | ✖ `cycle 2: fetch failed`, `cycle 2 did not finish within 3000 ms (hung)`, `cycle 8: fetch failed`, `cycle 8 … (hung)` | ✔ ×4 |
+| S-5 gas SKIP once on the ready row (300 rows; and scan scaled to 50) | ✖ ×2 `the ready order skipped by gas in cycle 9 was not executed in cycle 10` | ✔ ×2 (cycle 0 SKIP, cycle 1 fill) |
+| S-8 200 rows, restart every 10 cycles (30 cycles) | ✖ `50 of 200 rows never asked across 3 processes` | ✔ |
+| S-8 300 rows, scan 50, restart every 3 cycles (15 processes) | ✖ `255 of 300 rows never asked across 15 processes` | ✔ |
+| Owner: 40 unanswerable rows + one walked within 3 cycles (2 variants) | ✔ ×2 (round 1's window also rotated) | ✔ ×2 |
+
+Totals: a9f12d9a 16 fail / 2 pass; branch 18 / 18. Found while writing S-4: with the wrap read failing, the cursor sat on the
+newest row, the next cycle read an empty page and logged `No active orders` (returning 0 = idle cadence) although rows
+existed. Fixed before commit: no head ⇒ the next scan starts at the oldest row (`active-window.js:210`), and an empty page
+whose wrap failed is a scan fallback (`executor.js:844`). Found while writing S-3: the fixture faked `Date.now()` but not
+`new Date()`, so lock stamps and the stale-unlock cutoff used different clocks; `withFakes` now fakes both.
+
+## R2. The bound and the flood the creation limits allow
+
+Bound (`active-window.js` header; checked by `checkScreenBound`, `active-scan.testlib.mjs`): every active row is asked
+canExecute at least once every ceil(M / 1000) cycles, plus one cycle per fallback cycle. To hide a row a flood must add
+1000 rows per cycle (2000 per minute). Creation limits in code: 10 creates per minute per IP (`src/lib/kv-rate-limiter.ts:45`,
+`ORDER_CREATE_RATE_LIMIT`, checked in `src/app/api/orders/route.ts:107`) and 20 orders per wallet created in the last
+60 min still active or executing (`route.ts:76` `MAX_ACTIVE_ORDERS`, `contracts/order-engine/schema.sql:225`); wallets
+cost a signature only, and creation does not check funds. So 2000/min needs >= 200 IPs and >= 6000 fresh wallets per
+hour. One IP flat out adds 5 rows per cycle (0.5 % of a scan): 14,400 rows a day; unexecutable rows stay active until
+their expiry (<= 90 days), so a sustained one-IP flood grows a rotation by about 14 cycles (7.5 min) per day of flooding.
+
+## R3. Calls per steady-state cycle, shipped executeCycle vs origin/main's (`7bd3ec12`; executor.js unchanged since `bfe26155`)
+
+Fake chain and PostgREST; limit orders with a price feed (main's worst case: it reads the feed for each examined
+non-DCA row); the cycle-start/end observability reads (balance, freeze flag, ETH/USD) are the same in both and not
+counted. "None ready" = every row answers false; "5 ready" = the 5 oldest answer true and fill this cycle.
+
+| M | main RPC | main Supabase | branch RPC | branch Supabase |
+|---|---|---|---|---|
+| 0 | 0 | 2 (stale-unlock PATCH, GET) | 0 | 2 |
+| 1, none ready | 2 (feed read, canExecute) | 4 (+ lock, unlock) | 1 (aggregate3) | 2 |
+| 15, none ready | 30 | 32 | 1 | 2 |
+| 100, none ready | 30 | 32 | 2 | 2 |
+| 1000, none ready | 30 | 32 | 20 | 2 |
+| 1500, none ready (rotating) | 30 | 32 | 20 | 3 (+ HEAD count) |
+| 15, 5 ready | 30 (5 × feed, canExecute, gas price, block, executeOrder, receipt) | 22 | 31 (the same + 1 aggregate3) | 22 |
+| 1000, 5 ready | 30 | 22 | 50 (the same + 20 aggregate3) | 22 |
+| 1500, 5 ready | 30 | 22 | 50 | 23 |
+
+At a wrap the rotating scan adds one GET (the head page) instead of the HEAD count; a carried row the page does not hold
+adds one GET per 100 ids. Idle backoff unchanged (`idle-backoff.js`): 0 rows ⇒ the same 2 Supabase calls and no RPC.
+
+## R4. Differential against origin/main (`active-scan.differential.mjs`, hand-run; reference = `git show origin/main:contracts/order-engine/executor/executor.js`)
+
+500 runs (seeds 53759 + i·7919, i = 0..499), 12 cycles each, <= 15 active rows, no Supabase or RPC failure; personas
+ready-once, never, flaky (per row and cycle), shared-balance (one fill empties the owner), expired, DCA (true, never
+fills: infra keeper-config miss in both); gas SKIP on ~8 % of cycles; rows added between cycles.
+Batches 0–99 / 100–199 / 200–299 / 300–399 / 400–499: 1001 / 1018 / 1003 / 1023 / 1051 fills by main; 0 runs with a
+different executed list or order (6000 cycles, 5096 fills). Not modelled: an execution that makes ANOTHER row ready in
+the same cycle (the pre-screen asked at the cycle's start; main asks each row as it reaches it): that row fills one cycle
+later on the branch.
+
+## R5. Seeded properties
+
+- `active-scan-property.test.mjs` (shipped cycles, real fills): 20 seeds (0x7e57 + i·104729) × 80 cycles, half with
+  SCAN_CAP rewritten to 25: 22,528 bound checks, 1,725 fills, 8,674 row writes checked, 115 fallback cycles (scan 503 on
+  ~4 % of cycles, a failed Multicall3 chunk on ~3 % of chunks, gas SKIP on ~5 %). No order filled twice; <= 5 fills
+  per cycle; every row asked within ceil(M/SCAN) + fallback cycles; a row written only when that cycle's pre-screen said
+  true, could not answer it, or its expiry passed.
+- `active-window.test.mjs` (pure): 30 seeds (0x5ec4 + i·7919) × 120 cycles, 1–300 rows, churn (ties, back-dated rows),
+  failed scan and wrap reads, a random first page: bound checked > 20,000 times; no entry of an active row ever pruned;
+  a removed row's entry goes by the second complete scan after it left (> 100 removals checked).
+
+## R6. Mutation proof (scratch copies of the executor directory, one textual mutant each; the five active-scan /
+active-window test files, Node 22; then the differential for M8)
+
+| Mutant | Killed by |
+|---|---|
+| M1 pre-screen trusted: the path skips its own canExecute when the pre-screen said true | 7 tests (S-5 ×2, S-3 overlap, owner "becomes answerable", S-3 two-scans, gas SKIP, v2 builder equality) |
+| M2 carry-over dropped (`carryIds = []`) | 4 (S-5 scaled, carry-over leads, gas SKIP, MAX_BATCH mid-list) |
+| M3 overlap guard removed | 2 (S-3 overlap probe, one-tick-at-a-time) |
+| M4 a scan fallback moves the cursor (round 1's behaviour) | 4 (S-2 ×3, the shipped property) |
+| M5 a streak pruned after ONE complete scan | 3 (S-3 two-scans shipped, two keepIdsAfterScans units) |
+| M6 the audit's M6 here: every walked row counted as reached | 3 (carry-over leads, gas SKIP, MAX_BATCH mid-list) |
+| M7 the one-by-one budget does not rotate | 4 (owner's test, Multicall3 absent, two planWalk units) |
+| M8 carried rows literally first (the reading the owner did not choose) | 0 test files — the differential: 9 of 100 runs differ in order |
+
+## R7. Multicall3 on the real chains (owner answer 2: read-only, public keyless RPCs, nothing from the project sent)
+
+`eth_getCode(0xcA11bde05977b3631167028862bE2a173976CA11)` and ONE `aggregate3([{target: Multicall3, allowFailure: true,
+callData: getChainId()}])`, 2026-11-18 14:52Z:
+- Base, `mainnet.base.org`, block 59115860: 3808 bytes, code keccak `0xd5c15df6…e770891`; aggregate3 → 1 result, success, getChainId = 8453.
+- Arbitrum One, `arb1.arbitrum.io`, block 525352000: 3808 bytes, same code keccak; aggregate3 → success, getChainId = 42161.
+
+## R8. Keeper suite and CPU (Node 20.20.2 and 22.23.5, `node --test` in `contracts/order-engine/executor`)
+
+At `cc262b34`: Node 22 2136/2136, Node 20 2136/2136. At `a01d9251` (a9f12d9a merged with main, before round 2): 2098/2098 (Node 22).
+New and changed files, user CPU (Node 22): probes 3.98 s (9.75 s before `cc262b34`), cycle 0.47 s, property 1.80 s,
+active-window 0.60 s, active-window-cycle 0.41 s.
