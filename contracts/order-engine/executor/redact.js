@@ -6,9 +6,9 @@
  *
  * redactUrl(text)  — every URL keeps scheme + host[:port] (the operator still sees WHICH provider)
  *                    and loses userinfo, path, query and fragment: `https://host/REDACTED`.
- * redactError(err) — the error's text (`message`, which is where viem puts `URL:` and `Details:`),
- *                    through redactUrl, optionally truncated AFTER redaction (a slice taken first
- *                    could cut the URL into a shape the patterns no longer see).
+ * redactError(err) — [fix/keeper-errors-no-signature, A87 S-2] a SHORT text built from the error's fields, never its
+ *                    whole `message`: viem's message for a contract call prints the call's `args:` — the order's
+ *                    EIP-712 signature — and its request `data:`. See redactError below for what it keeps.
  *
  * What is read first [A74 S-5]: the text is DECODED to a fixpoint (percent, stacked percent, JSON/JS and octal
  * escapes, HTML entities — for `/ : @ ? # \\ %` only), so an encoded delimiter cannot hide a URL; text nested
@@ -34,6 +34,9 @@
  * nested repetition (a redactor that backtracks inside an alert path is a denial of service); backslash
  * runs are clamped to 8 first [S-9].
  */
+
+// [fix/keeper-errors-no-signature] The keeper's own revert decoders (SwapFailed's inner reason, the executor's market errors).
+import { decodeExecutorMarketRevert, decodeSwapFailed, extractRevertData } from "./revert-decode.js"
 
 export const REDACTED = "/REDACTED"
 
@@ -188,22 +191,198 @@ export function redactUrl(text, { allowHosts = [] } = {}) {
   return stripBareUserinfo(redacted)
 }
 
+// ── [fix/keeper-errors-no-signature] A87 S-2: what an error may say in a log line or an alert ──────────────────────
+// viem's message for a contract call is the whole call: the Contract Call block prints `args:` (the order struct and
+// its EIP-712 signature), Raw Call / Request Arguments print `data:` (the calldata, which embeds the same signature),
+// Request body prints the JSON-RPC request. Measured on origin/main for canExecute and executeOrder under revert, RPC
+// error and timeout: 9 of 9 put the signature in the log line and the Telegram text, which ran to 14,907 characters
+// (Telegram refuses more than 4,096; the alert was lost). viem's shortMessage never carries the arguments.
+
+/** The longest text redactError returns. */
+export const ERROR_TEXT_MAX = 600
+/** The start of the visible marker a cut text ends with: `…[truncated N chars]`. */
+export const TRUNCATED = "…[truncated"
+/** @param {number} n */
+export const truncatedMarker = (n) => `${TRUNCATED} ${n} chars]`
+
+const UNPRINTABLE = "[unprintable error]"
+// viem's own diagnostic lines, kept from a multi-line message (owner answer 1, 2026-11-18): where the call went,
+// what the transport answered, what the node said (`Details: … not on whitelist` is the INC-2026-10-30-001 auth
+// signal). Every other line of the message is dropped.
+const KEPT_LINE = /[ \t]{0,8}(?:URL|Status|Details):/y
+const MAX_KEPT_LINES = 8
+// The blocks the scrub removes from whatever text remains (a string handed in, a first line, a kept line): an
+// `args:` or `data:` line, and a `Request Arguments:` / `Raw Call Arguments:` header with its indented lines.
+const DROPPED_LINE = /^[ \t]{0,64}(?:args|data)[ \t]{0,8}:/i
+const BLOCK_HEAD = /^[ \t]{0,64}(?:Request|Raw Call) Arguments[ \t]{0,8}:/i
+const BLOCK_HINT = /(?:^|\n)[ \t]{0,64}(?:args|data|Request Arguments|Raw Call Arguments)[ \t]{0,8}:/i
+// Any run of 130+ hex digits (a 65-byte signature is 130; calldata, raw transactions, revert blobs are longer).
+const HEX_RUN = /[0-9a-f]{130,}/gi
+// What reaches the URL redactor is bounded first (a multi-megabyte message costs one linear scan, no more). The
+// cut lands on whitespace: a URL, a userinfo and a hex run are each one whitespace-free token, so none is split
+// into a shape the patterns no longer see; a token with no whitespace before the bound is dropped whole.
+const PRE_MAX = 16_384
+const LINE_MAX = 4_096
+const REASON_MAX = 512
+const ERROR_NAME = /^[A-Za-z_$][\w$]{0,79}$/
+
+/** A string property, or undefined; a getter that throws reads as absent. */
+function readString(obj, key) {
+  try {
+    const v = obj[key]
+    return typeof v === "string" ? v : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function safeString(v) {
+  try {
+    return String(v)
+  } catch {
+    return UNPRINTABLE
+  }
+}
+
+/** At most `max` characters, cut where whitespace begins (see PRE_MAX). @returns {{ text: string, cut: number }} */
+function preSlice(s, max) {
+  if (s.length <= max) return { text: s, cut: 0 }
+  let end = max
+  while (end > 0 && !/\s/.test(s[end])) end--
+  return { text: s.slice(0, end), cut: s.length - end }
+}
+
+const oneLine = (s, max) => preSlice(s, max).text.replace(/[ \t]*[\r\n][\r\n \t]*/g, " ").trim()
+
+/** viem's / the executor's decoded revert reason anywhere in the cause chain, or null. Never throws. */
+function revertReason(err) {
+  let data = null
+  try {
+    data = extractRevertData(err)
+  } catch {
+    /* a hostile getter on the chain: no data */
+  }
+  try {
+    const sf = decodeSwapFailed(data)
+    if (sf) return `SwapFailed: ${sf.reason}`
+  } catch {
+    /* not decodable */
+  }
+  try {
+    const seen = new Set()
+    let e = err
+    for (let depth = 0; e !== null && typeof e === "object" && depth < 16 && !seen.has(e); depth++) {
+      seen.add(e)
+      if (readString(e, "name") === "ContractFunctionRevertedError") {
+        const reason = readString(e, "reason")
+        if (reason) return reason
+        const decoded = e.data
+        const errorName = decoded !== null && typeof decoded === "object" ? readString(decoded, "errorName") : undefined
+        if (errorName) return errorName
+      }
+      e = e.cause
+    }
+  } catch {
+    /* a hostile getter: what was read so far */
+  }
+  try {
+    const market = decodeExecutorMarketRevert(data)
+    if (market) return market.name
+  } catch {
+    /* not decodable */
+  }
+  return null
+}
+
+/** The text redactError starts from: name, short message, revert reason, viem's URL/Status/Details lines. */
+function composeErrorText(err) {
+  if (err === null || err === undefined) return String(err)
+  if (typeof err !== "object") return typeof err === "string" ? err : safeString(err)
+  const name = readString(err, "name")
+  const short = readString(err, "shortMessage")
+  const message = readString(err, "message")
+  const nl = message ? message.indexOf("\n") : -1
+  const head = short || (message ? (nl === -1 ? message : message.slice(0, nl)) : "")
+  if (!head) return safeString(err)
+  let first = oneLine(head, LINE_MAX)
+  // The class says what failed (ContractFunctionExecutionError, HttpRequestError, TypeError); a plain `Error` says
+  // nothing, and its existing log lines carry no prefix (chainlink-debug-read.test.mjs pins one).
+  if (name && name !== "Error" && ERROR_NAME.test(name)) first = `${name}: ${first}`
+  const reason = revertReason(err)
+  if (reason) {
+    const r = oneLine(reason, REASON_MAX)
+    if (r && !first.includes(r)) first = `${first} — reason: ${r}`
+  }
+  const lines = [first]
+  // viem's diagnostic lines, in the message's order; a sticky test at each line start (no copy of other lines).
+  for (let i = nl; i !== -1 && lines.length <= MAX_KEPT_LINES; i = message.indexOf("\n", i + 1)) {
+    KEPT_LINE.lastIndex = i + 1
+    if (!KEPT_LINE.test(message)) continue
+    const end = message.indexOf("\n", i + 1)
+    lines.push(oneLine(message.slice(i + 1, end === -1 ? message.length : end), LINE_MAX))
+  }
+  return lines.join("\n")
+}
+
+/** Drop the `args:` / `data:` lines and the Request / Raw Call Arguments blocks. */
+function dropBlocks(s) {
+  if (!BLOCK_HINT.test(s)) return s
+  const kept = []
+  let inBlock = false
+  for (const line of s.split("\n")) {
+    if (inBlock && /^[ \t]/.test(line) && line.trim() !== "") continue
+    inBlock = false
+    if (BLOCK_HEAD.test(line)) {
+      inBlock = true
+      continue
+    }
+    if (!DROPPED_LINE.test(line)) kept.push(line)
+  }
+  return kept.join("\n")
+}
+
 /**
- * The printable text of an error, redacted. Never throws.
+ * `s` cut to at most `max` characters ending with the marker, or `s` itself when it fits and nothing was cut before.
+ * @param {string} s @param {number} max @param {number} [alreadyCut] — characters an earlier bound removed
+ */
+function capText(s, max, alreadyCut = 0) {
+  if (alreadyCut === 0 && s.length <= max) return s
+  const room = max - truncatedMarker(s.length + alreadyCut).length - 1
+  let keep = Math.max(0, Math.min(s.length, room))
+  if (keep > 0 && keep < s.length && /[\uD800-\uDBFF]/.test(s[keep - 1])) keep-- // never half a surrogate pair
+  const out = `${s.slice(0, keep)}${keep > 0 ? " " : ""}${truncatedMarker(s.length - keep + alreadyCut)}`
+  return out.length <= max ? out : out.slice(0, max)
+}
+
+/**
+ * The printable text of an error for a log line or an alert, redacted and short. Never throws (non-errors, circular
+ * cause chains, getters that throw). In order:
+ *   1. `Name: shortMessage` (else the first line of `message`; a string is taken as it is; no prefix for a plain
+ *      `Error`), then ` — reason: …` with
+ *      the decoded revert reason when the error carries one (viem's Error(string)/Panic text or custom error name,
+ *      or the executor's SwapFailed inner reason), then viem's `URL:`, `Status:` and `Details:` lines;
+ *   2. every URL redaction (redactUrl);
+ *   3. the scrub: `args:` / `data:` lines and Request / Raw Call Arguments blocks removed, any run of 130+ hex
+ *      digits replaced by `<hex N>`;
+ *   4. the cap: ERROR_TEXT_MAX (600) characters, or `max` when smaller, ending with `…[truncated N chars]`.
  * @param {unknown} err — an Error (viem or not), a string, or anything else
- * @param {{ max?: number }} [opts] — truncate to `max` characters AFTER redaction
+ * @param {{ max?: number }} [opts] — a lower cap for one call site
  * @returns {string}
  */
 export function redactError(err, { max } = {}) {
-  let text
+  const cap = Number.isInteger(max) && max > 0 ? Math.min(max, ERROR_TEXT_MAX) : ERROR_TEXT_MAX
+  let text = UNPRINTABLE
+  let cut = 0
   try {
-    if (err == null || typeof err !== "object") text = String(err)
-    else if (typeof err.message === "string" && err.message) text = err.message
-    else if (typeof err.shortMessage === "string" && err.shortMessage) text = err.shortMessage
-    else text = String(err)
+    ;({ text, cut } = preSlice(composeErrorText(err), PRE_MAX))
   } catch {
-    text = "[unprintable error]"
+    /* unprintable */
   }
-  const out = redactUrl(text)
-  return Number.isInteger(max) && max > 0 && out.length > max ? out.slice(0, max) : out
+  let out = UNPRINTABLE
+  try {
+    out = dropBlocks(redactUrl(text)).replace(HEX_RUN, (m) => `<hex ${m.length}>`)
+  } catch {
+    /* unprintable */
+  }
+  return capText(out, cap, cut)
 }
