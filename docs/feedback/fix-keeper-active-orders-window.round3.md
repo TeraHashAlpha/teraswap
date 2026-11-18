@@ -20,6 +20,9 @@ answer to a question: it is the owner's own message, sent after the goal started
    alone-ask fails with out of gas, a revert or its own time limit while another call of the cycle answered.
 3. **Await limits added:** KMS 10 s, Supabase writes 10 s, POST /api/swap 65 s; each down the catch path it already had.
 4. **Quarantine re-asks: own budget of 10 per cycle**, outside BISECT_CALL_BUDGET (40).
+5. **After the push (the stop check held the goal on R2-2, whose binding text on disk was never updated):** asked
+   "keep error = frozen, or revert to timeout-only?" — the owner chose **keep error = frozen**: the owner updates
+   `120c-details.md` R2-2 / `120c-keeper-scan-round3.txt` line 11, or clears the goal by hand. No code change.
 
 ## Checklist
 
