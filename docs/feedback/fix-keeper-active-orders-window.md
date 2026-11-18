@@ -2,6 +2,37 @@
 
 Keeper, fund-flow: Draft PR, **Auditor required**. Base origin/main `4a4129ef`. Long tables: `fix-keeper-active-orders-window.tables.md` (T1–T5).
 
+## Round 2 — A88 audit (blocked 0C/3H at a9f12d9a), design 120b
+
+origin/main `bfe26155` merged first (merge commit `a01d9251`). Long tables for round 2: the tables file, R1–R9.
+
+### Owner answers (asked once, 2026-11-18; they supersede the goal text)
+
+1. Carry-over order: **oldest first**. A carried row is always attempted next cycle; when the rotating scan (M > 1000) did not
+   return it, it is re-read by id and goes first; when the scan holds it (always with M <= 1000) it keeps its oldest-first place,
+   so with M <= 15 the executed order is main's and the differential holds as written.
+2. Multicall3: **read-only public RPC** allowed: one `eth_getCode` and one `aggregate3` `eth_call` per chain on the chains' public
+   keyless endpoints; nothing from the project is sent.
+3. Path entry: off-chain-expired rows always enter the per-order path; every row the pre-screen could not answer shares ONE budget
+   of 15 per cycle, and the budget **rotates**: rows that used it go to the back of that queue next cycle. Time limits 5 s per
+   Supabase read and per Multicall3 chunk. Added test: 40 permanently unanswerable rows and one that becomes answerable: it is
+   walked within 3 cycles.
+4. `price-quorum-wiring.test.mjs` (main): register only the DCA rows the path walks; that one anchored line and its regex change.
+
+### Checklist
+
+- [ ] Probes of the audit as tests, each shown FAILING on a9f12d9a (flood 15/16/30, scan 503 at 0.5/2/10 %, overlap A-B-A-C,
+      count/wrap throwing or hanging, gas SKIP one cycle, restart loops) + the owner's 40-unanswerable test
+- [ ] Scan <= 1000 rows (keyset pages), pre-screen via Multicall3 (chunks <= 50, 5 s each), struct from the path's own builder
+- [ ] Walk: ready rows oldest first through the unchanged path; expired rows; rotating 15-row budget; MAX_BATCH unchanged
+- [ ] Carry-over; pre-screen failure falls back, flagged; slow-down removed (state, tests, log field)
+- [ ] S-2 S-3 S-4 S-6 S-7 S-8 S-9 S-10 S-11 S-12
+- [ ] Shipped-cycle tests that really execute (MAX_BATCH mid-list, gas SKIP, carry-over); mutant M6 fails
+- [ ] Differential vs origin/main (500 seeded runs, M <= 15); seeded properties; pre-screen chunk failures; mutation proof
+- [ ] Multicall3 code + one aggregate3 call on Base and Arbitrum (public RPC)
+- [ ] Runbooks, ADR-024 / ADR-026 dated notes
+- [ ] Keeper suite Node 20 + 22; agent-verify --keeper --codeql (load < 10, once); gen-claude-state --check; push; evidence 1-6
+
 ## Owner answers (asked once, 2026-11-17; they supersede the goal text)
 
 One AskUserQuestion, four parts; only (1) came back answered. Per "ask ONCE", (2)–(4) were not re-asked: the recommended option was built.
