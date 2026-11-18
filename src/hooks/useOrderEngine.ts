@@ -309,7 +309,8 @@ function rowToOrder(row: OrderRow): AutonomousOrder {
     id: row.id,
     orderHash: row.order_hash,
     order: row.order_data as unknown as OnChainOrder,
-    signature: row.signature,
+    // [fix/order-signature-not-returned] Read routes no longer return it; nothing here reads it ('' = not held).
+    signature: row.signature ?? '',
     status: mapDbStatus(row.status as string),
     orderType: typeMap[row.order_type] ?? OrderType.LIMIT,
     // [CHORE-DCA-POSITIONS-DASHBOARD] Thread the chain (BaseScan links + chain-keyed logos) and the

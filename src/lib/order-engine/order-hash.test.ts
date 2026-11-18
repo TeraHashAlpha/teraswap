@@ -5,8 +5,11 @@
  * scripts/orders/order-hash-vectors.ts); this file pins the function's own contract.
  */
 import { describe, it, expect } from 'vitest'
-import { zeroHash } from 'viem'
-import { computeOrderHash, computeOrderDigest, normalizeOrderHashText } from './order-hash'
+import { keccak256, recoverTypedDataAddress, toBytes, zeroHash, type Hex } from 'viem'
+import { privateKeyToAccount } from 'viem/accounts'
+import {
+  computeOrderHash, computeOrderDigest, normalizeOrderHashText, orderSignatureEncodings, canonicalOrderSignature,
+} from './order-hash'
 import { ORDER_EIP712_TYPES, ORDER_V3_EIP712_TYPES } from './types'
 
 const MESSAGE = {
@@ -87,5 +90,57 @@ describe('normalizeOrderHashText', () => {
   })
   it.each([[undefined], [null], [42], [{ h }]])('non-string %s → null', (input) => {
     expect(normalizeOrderHashText(input)).toBeNull()
+  })
+})
+
+// [A86 S-3] The texts of one signature that recover the same signer.
+describe('orderSignatureEncodings / canonicalOrderSignature', () => {
+  const N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n
+  const account = privateKeyToAccount(keccak256(toBytes('order-hash signature encodings')))
+  const sign = () => account.signTypedData({ domain: DOMAIN, types: ORDER_V3_EIP712_TYPES, primaryType: 'Order', message: MESSAGE as never })
+  const recover = (signature: string) => recoverTypedDataAddress({
+    domain: DOMAIN, types: ORDER_V3_EIP712_TYPES, primaryType: 'Order', message: MESSAGE as never, signature: signature as Hex,
+  })
+  const parts = (t: string) => ({ s: BigInt(`0x${t.slice(66, 130)}`), v: t.slice(130) })
+
+  it('gives 4 distinct lower-case texts, the given one first, and every one recovers the same signer (real recovery)', async () => {
+    const sig = await sign()
+    const all = orderSignatureEncodings(sig)!
+    expect(all).toHaveLength(4)
+    expect(new Set(all).size).toBe(4)
+    expect(all[0]).toBe(sig.toLowerCase())
+    for (const t of all) {
+      expect(t).toMatch(/^0x[0-9a-f]{130}$/)
+      expect(await recover(t)).toBe(account.address)
+    }
+    expect(all.map((t) => parts(t).v).sort()).toEqual(['00', '01', '1b', '1c'])
+    const ss = [...new Set(all.map((t) => parts(t).s))]
+    expect(ss).toHaveLength(2)
+    expect(ss[0] + ss[1]).toBe(N)
+  })
+
+  it('every encoding (and upper case, 0X, no prefix) gives the same set and the same canonical text', async () => {
+    const sig = await sign()
+    const all = orderSignatureEncodings(sig)!
+    const canonical = canonicalOrderSignature(sig)!
+    expect(parts(canonical).s <= N / 2n).toBe(true)
+    expect(['1b', '1c']).toContain(parts(canonical).v)
+    for (const t of [...all, sig.toUpperCase(), `0x${sig.slice(2).toUpperCase()}`, sig.slice(2)]) {
+      expect(new Set(orderSignatureEncodings(t))).toEqual(new Set(all))
+      expect(canonicalOrderSignature(t)).toBe(canonical)
+    }
+  })
+
+  it.each([
+    ['not a string', 42],
+    ['too short', `0x${'11'.repeat(64)}`],
+    ['a pattern character', `0x${'11'.repeat(64)}%b`],
+    ['v = 2', `0x${'11'.repeat(64)}02`],
+    ['v = 29', `0x${'11'.repeat(64)}1d`],
+    ['s = 0', `0x${'11'.repeat(32)}${'00'.repeat(32)}1b`],
+    ['s = n', `0x${'11'.repeat(32)}${N.toString(16)}1b`],
+  ])('%s → null', (_label, input) => {
+    expect(orderSignatureEncodings(input)).toBeNull()
+    expect(canonicalOrderSignature(input)).toBeNull()
   })
 })

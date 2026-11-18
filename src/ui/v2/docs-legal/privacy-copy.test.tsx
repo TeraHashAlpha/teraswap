@@ -114,9 +114,15 @@ describe.each(LEGAL)('Privacy Policy — %s', (_ui, mount) => {
     expect(PRIVACY_PUBLIC_ANALYTICS_NOTE).toContain('shortened to its first six and last four characters')
     // [S-13] What needs no signature and what does: each clause is proved against its route in product-claims.ts.
     expect(PRIVACY_PUBLIC_ANALYTICS_NOTE).toContain(
-      'Anyone who knows a wallet address can also request, with no signature from that wallet, the swap history, swap statistics and swap export the site holds for that address, the full records of its executed, cancelled, expired or failed orders (signatures included), and a count of its orders by status; open orders and DCA fills need a signature from that wallet.',
+      'Anyone who knows a wallet address can also request, with no signature from that wallet, the swap history, swap statistics and swap export the site holds for that address, the records of its executed, cancelled, expired or failed orders (without the signature that authorised each order), and a count of its orders by status; open orders and the DCA fills in a wallet\'s history need a signature from that wallet; the fills of a finished order can be read with its record.',
     )
+    // [fix/order-signature-not-returned] No read route returns the order signature any more (orders-read-no-signature.test.ts).
+    expect(PRIVACY_PUBLIC_ANALYTICS_NOTE).not.toMatch(/signatures included/i)
     expect(PRIVACY_PUBLIC_ANALYTICS_NOTE).not.toMatch(/as they appear on-chain/i)
+    // [A87 S-1] The old clause said every DCA fill needs a signature; a finished order's fills need none (orders-privacy-clause.test.ts).
+    expect(PRIVACY_PUBLIC_ANALYTICS_NOTE).not.toContain('open orders and DCA fills need a signature')
+    expect(PRIVACY_PUBLIC_ANALYTICS_NOTE).not.toContain('\u2014')
+    expect(PRIVACY_PUBLIC_ANALYTICS_NOTE).not.toContain('\u2013')
   })
 })
 
