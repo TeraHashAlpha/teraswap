@@ -1,5 +1,5 @@
 import type { NextRequest } from 'next/server'
-import { bodySizeGuard } from '@/lib/body-limit'
+import { bodySizeGuard, bodyTooLargeFrom } from '@/lib/body-limit'
 import {
   COW_PROXY_MAX_BODY_BYTES,
   cowBadRequest,
@@ -35,8 +35,9 @@ export async function POST(req: NextRequest) {
     const picked = pickSignedOrder(await readRequestJson(req))
     if (!picked.ok) return cowBadRequest(picked.error)
     return cowJson(await relayToCow({ chainId, method: 'POST', path: '/orders', body: picked.value }))
-  } catch {
-    return cowInternalError()
+  } catch (err) {
+    // [SEC-8] A read past the cap bodySizeGuard put on the request: 413, as for a declared over-cap body.
+    return bodyTooLargeFrom(err) ?? cowInternalError()
   }
 }
 
@@ -51,7 +52,8 @@ export async function DELETE(req: NextRequest) {
     const picked = pickCancellation(req.nextUrl.searchParams.get('uid'), await readRequestJson(req))
     if (!picked.ok) return cowBadRequest(picked.error)
     return cowJson(await relayToCow({ chainId, method: 'DELETE', path: `/orders/${picked.value.uid}`, body: picked.value.body }))
-  } catch {
-    return cowInternalError()
+  } catch (err) {
+    // [SEC-8] A read past the cap bodySizeGuard put on the request: 413, as for a declared over-cap body.
+    return bodyTooLargeFrom(err) ?? cowInternalError()
   }
 }

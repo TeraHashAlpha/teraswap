@@ -23,7 +23,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { bodySizeGuard } from '@/lib/body-limit'
+import { bodySizeGuard, bodyTooLargeFrom } from '@/lib/body-limit'
 import { verifyBearerToken } from '@/lib/auth'
 import { getDcaFreezeState, setDcaFreezeState } from '@/lib/dca-freeze'
 
@@ -68,7 +68,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let body: { frozen?: unknown; reason?: unknown }
   try {
     body = await req.json()
-  } catch {
+  } catch (err) {
+    // [SEC-8] A read past the cap bodySizeGuard put on the request: 413, as for a declared over-cap body.
+    const tooLarge = bodyTooLargeFrom(err)
+    if (tooLarge) return tooLarge
     return NextResponse.json(
       { error: 'invalid JSON body' },
       { status: 400 },

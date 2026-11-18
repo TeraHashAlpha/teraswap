@@ -29,6 +29,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { getCowApiBase, hasCowApi } from '@/lib/constants'
 import { getSupportedChainIds } from '@/lib/chains/registry'
 import { readJsonCapped } from '@/lib/read-body-capped'
+import { BodyTooLargeError } from '@/lib/body-limit'
 import { checkRateLimitWithin, COW_PROXY_RATE_LIMITS } from '@/lib/kv-rate-limiter'
 import { clientIpKey } from '@/lib/client-ip-key'
 
@@ -272,11 +273,13 @@ export async function cowRateLimitGate(req: NextRequest, route: CowProxyRoute): 
   )
 }
 
-/** The request body as JSON, or undefined when it does not parse. */
+/** The request body as JSON, or undefined when it does not parse. [SEC-8] A body past the cap bodySizeGuard put on the
+ *  request is not "does not parse": its BodyTooLargeError reaches the route, which answers 413. */
 export async function readRequestJson(req: NextRequest): Promise<unknown> {
   try {
     return await req.json()
-  } catch {
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) throw err
     return undefined
   }
 }

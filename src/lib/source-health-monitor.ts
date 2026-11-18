@@ -59,8 +59,9 @@
  *   - #18/#247 (oracle-less advisory) is a client display advisory; it never
  *     alerts.
  */
-import { kv } from '@/lib/kv'
+import { kv, kvRaw } from '@/lib/kv'
 import { emitTransitionAlert } from '@/lib/alert-wrapper'
+import { ADAPTER_SOURCE_NAMES, isAdapterSourceName } from '@/lib/adapters'
 
 /** One alert per source·kind per this window (seconds). Source death is not
  *  sub-hourly actionable; 6 h keeps a persistent condition visible without spam. */
@@ -97,6 +98,21 @@ export const SOURCE_KNOWN_QUOTING_TTL_SECONDS = 7 * 24 * 3600
  *  occasionally-missed watchdog tick doesn't spuriously reset a real streak;
  *  still bounded so a long-idle counter doesn't linger forever. */
 const ZERO_WIN_STREAK_TTL_SECONDS = 24 * 3600
+
+/** [SEC-3, fix/log-routes-bounded-input] Members of the known-sources set the prune examines per monitor run (one
+ *  SRANDMEMBER of this many distinct members, one SREM of those outside the registry). See pruneUnregisteredKnownSources
+ *  for why the pollution reaches zero. 500 keeps one reply small while clearing the audit's 20,300 names in 42 runs. */
+export const KNOWN_SOURCES_PRUNE_SAMPLE = 500
+
+/**
+ * [SEC-3] Most key-value commands one checkSourceHealthAlerts run issues, whatever the store holds (R = registry size):
+ * prune 2 (SRANDMEMBER, SREM) + outlier reads R (GET) + history reads 1 + 2R (SMISMEMBER, 2 GET per name) + history
+ * writes 4R (SADD, SET, INCR, EXPIRE, or DEL instead of INCR/EXPIRE) + one SET NX per finding, at most 2R findings
+ * (silence needs 0 quotes, drift at least DRIFT_MIN_SAMPLE: never both). The alert fan-out after an acquired NX
+ * (emitTransitionAlert, its own dedup keys) is not counted. Before the fix one run cost 1 + 6 per stored name: 121,801
+ * commands for the audit's 20,300 invented names.
+ */
+export const SOURCE_HEALTH_MAX_KV_COMMANDS = 3 + 9 * ADAPTER_SOURCE_NAMES.length
 
 const OUTLIER_COUNTER_PREFIX = 'teraswap:source-health:display-drop:'
 const ALERT_NX_PREFIX = 'teraswap:source-health:alerted:'
@@ -202,6 +218,8 @@ export function detectSourceHealthFindings(
  * counter, the cow-fee-monitor pattern. Fail-open.
  */
 export async function recordQuoteDisplayDrop(source: string): Promise<void> {
+  // [SEC-3] Only registry sources are ever read back, so any other name would be a key nobody reads.
+  if (!isAdapterSourceName(source)) return
   try {
     const count = await kv.incr(`${OUTLIER_COUNTER_PREFIX}${source}`)
     if (count === 1) await kv.expire(`${OUTLIER_COUNTER_PREFIX}${source}`, SOURCE_HEALTH_ALERT_WINDOW_SECONDS)
@@ -228,18 +246,25 @@ async function readOutlierDrops(snapshots: SourceHealthSnapshot[]): Promise<Reco
 
 /**
  * Read each observed-or-previously-known source's carried-over state
- * (knownQuoting flag + zero-win streak) from kv. `KNOWN_SOURCES_SET_KEY` is an
- * append-only registry (SADD, never pruned — cardinality is bounded by the
- * fleet size) so silence can be evaluated for a source that's gone completely
- * absent from the current window, not just ones present in it.
+ * (knownQuoting flag + zero-win streak) from kv. `KNOWN_SOURCES_SET_KEY` records
+ * the sources that have quoted (SADD) so silence can be evaluated for a source
+ * that's gone completely absent from the current window, not just ones present
+ * in it.
+ *
+ * [SEC-3] Only registry names are looked up: one SMISMEMBER over
+ * ADAPTER_SOURCE_NAMES (a reply of R flags) instead of SMEMBERS, whose reply
+ * carried every name ever stored. Before the fix the set also took any name a
+ * /api/log-quote caller invented; pruneUnregisteredKnownSources removes those.
  */
 async function readTrailingHistory(
   snapshots: SourceHealthSnapshot[],
 ): Promise<Record<string, SourceTrailingHistory>> {
   const history: Record<string, SourceTrailingHistory> = {}
   try {
-    const known = (await kv.smembers(KNOWN_SOURCES_SET_KEY)) as string[]
-    const sources = Array.from(new Set([...known, ...snapshots.map(s => s.source)]))
+    const names = [...ADAPTER_SOURCE_NAMES]
+    const membership = (await kv.smismember(KNOWN_SOURCES_SET_KEY, names)) as Array<0 | 1>
+    const observed = new Set(snapshots.map(s => s.source))
+    const sources = names.filter((name, i) => membership[i] === 1 || observed.has(name))
     await Promise.all(
       sources.map(async source => {
         try {
@@ -292,21 +317,61 @@ async function writeTrailingHistory(snapshots: SourceHealthSnapshot[]): Promise<
 }
 
 /**
+ * [SEC-3, fix/log-routes-bounded-input] Removes names outside the adapter registry from the known-sources set, at most
+ * KNOWN_SOURCES_PRUNE_SAMPLE per run: one SRANDMEMBER of that many distinct members, read as raw text (kvRaw: a member
+ * like "true" or "\"x\"" must reach SREM byte for byte), and one SREM of those not in ADAPTER_SOURCE_NAMES. Runs inside
+ * the authenticated /api/monitor run (checkSourceHealthAlerts has no other caller).
+ *
+ * Why it reaches zero: no name outside the registry is added any more (checkSourceHealthAlerts passes registry names
+ * only to writeTrailingHistory), and a sample of min(SAMPLE, size) distinct members holds at most R registry names
+ * (R = ADAPTER_SOURCE_NAMES.length). So while J outside names remain, a run removes at least min(J, SAMPLE - R) of them,
+ * and J is 0 after at most ceil(J / (SAMPLE - R)) runs: 42 runs for the audit's 20,300 names. Fail-open; returns the
+ * number removed.
+ */
+export async function pruneUnregisteredKnownSources(): Promise<number> {
+  try {
+    const sample = await kvRaw.srandmember<string[]>(KNOWN_SOURCES_SET_KEY, KNOWN_SOURCES_PRUNE_SAMPLE)
+    if (!Array.isArray(sample)) return 0
+    const outside = sample.filter(member => !isAdapterSourceName(member))
+    if (outside.length === 0) return 0
+    return await kvRaw.srem(KNOWN_SOURCES_SET_KEY, ...outside)
+  } catch (err) {
+    console.warn('[source-health] known-sources prune failed (ignored):', err instanceof Error ? err.message : err)
+    return 0
+  }
+}
+
+/**
  * Detect findings over the monitor's windowed snapshots and emit ONE
  * rate-limited informational alert per source·kind per window. Returns the
  * findings so the monitor response can surface them. Fail-open everywhere.
+ *
+ * [SEC-3] Only adapter-registry sources are read, written or alerted on: a
+ * snapshot for any other name is dropped before the first KV command, so it
+ * costs nothing and no operator alert can carry it. At most
+ * SOURCE_HEALTH_MAX_KV_COMMANDS key-value commands per run. The known-sources
+ * prune runs alongside the check: the check touches registry names only, the
+ * prune only other names, and a KV outage then costs one client retry budget
+ * per run, not two in a row.
  */
 export async function checkSourceHealthAlerts(
   snapshots: SourceHealthSnapshot[],
 ): Promise<SourceHealthFinding[]> {
+  const [findings] = await Promise.all([runSourceHealthCheck(snapshots), pruneUnregisteredKnownSources()])
+  return findings
+}
+
+async function runSourceHealthCheck(snapshots: SourceHealthSnapshot[]): Promise<SourceHealthFinding[]> {
   let findings: SourceHealthFinding[] = []
   try {
+    const registered = snapshots.filter(s => isAdapterSourceName(s.source))
     const [outlierDrops, trailingHistory] = await Promise.all([
-      readOutlierDrops(snapshots),
-      readTrailingHistory(snapshots),
+      readOutlierDrops(registered),
+      readTrailingHistory(registered),
     ])
-    findings = detectSourceHealthFindings(snapshots, outlierDrops, trailingHistory)
-    await writeTrailingHistory(snapshots)
+    findings = detectSourceHealthFindings(registered, outlierDrops, trailingHistory)
+      .filter(f => isAdapterSourceName(f.source))
+    await writeTrailingHistory(registered)
 
     for (const finding of findings) {
       try {

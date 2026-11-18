@@ -24,7 +24,7 @@
  */
 
 import { NextResponse } from 'next/server'
-import { bodySizeGuard } from '@/lib/body-limit'
+import { bodySizeGuard, bodyTooLargeFrom } from '@/lib/body-limit'
 import { kv } from '@/lib/kv'
 import { timingSafeEqual, createHash } from 'node:crypto'
 import {
@@ -766,8 +766,9 @@ export async function POST(req: Request): Promise<Response> {
   let update: TelegramUpdate
   try {
     update = await req.json()
-  } catch {
-    return NextResponse.json({ ok: true }, { status: 200 })
+  } catch (err) {
+    // [SEC-8] A read past the cap bodySizeGuard put on the request: 413, as for a declared over-cap body.
+    return bodyTooLargeFrom(err) ?? NextResponse.json({ ok: true }, { status: 200 })
   }
 
   // ── Handle callback queries (inline keyboard button presses) ──
