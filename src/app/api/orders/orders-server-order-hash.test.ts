@@ -27,7 +27,7 @@ const fake = vi.hoisted(() => {
   return {
     rows: [] as Record<string, unknown>[],
     /** [A86 S-3] Every `or` filter the route sent, and how many rows each lookup found. */
-    lookups: [] as { filter: string; found: number }[],
+    lookups: [] as { filter: string; wallet: string; found: number }[],
     /** When set, each lookup waits until `needed` lookups have arrived: requests racing past the lookup together. */
     barrier: null as null | { needed: number; arrived: number; release: () => void; open: Promise<void> },
     lookupError: null as null | { message: string },
@@ -51,27 +51,34 @@ vi.mock('@supabase/supabase-js', () => ({
     from: (table: string) => {
       if (table !== 'orders') throw new Error(`unexpected table ${table}`)
       return {
-        // [A86 S-3] The route's lookup: .select('id').or('signature.ilike.<t>,…').limit(1)
+        // [A86 S-3] The route's lookup: .select('id').eq('wallet', <lower>).or('signature.ilike.<t>,…').limit(1)
+        // .abortSignal(<3 s>) [A89 R2-3/R2-4]. Both filters apply (PostgREST ANDs them).
         select: (cols: string) => ({
-          or: (filter: string) => ({
-            limit: async (n: number) => {
-              if (cols !== 'id') throw new Error(`unexpected select ${cols}`)
-              const terms = filter.split(',').map((term) => {
-                const m = /^signature\.ilike\.(.*)$/s.exec(term)
-                if (!m) throw new Error(`unexpected filter term ${term}`)
-                return m[1]
-              })
-              const barrier = fake.barrier
-              if (barrier) {
-                barrier.arrived += 1
-                if (barrier.arrived >= barrier.needed) barrier.release()
-                await barrier.open
-              }
-              if (fake.lookupError) return { data: null, error: fake.lookupError }
-              const hits = fake.rows.filter((r) => terms.some((t) => ilike(r.signature, t)))
-              fake.lookups.push({ filter, found: hits.length })
-              return { data: hits.slice(0, n).map((r) => ({ id: r.id })), error: null }
-            },
+          eq: (column: string, wallet: string) => ({
+            or: (filter: string) => ({
+              limit: (n: number) => ({
+                abortSignal: async (signal: AbortSignal) => {
+                  if (cols !== 'id') throw new Error(`unexpected select ${cols}`)
+                  if (column !== 'wallet') throw new Error(`unexpected eq column ${column}`)
+                  if (!(signal instanceof AbortSignal)) throw new Error('the lookup must carry an AbortSignal')
+                  const terms = filter.split(',').map((term) => {
+                    const m = /^signature\.ilike\.(.*)$/s.exec(term)
+                    if (!m) throw new Error(`unexpected filter term ${term}`)
+                    return m[1]
+                  })
+                  const barrier = fake.barrier
+                  if (barrier) {
+                    barrier.arrived += 1
+                    if (barrier.arrived >= barrier.needed) barrier.release()
+                    await barrier.open
+                  }
+                  if (fake.lookupError) return { data: null, error: fake.lookupError }
+                  const hits = fake.rows.filter((r) => r.wallet === wallet && terms.some((t) => ilike(r.signature, t)))
+                  fake.lookups.push({ filter, wallet, found: hits.length })
+                  return { data: hits.slice(0, n).map((r) => ({ id: r.id })), error: null }
+                },
+              }),
+            }),
           }),
         }),
         insert: (row: Record<string, unknown>) => ({
@@ -339,7 +346,16 @@ describe('orderData that differs from the signed order where M-07 does not compa
       expect(b.status).toBe(409)
       expect(b.json.error).toMatch(/^Order already exists/)
       expect(fake.rows).toHaveLength(1)
-      expect(fake.rows[0]).toMatchObject({ order_hash: hash, order_data: firstData })
+      // [A86 S-4] CHANGED: the stored order_data is the SIGNED order (signedDca's orderData is exactly the signed fields
+      // in the client's shapes), never the caller's bent copy firstData. The first post's differs line names the bent keys.
+      expect(fake.rows[0]).toMatchObject({ order_hash: hash })
+      expect(fake.rows[0].order_data).toEqual(orderData)
+      expect(fake.rows[0].order_data).not.toEqual(firstData)
+      const differs = warn.mock.calls
+        .map((c: unknown[]) => { try { return JSON.parse(String(c[0])) } catch { return null } })
+        .filter((x: Record<string, unknown> | null) => x?.event === 'orders_order_data_differs')
+      expect(differs[0]).toMatchObject({ outcome: 'stored', serverHash: hash, otherKeys: 0 })
+      expect(new Set(differs[0].fields)).toEqual(new Set(Object.keys(first)))
     },
   )
 })

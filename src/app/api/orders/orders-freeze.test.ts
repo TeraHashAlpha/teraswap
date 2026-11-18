@@ -46,8 +46,8 @@ const mockSingle = vi.fn()
 const mockInsert = vi.fn(() => ({ select: () => ({ single: () => mockSingle() }) }))
 const mockUpdate = vi.fn(() => ({ eq: () => ({ eq: () => ({ eq: () => ({ select: () => Promise.resolve({ data: [], error: null }) }) }) }) }))
 const mockDelete = vi.fn(() => ({ eq: () => Promise.resolve({ data: null, error: null }) }))
-// [A86 S-3] The route's pre-insert lookup by signature (.select('id').or(...).limit(1)): no existing row. Read-only.
-const mockLookup = vi.fn(() => ({ or: () => ({ limit: async () => ({ data: [], error: null }) }) }))
+// [A86 S-3] The route's pre-insert lookup by signature (.select('id').eq('wallet', …).or(...).limit(1).abortSignal(…) [A89 R2-3/R2-4]): no existing row. Read-only.
+const mockLookup = vi.fn(() => ({ eq: () => ({ or: () => ({ limit: () => ({ abortSignal: async () => ({ data: [], error: null }) }) }) }) }))
 const mockFrom = vi.fn((..._args: unknown[]) => ({
   insert: mockInsert,
   update: mockUpdate,

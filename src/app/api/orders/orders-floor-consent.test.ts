@@ -23,8 +23,8 @@ vi.mock('viem', async () => {
 const mockRpc = vi.fn()
 const mockSingle = vi.fn()
 const mockInsert = vi.fn((_row: Record<string, unknown>) => ({ select: () => ({ single: () => mockSingle() }) }))
-// [A86 S-3] The route's pre-insert lookup by signature (.select('id').or(...).limit(1)): no existing row.
-const mockLookup = vi.fn(() => ({ or: () => ({ limit: async () => ({ data: [], error: null }) }) }))
+// [A86 S-3] The route's pre-insert lookup by signature (.select('id').eq('wallet', …).or(...).limit(1).abortSignal(…) [A89 R2-3/R2-4]): no existing row.
+const mockLookup = vi.fn(() => ({ eq: () => ({ or: () => ({ limit: () => ({ abortSignal: async () => ({ data: [], error: null }) }) }) }) }))
 const mockFrom = vi.fn((..._args: unknown[]) => ({ insert: mockInsert, select: mockLookup }))
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
