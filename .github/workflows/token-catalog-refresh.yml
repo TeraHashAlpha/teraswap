@@ -33,6 +33,15 @@
 #    by hand. The fallback needs the repo setting "Allow GitHub Actions to create and
 #    approve pull requests".
 #
+# Untrusted tokens [fix/catalog-refresh-drops-untrusted]: tokens:sync no longer ships a token the
+# guard calls fatal. A NEW candidate is left out; a token already on the site that the fresh
+# CoinGecko list no longer holds is REMOVED, and the PR body OPENS with two sections — "Tokens
+# removed from the site by this refresh" and "Candidates left out" (scripts/token-catalog/lib/
+# refresh-decision.ts) — so merging the PR is the owner's decision to remove them. More than 20
+# removals or 5% of a chain, a dead upstream list, or a core/hand-pinned token that fails ⇒ that
+# chain changes NOTHING and the failure issue opens. The guard itself is untouched. One open issue
+# per chain (exact-title match); a passing run closes it, linking the run.
+#
 # Auto-merge [feat/catalog-auto-merge] — owner's scoped exception to "owner merges every PR":
 #  - After the PR exists, scripts/token-catalog/auto-merge-eligibility.mjs checks nine
 #    conditions (guard PASS, data-files-only diff, 0 removals, <=10 additions + size bound,
@@ -105,6 +114,8 @@ jobs:
           GUARD_RPC_8453_OVERRIDE: ${{ secrets.GUARD_RPC_8453 }}
           GUARD_RPC_42161_OVERRIDE: ${{ secrets.GUARD_RPC_42161 }}
           TOKENS_SYNC_CHAINS: ${{ matrix.chain }}
+          # decision artifacts (PR-body sections, blocked summary) — read by the PR + alert steps, never committed
+          TOKENS_SYNC_REPORT_DIR: catalog-refresh-report
         run: |
           if [ -n "$GUARD_RPC_1_OVERRIDE" ]; then export GUARD_RPC_1="$GUARD_RPC_1_OVERRIDE"; fi
           if [ -n "$GUARD_RPC_8453_OVERRIDE" ]; then export GUARD_RPC_8453="$GUARD_RPC_8453_OVERRIDE"; fi
@@ -232,7 +243,16 @@ jobs:
           # "a PR exists" (this step only runs on steps.gate.outcome == 'success').
           COUNTS_LINE="$(printf '%s\n' "$DIFF_SUMMARY" | head -n1)"
           BODY_FILE=$(mktemp)
+          # [fix/catalog-refresh-drops-untrusted] The body OPENS with the removals + left-out sections
+          # (written by tokens:sync, rendered from the pure decision module). They are the basis of the
+          # owner's merge decision — a missing file must stop the PR, never open it without them.
+          SECTIONS_FILE="catalog-refresh-report/pr-body.${CHAIN}.md"
+          if [ ! -s "$SECTIONS_FILE" ]; then echo "::error::chain ${CHAIN}: ${SECTIONS_FILE} is missing — refusing to open a PR without its removals section"; exit 1; fi
           {
+            cat "$SECTIONS_FILE"
+            echo ""
+            echo "---"
+            echo ""
             echo "Automated \`npm run tokens:sync\` refresh for chain **${CHAIN}** (cross-verified multi-source catalog + guard trust fixture). Gated by catalog-address-guard + catalog JSON invariants before this PR was opened. See docs/Prompts/CHORE-TOKEN-CATALOG-PIPELINE.md."
             echo ""
             echo "Guard: PASS (catalog-address-guard + no-network gates) — run ${RUN_URL} — ${COUNTS_LINE}"
@@ -365,6 +385,18 @@ jobs:
             gh api "repos/${REPO}/issues/${PR_NUM}/comments" -F body=@"${CHECKLIST_FILE}.body" > /dev/null
           fi
 
+      # [fix/catalog-refresh-drops-untrusted] A chain whose refresh PASSED (gate green, branch/PR/auto-merge
+      # steps done, or nothing to change) closes that chain's open failure issue, linking this run. It sits
+      # BEFORE the alert step so a failure here is still caught by the alert's `failure()`. Exact-title
+      # match on the open-issue list (scripts/token-catalog/lib/issue-plan.ts) — see the alert step.
+      - name: Close this chain's open failure issue (refresh passed, chain ${{ matrix.chain }})
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHAIN: ${{ matrix.chain }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: npx tsx --tsconfig tsconfig.json scripts/token-catalog/refresh-issue.ts close "$CHAIN" "$RUN_URL"
+
       - name: Loud failure alert — never a silent skip (chain ${{ matrix.chain }})
         # [chore/catalog-workflow-verified-commits-and-alerts] was `failure() &&
         # steps.gate.outcome == 'failure'` — if the REBUILD step throws (the most likely
@@ -389,7 +421,14 @@ jobs:
           # next best signal. Falls back to a generic marker so the alert is NEVER empty.
           # gate-output.log may not exist at all (build failed before the gate ran) — grep's
           # own nonzero exit on a missing file still falls through the || chain.
-          FIRST_ISSUE=$(grep -m1 -E '^\s*\[fatal\]' gate-output.log 2>/dev/null || grep -m1 'AssertionError' gate-output.log 2>/dev/null || echo 'see attached gate log for detail')
+          # [fix/catalog-refresh-drops-untrusted] a BLOCKED chain (cap / dead upstream list / protected token)
+          # writes blocked.<chain>.txt in the build step — its first line is the most specific finding.
+          BLOCKED_FILE="catalog-refresh-report/blocked.${{ matrix.chain }}.txt"
+          if [ -s "$BLOCKED_FILE" ]; then
+            FIRST_ISSUE=$(head -n1 "$BLOCKED_FILE")
+          else
+            FIRST_ISSUE=$(grep -m1 -E '^\s*\[fatal\]' gate-output.log 2>/dev/null || grep -m1 'AssertionError' gate-output.log 2>/dev/null || echo 'see attached gate log for detail')
+          fi
           FAILED_STEP="unknown step"
           if [ "$BUILD_OUTCOME" = "failure" ]; then
             FAILED_STEP="build (Rebuild token catalog)"
@@ -406,7 +445,6 @@ jobs:
           elif [ "$AUTOMERGE_OUTCOME" = "failure" ]; then
             FAILED_STEP="automerge (eligibility + auto-merge/label)"
           fi
-          TITLE="[token-catalog-guard] chain ${{ matrix.chain }} refresh failed"
           BODY_FILE=$(mktemp)
           {
             echo "The token-catalog-refresh cron FAILED for **chain ${{ matrix.chain }}** on \`$(date -u +%Y-%m-%d)\` — failed step: **${FAILED_STEP}**."
@@ -416,6 +454,14 @@ jobs:
             echo "$FIRST_ISSUE"
             echo '```'
             echo ""
+            if [ -s "$BLOCKED_FILE" ]; then
+              echo ""
+              echo "The refresh was blocked and changed nothing for this chain:"
+              echo '```'
+              head -c 6000 "$BLOCKED_FILE"
+              echo '```'
+            fi
+            echo ""
             echo "Full gate output (last 200 lines, if the gate step ran):"
             echo '```'
             tail -n 200 gate-output.log 2>/dev/null || echo '(gate step did not run — the build step failed first)'
@@ -424,10 +470,8 @@ jobs:
             echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           } > "$BODY_FILE"
 
-          EXISTING=$(gh issue list --search "in:title \"$TITLE\" is:open" --json number --jq '.[0].number' --repo "${{ github.repository }}" || true)
-          if [ -n "$EXISTING" ]; then
-            gh issue comment "$EXISTING" --repo "${{ github.repository }}" --body-file "$BODY_FILE"
-          else
-            gh issue create --repo "${{ github.repository }}" --title "$TITLE" --body-file "$BODY_FILE"
-          fi
+          # [fix/catalog-refresh-drops-untrusted] exact-title match on the open-issue LIST (not the search
+          # index): comment on the chain's open issue or open one — never a second issue. If the lookup
+          # itself fails the script exits non-zero without creating anything.
+          npx tsx --tsconfig tsconfig.json scripts/token-catalog/refresh-issue.ts alert "${{ matrix.chain }}" "$BODY_FILE"
           echo "::error::token-catalog-refresh FAILED for chain ${{ matrix.chain }} at step ${FAILED_STEP}: $FIRST_ISSUE"
