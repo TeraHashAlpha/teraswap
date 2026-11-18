@@ -14,6 +14,7 @@ import {
   ORDERS_READ_HEADER_SIGNATURE,
 } from '@/lib/order-engine/read-auth'
 import { bodySizeGuard } from '@/lib/body-limit'
+import { withOrderReadColumns, type OrderReadRow } from '../order-read-columns'
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const SIGNATURE_RE = /^0x[0-9a-fA-F]+$/
@@ -39,12 +40,16 @@ export async function GET(
   const supabase = getSupabase()
   if (!supabase) return NextResponse.json({ error: 'Not configured' }, { status: 503 })
 
-  const { data, error } = await supabase
-    .from('orders')
-    .select('*')
-    .eq('id', id)
-    .eq('wallet', wallet.toLowerCase())
-    .single()
+  // [fix/order-signature-not-returned] Explicit allow-list, never `*`: the EIP-712 `signature` is never returned,
+  // for a public terminal row or for an authenticated live one (order-read-columns.ts).
+  const { data, error } = await withOrderReadColumns((columns) =>
+    supabase
+      .from('orders')
+      .select(columns)
+      .eq('id', id)
+      .eq('wallet', wallet.toLowerCase())
+      .single<OrderReadRow>(),
+  )
 
   if (error || !data) {
     return NextResponse.json({ error: 'Order not found' }, { status: 404 })
