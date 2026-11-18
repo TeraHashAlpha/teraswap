@@ -35,7 +35,18 @@ vi.mock('@/lib/kv', () => ({
     get: (...a: unknown[]) => mockGet(...a),
     sadd: (...a: unknown[]) => mockSadd(...a),
     smembers: (...a: unknown[]) => mockSmembers(...a),
+    // [fix/log-routes-bounded-input] The module now reads the registry names' membership with one SMISMEMBER; it is
+    // answered from the same smembers fixture (owner answer 2026-11-17: mock plumbing only, no assertion changed).
+    smismember: async (key: unknown, members: unknown[]) => {
+      const set = await mockSmembers(key)
+      return members.map((m) => (set.includes(m as string) ? 1 : 0))
+    },
     del: (...a: unknown[]) => mockDel(...a),
+  },
+  // The known-sources prune (raw-text client): an empty set here; its own tests are in source-health-monitor.sec3.test.ts.
+  kvRaw: {
+    srandmember: async () => [],
+    srem: async () => 0,
   },
 }))
 

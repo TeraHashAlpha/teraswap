@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/supabase'
 import { safeCompare, isAllowedOrigin } from '@/lib/validation'
 import { checkSourceHealthAlerts, type SourceHealthFinding } from '@/lib/source-health-monitor'
+import { registrySourceNames } from '@/lib/adapters'
 
 // API-HIGH-03: CORS restricted to app domain (was wildcard *)
 function corsHeaders(req: Request) {
@@ -197,8 +198,11 @@ export async function GET(req: Request) {
     }> = {}
 
     for (const q of quotes) {
-      const sources = (q.sources_queried as string[]) || []
-      const responded = (q.sources_responded as string[]) || []
+      // [SEC-3, fix/log-routes-bounded-input] Stored arrays are read through the registry filter /api/log-quote writes
+      // with: a name outside the adapter registry (in rows written before the fix) gets no counter, no snapshot, no
+      // key-value command and no alert, and each row counts a registry source at most once.
+      const sources = registrySourceNames(q.sources_queried)
+      const responded = registrySourceNames(q.sources_responded)
       const best = q.best_source as string
       const responseMs = Number(q.response_time_ms) || 0
 

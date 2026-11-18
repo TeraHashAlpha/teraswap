@@ -116,3 +116,6 @@ ec6b1c4656977030020b2c7570e236ff932b1e40:src/lib/sanitize-error.test.ts:stripe-a
 # (8c51020) so the current content no longer matches; this fingerprint covers only the historical
 # commit, which cannot be changed without a history rewrite. Owner-approved 2026-11-06.
 3ec1c0499fe9cb6c6a255c575bcb7f55a84c7c62:src/lib/rpc-method-policy.ts:generic-api-key:34
+
+# src/app/api/body-limit.routes.test.ts — test fixture (fake bearer secret for route tests), never a credential, PR #713.
+b0c8df9fafd257874fa339d586515c9c8dfebac7:src/app/api/body-limit.routes.test.ts:generic-api-key:71
