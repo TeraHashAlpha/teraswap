@@ -41,8 +41,17 @@ import { makeCategoryResolver } from './lib/category'
 import { applyCuratedCorrections, correctSeed, CURATED_BASE_SEEDS, CURATED_ARBITRUM_SEEDS } from './lib/curated'
 import { collectVerdicts, writeTrustFixture } from './lib/verdicts'
 import { formatSingleSourceDryRun } from './lib/dry-run'
+import { deriveGuardOutcomes } from './lib/guard-gate'
+import { decideRefresh, renderBlockedSummary, renderPrBodySections, type DecisionLine, type RefreshDecision } from './lib/refresh-decision'
 
 const OUT_DIR = path.join('src', 'config', 'generated')
+
+/** [fix/catalog-refresh-drops-untrusted] Where the per-chain decision artifacts go (PR-body sections,
+ *  blocked summary, decision JSON). Never under src/ — the workflow reads them, nothing commits them. */
+const REPORT_DIR = process.env.TOKENS_SYNC_REPORT_DIR?.trim() || 'catalog-refresh-report'
+
+/** Removed / left-out lines get a real 7-day volume only for this many tokens per chain (one CoinGecko call each). */
+const VOLUME_LOOKUP_LIMIT = 40
 
 /** `--dry-run`: run the whole pipeline (live sources + RPC reads) but write NOTHING — no catalog,
  *  no trust fixture, no output dir — and print what the single-source volume rule would admit. */
@@ -191,6 +200,36 @@ function previousSourceCountsFor(chainId: number): SourceCounts | undefined {
   }
 }
 
+/** Thrown after every chain was processed when at least one chain's refresh was blocked. */
+export class RefreshBlockedError extends Error {}
+
+/** 7-day volume (sum of the last 7 daily 24h-volume readings, CoinGecko — the catalog's own volume source)
+ *  for the tokens a PR body lists. Any failure ⇒ null for that token ("n/a"), never a made-up number. */
+async function sevenDayVolumes(chainId: number, lines: DecisionLine[], log: (m: string) => void): Promise<Map<string, number | null>> {
+  const out = new Map<string, number | null>()
+  const wanted = lines.slice(0, VOLUME_LOOKUP_LIMIT)
+  for (const l of lines) out.set(l.address.toLowerCase(), null)
+  if (wanted.length === 0) return out
+  try {
+    const history = await makeVolumeHistoryFetcher(chainId, 7, undefined, log)(wanted.map((l) => l.address as `0x${string}`))
+    for (const [addr, h] of history) {
+      if (h.ok && h.dailyVolumeUsd.length > 0) out.set(addr, h.dailyVolumeUsd.slice(-7).reduce((a, b) => a + b, 0))
+    }
+  } catch (e) {
+    log(`7-day volume lookup failed (lines show n/a): ${String((e as Error)?.message ?? e)}`)
+  }
+  return out
+}
+
+function writeDecisionArtifacts(chainId: number, decision: RefreshDecision, volume7d: Map<string, number | null>): void {
+  fs.mkdirSync(REPORT_DIR, { recursive: true })
+  fs.writeFileSync(path.join(REPORT_DIR, `pr-body.${chainId}.md`), renderPrBodySections(decision, volume7d))
+  const { catalog, ...summary } = decision
+  fs.writeFileSync(path.join(REPORT_DIR, `decision.${chainId}.json`), JSON.stringify({ ...summary, kept: catalog.length }, null, 2) + '\n')
+  const blocked = renderBlockedSummary(decision, volume7d)
+  if (blocked) fs.writeFileSync(path.join(REPORT_DIR, `blocked.${chainId}.txt`), blocked)
+}
+
 function categoryResolver() {
   const seedCategories = new Map<string, string>()
   for (const t of DEFAULT_TOKENS) seedCategories.set(`1:${t.address.toLowerCase()}`, t.category)
@@ -213,6 +252,7 @@ async function run() {
   if (!DRY_RUN) fs.mkdirSync(OUT_DIR, { recursive: true })
   const builtAt = new Date().toISOString().slice(0, 10)
   const chains = chainsToRun()
+  const blockedChains: number[] = []
   if (chains.length !== PIPELINE_CONFIG.chains.length) log(`scoped run: chain(s) ${chains.join(', ')} (of ${PIPELINE_CONFIG.chains.join(', ')})`)
 
   for (const chainId of chains) {
@@ -249,9 +289,34 @@ async function run() {
       continue
     }
 
+    // [fix/catalog-refresh-drops-untrusted] The decision: what may ship for this chain. A token the
+    // guard calls fatal is left out (new) or removed (already on the site, listed in the PR body); a
+    // dead upstream list, a protected token or an over-cap removal blocks the chain and changes NOTHING.
+    const previousRows = [...previousCatalogFor(chainId).values()]
+    const decision = decideRefresh({
+      chainId,
+      previous: previousRows,
+      candidate: result.tokens,
+      audit: (rows) => deriveGuardOutcomes(chainId, [...rows], result.verdicts, allowlist),
+      protectedAddresses: new Set([...CORE_TOKENS[chainId].map((c) => c.address.toLowerCase()), ...handCuratedSeedsFor(chainId)]),
+      trustedList: { previous: previousSourceCountsFor(chainId)?.coingecko ?? null, current: result.sourceCounts.coingecko ?? null },
+      pipelineDropReasons: new Map(result.report.trustLost.map((t) => [t.address.toLowerCase(), t.reason])),
+    })
+    const volume7d = await sevenDayVolumes(chainId, [...decision.attempted.removed, ...decision.attempted.leftOut], log)
+    writeDecisionArtifacts(chainId, decision, volume7d)
+    log(`\ndecision: kept ${decision.catalog.length}, removed ${decision.attempted.removed.length}, left out ${decision.attempted.leftOut.length}`)
+    for (const l of decision.attempted.removed) log(`  REMOVED  ${l.symbol} ${l.address} — ${l.why}`)
+    for (const l of decision.attempted.leftOut) log(`  LEFT OUT ${l.symbol} ${l.address} — ${l.why}`)
+    if (decision.blocked) {
+      blockedChains[blockedChains.length] = chainId
+      log(`::error::refresh BLOCKED for chain ${chainId} (${decision.blocked.reason}): ${decision.blocked.detail} — nothing written for this chain`)
+      continue
+    }
+    const finalTokens = decision.catalog
+
     // keep only verdicts for tokens that actually shipped (the guard gate audits the
     // final catalog; extra rows would go stale as sources churn)
-    const shipped = new Set(result.tokens.map((t) => t.address.toLowerCase()))
+    const shipped = new Set(finalTokens.map((t) => t.address.toLowerCase()))
     allVerdicts.push(...result.verdicts.filter((v) => shipped.has(v.address.toLowerCase())))
 
     const file = path.join(OUT_DIR, `token-catalog.${chainId}.json`)
@@ -274,18 +339,18 @@ async function run() {
         requiredSourceForNew: PIPELINE_CONFIG.requiredSourceForNew,
       },
       sourcesUsed: [...result.sourcesUsed].sort(),
-      counts: { included: result.report.included, verified: result.report.verified, sourceCounts: result.sourceCounts },
-      tokens: result.tokens,
+      counts: { included: finalTokens.length, verified: finalTokens.filter((t) => t.verified).length, sourceCounts: result.sourceCounts },
+      tokens: finalTokens,
     }
     fs.writeFileSync(file, JSON.stringify(payload, null, 2) + '\n')
 
     // ── build report (feeds FEEDBACK) ──
-    const populatedVolume = result.tokens.filter((t) => t.volume24hUsd != null).length
+    const populatedVolume = finalTokens.filter((t) => t.volume24hUsd != null).length
     log(`\nwrote ${file}`)
-    log(`  volume24hUsd populated: ${populatedVolume}/${result.tokens.length}`)
+    log(`  volume24hUsd populated: ${populatedVolume}/${finalTokens.length}`)
     log(`  sources used: ${payload.sourcesUsed.join(', ') || 'NONE'}`)
     for (const n of result.sourceNotes) log(`  note: ${n}`)
-    log(`  included: ${result.report.included} (verified: ${result.report.verified})`)
+    log(`  included: ${finalTokens.length} (verified: ${finalTokens.filter((t) => t.verified).length})`)
     if (result.report.unverifiedSeeds.length) {
       log(`  UNVERIFIED SEEDS (kept, honest ⚠ — flag in FEEDBACK):`)
       for (const s of result.report.unverifiedSeeds) log(`    ${s.symbol} ${s.address} — ${s.reason}`)
@@ -312,8 +377,16 @@ async function run() {
     log('\ndry run complete — no files written')
     return
   }
-  const { file, count } = writeTrustFixture(allVerdicts, chains)
-  log(`\nrefreshed ${file}: ${count} verdicts (same pass as the catalog build)`)
+  // a blocked chain must NOT be passed as "covered": writeTrustFixture replaces a covered chain's rows
+  // with the (empty) verdict set and would wipe the verdicts the unchanged catalog still needs.
+  const written = chains.filter((c) => !blockedChains.includes(c))
+  if (written.length > 0) {
+    const { file, count } = writeTrustFixture(allVerdicts, written)
+    log(`\nrefreshed ${file}: ${count} verdicts (same pass as the catalog build)`)
+  }
+  if (blockedChains.length > 0) {
+    throw new RefreshBlockedError(`refresh blocked for chain(s) ${blockedChains.join(', ')} — see ${REPORT_DIR}/blocked.<chain>.txt; nothing was changed for them`)
+  }
 }
 
 // [fix/catalog-seeds-include-unverified-rows] CLI guard (same pattern as
@@ -327,7 +400,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     // [fix/catalog-trust-loss-means-previously-verified] one ::error:: annotation line so the
     // failure surfaces in the GitHub Actions run summary — no catalog written, no PR opened
     // (the PR step only runs after this script exits 0). Not tied to any separate alert wiring.
-    const label = e instanceof OutageSuspectedError ? 'catalog outage breaker tripped' : 'catalog build failed'
+    const label = e instanceof OutageSuspectedError ? 'catalog outage breaker tripped' : e instanceof RefreshBlockedError ? 'catalog refresh blocked' : 'catalog build failed'
     console.error(`::error::${label}: ${msg}`)
     process.exit(1)
   })
