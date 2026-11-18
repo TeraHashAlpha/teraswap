@@ -250,11 +250,56 @@ describe('POST /api/orders stores the server hash [S-5]', () => {
     expect((await post(body)).status).toBe(409)
   })
 
-  it('the hash covers only VERIFIED fields: a body field that differs from the signed one is refused, nothing stored', async () => {
+  it('a top-level body field that differs from the signed one fails recovery: 400 Signature mismatch, nothing stored', async () => {
     const { body } = await signedDca(3)
     const res = await post({ ...body, nonce: 8 })
     expect(res.status).toBe(400)
     expect(res.json.error).toBe('Signature mismatch')
     expect(fake.rows).toHaveLength(0)
   })
+})
+
+// [A86 S-1] The M-07 order_data cross-check (route.ts) compares owner, tokens, amounts, router, maxSlippageBps and a
+// non-zero routerDataHash only. These are the signed fields it does NOT compare, each bent in orderData to two values
+// that differ from the signed one. The stored hash must still be the signed order's (the verified message, never the
+// orderData copy), and the same signature re-posted with another orderData must not add a row.
+const FEED_A = '0x5555555555555555555555555555555555555555'
+const FEED_B = '0x6666666666666666666666666666666666666666'
+const SKIPPED: [string, Record<string, unknown>, Record<string, unknown>][] = [
+  ['orderType', { orderType: 0 }, { orderType: 1 }],
+  ['condition', { condition: 1 }, { condition: 2 }],
+  ['targetPrice', { targetPrice: '1' }, { targetPrice: '250000000000' }],
+  ['priceFeed', { priceFeed: FEED_A }, { priceFeed: FEED_B }],
+  ['expiry', { expiry: String(NOW_S + 7200) }, { expiry: String(NOW_S + 10_800) }],
+  ['nonce', { nonce: '8' }, { nonce: '9' }],
+  ['dcaInterval', { dcaInterval: '7200' }, { dcaInterval: '60' }],
+  ['dcaTotal', { dcaTotal: '4' }, { dcaTotal: '2' }],
+  ['routerDataHash (the body\'s is zero)', { routerDataHash: `0x${'12'.repeat(32)}` }, { routerDataHash: `0x${'34'.repeat(32)}` }],
+]
+const ALL_NINE: [string, Record<string, unknown>, Record<string, unknown>] = [
+  'all nine at once',
+  Object.assign({}, ...SKIPPED.map(([, first]) => first)),
+  Object.assign({}, ...SKIPPED.map(([, , second]) => second)),
+]
+
+describe('orderData that differs from the signed order where M-07 does not compare [A86 S-1]', () => {
+  it.each(([3, 2] as const).flatMap((v) => [...SKIPPED, ALL_NINE].map(([field, first, second]) => [v, field, first, second] as const)))(
+    'v%s, orderData differs in %s: stored order_hash = the signed order\'s contract hash; a re-post with other orderData is 409, one row',
+    async (version, _field, first, second) => {
+      const { body, hash } = await signedDca(version)
+      const orderData = body.orderData as Record<string, unknown>
+      const firstData = { ...orderData, ...first }
+
+      const a = await post({ ...body, orderData: firstData })
+      expect(a.status).toBe(201)
+      expect(a.json.order?.order_hash).toBe(hash)
+      expect(fake.rows.map((r) => r.order_hash)).toEqual([hash])
+
+      const b = await post({ ...body, orderData: { ...orderData, ...second } })
+      expect(b.status).toBe(409)
+      expect(b.json.error).toMatch(/^Order already exists/)
+      expect(fake.rows).toHaveLength(1)
+      expect(fake.rows[0]).toMatchObject({ order_hash: hash, order_data: firstData })
+    },
+  )
 })
