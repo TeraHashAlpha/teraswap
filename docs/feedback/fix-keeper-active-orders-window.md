@@ -1,112 +1,53 @@
 # fix/keeper-active-orders-window — SEC-4 (keeper's 15-row active-orders window)
 
-Keeper, fund-flow: Draft PR, **Auditor required**. Base origin/main `4a4129ef`. Long tables: `fix-keeper-active-orders-window.tables.md` (T1–T5).
+Keeper, fund-flow: Draft PR, **Auditor required**. Base origin/main `4a4129ef`. Long tables: `fix-keeper-active-orders-window.tables.md` (T1–T5, R1–R10).
 
 ## Round 2 — A88 audit (blocked 0C/3H at a9f12d9a), design 120b
 
-origin/main `bfe26155` merged first (`a01d9251`), `7bd3ec12` before the verify (`5d45dfe2`). Long tables: the tables file, R1–R9.
+Main merged `a01d9251` (bfe26155) and `5d45dfe2` (7bd3ec12). Tables R1–R10 in the tables file. Checklist (`978989a6`): all 10 items done.
 
-### Owner answers (asked once, 2026-11-18; they supersede the goal text)
+**Owner answers (asked once, 2026-11-18; they supersede the goal text).** 1. Carry-over keeps oldest-first order (re-read by
+id, and first, only when the rotating scan does not hold the row). 2. Multicall3 check: read-only public RPC allowed. 3. Expired
+rows always walked; ONE 15-row budget for rows the pre-screen cannot answer, rotating (least recently walked first); 5 s limits;
+added test: 40 unanswerable rows, one more walked within 3 cycles. 4. Register only walked DCA rows (main's quorum-wiring regex).
 
-1. Carry-over order: **oldest first**. A carried row is always attempted next cycle; when the rotating scan (M > 1000) did not
-   return it, it is re-read by id and goes first; when the scan holds it (always with M <= 1000) it keeps its oldest-first place,
-   so with M <= 15 the executed order is main's and the differential holds as written.
-2. Multicall3: **read-only public RPC** allowed: one `eth_getCode` and one `aggregate3` `eth_call` per chain on the chains' public
-   keyless endpoints; nothing from the project is sent.
-3. Path entry: off-chain-expired rows always enter the per-order path; every row the pre-screen could not answer shares ONE budget
-   of 15 per cycle, and the budget **rotates**: rows that used it go to the back of that queue next cycle. Time limits 5 s per
-   Supabase read and per Multicall3 chunk. Added test: 40 permanently unanswerable rows and one that becomes answerable: it is
-   walked within 3 cycles.
-4. `price-quorum-wiring.test.mjs` (main): register only the DCA rows the path walks; that one anchored line and its regex change.
+**Evidence.** (tests: P `active-scan-probes`, C `active-scan-cycle`, U `active-window`, Pr `active-scan-property`)
+1. Every finding fixed. S-1 asking without locking, 1000-row scan `executor.js:351,940`, only true rows walked `:1836` (P flood ×4,
+   Pr). S-2 failed scan read = main's 15 oldest, nothing moves `:801-818,992` (P 503 ×4). S-3 one tick at a time `:2643,3045`, prune
+   after two complete scans `active-window.js:243` (P overlap, C ×3). S-4 5 s on every read `:751`, count/wrap caught `:844,849` (P ×4).
+   S-5 carry-over incl. the SKIP row `:2336,2580`, re-read by id `:857` (P gas ×2, C). S-6 fills through a fake wallet (C ×3); M6
+   killed. S-7 alert warn then hourly, /health counters `:1013,2702` (C). S-8 random first page `:819` (P ×2). S-9 no count header
+   on the fallback `:806` (cycle test). S-10 dated notes ADR-024/026, runbook § 9. S-11 `Active scan:` line, validated numbers,
+   bodies <= 200 chars, ids/URLs masked `active-window.js:333-366` (U, C). S-12 slow-down removed; comments, both runbooks.
+2. Bound: every active row asked within ceil(M/1000) cycles + 1 per fallback cycle. Hiding one needs 1000 new rows/cycle
+   (2000/min): >= 200 IPs at 10/min and 6000 wallets/h at 20/wallet/h; one IP adds 5 rows/cycle (R2).
+3. Calls per cycle, nothing ready, RPC / Supabase main → branch: M=0 0→0 / 2→2; M=1 2→1 / 4→2; M=15 30→1 / 32→2; M=100 30→2 /
+   32→2; M=1000 30→20 / 32→2 (M=1500: 30→20 / 32→3). Each fill costs the same in both (R3).
+4. Differential: 500 runs (seeds 53759 + i·7919), 6000 cycles, 5096 fills, 0 differences (R4). Properties: 20 shipped seeds × 80
+   cycles, no double fill, <= 5/cycle, bound held, pre-screen wrote nothing; 30 pure seeds, no active row's streak pruned (R5).
+   Mutants: the goal's five + M6 + rotation killed; carried-literally-first caught by the differential (R6).
+5. Host log, one per cycle: `Active scan: active=<n> scanned=<n> true=<n> attempted=<n> carried=<n> rotate=no fallback=none`;
+   absent `Active scan query FAILED (`, `Pre-screen chunk`, `fallback=scan-`, `fallback=prescreen-`; not repeating `Supabase fetch
+   error (scan wrap):`, `Tick skipped:`; gone `Active window:`, `Querying:`, `Supabase returned`, `First order:` (runbook § 9).
+6. agent-verify --keeper --codeql, once, quiet (load 5–7): PASS on `c4c9a878` (suite 11090, CodeQL 13=13, keeper 2136 Node 20+22).
+   After it, `df38ad6b` restored the probe file (below): keeper 2137/2137 on Node 20 and 22, agent-verify NOT re-run (rule: once).
+   gen-claude-state current; gitleaks clean. Diff since a9f12d9a (this round's files): 16 files, +2541/−1006 at c4c9a878.
+   Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/keeper-active-orders-window. NOT verified: the reads
+   against a real Supabase (offset, id=in, count, max_rows), a real canExecute through Multicall3, the host, CI.
 
-### Checklist
+**Changed test expectations (CAPITALS; all other existing tests unchanged).**
+- COMMIT `cc262b34` SAID "NO ASSERTION CHANGED": WRONG. IT LOWERED THE FULL-SIZE FLOOD FLOOR `checked > 5000` TO `> 3000` (13 → 8
+  CYCLES), DELETED THE FULL-SIZE 10 % S-2 PROBE AND SHRANK THE SCALED S-2 AND S-8 PROBES. `df38ad6b` RESTORES THE FILE BYTE FOR BYTE.
+- REMOVED WITH THE SLOW-DOWN: 5 tests in `active-window.test.mjs`, 2 in `active-window-cycle.test.mjs`.
+- REMOVED WITH ROUND 1'S CURSOR-BY-REACHED-ROWS, KEEP-SET AND LOG LINE: `advanceActiveWindow` (5), `activeWindowKeepIds` (3), round
+  1's properties (4 + the shipped one, now `active-scan-property`), the `Active window:` line test.
+- ROUND 1 SELECTION TESTS MOVED TO `advanceScan`, SAME EXPECTATIONS; "CANNOT KNOW THE END" NOW READS WITHOUT A COUNT.
+- `active-window-cycle.test.mjs`: STEP 0 "<= 15 ASKS" → "<= SCAN_CAP + 15, PATH ASKS ONLY THE READY ROW"; `Active scan:` REGEXES;
+  WHOLE CHAIN EVERY CYCLE; RESTART AND IDLE-PROBE TESTS (SCAN 15) START AT A RANDOM PAGE (S-8); 400 FALLBACK MATCHES THE SCAN READ,
+  FLAG `fallback=scan-400`, + NO COUNT HEADER; PAUSED-BRANCH AND CONSTANT ANCHORS RENAMED.
+- MAIN'S `price-quorum-wiring.test.mjs`: REGISTERTOKENS REGEX AND NAME → WALKED DCA ROWS ONLY (owner answer 4).
 
-- [x] Probes of the audit as tests, each shown FAILING on a9f12d9a (flood 15/16/30, scan 503 at 0.5/2/10 %, overlap A-B-A-C,
-      count/wrap throwing or hanging, gas SKIP one cycle, restart loops) + the owner's 40-unanswerable test
-- [x] Scan <= 1000 rows (keyset pages), pre-screen via Multicall3 (chunks <= 50, 5 s each), struct from the path's own builder
-- [x] Walk: ready rows oldest first through the unchanged path; expired rows; rotating 15-row budget; MAX_BATCH unchanged
-- [x] Carry-over; pre-screen failure falls back, flagged; slow-down removed (state, tests, log field)
-- [x] S-2 S-3 S-4 S-6 S-7 S-8 S-9 S-10 S-11 S-12
-- [x] Shipped-cycle tests that really execute (MAX_BATCH mid-list, gas SKIP, carry-over); mutant M6 fails
-- [x] Differential vs origin/main (500 seeded runs, M <= 15); seeded properties; pre-screen chunk failures; mutation proof
-- [x] Multicall3 code + one aggregate3 call on Base and Arbitrum (public RPC)
-- [x] Runbooks, ADR-024 / ADR-026 dated notes
-- [x] Keeper suite Node 20 + 22; agent-verify --keeper --codeql (load < 10, once); gen-claude-state --check; push; evidence 1-6
-
-### Evidence (round 2)
-
-1. **Findings** (lines at the head below; tests in `active-scan-probes` P, `active-scan-cycle` C, `active-window` U, `-property` Pr):
-   S-1 fixed: ask without locking, scan `SCAN_CAP` 1000 `executor.js:351,940`, walk only true rows `:1836` — P flood ×4, Pr.
-   S-2 fixed: a failed scan read = main's 15 oldest, nothing moves `executor.js:801-818`, `:991-992` — P 503 ×3, Pr.
-   S-3 fixed: one tick at a time `executor.js:2643,3045`; prune only after two complete scans `active-window.js:243` — P overlap, C ×3.
-   S-4 fixed: 5 s on every Supabase read `executor.js:751`; count/wrap caught `:844,849` — P count/wrap ×4.
-   S-5 fixed: carry-over incl. the SKIP row `executor.js:2336,2580`, re-read by id `:857` — P gas ×2, C gas SKIP.
-   S-6 fixed: shipped cycles with a fake wallet that fills — C MAX_BATCH, gas SKIP, carry-over leads; M6 killed (R6).
-   S-7 fixed: alert warn then hourly + /health counters `executor.js:1013,2702` — C alert pacing, /health.
-   S-8 fixed: random first page when M > 1000 `executor.js:819` — P restart ×2. S-9 fixed: no count header on the fallback
-   `executor.js:806` — cycle "400 ⇒ today's query" (prefer = ""). S-10 fixed: <= 1000 ⇒ streaks count cycles; dated notes
-   ADR-024, ADR-026, runbook § 9. S-11 fixed: `Active scan:` line, validated numbers, bodies <= 200 chars, ids/URLs masked
-   `active-window.js:333-366` — U line, C detail line. S-12 fixed: slow-down removed; comments, both runbooks (§ 9, S2.5).
-2. **Bound**: every active row asked within ceil(M/1000) cycles + 1 per fallback cycle. Hiding a row takes 1000 new rows per
-   cycle = 2000/min; the create limits (10/min per IP, 20 per wallet per hour, no funds check) need >= 200 IPs and 6000
-   wallets/h for that. One IP: 5 rows/cycle (0.5 % of a scan) (R2).
-3. **Calls per cycle, none ready, main → branch** (R3): M=0 RPC 0→0, Supabase 2→2; M=1 2→1, 4→2; M=15 30→1, 32→2;
-   M=100 30→2, 32→2; M=1000 30→20, 32→2; M=1500 30→20, 32→3. Each fill costs the same in both.
-4. **Differential** 500 runs (seeds 53759 + i·7919), 6000 cycles, 5096 fills: 0 differences (R4). **Properties**: shipped,
-   20 seeds × 80 cycles: no double fill, <= 5/cycle, bound held (22,528 checks), pre-screen wrote nothing (8,674 writes);
-   pure: 30 seeds, no active row's entry pruned (R5). **Mutants** M1–M7 killed, M8 (carried first) by the differential (R6).
-5. **Host log** (each app, `pm2 logs <app> --lines 200 --nostream`): one per cycle
-   `Active scan: active=<n> scanned=<n> true=<n> attempted=<n> carried=<n> rotate=no fallback=none` (`scanned` = `active`
-   while <= 1000); absent: `Active scan query FAILED (`, `Pre-screen chunk`, `fallback=scan-`, `fallback=prescreen-`;
-   not repeating: `Supabase fetch error (scan wrap):`, `Tick skipped:`, `Cycle error:`; gone: `Active window:`,
-   `Querying:`, `Supabase returned`, `First order:`; `/health` stats `scanFallbackCycles`, `prescreenFallbackCycles`,
-   `overlapSkippedTicks` = 0.
-6. **Verify** (once, quiet: load1 7.04 / 5.31 at the two checks 15:36Z, no other verify or CodeQL): `agent-verify --keeper
-   --codeql` on `c4c9a878` **RESULT: PASS** — suite 11090/11090, lint +0/+0, tsc 0, build ok, parity 123, rpc-budget 36,
-   CodeQL 13 = 13 / 0 new, keeper 2136/2136 on Node 20 and 22 (R9). `gen-claude-state --check`: current. gitleaks: no leaks. diff since a9f12d9a, this round's files:
-   16 files, +2541 / −1006 (`executor.js` +568 lines touched, `active-window.js` rewritten, tests/fixture/rig ~2,000, docs
-   136). Verified head `c4c9a878`; HEAD adds only this paragraph and R9 (docs). Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/keeper-active-orders-window
-   **Not verified**: PostgREST accepting `offset=` with `or=` absent, `id=in.(…)` and the count against a real Supabase
-   (fake only); Supabase `max_rows` below 1000 (the count decides the end: a unit test, not a real server); Multicall3
-   beyond code presence and one `getChainId` call (no real `canExecute` through it); a run on the host; CI.
-
-### Changed test expectations (CAPITALS; every other existing test unchanged)
-
-- REMOVED WITH THE SLOW-DOWN: `active-window.test.mjs` "slow-down — only balance/allowance…" (4 tests) and "pruneSlowRows…";
-  `active-window-cycle.test.mjs` "shipped cycle — slow-down" (2 tests).
-- REMOVED WITH ROUND 1'S CURSOR-BY-REACHED-ROWS AND ROTATION KEEP-SET (replaced by carry-over / two complete scans):
-  `active-window.test.mjs` "advanceActiveWindow…" (5), "activeWindowKeepIds…" (3), round 1's property describe (4);
-  `active-window-cycle.test.mjs` round 1's seeded property (now `active-scan-property.test.mjs`); `active-window.test.mjs`
-  "the log line carries counts only" (round 1's `Active window:` format) → THE `Active scan:` LINE TESTS.
-- ROUND 1 SELECTION TESTS MOVED FROM advanceActiveWindow TO advanceScan, SAME EXPECTATIONS; "exactly 15 rows": THE
-  "CANNOT KNOW THE END" CHECK NOW READS WITHOUT A COUNT (the scan sends one); "empty table": COMPLETE SCAN = EMPTY SET.
-- `active-window-cycle.test.mjs`: STEP 0 "<= 15 ASKS PER CYCLE" → "<= SCAN_CAP + 15, THE PATH ASKS ONLY THE READY ROW";
-  EVERY `Active window:` REGEX → THE `Active scan:` LINE; "exactly 15 rows" / "one line per cycle": WHOLE CHAIN EVERY CYCLE;
-  "restart mid-rotation" (SCAN 15): A RESTART STARTS AT A RANDOM PAGE, NOT THE OLDEST (S-8); idle probe (SCAN 15): THE PAGE
-  AFTER THE FIRST RANDOM PAGE; 400 fallback: MATCHES THE SCAN READ (NO `or=` BELOW 1000 ROWS), FLAG `fallback=scan-400`,
-  LINE "Active scan query FAILED", + S-9 NO COUNT HEADER; "both fail" (SCAN 15): CURSOR AFTER THE FIRST RANDOM PAGE;
-  wiring: `advanceActiveScan(` / `prescreenRows(` ABSENT FROM THE PAUSED BRANCH; CONSTANTS `SCAN_CAP 1000`, `ONE_BY_ONE`.
-- MAIN'S `price-quorum-wiring.test.mjs`: registerTokens REGEX AND NAME → ONLY WALKED DCA ROWS (owner answer 4).
-
-### Feedback — round 2 (`2ee76254`…HEAD)
-
-#### Assumption that turned out wrong
-- A failing wrap read left the cursor on the newest row; the next cycle read an empty page and said `No active orders`
-  (idle cadence) with rows on the chain. Found by the S-4 probe; fixed before commit (R1).
-- The fixture faked `Date.now()` only: lock stamps (`new Date()`) and the stale-unlock cutoff ran on two clocks, so the S-3
-  probe could not hold a lock across ticks. `withFakes` now fakes both.
-
-#### Concern
-- The pre-screen asks at the start of a cycle: if one fill makes ANOTHER row ready in the same cycle, that row fills a cycle
-  later than on main (not modelled in the differential).
-- Ready rows that a gate defers (quorum skip, no route, deviation) are walked every cycle without a per-cycle cap beyond
-  MAX_BATCH fills (design: only MAX_BATCH / gas SKIP stop the loop); many of them lengthen a cycle. One tick at a time
-  absorbs it; `overlapSkippedTicks` shows it.
-- The new-DCA Telegram announcement now fires when a DCA order first answers true (enters the path), not when first locked.
-- Rows that answer false are no longer locked/unlocked, so their `updated_at` no longer moves each cycle (nothing reads it:
-  grep of `src/lib`, `src/app/api`, `workers`).
-- Chunks run one after another: if all 20 time out, the cycle spends 100 s in the pre-screen (then 15 rows one by one).
-- origin/main moved during the round (PR #715, keeper unchanged): merged again before the verify (`5d45dfe2`).
+Round-2 feedback (assumptions that were wrong, concerns): tables R10.
 
 ## Owner answers (asked once, 2026-11-17; they supersede the goal text)
 

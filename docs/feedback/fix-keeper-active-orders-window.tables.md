@@ -105,16 +105,17 @@ new = 1610; no existing test file is modified (`git diff --name-status origin/ma
 | Probe | a9f12d9a | branch |
 |---|---|---|
 | S-1 flood 15 / 16 / 30 rows per cycle, scan scaled to 100, 40 cycles | ✖ ×3 `flood 15/cycle (oldest row asked at cycles 0): row …000010 present in cycles 0..0 (M=60 …, bound 1) was never asked` — the oldest row asked once in 40 cycles | ✔ ×3 |
-| S-1 flood 30/cycle at SCAN_CAP 1000 (980 → 1190 rows) | ✖ `(M=980, … bound 1) was never asked canExecute; next ask at 1` | ✔ |
-| S-2 503 on the scan read, 0.5 / 2 / 10 % of 200 cycles, 100 rows, scan 25 | ✖ ×3 `after the fallback cycle 99 the scan restarted at row 15 instead of continuing at row 85` (24 → row 60, 4 → row 60) | ✔ ×3 |
+| S-1 flood 30/cycle at SCAN_CAP 1000 (980 → 1340 rows, 13 cycles) | ✖ `(M=980, … bound 1) was never asked canExecute; next ask at 1` | ✔ |
+| S-2 503 on the scan read, 0.5 / 2 / 10 % of 200 cycles, 200 rows, scan 50 | ✖ ×3 `after the fallback cycle 99 the scan restarted at row 15 instead of continuing at row 85` (24 → row 160, 4 → row 60) | ✔ ×3 |
+| S-2 10 % at SCAN_CAP 1000 (2000 rows, 30 cycles) | ✖ `(M=2000, fallback cycles=0, bound 2) was never asked canExecute; next ask at 2` | ✔ |
 | S-3 A (receipt held) – B (tick) – A ends – C, 45 rows, streak rows 16..25 | ✖ `after cycle 4, 10 of the 10 active rows lost their ADR-026 streak` (and 2 cycles ran at once) | ✔ (B skipped) |
 | S-4 count read throws / hangs; wrap read throws / hangs (5 s limit rewritten to 100 ms) | ✖ `cycle 2: fetch failed`, `cycle 2 did not finish within 3000 ms (hung)`, `cycle 8: fetch failed`, `cycle 8 … (hung)` | ✔ ×4 |
 | S-5 gas SKIP once on the ready row (300 rows; and scan scaled to 50) | ✖ ×2 `the ready order skipped by gas in cycle 9 was not executed in cycle 10` | ✔ ×2 (cycle 0 SKIP, cycle 1 fill) |
-| S-8 200 rows, restart every 10 cycles (30 cycles) | ✖ `50 of 200 rows never asked across 3 processes` | ✔ |
+| S-8 500 rows, restart every 10 cycles (50 cycles) | ✖ `350 of 500 rows never asked across 5 processes` | ✔ |
 | S-8 300 rows, scan 50, restart every 3 cycles (15 processes) | ✖ `255 of 300 rows never asked across 15 processes` | ✔ |
 | Owner: 40 unanswerable rows + one walked within 3 cycles (2 variants) | ✔ ×2 (round 1's window also rotated) | ✔ ×2 |
 
-Totals: a9f12d9a 16 fail / 2 pass; branch 18 / 18. Found while writing S-4: with the wrap read failing, the cursor sat on the
+Totals (the file as restored at `df38ad6b`, identical to `11502c78`): a9f12d9a 17 fail / 2 pass; branch 19 / 19. Found while writing S-4: with the wrap read failing, the cursor sat on the
 newest row, the next cycle read an empty page and logged `No active orders` (returning 0 = idle cadence) although rows
 existed. Fixed before commit: no head ⇒ the next scan starts at the oldest row (`active-window.js:210`), and an empty page
 whose wrap failed is a scan fallback (`executor.js:844`). Found while writing S-3: the fixture faked `Date.now()` but not
@@ -174,14 +175,15 @@ later on the branch.
   a removed row's entry goes by the second complete scan after it left (> 100 removals checked).
 
 ## R6. Mutation proof (scratch copies of the executor directory, one textual mutant each; the five active-scan /
-active-window test files, Node 22; then the differential for M8)
+active-window test files, Node 22; then the differential for M8). Counts from the run on the probe file as it is now
+(`11502c78` = `df38ad6b`); a second run on `cc262b34`'s weakened file killed the same mutants (M4 by 4 instead of 5)
 
 | Mutant | Killed by |
 |---|---|
 | M1 pre-screen trusted: the path skips its own canExecute when the pre-screen said true | 7 tests (S-5 ×2, S-3 overlap, owner "becomes answerable", S-3 two-scans, gas SKIP, v2 builder equality) |
 | M2 carry-over dropped (`carryIds = []`) | 4 (S-5 scaled, carry-over leads, gas SKIP, MAX_BATCH mid-list) |
 | M3 overlap guard removed | 2 (S-3 overlap probe, one-tick-at-a-time) |
-| M4 a scan fallback moves the cursor (round 1's behaviour) | 4 (S-2 ×3, the shipped property) |
+| M4 a scan fallback moves the cursor (round 1's behaviour) | 5 (S-2 ×4 incl. the full-size one, the shipped property) |
 | M5 a streak pruned after ONE complete scan | 3 (S-3 two-scans shipped, two keepIdsAfterScans units) |
 | M6 the audit's M6 here: every walked row counted as reached | 3 (carry-over leads, gas SKIP, MAX_BATCH mid-list) |
 | M7 the one-by-one budget does not rotate | 4 (owner's test, Multicall3 absent, two planWalk units) |
@@ -196,9 +198,11 @@ callData: getChainId()}])`, 2026-11-18 14:52Z:
 
 ## R8. Keeper suite and CPU (Node 20.20.2 and 22.23.5, `node --test` in `contracts/order-engine/executor`)
 
-At `cc262b34`: Node 22 2136/2136, Node 20 2136/2136. At `a01d9251` (a9f12d9a merged with main, before round 2): 2098/2098 (Node 22).
-New and changed files, user CPU (Node 22): probes 3.98 s (9.75 s before `cc262b34`), cycle 0.47 s, property 1.80 s,
-active-window 0.60 s, active-window-cycle 0.41 s.
+At `a01d9251` (a9f12d9a merged with main, before round 2): 2098/2098 (Node 22). At `cc262b34`: 2136/2136 on Node 20 and 22.
+At `df38ad6b` (probe file restored): 2137/2137 on Node 20 and 22 (load 8.7 at the start).
+User CPU per new file (Node 22): probes 9.75 s at `11502c78` and again now (13.8 s measured at load ~8), cycle 0.47 s, property
+1.80 s, active-window 0.60 s, active-window-cycle 0.41 s. `cc262b34` had cut the probes to 3.98 s by weakening them (below,
+and CAPITALS in the feedback file); `df38ad6b` reverted that. chain-verify.test.mjs:765 passed in every run beside it.
 
 ## R9. The one verify run (owner rule: when no other verify or CodeQL runs and the 1-minute load is under 10)
 
@@ -222,3 +226,29 @@ RESULT: PASS
 
 `node scripts/gen-claude-state.mjs --check`: `CLAUDE.md state block is current`. `gitleaks git --log-opts=a9f12d9a..HEAD`:
 67 commits scanned, no leaks found.
+
+The verified head `c4c9a878` carried `cc262b34`'s weakened probe file. `df38ad6b` restored it byte for byte to `11502c78`; the
+keeper suite was run again on Node 20 and 22 (2137/2137) but agent-verify was not (the goal allows one run).
+
+## R10. Round-2 feedback (moved here to keep the round-2 section of the feedback file to one screen)
+
+#### Assumption that turned out wrong
+- A failing wrap read left the cursor on the newest row; the next cycle read an empty page and said `No active orders`
+  (idle cadence) with rows on the chain. Found by the S-4 probe; fixed before commit (R1).
+- The fixture faked `Date.now()` only: lock stamps (`new Date()`) and the stale-unlock cutoff ran on two clocks, so the S-3
+  probe could not hold a lock across ticks. `withFakes` now fakes both.
+
+#### Concern
+- The pre-screen asks at the start of a cycle: if one fill makes ANOTHER row ready in the same cycle, that row fills a cycle
+  later than on main (not modelled in the differential).
+- Ready rows that a gate defers (quorum skip, no route, deviation) are walked every cycle without a per-cycle cap beyond
+  MAX_BATCH fills (design: only MAX_BATCH / gas SKIP stop the loop); many of them lengthen a cycle. One tick at a time
+  absorbs it; `overlapSkippedTicks` shows it.
+- The new-DCA Telegram announcement now fires when a DCA order first answers true (enters the path), not when first locked.
+- Rows that answer false are no longer locked/unlocked, so their `updated_at` no longer moves each cycle (nothing reads it:
+  grep of `src/lib`, `src/app/api`, `workers`).
+- Chunks run one after another: if all 20 time out, the cycle spends 100 s in the pre-screen (then 15 rows one by one).
+- origin/main moved during the round (PR #715, keeper unchanged): merged again before the verify (`5d45dfe2`).
+- `cc262b34` weakened the probe file to save CPU and its message said "No assertion changed": wrong; reverted in `df38ad6b`
+  (CAPITALS in the feedback file). The CPU concern stands: the probe file costs ~10 s of CPU, more than round 1's 8.9 s file
+  that turned chain-verify.test.mjs:765 red beside it on a loaded Mac; it passed in every run here.
