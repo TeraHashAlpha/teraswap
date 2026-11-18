@@ -32,3 +32,21 @@ export function planPassClose(chainId: number | string, open: readonly IssueRef[
   const title = failureIssueTitle(chainId)
   return open.filter((i) => i.title === title).map((i) => i.number).sort((a, b) => a - b)
 }
+
+// ── held-back sources (growth breaker) ───────────────────────────────────────────────────────
+// ONE open "[token-catalog-guard] chain N source growth held back" issue per chain. A run that holds
+// a source back comments on it (or creates it); a run that holds nothing back closes it — the owner
+// accepted the size (accepted-source-sizes.json) or the list shrank back. Same exact-title rule.
+
+export function heldBackIssueTitle(chainId: number | string): string {
+  return `[token-catalog-guard] chain ${chainId} source growth held back`
+}
+
+export type HeldBackPlan = { action: 'create' } | { action: 'comment'; number: number } | { action: 'close'; numbers: number[] } | { action: 'none' }
+
+export function planHeldBackIssue(chainId: number | string, open: readonly IssueRef[], heldCount: number): HeldBackPlan {
+  const title = heldBackIssueTitle(chainId)
+  const mine = open.filter((i) => i.title === title).sort((a, b) => a.number - b.number)
+  if (heldCount > 0) return mine.length > 0 ? { action: 'comment', number: mine[0].number } : { action: 'create' }
+  return mine.length > 0 ? { action: 'close', numbers: mine.map((i) => i.number) } : { action: 'none' }
+}

@@ -17,7 +17,9 @@ Scoped exception to "the owner merges every PR manually": the weekly `token-cata
 | C7 | Workflow identity | branch pattern/run id, PR author ≠ PAT owner, ≠ 1 commit, commit not directly on base, author ≠ `github-actions[bot]`, wrong headline |
 | C8 | Existing rows keep identity | an existing row changes symbol/decimals; trust-fixture edits outside this chain |
 | C9 | CI will run | PR was opened with the `GITHUB_TOKEN` fallback (CI never starts → auto-merge would wait forever) |
+| C10 | No source held back | the refresh's `decision.<chain>.json` lists ≥ 1 source the growth breaker held back (a source list that grew by more than 50%), or the file is missing / unreadable (fail closed) |
 
+   Owner rule (2026-11-18): auto-merge only with 0 removals (C3) AND 0 held-back sources (C10) AND additions within the cap (C4, 10 ≤ the refresh's own cap of 25 per chain). To accept a held-back source's new size, add `"<chainId>:<source>": <size>` to `scripts/token-catalog/accepted-source-sizes.json` in a reviewed commit.
    C8/C9 are stricter than the owner's seven. Cap 10 = 9 of the last 11 merged refresh PRs; with the single-source rule ON, Base/Arbitrum PRs routinely exceed it and are always reviewed.
 3. Eligible ⇒ `gh pr merge --auto --squash --match-head-commit <sha>` with the job's `GITHUB_TOKEN`; GitHub then merges when the **required** checks pass. Not eligible ⇒ label `catalog-review` + one checklist comment (updated in place on re-runs). If GitHub refuses auto-merge the PR also takes the review path.
 

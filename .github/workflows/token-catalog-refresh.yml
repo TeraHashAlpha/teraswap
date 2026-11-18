@@ -42,10 +42,17 @@
 # chain changes NOTHING and the failure issue opens. The guard itself is untouched. One open issue
 # per chain (exact-title match); a passing run closes it, linking the run.
 #
+# Growth breaker + weekly cap [fix/catalog-refresh-drops-untrusted, owner decision 2026-11-18]: a source list
+# that grew by more than 50% against the previous run is not used (the previous snapshot stands in; the PR body
+# and ONE issue per chain say source, chain, old and new size) until the owner accepts the new size in
+# scripts/token-catalog/accepted-source-sizes.json. A refresh adds at most 25 new tokens per chain (highest
+# 7-day volume first, never past the chain's size bound); the rest are listed under "Candidates held back by
+# the weekly cap". Auto-merge needs 0 removals AND 0 held-back sources AND additions within the cap (C3, C10, C4).
+#
 # Auto-merge [feat/catalog-auto-merge] — owner's scoped exception to "owner merges every PR":
-#  - After the PR exists, scripts/token-catalog/auto-merge-eligibility.mjs checks nine
+#  - After the PR exists, scripts/token-catalog/auto-merge-eligibility.mjs checks ten
 #    conditions (guard PASS, data-files-only diff, 0 removals, <=10 additions + size bound,
-#    no single-source rows on mainnet, valid added rows, workflow identity, ...). ALL pass →
+#    no single-source rows on mainnet, valid added rows, workflow identity, 0 held-back sources, ...). ALL pass →
 #    `gh pr merge --auto --squash` (GitHub waits for the branch-protection required checks;
 #    nothing is bypassed). Otherwise → label `catalog-review` + a checklist comment.
 #  - Needs the repo setting Settings → General → "Allow auto-merge" (OFF today → the step
@@ -346,6 +353,7 @@ jobs:
             --base "$(git rev-parse HEAD)" --head "$HEAD_SHA" --head-ref "$BRANCH" \
             --guard "$GUARD_OUTCOME" --pr-author "$PR_AUTHOR" --expected-author "$EXPECTED_AUTHOR" \
             --ci-triggered "$CI_TRIGGERED" --run-id "$RUN_ID" \
+            --decision-file "catalog-refresh-report/decision.${CHAIN}.json" \
             --checklist-file "$CHECKLIST_FILE" > "$RESULT_FILE"; then
             echo "eligible=false" > "$RESULT_FILE"
             echo '**Catalog auto-merge: NOT eligible** — the eligibility script crashed (fail-closed). See the run log.' > "$CHECKLIST_FILE"
@@ -396,6 +404,18 @@ jobs:
           CHAIN: ${{ matrix.chain }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: npx tsx --tsconfig tsconfig.json scripts/token-catalog/refresh-issue.ts close "$CHAIN" "$RUN_URL"
+
+      # [fix/catalog-refresh-drops-untrusted] Growth breaker: a source list that grew by more than 50% was not
+      # used this run. The chain's ONE "source growth held back" issue is commented on (or created) while any
+      # source is held back, and closed when none is. Reads this run's decision file; a missing / malformed
+      # file fails the step (never "nothing held back" by default). Exact-title match, see issue-plan.ts.
+      - name: Held-back sources issue (chain ${{ matrix.chain }})
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHAIN: ${{ matrix.chain }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: npx tsx --tsconfig tsconfig.json scripts/token-catalog/refresh-issue.ts held "$CHAIN" "catalog-refresh-report/decision.${CHAIN}.json" "$RUN_URL"
 
       - name: Loud failure alert — never a silent skip (chain ${{ matrix.chain }})
         # [chore/catalog-workflow-verified-commits-and-alerts] was `failure() &&

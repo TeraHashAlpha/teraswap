@@ -52,6 +52,19 @@ describe('token-catalog-refresh.yml wiring', () => {
     expect(alert).toContain('blocked.${{ matrix.chain }}.txt')
   })
 
+  it('rule D: the auto-merge step hands the eligibility script this chain\'s decision file', () => {
+    const am = stepBody('Auto-merge when eligible')
+    expect(am).toContain('--decision-file "catalog-refresh-report/decision.${CHAIN}.json"')
+  })
+
+  it('rule A: a passing run comments on / creates / closes the chain\'s ONE held-back issue from the decision file', () => {
+    const held = stepBody('Held-back sources issue')
+    expect(held).toContain('if: success()')
+    expect(held).toContain('refresh-issue.ts held "$CHAIN" "catalog-refresh-report/decision.${CHAIN}.json" "$RUN_URL"')
+    expect(held).not.toContain('--search')
+    expect(wf.indexOf('Held-back sources issue')).toBeLessThan(wf.indexOf('Loud failure alert'))
+  })
+
   it('the report dir is gitignored (decision artifacts are never committed)', () => {
     expect(readFileSync(join(root, '.gitignore'), 'utf8')).toMatch(/^\/?catalog-refresh-report\/?$/m)
   })
