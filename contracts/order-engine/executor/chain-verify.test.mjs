@@ -750,16 +750,31 @@ describe("chain-verify — no secret survives a refusal, whatever shape it arriv
   // noise cannot inflate. Each repetition itself times a small batch of calls and divides by the
   // batch size, which keeps the per-call time well above timer-resolution noise even for inputs
   // fast enough that a single call would measure as 0ms.
+  //
+  // [fix/flaky-tests-root-cause] The minimum is only immune to noise if every batch has the same
+  // chance of escaping it. It used to time all small batches first, each a tenth as long as a large
+  // one: on a loaded machine a short batch often runs inside one scheduler time slice and keeps its
+  // true cost, a batch ten times longer almost never does, so contention inflated the large side
+  // alone (CI: 54.2x once on Node 20). Now the two sizes are timed INTERLEAVED (load that comes or
+  // goes mid-test hits both) and with the SAME WORK per batch (SCALE times the calls on the input
+  // SCALE times smaller, so both batches last as long). Measured on Node 20, 20 rounds each, machine
+  // at load average ~85: old shape 19 rounds over the bound (median worst ratio 53.4), interleaving
+  // alone 20 (71.8), interleaved with equal work 0 (12.6). Total work per row is unchanged.
   const RATIO_BOUND = 30
-  function timeMinOf(input, { batches = 5, callsPerBatch = 10 } = {}) {
-    let min = Infinity
+  const SCALE = 10
+  function perCallMs(input, calls) {
+    const started = performance.now()
+    for (let c = 0; c < calls; c++) redactUrls(input)
+    return (performance.now() - started) / calls
+  }
+  function timeMinPair(small, large, { batches = 5, largeCallsPerBatch = 5 } = {}) {
+    let tSmall = Infinity
+    let tLarge = Infinity
     for (let b = 0; b < batches; b++) {
-      const started = performance.now()
-      for (let c = 0; c < callsPerBatch; c++) redactUrls(input)
-      const perCall = (performance.now() - started) / callsPerBatch
-      if (perCall < min) min = perCall
+      tSmall = Math.min(tSmall, perCallMs(small, largeCallsPerBatch * SCALE))
+      tLarge = Math.min(tLarge, perCallMs(large, largeCallsPerBatch))
     }
-    return min
+    return { tSmall, tLarge }
   }
 
   test(
@@ -777,10 +792,11 @@ describe("chain-verify — no secret survives a refusal, whatever shape it arriv
       ]
       for (const [label, make, base] of EVIL) {
         const small = make(base)
-        const large = make(base * 10)
+        const large = make(base * SCALE)
+        const timed = timeMinPair(small, large)
         // The 0.001 floor only guards divide-by-zero; batching keeps it from firing in practice.
-        const tSmall = Math.max(timeMinOf(small), 0.001)
-        const tLarge = timeMinOf(large)
+        const tSmall = Math.max(timed.tSmall, 0.001)
+        const tLarge = timed.tLarge
         const ratio = tLarge / tSmall
         assert.ok(
           ratio < RATIO_BOUND,
