@@ -7,6 +7,8 @@
  *           (process.env access spy) — the browser key is not touched.
  *  - UNSET: with RPC_URL_<id> unset, the URL is the browser env's / public default, i.e. what
  *           the code did before the split (the pre-existing suites also pass unchanged).
+ *           [fix/mainnet-rpc-out-of-client, SEC-5] Except mainnet: NEXT_PUBLIC_RPC_URL is no longer a server step
+ *           (RPC_URL_1, then RPC_URL, then the public default). Base/Arbitrum unchanged.
  *
  * Distinct sentinel values per name so a leak is attributable. Placeholders only — no real keys.
  */
@@ -90,10 +92,10 @@ describe('RPC_URL_<id> SET — no server path uses a NEXT_PUBLIC_* RPC', () => {
 })
 
 describe('RPC_URL_<id> UNSET — behaviour is what it was (browser env, then public default)', () => {
-  it('adapters/shared resolves the NEXT_PUBLIC_* values', async () => {
+  it('adapters/shared resolves the deprecated L2 NEXT_PUBLIC_* values; mainnet ignores NEXT_PUBLIC_RPC_URL [SEC-5]', async () => {
     setEnv(false)
     const shared = await import('@/lib/adapters/shared')
-    expect([1, 8453, 42161].map((id) => shared.getRpcUrlForChain(id))).toEqual([PUB[1], PUB[8453], PUB[42161]])
+    expect([1, 8453, 42161].map((id) => shared.getRpcUrlForChain(id))).toEqual(['https://eth.llamarpc.com', PUB[8453], PUB[42161]])
   })
 
   it('legacy RPC_URL still wins over NEXT_PUBLIC_RPC_URL for mainnet only', async () => {

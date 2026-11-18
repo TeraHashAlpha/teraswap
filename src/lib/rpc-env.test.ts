@@ -31,11 +31,13 @@ afterEach(() => {
 })
 
 describe('server order', () => {
-  it('mainnet: RPC_URL_1 > RPC_URL > NEXT_PUBLIC_RPC_URL > llamarpc', () => {
+  // [fix/mainnet-rpc-out-of-client, SEC-5] NEXT_PUBLIC_RPC_URL is no longer a server step: it was a browser-era name,
+  // read literally in browser-reachable modules, so its value (a provider URL with its key) was in a client chunk.
+  it('mainnet: RPC_URL_1 > RPC_URL > llamarpc; NEXT_PUBLIC_RPC_URL is ignored', () => {
     expect(serverRpcUrl(1)).toBe('https://eth.llamarpc.com')
     expect(rpcEnvSource(1)).toBe(RPC_SOURCE_DEFAULT)
     process.env.NEXT_PUBLIC_RPC_URL = 'https://pub.test'
-    expect([serverRpcUrl(1), rpcEnvSource(1)]).toEqual(['https://pub.test', 'NEXT_PUBLIC_RPC_URL'])
+    expect([serverRpcUrl(1), rpcEnvSource(1), serverRpcEnvUrl(1)]).toEqual(['https://eth.llamarpc.com', RPC_SOURCE_DEFAULT, undefined])
     process.env.RPC_URL = 'https://legacy.test'
     expect([serverRpcUrl(1), rpcEnvSource(1)]).toEqual(['https://legacy.test', 'RPC_URL'])
     process.env.RPC_URL_1 = 'https://srv.test'
@@ -61,8 +63,8 @@ describe('server order', () => {
 
   it('an empty value counts as unset (same `||` semantics as before)', () => {
     process.env.RPC_URL_1 = ''
-    process.env.NEXT_PUBLIC_RPC_URL = 'https://pub.test'
-    expect(rpcEnvSource(1)).toBe('NEXT_PUBLIC_RPC_URL')
+    process.env.RPC_URL = 'https://legacy.test'
+    expect(rpcEnvSource(1)).toBe('RPC_URL')
   })
 
   it('throws on a chain with no resolver (never a silent mainnet fallback)', () => {
@@ -71,14 +73,18 @@ describe('server order', () => {
   })
 })
 
-describe('browser order (unchanged: NEXT_PUBLIC_* > default; RPC_URL_<id> ignored)', () => {
+describe('browser order (RPC_URL_<id> ignored; mainnet has no browser env name any more)', () => {
   it('ignores the server names entirely', () => {
     process.env.RPC_URL_1 = 'https://srv.test'
     process.env.RPC_URL = 'https://legacy.test'
     expect(browserRpcUrl(1)).toBe('https://eth.llamarpc.com')
     expect(browserRpcEnvUrl(1)).toBeUndefined()
+  })
+
+  it('[SEC-5] NEXT_PUBLIC_RPC_URL is not read for mainnet: the public default, whatever it holds', () => {
     process.env.NEXT_PUBLIC_RPC_URL = 'https://pub.test'
-    expect(browserRpcUrl(1)).toBe('https://pub.test')
+    expect(browserRpcUrl(1)).toBe('https://eth.llamarpc.com')
+    expect(browserRpcEnvUrl(1)).toBeUndefined()
   })
 })
 

@@ -120,11 +120,15 @@ jobs:
           # check below can prove they are absent from every client chunk. `.invalid` never resolves.
           NEXT_PUBLIC_BASE_RPC_URL: "https://base-provider.invalid/v2/CAPTURE-MARKER-BASE-RPC-KEY"
           NEXT_PUBLIC_ARBITRUM_RPC_URL: "https://arbitrum-provider.invalid/v2/CAPTURE-MARKER-ARBITRUM-RPC-KEY"
+          # [fix/mainnet-rpc-out-of-client, SEC-5] The retired mainnet names: no code reads them, and this proves none ships.
+          NEXT_PUBLIC_RPC_URL: "https://mainnet-provider.invalid/v2/CAPTURE-MARKER-MAINNET-RPC-KEY"
+          NEXT_PUBLIC_FALLBACK_RPC_1: "https://fallback1-provider.invalid/v2/CAPTURE-MARKER-FALLBACK-RPC-1-KEY"
+          NEXT_PUBLIC_FALLBACK_RPC_2: "https://fallback2-provider.invalid/v2/CAPTURE-MARKER-FALLBACK-RPC-2-KEY"
           NEXT_PUBLIC_SUPABASE_URL: "https://capture-marker-project.supabase.co"
           NEXT_PUBLIC_SUPABASE_ANON_KEY: "CAPTURE-MARKER-SUPABASE-ANON-KEY"
           NEXT_PUBLIC_SENTRY_DSN: "https://capturemarkerdsn@o0.ingest.sentry.io/0"
       - name: Run the third-party-host capture (v1 + v2, 3 chains, no wallet; then wallets; then the bundle)
         run: npx playwright test --config e2e/third-party-hosts/playwright.config.ts
         env:
-          CAPTURE_BUNDLE_MARKERS: "CAPTURE-MARKER-BASE-RPC-KEY,CAPTURE-MARKER-ARBITRUM-RPC-KEY,base-provider.invalid,arbitrum-provider.invalid,capture-marker-project.supabase.co,CAPTURE-MARKER-SUPABASE-ANON-KEY,capturemarkerdsn@o0.ingest.sentry.io"
+          CAPTURE_BUNDLE_MARKERS: "CAPTURE-MARKER-BASE-RPC-KEY,CAPTURE-MARKER-ARBITRUM-RPC-KEY,base-provider.invalid,arbitrum-provider.invalid,CAPTURE-MARKER-MAINNET-RPC-KEY,mainnet-provider.invalid,CAPTURE-MARKER-FALLBACK-RPC-1-KEY,fallback1-provider.invalid,CAPTURE-MARKER-FALLBACK-RPC-2-KEY,fallback2-provider.invalid,capture-marker-project.supabase.co,CAPTURE-MARKER-SUPABASE-ANON-KEY,capturemarkerdsn@o0.ingest.sentry.io"
 

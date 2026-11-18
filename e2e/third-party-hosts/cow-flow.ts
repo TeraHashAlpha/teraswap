@@ -96,7 +96,8 @@ function answerCall(to: string, data: Hex): Hex | null {
 
 const hex = (n: number | bigint) => `0x${n.toString(16)}`
 
-function answerRpc(chainId: number, rpc: { id?: unknown; method?: string; params?: unknown[] }) {
+/** One JSON-RPC answer as the chain `chainId`. Exported for e2e/mainnet-rpc-session, which serves it as /api/rpc's REAL upstream. */
+export function answerRpc(chainId: number, rpc: { id?: unknown; method?: string; params?: unknown[] }) {
   const ok = (result: unknown) => ({ jsonrpc: '2.0', id: rpc?.id ?? null, result })
   const now = Math.floor(Date.now() / 1000)
   switch (rpc?.method) {
