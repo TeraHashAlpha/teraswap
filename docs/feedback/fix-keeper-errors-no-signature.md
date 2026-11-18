@@ -24,7 +24,15 @@ Keeper code: Draft PR, **Auditor required**. Tables: `fix-keeper-errors-no-signa
 - [x] 4. Property: seeds 1..24 × 40 in CI; `S2_SEEDS=1-500` green locally (20,000 + 20,000 cases). Mutants on a
       scratch copy: hex scrub removed, cap removed, shortMessage ignored, plus three more, all killed (tables §4).
       App test red with origin/main's channels 10/19, green 19/19.
-- [ ] 5. Verify, diff --stat, head SHA, compare link, NOT verified.
+- [x] 5. `agent-verify.sh --keeper --codeql`, ONE run on a quiet machine (load1 3.5, no other verify/CodeQL), head
+      232aa5e6, base origin/main 85a6f9cb: **PASS**: suite 11,110/0 (521 files), lint +0/+0, tsc 0, build ok, parity 123,
+      rpc-budget 36, CodeQL 13 = 13 (0 new), keeper Node 20 and 22 2,167/0/0 cancelled. `gen-claude-state --check`: current.
+      gitleaks over the 7 code commits: no leaks. diff --stat: 16 files, +1,585/−76 (executor.js, basket-*, package.json
+      untouched). Merges clean with origin/main 85a6f9cb. Compare:
+      https://github.com/TeraHashAlpha/teraswap/compare/main...fix/keeper-errors-no-signature
+      NOT verified: CI (owner opens the Draft PR); real Telegram/Resend/Discord delivery (fetch stubbed, no host
+      touched; Telegram's 4,096 and HTML refusals are the audit's measurement); viem errors from a real provider (local
+      stub only); a keeper on a chain; Linux (no permission code changed); seeds beyond 1-500; L-1 left open.
 
 ## Feedback — fix-keeper-errors-no-signature
 
