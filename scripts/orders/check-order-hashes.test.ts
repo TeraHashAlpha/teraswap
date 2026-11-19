@@ -208,14 +208,140 @@ describe('A86 S-2 / S-8 (fixture order-rows-a86.json)', () => {
     expect(leaked).toEqual([])
   })
 
-  it('safeText prints only a hash- or UUID-shaped text', () => {
+  // (safeText: see 'a stored order_hash is never printed, only its shape and digest [A95 S-1]' below.)
+})
+
+// [A89 R2-2, R2-5] A stored order_hash that is a window of the row's OWN signature has the shape of a hash, so the
+// shape rule alone printed it; and the CLI's last-resort redact (130+ hex) had no test of its own.
+describe('the row\'s own signature is never printed [A89 R2-2, R2-5]', () => {
+  const base = rows.find((r) => r.id === 'v3-dca-match')!
+  // Signature-shaped with distinct bytes (low s, v 27), so every 10-hex window is specific: built, not a signature of anything.
+  const R = keccak256(toBytes('A89 R2-2 r')).slice(2)
+  const S = (BigInt(keccak256(toBytes('A89 R2-2 s'))) % (SECP256K1_N / 2n)).toString(16).padStart(64, '0')
+  const TWIN_S = (SECP256K1_N - BigInt(`0x${S}`)).toString(16).padStart(64, '0')
+  const SIG = `0x${R}${S}1b`
+  const HEX = SIG.slice(2)
+  /** Every 10-hex window of the signature and of its high-s twin text that appears in `printed`. */
+  const leaked = (printed: string) => {
+    const lower = printed.toLowerCase()
+    return [HEX, `${R}${TWIN_S}1c`].flatMap((h) =>
+      Array.from({ length: h.length - 9 }, (_, i) => h.slice(i, i + 10)).filter((w) => lower.includes(w)))
+  }
+  const WINDOWS: [string, string][] = [
+    ['r', `0x${R}`],
+    ['s', `0x${S}`],
+    ['a middle window', `0x${HEX.slice(33, 97)}`],
+    ['the last 64 hex (end of s + v)', `0x${HEX.slice(66)}`],
+    ['r in upper case without 0x', R.toUpperCase()],
+    ['the s of the high-s twin', `0x${TWIN_S}`],
+  ]
+
+  it.each(WINDOWS)('a stored order_hash that is %s of the row\'s signature: <hash-shaped> + digest, on stdout and stderr', (_label, window) => {
+    const r = run(JSON.stringify([
+      { ...base, id: 'window-differs', order_hash: window, signature: SIG },
+      { ...base, id: 'window-uncomputable', order_hash: window, order_data: null, signature: SIG },
+    ]))
+    expect(lines(r.stdout).find((o) => o.id === 'window-differs')).toMatchObject({
+      verdict: 'differs', stored: '<hash-shaped>', storedDigest: keccak256(toBytes(window)).slice(2, 18),
+    })
+    expect(r.stderr).toContain(`uncomputable {"id":"window-uncomputable","chain_id":8453,"stored":"<hash-shaped>","storedDigest":"${keccak256(toBytes(window)).slice(2, 18)}"`)
+    expect(leaked(r.stdout + r.stderr)).toEqual([])
+  })
+
+  it.each([
+    ['with 0x', SIG, 132],
+    ['without 0x', HEX, 130],
+  ])('R2-5 last-resort redact: a row whose id is a signature (%s) is printed as <redacted len N> on both streams', (_label, id, len) => {
+    const r = run(JSON.stringify([
+      { ...base, id, order_hash: `0x${'ab'.repeat(32)}`, signature: `0x${'cd'.repeat(64)}1b` },
+      { ...base, id, order_hash: null, order_data: null, signature: `0x${'ef'.repeat(64)}1b` },
+    ]))
+    expect(lines(r.stdout).find((o) => o.verdict === 'differs')).toMatchObject({ id: `<redacted len ${len}>` })
+    expect(r.stderr).toContain(`uncomputable {"id":"<redacted len ${len}>"`)
+    expect(leaked(r.stdout + r.stderr)).toEqual([])
+  })
+})
+
+// [A95 S-1] A stored order_hash that is not the computed one is never printed: the old rule printed any hash-shaped text,
+// except an exact 64-hex window of the row's own signature, so a text mixing signature hex with other hex was printed as stored.
+describe('a stored order_hash is never printed, only its shape and digest [A95 S-1]', () => {
+  const base = rows.find((r) => r.id === 'v3-dca-match')!
+  const R = keccak256(toBytes('A95 S-1 r')).slice(2)
+  const S = (BigInt(keccak256(toBytes('A95 S-1 s'))) % (SECP256K1_N / 2n)).toString(16).padStart(64, '0')
+  const SIG = `0x${R}${S}1b`
+  const HEX = SIG.slice(2)
+  const TWIN_S = (SECP256K1_N - BigInt(`0x${S}`)).toString(16).padStart(64, '0')
+  const FOUR = [HEX, `${R}${S}00`, `${R}${TWIN_S}1c`, `${R}${TWIN_S}01`]
+  const digest16 = (text: string) => keccak256(toBytes(text)).slice(2, 18)
+  /** Every 8-hex window of any of the 4 texts of the signature that appears in `printed`. */
+  const leakedRuns = (printed: string) => {
+    const lower = printed.toLowerCase()
+    return FOUR.flatMap((h) => Array.from({ length: h.length - 7 }, (_, i) => h.slice(i, i + 8)).filter((w) => lower.includes(w)))
+  }
+
+  it.each([
+    ['0x + 60 hex of the signature + ffff', `0x${HEX.slice(10, 70)}ffff`],
+    ['32 hex of r + 32 other hex', `0x${R.slice(0, 32)}${'f0e1d2c3b4a59687'.repeat(2)}`],
+    ['a stored hash of another order', `0x${'cd'.repeat(32)}`],
+    ['a UUID', '3f1c2a4e-9b7d-4c1e-8a2f-5d6e7f8a9b0c'],
+  ])('differs, stored = %s: shape + digest on stdout, uncomputable the same on stderr, no 8-hex run of the signature', (_label, text) => {
+    const r = run(JSON.stringify([
+      { ...base, id: 'differs-row', order_hash: text, signature: SIG },
+      { ...base, id: 'uncomputable-row', order_hash: text, order_data: null, signature: SIG },
+    ]))
+    const shape = /^(?:0[xX])?[0-9a-fA-F]{64}$/.test(text) ? '<hash-shaped>' : `<string len ${text.length}>`
+    expect(lines(r.stdout).find((o) => o.id === 'differs-row')).toMatchObject({ verdict: 'differs', stored: shape, storedDigest: digest16(text) })
+    expect(r.stderr).toContain(`uncomputable {"id":"uncomputable-row","chain_id":8453,"stored":"${shape}","storedDigest":"${digest16(text)}"`)
+    expect(leakedRuns(r.stdout + r.stderr)).toEqual([])
+    expect(r.stdout + r.stderr).not.toContain(text.slice(2, 22))
+  })
+
+  it('non-canonical (the computed hash in another spelling): shape + digest, the computed hash still printed', () => {
+    const computed = checkRows([base])[0] as Extract<Verdict, { verdict: 'match' }>
+    const upper = `0x${computed.computed.slice(2).toUpperCase()}`
+    const r = run(JSON.stringify([{ ...base, id: 'upper', order_hash: upper, signature: SIG }]))
+    expect(lines(r.stdout)[0]).toMatchObject({ verdict: 'non-canonical', stored: '<hash-shaped>', storedDigest: digest16(upper), computed: computed.computed })
+    expect(r.stdout).not.toContain(upper)
+  })
+
+  it('safeText: a shape, never the text; digest = first 16 hex of keccak256', () => {
     const h = `0x${'ab'.repeat(32)}`
-    expect(safeText(h)).toBe(h)
-    expect(safeText(h.slice(2).toUpperCase())).toBe(h.slice(2).toUpperCase())
-    expect(safeText('6f1c2a90-3b7e-4c1d-9a2e-5d6f7a8b9c0d')).toBe('6f1c2a90-3b7e-4c1d-9a2e-5d6f7a8b9c0d')
+    expect(safeText(h)).toBe('<hash-shaped>')
+    expect(safeText(h.slice(2).toUpperCase())).toBe('<hash-shaped>')
+    expect(safeText('6f1c2a90-3b7e-4c1d-9a2e-5d6f7a8b9c0d')).toBe('<string len 36>')
     expect(safeText(`0x${'ab'.repeat(65)}`)).toBe('<string len 132>')
-    expect(safeText('not-a-hash')).toBe('<string len 10>')
-    expect(safeText(42)).toBe('<number>')
+    expect(safeText(42)).toBe('<type number>')
     expect(safeText(null)).toBeNull()
+  })
+
+  it('property, seeded: 1,000 rows whose stored order_hash is cut from the row\'s own signature leave no 8-hex run of it on either stream', () => {
+    let state = 95_002
+    const rand = () => {
+      state = (state + 0x6d2b79f5) >>> 0
+      let t = state
+      t = Math.imul(t ^ (t >>> 15), t | 1)
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    }
+    const int = (lo: number, hi: number) => lo + Math.floor(rand() * (hi - lo + 1))
+    const hexOf = (n: number) => Array.from({ length: n }, () => '0123456789abcdef'[int(0, 15)]).join('')
+    const input = Array.from({ length: 1000 }, (_, i) => {
+      const len = int(8, 64)
+      const src = FOUR[int(0, 3)]
+      const at = int(0, src.length - len)
+      let text = src.slice(at, at + len)
+      const pad = 64 - len
+      if (pad > 0) { const left = int(0, pad); text = hexOf(left) + text + hexOf(pad - left) }
+      if (rand() < 0.5) text = text.toUpperCase()
+      const k = int(0, 2)
+      text = k === 0 ? `0x${text}` : k === 1 ? `0X${text}` : text
+      if (rand() < 0.15) text = `${text.slice(0, 20)}-${text.slice(20)}`
+      // every third row cannot be computed, so its stored text goes through the stderr path
+      return { ...base, id: `row-${i}`, order_hash: text, order_data: i % 3 === 0 ? null : base.order_data, signature: SIG }
+    })
+    const r = run(JSON.stringify(input))
+    expect(lines(r.stdout).length).toBeGreaterThan(600)
+    expect(r.stderr.split('\n').filter((l) => l.startsWith('uncomputable ')).length).toBe(334)
+    expect(leakedRuns(r.stdout + r.stderr)).toEqual([])
   })
 })
