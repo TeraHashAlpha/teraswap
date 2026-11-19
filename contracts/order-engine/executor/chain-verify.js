@@ -254,10 +254,14 @@ const flatten = (s) =>
  * never reached the refusal. Appended when it adds something: redacted like the rest, then every configured secret
  * removed by value (a path echoed with no host has nothing redactUrls anchors on), then cut to DETAILS_MAX — the cut
  * comes after the scrub, so it never leaves half a secret — and on the same one line.
+ * [A96 R3-3] The head gets the same scrub, FIRST: before redactUrls and before the flatten, which turns a line break into
+ * a plain space (a key a provider split over two lines, in a revert reason, would read `half half` and never match). Head
+ * and details are then both scrubbed, so `head.includes(details)` compares like with like and the provider's words, which
+ * viem puts on both, are printed once.
  */
 const DETAILS_MAX = 300
 function errText(err) {
-  const head = flatten(redactUrls((err && err.shortMessage) || (err && err.message) || String(err)))
+  const head = flatten(redactUrls(redactSecretLiterals((err && err.shortMessage) || (err && err.message) || String(err))))
   let details = ""
   try {
     if (err && typeof err.details === "string") details = flatten(redactSecretLiterals(redactUrls(err.details)))

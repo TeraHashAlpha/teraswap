@@ -312,7 +312,8 @@ function secretLiterals(env) {
 // encodes (any mix of encoded and plain characters, either hex case), each HTML entity (`&amp;` `&lt;` `&#47;` `&#x2F;`,
 // what Telegram's HTML text carries) and each JSON / JS string escape (`\"` `\'` `\\` `\/` `/`, an error body
 // quoted as JSON) is its character, ASCII letters are lower case (an upper-cased or lower-cased echo), and a line break
-// with the spaces and tabs around it is nothing at all (a key split over two lines is still the key). Other characters
+// with the spaces and tabs around it is nothing at all (a key split over two lines is still the key; [A96 R3-2] a break
+// or a tab written as a JSON escape, `\n` `\r` `\t` `\u000a` `\u000d` `\u0009`, is the same break or tab). Other characters
 // are their UTF-8 bytes. A plain space that touches no line break is an ordinary character.
 // One pass over the text, a map back to its positions, an indexOf per form: linear, no regex (a pattern per secret
 // character overflows V8's regex compiler at about 1,200 characters, and an AWS session token is longer).
@@ -339,6 +340,31 @@ function emitCodePoint(cp, start, end, emit) {
   )
 }
 
+/**
+ * [A96 R3-2] A blank or a line break at `i`: `{ brk, byte, len }`, or null. A literal space, tab, CR or LF; with `decode`, also
+ * how a JSON string writes them: `\n` `\r` (breaks), `\t` (a blank), and `\u000a` `\u000d` (breaks) `\u0009` (a blank), either
+ * hex case. viem's HttpRequestError quotes the HTTP body as JSON, so a key the provider broke over two lines arrives as
+ * `half\n   half`: the walk must read that `\n` as the line break it is, or the two halves never join.
+ */
+function readSpace(text, i, n, decode) {
+  const c = text.charCodeAt(i)
+  if (isBlank(c)) return { brk: false, byte: c, len: 1 }
+  if (isBreak(c)) return { brk: true, byte: c, len: 1 }
+  if (decode && c === 92 && i + 1 < n) {
+    // The letter is read in either case, like every ASCII letter in the walk: a secret that holds `\T` is echoed lower-cased
+    // as `\t`, and the text and the secret must read that pair alike (else the lower-cased echo never matches).
+    const d = text.charCodeAt(i + 1) | 32
+    if (d === 110 || d === 114) return { brk: true, byte: d === 110 ? 10 : 13, len: 2 } // \n \r
+    if (d === 116) return { brk: false, byte: 9, len: 2 } // \t
+    if (d === 117 && i + 5 < n && [2, 3, 4, 5].every((k) => isHexCode(text.charCodeAt(i + k)))) {
+      const cp = parseInt(text.slice(i + 2, i + 6), 16)
+      if (cp === 10 || cp === 13) return { brk: true, byte: cp, len: 6 }
+      if (cp === 9) return { brk: false, byte: 9, len: 6 }
+    }
+  }
+  return null
+}
+
 /** The escape that starts at `i` (`%XX`; `\"` `\'` `\\` `\/` `\uXXXX`; an HTML entity): `{ byte | cp, len }`, or null. */
 function readEscape(text, i, n) {
   const c = text.charCodeAt(i)
@@ -348,7 +374,7 @@ function readEscape(text, i, n) {
   if (c === 92 && i + 1 < n) {
     const d = text.charCodeAt(i + 1)
     if (d === 34 || d === 39 || d === 92 || d === 47) return { byte: d, len: 2 }
-    if (d === 117 && i + 5 < n && [2, 3, 4, 5].every((k) => isHexCode(text.charCodeAt(i + k)))) {
+    if ((d | 32) === 117 && i + 5 < n && [2, 3, 4, 5].every((k) => isHexCode(text.charCodeAt(i + k)))) {
       return { cp: parseInt(text.slice(i + 2, i + 6), 16), len: 6 }
     }
   }
@@ -371,16 +397,28 @@ function eachCanonicalByte(text, emit, decode = true) {
   const n = text.length
   let i = 0
   while (i < n) {
-    const c = text.charCodeAt(i)
-    if (isBlank(c) || isBreak(c)) {
+    const space = readSpace(text, i, n, decode)
+    if (space !== null) {
+      // A run of blanks; if a line break follows it, the run, the break and every blank or break after it are nothing.
       let j = i
-      while (j < n && isBlank(text.charCodeAt(j))) j++
-      if (j < n && isBreak(text.charCodeAt(j))) {
-        while (j < n && (isBlank(text.charCodeAt(j)) || isBreak(text.charCodeAt(j)))) j++
+      let next = space
+      while (next !== null && !next.brk) {
+        j += next.len
+        next = j < n ? readSpace(text, j, n, decode) : null
+      }
+      if (next !== null) {
+        while (next !== null) {
+          j += next.len
+          next = j < n ? readSpace(text, j, n, decode) : null
+        }
         i = j
         continue
       }
-      for (; i < j; i++) if (emit(text.charCodeAt(i), i, i + 1)) return
+      while (i < j) {
+        const blank = readSpace(text, i, n, decode)
+        if (emit(blank.byte, i, i + blank.len)) return
+        i += blank.len
+      }
       continue
     }
     if (decode) {
@@ -442,23 +480,39 @@ function literalForms(literal) {
       return false
     }
     if (start > pos) tokens.push({ decoded: "", raw: rawBytes(literal.slice(pos, start)) })
-    current = { start, decoded: String.fromCharCode(b), raw: rawBytes(literal.slice(start, end)) }
+    current = { start, end, decoded: String.fromCharCode(b), raw: rawBytes(literal.slice(start, end)) }
     tokens.push(current)
     pos = end
     return false
   })
   if (pos < literal.length) tokens.push({ decoded: "", raw: rawBytes(literal.slice(pos)) })
-  const escapes = tokens.filter((t) => t.decoded !== t.raw).length
-  const forms = new Set()
-  const build = (pickRaw) => {
-    let e = 0
-    return tokens.map((t) => (t.decoded === t.raw ? t.decoded : pickRaw(e++) ? t.raw : t.decoded)).join("")
+  // [A96 R3-2] A blank (a space or tab, or `\t` / `\u0009` written as the escape) has a third reading: in the TEXT a line break
+  // beside it swallows it (`Z*` LF `\ty)` reads `Z*y)`), so a secret holding one is also searched with that blank dropped.
+  for (const t of tokens) {
+    const src = t.start === undefined ? null : literal.slice(t.start, t.end)
+    const space = src === null ? null : readSpace(src, 0, src.length, true)
+    t.options = [...new Set(space !== null && !space.brk && space.len === src.length ? [t.decoded, t.raw, ""] : [t.decoded, t.raw])]
   }
-  if (escapes > MAX_ESCAPE_TOKENS) {
-    forms.add(build(() => false))
-    forms.add(build(() => true))
+  const variable = tokens.filter((t) => t.options.length > 1)
+  const combos = variable.reduce((n, t) => n * t.options.length, 1)
+  const forms = new Set()
+  const build = (pick) => {
+    let v = 0
+    return tokens.map((t) => (t.options.length > 1 ? t.options[Math.min(pick(v++), t.options.length - 1)] : t.options[0])).join("")
+  }
+  if (combos > 2 ** MAX_ESCAPE_TOKENS) {
+    for (const reading of [0, 1, 2]) forms.add(build(() => reading)) // all as decoded, all as written, all blanks dropped
   } else {
-    for (let mask = 0; mask < 2 ** escapes; mask++) forms.add(build((i) => (mask >> i) & 1))
+    for (let n = 0; n < combos; n++) {
+      forms.add(
+        build((i) => {
+          // digit i of n, in the mixed radix of the variable tokens (the same order as the tokens)
+          let rest = n
+          for (let k = 0; k < i; k++) rest = Math.floor(rest / variable[k].options.length)
+          return rest % variable[i].options.length
+        }),
+      )
+    }
   }
   forms.delete("")
   return [...forms]
