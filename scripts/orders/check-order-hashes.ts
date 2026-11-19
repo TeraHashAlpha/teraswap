@@ -16,15 +16,16 @@
  * Exit: 0 at least one row, every row byte-equal, no group, every row signed · 1 anything else, including an empty
  * array [A86 S-8] · 2 unreadable input.
  *
- * A stored text is printed only when it has the shape of a hash or a UUID, otherwise as `<string len N>`; a hash-shaped
- * text that is a window of the row's own signature as `<signature fragment len N>` [A89 R2-2]; as a last guard every
- * printed line has any run of 130+ hex characters replaced.
+ * [A95 S-1] A stored order_hash is never printed: only its shape (`<hash-shaped>`, `<string len N>`, `<type T>`) and
+ * `storedDigest`, the first 16 hex of keccak256 of the text, to match two reports about one text. (A text that mixes hex of
+ * the row's own signature with other hex has the shape of a hash, so no rule about "a fragment of the signature" is
+ * complete.) As a last guard every printed line has any run of 130+ hex characters replaced.
  *
  * Reads stdin only. No network, no database, no environment, no writes: rows found here are for the
  * owner to decide on (this change deliberately ships no migration and no backfill).
  */
 // @ts-expect-error TS5097 - Node's native type stripping requires the .ts extension; tsc is noEmit here
-import { checkRows, groupRows, safeText } from './check-order-hashes-lib.ts'
+import { checkRows, groupRows, safeText, storedDigest } from './check-order-hashes-lib.ts'
 
 async function readStdin(): Promise<string> {
   let text = ''
@@ -51,20 +52,16 @@ try {
 }
 
 const count = { match: 0, 'non-canonical': 0, differs: 0, uncomputable: 0 }
-// [A89 R2-2] Each row's own signature, so a stored text that is a window of it is never printed (safeText).
-const signatureOf = (i: number): unknown => {
-  const row = rows[i] as Record<string, unknown> | null
-  return row && typeof row === 'object' ? row.signature : undefined
-}
-verdicts.forEach((v, i) => {
+verdicts.forEach((v) => {
   count[v.verdict]++
-  const stored = safeText(v.stored, signatureOf(i))
+  const stored = safeText(v.stored)
+  const digest = storedDigest(v.stored)
   if (v.verdict === 'differs') {
-    out({ verdict: 'differs', id: v.id, chain_id: v.chain_id, stored, computed: v.computed, version: v.version })
+    out({ verdict: 'differs', id: v.id, chain_id: v.chain_id, stored, storedDigest: digest, computed: v.computed, version: v.version })
   } else if (v.verdict === 'non-canonical') {
-    out({ verdict: 'non-canonical', id: v.id, chain_id: v.chain_id, stored, computed: v.computed })
+    out({ verdict: 'non-canonical', id: v.id, chain_id: v.chain_id, stored, storedDigest: digest, computed: v.computed })
   } else if (v.verdict === 'uncomputable') {
-    err(`uncomputable ${JSON.stringify({ id: v.id, chain_id: v.chain_id, stored, reason: v.reason })}`)
+    err(`uncomputable ${JSON.stringify({ id: v.id, chain_id: v.chain_id, stored, storedDigest: digest, reason: v.reason })}`)
   }
 })
 const groups = groupRows(rows, verdicts)

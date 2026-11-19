@@ -16,7 +16,9 @@ import { verifyRouterDataHash } from '@/lib/order-engine/canonical-route'
 import { STOP_LOSS_DEFERRED_REASON, LIMIT_TP_CHAIN_ID } from '@/lib/order-engine/limit-launch'
 import { ORDER_EIP712_TYPES, ORDER_V3_EIP712_TYPES, MAX_ORDER_SLIPPAGE_BPS } from '@/lib/order-engine/types'
 // [fix/orders-server-side-order-hash, audit 2026-11-16 S-5] The stored order hash is the server's.
-import { computeOrderHash, normalizeOrderHashText, orderSignatureEncodings } from '@/lib/order-engine/order-hash'
+import {
+  computeOrderHash, normalizeOrderHashText, orderSignatureEncodings, describeCallerText, callerTextDigest,
+} from '@/lib/order-engine/order-hash'
 import { getDcaMinChunkUsd } from '@/lib/order-engine/dca-custom'
 // [FEAT-DCA-FLOOR-TIERS] Server-side floor tier + the consent it requires.
 import { checkTokenOnChain } from '@/lib/order-engine/token-on-chain'
@@ -815,21 +817,16 @@ export async function POST(req: NextRequest) {
     // docs/feedback/fix-orders-server-side-order-hash.md.
     // [A86 S-7] The line is written once the request's outcome is known (stored / exists / error), so it never
     // names a row this request did not store: `serverHash` is the hash of the signed order, `outcome` says what
-    // happened to it. It never carries the signature or the wallet; the caller's text appears only when it has the
-    // shape of a hash (0x/0X/no prefix + 64 hex), anything else as `<string len N>` (a caller that put its
-    // signature in orderHash leaves no fragment of it in the log), a non-string by its type.
+    // happened to it. It never carries the signature or the wallet.
+    // [A95 S-1] Nor any text the caller sent: the caller's orderHash appears only as its SHAPE (<hash-shaped> /
+    // <string len N> / <type T>) and the first 16 hex of its keccak256, to match two lines about one text. A text that mixes
+    // signature hex with other hex has the shape of a hash, so no rule about which hex "belongs to the signature" can be
+    // complete (A89 R2-1 had one); the line carries none of it.
     // [A86 S-3] The 4 texts of this signature that recover the same signer (v 27/28 or 0/1, s or its twin n − s).
     const signatureTexts = orderSignatureEncodings(body.signature) ?? [body.signature.toLowerCase()]
-    // [A89 R2-1] A hash-shaped text can still be 32 bytes of this request's own signature (r, s, any 64-hex window): such a
-    // text is never logged, only its length. Checked against all 4 texts (the twin's s gives s away as well).
-    const isSignatureFragment = (text: string) => {
-      const hex = text.replace(/^0[xX]/, '').toLowerCase()
-      return signatureTexts.some((sig) => sig.slice(2).includes(hex))
-    }
     const callerHashMismatch = normalizeOrderHashText(body.orderHash) !== serverOrderHash
     const logHashMismatch = (outcome: 'stored' | 'exists' | 'error') => {
       if (!callerHashMismatch) return
-      const text: unknown = body.orderHash
       console.warn(JSON.stringify({
         event: 'orders_order_hash_mismatch',
         mode: 'observe',
@@ -838,11 +835,8 @@ export async function POST(req: NextRequest) {
         version: isV3Order ? 3 : 2,
         orderType: orderTypeLabel,
         serverHash: serverOrderHash,
-        callerHash: typeof text !== 'string'
-          ? `<${typeof text}>`
-          : !/^(?:0[xX])?[0-9a-fA-F]{64}$/.test(text)
-            ? `<string len ${text.length}>`
-            : isSignatureFragment(text) ? `<signature fragment len ${text.length}>` : text,
+        callerHash: describeCallerText(body.orderHash),
+        callerHashDigest: callerTextDigest(body.orderHash),
       }))
     }
 

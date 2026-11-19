@@ -310,8 +310,10 @@ describe('what the server builds, key by key [A86 S-4, Step 0]', () => {
   })
 })
 
-// ── [A89 R2-1] A hash-shaped orderHash that is a window of this request's own signature is never logged ────────────────
-describe('R2-1: a caller orderHash cut from the request\'s signature leaves no fragment in the log', () => {
+// ── [A89 R2-1, superseded by A95 S-1] A caller orderHash cut from the request's own signature leaves no fragment in the log ──
+// R2-1 replaced an exact 64-hex window by `<signature fragment len N>`; A95 S-1 found a text MIXING signature hex with other
+// hex still passed. The line now carries no caller text at all: the same six windows are `<hash-shaped>` + a digest.
+describe('R2-1 (as of A95 S-1): a caller orderHash cut from the request\'s signature leaves no fragment in the log', () => {
   const METHODS = ['log', 'info', 'warn', 'error', 'debug'] as const
   const windows = (sig: Hex) => {
     const hex = sig.slice(2)
@@ -326,7 +328,7 @@ describe('R2-1: a caller orderHash cut from the request\'s signature leaves no f
     ] as const
   }
 
-  it.each([0, 1, 2, 3, 4, 5])('window %i: callerHash is <signature fragment len N>; no 10-hex window of the signature (any of its 4 texts) is printed', async (i) => {
+  it.each([0, 1, 2, 3, 4, 5])('window %i: callerHash is <hash-shaped> + digest; no 10-hex window of the signature (any of its 4 texts) is printed', async (i) => {
     const s = await signOrder({ version: 3, chainId: 8453, kind: 'dca', salt: `r21 ${i}` })
     const [label, text] = windows(s.signature)[i]
     const others = METHODS.filter((m) => m !== 'warn').map((m) => vi.spyOn(console, m).mockImplementation(() => {}))
@@ -335,7 +337,7 @@ describe('R2-1: a caller orderHash cut from the request\'s signature leaves no f
       expect(res.status, label).toBe(201)
       expect(logged('orders_order_hash_mismatch')).toEqual([{
         event: 'orders_order_hash_mismatch', mode: 'observe', outcome: 'stored', chainId: 8453, version: 3, orderType: 'dca',
-        serverHash: s.hash, callerHash: `<signature fragment len ${text.length}>`,
+        serverHash: s.hash, callerHash: '<hash-shaped>', callerHashDigest: keccak256(toBytes(text)).slice(2, 18),
       }])
       const printed = [warn, ...others].flatMap((spy) => spy.mock.calls.map((c: unknown[]) => c.map(String).join(' '))).join('\n').toLowerCase()
       const hex = s.signature.slice(2)
@@ -347,11 +349,12 @@ describe('R2-1: a caller orderHash cut from the request\'s signature leaves no f
     }
   })
 
-  it('a hash-shaped text that is NOT part of the signature is still logged as sent', async () => {
+  it('a hash-shaped text that is NOT part of the signature is logged as a shape too, never as sent', async () => {
     const s = await signOrder({ version: 3, chainId: 8453, kind: 'dca', salt: 'r21 control' })
     const other = `0x${'cd'.repeat(32)}`
     expect((await post({ ...s.body, orderHash: other })).status).toBe(201)
-    expect(logged('orders_order_hash_mismatch')).toMatchObject([{ callerHash: other }])
+    expect(logged('orders_order_hash_mismatch')).toMatchObject([{ callerHash: '<hash-shaped>', callerHashDigest: keccak256(toBytes(other)).slice(2, 18) }])
+    expect(JSON.stringify(logged('orders_order_hash_mismatch'))).not.toContain(other.slice(2))
   })
 })
 
@@ -446,4 +449,154 @@ describe('R2-4: the signature lookup is scoped to the lower-cased wallet; the au
       [account.address.toLowerCase(), 0], [account.address.toLowerCase(), 1],
     ])
   })
+})
+
+// ── [A95 S-1] The mismatch line never contains caller-supplied text ────────────────────────────────────────────────────
+// A89 R2-1 dropped a caller orderHash only when it was an exact 64-hex window of the request's own signature: a text that
+// MIXES signature hex with other hex was logged as sent (callerHash). The line now carries the caller's value as a shape
+// (<hash-shaped> / <string len N> / <type T>) and the first 16 hex of keccak256(text), never the text.
+describe('A95 S-1: no caller text in the order-hash mismatch line', () => {
+  const METHODS = ['log', 'info', 'warn', 'error', 'debug'] as const
+  const digest16 = (text: string) => keccak256(toBytes(text)).slice(2, 18)
+  /** The 4 texts of a signature that recover the same signer: given, v 0/1, and the high-s twin in both v spellings. */
+  const fourTexts = (sig: string) => {
+    const hex = sig.slice(2).toLowerCase()
+    const twin = (SECP256K1_N - BigInt(`0x${hex.slice(64, 128)}`)).toString(16).padStart(64, '0')
+    const p = parseInt(hex.slice(128), 16) % 2 // 27 → 0, 28 → 1 (and 0/1)
+    const b = (x: number) => x.toString(16).padStart(2, '0')
+    return [hex, `${hex.slice(0, 128)}${b(p)}`, `${hex.slice(0, 64)}${twin}${b(27 + 1 - p)}`, `${hex.slice(0, 64)}${twin}${b(1 - p)}`]
+  }
+  /** Every 8-hex window of any of the 4 texts that appears in `printed`. */
+  const leakedRuns = (sig: string, printed: string) => {
+    const lower = printed.toLowerCase()
+    return fourTexts(sig).flatMap((h) => Array.from({ length: h.length - 7 }, (_, j) => h.slice(j, j + 8)).filter((w) => lower.includes(w)))
+  }
+  /** Everything the route printed through any console method. */
+  function spyAll() {
+    const spies = METHODS.map((m) => (m === 'warn' ? warn : vi.spyOn(console, m).mockImplementation(() => {})))
+    return {
+      printed: () => spies.flatMap((spy) => spy.mock.calls.map((c: unknown[]) => c.map(String).join(' '))).join('\n'),
+      clear: () => { for (const spy of spies) spy.mockClear() },
+      restore: () => { for (const spy of spies) if (spy !== warn) spy.mockRestore() },
+    }
+  }
+  const OTHER_HEX = 'f0e1d2c3b4a5968778695a4b3c2d1e0f'
+
+  it.each([
+    ['0x + 60 hex of the signature + ffff', (hex: string) => `0x${hex.slice(10, 70)}ffff`],
+    ['32 hex of r + 32 other hex', (hex: string) => `0x${hex.slice(0, 32)}${OTHER_HEX}`],
+    ['32 other hex + 32 hex of s', (hex: string) => `0x${OTHER_HEX}${hex.slice(64, 96)}`],
+  ])('the audit\'s shape "%s": stored 201, line = shape + digest, no 8-hex run of the signature in any console line', async (_label, build) => {
+    const s = await signOrder({ version: 3, chainId: 8453, kind: 'dca', salt: `a95 s1 ${_label}` })
+    const text = build(s.signature.slice(2))
+    const all = spyAll()
+    try {
+      expect((await post({ ...s.body, orderHash: text })).status).toBe(201)
+      expect(logged('orders_order_hash_mismatch')).toEqual([{
+        event: 'orders_order_hash_mismatch', mode: 'observe', outcome: 'stored', chainId: 8453, version: 3, orderType: 'dca',
+        serverHash: s.hash, callerHash: '<hash-shaped>', callerHashDigest: digest16(text),
+      }])
+      expect(leakedRuns(s.signature, all.printed())).toEqual([])
+      expect(all.printed()).not.toContain(text.slice(2, 22))
+    } finally {
+      all.restore()
+    }
+  })
+
+  it('every kind of caller value: a shape and a digest, the text itself nowhere', async () => {
+    const s = await signOrder({ version: 3, chainId: 8453, kind: 'dca', salt: 'a95 s1 kinds' })
+    const CASES: [string, unknown, string, string | null][] = [
+      ['another hash', `0x${'cd'.repeat(32)}`, '<hash-shaped>', digest16(`0x${'cd'.repeat(32)}`)],
+      ['0X + upper case', `0X${'AB'.repeat(32)}`, '<hash-shaped>', digest16(`0X${'AB'.repeat(32)}`)],
+      ['no prefix', 'ab'.repeat(32), '<hash-shaped>', digest16('ab'.repeat(32))],
+      ['a UUID', '3f1c2a4e-9b7d-4c1e-8a2f-5d6e7f8a9b0c', '<string len 36>', digest16('3f1c2a4e-9b7d-4c1e-8a2f-5d6e7f8a9b0c')],
+      ['the whole signature', s.signature, '<string len 132>', digest16(s.signature)],
+      ['a number', 42, '<type number>', null],
+      ['an object', { a: 1 }, '<type object>', null],
+      ['a boolean', true, '<type boolean>', null],
+    ]
+    for (const [label, value, shape, digest] of CASES) {
+      db.reset()
+      warn.mockClear()
+      const res = await post({ ...s.body, orderHash: value })
+      // orderHash: true / 42 / {} are truthy, so they pass the presence check as before; whatever status, the line is the same shape.
+      expect([201, 400], label).toContain(res.status)
+      if (res.status === 201) {
+        expect(logged('orders_order_hash_mismatch'), label).toMatchObject([{ callerHash: shape, callerHashDigest: digest }])
+      }
+      const line = JSON.stringify(logged('orders_order_hash_mismatch'))
+      if (typeof value === 'string' && value.length >= 20) expect(line, label).not.toContain(value.slice(0, 20).toLowerCase())
+    }
+  })
+
+  it('a matching hash (any spelling) logs nothing; the exists and error outcomes carry the same shape + digest', async () => {
+    const s = await signOrder({ version: 3, chainId: 8453, kind: 'dca', salt: 'a95 s1 outcomes' })
+    const text = `0x${s.signature.slice(12, 76)}`
+    expect((await post(s.body)).status).toBe(201)
+    expect(logged('orders_order_hash_mismatch')).toEqual([])
+    expect((await post({ ...s.body, orderHash: text })).status).toBe(409)
+    expect(logged('orders_order_hash_mismatch')).toMatchObject([{ outcome: 'exists', callerHash: '<hash-shaped>', callerHashDigest: digest16(text) }])
+  })
+
+  it('property, seeded: 1,000 requests whose orderHash is cut from the request\'s own signature leave no 8-hex run of it in any console line', async () => {
+    const SEED = 95_001
+    let state = SEED
+    const rand = () => { // mulberry32
+      state = (state + 0x6d2b79f5) >>> 0
+      let t = state
+      t = Math.imul(t ^ (t >>> 15), t | 1)
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    }
+    const int = (lo: number, hi: number) => lo + Math.floor(rand() * (hi - lo + 1))
+    const hexOf = (n: number) => Array.from({ length: n }, () => '0123456789abcdef'[int(0, 15)]).join('')
+    const SIGNED = 25
+    const REQUESTS = 40
+    const signed = await Promise.all(Array.from({ length: SIGNED }, (_, i) =>
+      signOrder({ version: i % 2 ? 3 : 2, chainId: i % 2 ? 8453 : 1, kind: 'dca', salt: `a95 property ${i}` })))
+    const all = spyAll()
+    const seen = { requests: 0, hashShaped: 0, otherShape: 0, fullWindow: 0, upper: 0, prefix0x: 0, prefix0X: 0, noPrefix: 0 }
+    try {
+      for (const s of signed) {
+        db.reset()
+        const texts = fourTexts(s.signature)
+        for (let k = 0; k < REQUESTS; k++) {
+          const len = int(8, 64)
+          const src = texts[int(0, 3)]
+          const at = int(0, src.length - len)
+          let text = src.slice(at, at + len)
+          const pad = 64 - len
+          const mode = int(0, 3)
+          if (pad > 0) {
+            const left = mode === 0 ? pad : mode === 1 ? 0 : int(0, pad)
+            text = hexOf(left) + text + hexOf(pad - left)
+          }
+          if (rand() < 0.5) text = text.toUpperCase()
+          const prefixKind = int(0, 2)
+          if (prefixKind === 0) text = `0x${text}`
+          else if (prefixKind === 1) text = `0X${text}`
+          // Some requests are not hash-shaped at all: a signature slice with a run of non-hex text around it.
+          if (rand() < 0.15) text = `${text.slice(0, 20)}-${text.slice(20)}`
+          const res = await post({ ...s.body, orderHash: text })
+          expect([201, 409]).toContain(res.status)
+          seen.requests += 1
+          if (/^(?:0[xX])?[0-9a-fA-F]{64}$/.test(text)) seen.hashShaped += 1
+          else seen.otherShape += 1
+          if (len === 64) seen.fullWindow += 1
+          if (text !== text.toLowerCase()) seen.upper += 1
+          if (text.startsWith('0x')) seen.prefix0x += 1
+          else if (text.startsWith('0X')) seen.prefix0X += 1
+          else seen.noPrefix += 1
+          expect(leakedRuns(s.signature, all.printed()), `request ${seen.requests}: ${text.length} chars`).toEqual([])
+          all.clear()
+        }
+      }
+    } finally {
+      all.restore()
+    }
+    expect(seen.requests).toBe(SIGNED * REQUESTS)
+    expect(seen.requests).toBe(1000)
+    // The property is not vacuous: every spelling and both shapes occurred.
+    for (const [k, v] of Object.entries(seen)) expect(v, k).toBeGreaterThan(0)
+  }, 120_000)
 })
