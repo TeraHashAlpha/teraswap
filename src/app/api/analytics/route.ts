@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/supabase'
+import { PUBLIC_ORDER_STATUSES } from '@/lib/order-engine/read-auth'
 
 /**
  * GET /api/analytics
@@ -81,7 +82,8 @@ async function fetchConfirmedExecutions(
       .from('order_executions')
       .select(
         'id,created_at,tx_hash,amount_in,amount_out,status,order_id,' +
-          'orders(wallet,order_type,token_in,token_in_symbol,token_out,token_out_symbol,chain_id,router,dca_total,amount_in)',
+          // [A97 S-2] `status`: whether the parent order is finished decides if its fill may be listed in recentTrades.
+          'orders(wallet,order_type,token_in,token_in_symbol,token_out,token_out_symbol,chain_id,router,dca_total,amount_in,status)',
       )
       .eq('status', 'confirmed')
       .order('created_at', { ascending: false })
@@ -312,12 +314,24 @@ function perChunkAmount(amountInRaw: unknown, dcaTotal: number): string {
  * attribute it). USD volume uses the SAME estimateUsdValue path swaps fall back
  * to — no fabrication, no stored USD invented.
  */
-export function executionToEvent(row: Record<string, unknown>): TradeEvent | null {
+function embeddedOrder(row: Record<string, unknown>): Record<string, unknown> | null | undefined {
   const orderRaw = (row as { orders?: unknown }).orders
-  const order = (Array.isArray(orderRaw) ? orderRaw[0] : orderRaw) as
-    | Record<string, unknown>
-    | null
-    | undefined
+  return (Array.isArray(orderRaw) ? orderRaw[0] : orderRaw) as Record<string, unknown> | null | undefined
+}
+
+/**
+ * [A97 S-2, owner decision 2026-11-19] A fill may be listed in the public recent-trades feed only once its order is
+ * FINISHED: the parent's status is in PUBLIC_ORDER_STATUSES, the same terminal set the orders routes gate on
+ * (read-auth.ts). A live order's fill (active, executing, partially filled, a missing or unknown status: default-deny)
+ * would show its unfinished strategy (tx, chunk size, timing) to anyone. It still counts in every total.
+ */
+function isFinishedOrderFill(row: Record<string, unknown>): boolean {
+  const status = embeddedOrder(row)?.status
+  return typeof status === 'string' && PUBLIC_ORDER_STATUSES.has(status)
+}
+
+export function executionToEvent(row: Record<string, unknown>): TradeEvent | null {
+  const order = embeddedOrder(row)
   if (!order) return null
 
   const createdAt = row.created_at ? new Date(row.created_at as string) : new Date()
@@ -386,9 +400,15 @@ export function computeDashboard(
   executions: Record<string, unknown>[],
 ): DashboardResponse {
   const swapEvents = swaps.map(swapToEvent)
-  const execEvents = executions
-    .map(executionToEvent)
-    .filter((e): e is TradeEvent => e !== null)
+  // [A97 S-2] Fills of orders that are not finished: counted below like every other event, never listed in recentTrades.
+  const liveOrderFills = new Set<TradeEvent>()
+  const execEvents: TradeEvent[] = []
+  for (const row of executions) {
+    const e = executionToEvent(row)
+    if (!e) continue
+    if (!isFinishedOrderFill(row)) liveOrderFills.add(e)
+    execEvents.push(e)
+  }
 
   const seenTx = new Set<string>()
   const events: TradeEvent[] = []
@@ -402,10 +422,10 @@ export function computeDashboard(
   }
   events.sort((a, b) => b.timestamp - a.timestamp)
 
-  return buildDashboard(events)
+  return buildDashboard(events, liveOrderFills)
 }
 
-function buildDashboard(events: TradeEvent[]): DashboardResponse {
+function buildDashboard(events: TradeEvent[], liveOrderFills: ReadonlySet<TradeEvent>): DashboardResponse {
   // Period metrics
   const allTime = computePeriodMetrics(events)
   const last24h = computePeriodMetrics(filterByPeriod(events, 24 * 60 * 60 * 1000))
@@ -466,7 +486,8 @@ function buildDashboard(events: TradeEvent[]): DashboardResponse {
   const totalWallets = new Set(events.map(e => e.wallet)).size
 
   // Recent trades (latest 50) — API-MED-07: strip wallet addresses from public response
-  const recentTrades = events.slice(0, 50).map(e => ({
+  // [A97 S-2] The same 50 newest events as before, minus the fills of orders that are not finished (order kept).
+  const recentTrades = events.slice(0, 50).filter(e => !liveOrderFills.has(e)).map(e => ({
     ...e,
     wallet: e.wallet ? `${e.wallet.slice(0, 6)}...${e.wallet.slice(-4)}` : '',
   }))

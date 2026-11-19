@@ -15,6 +15,7 @@ import {
 } from '@/lib/order-engine/read-auth'
 import { bodySizeGuard } from '@/lib/body-limit'
 import { withOrderReadColumns, type OrderReadRow } from '../order-read-columns'
+import { withOrdersReadCacheControl } from '../read-cache'
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const SIGNATURE_RE = /^0x[0-9a-fA-F]+$/
@@ -26,7 +27,15 @@ function getSupabase() {
   return createClient(url, key, { auth: { persistSession: false } })
 }
 
+// [A97 S-7] Every answer of the read, 4xx included: Cache-Control: private, no-store (read-cache.ts). PATCH is unchanged.
 export async function GET(
+  req: NextRequest,
+  ctx: { params: Promise<{ id: string }> },
+) {
+  return withOrdersReadCacheControl(await readOrder(req, ctx))
+}
+
+async function readOrder(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {

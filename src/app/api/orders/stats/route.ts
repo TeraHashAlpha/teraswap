@@ -7,6 +7,11 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import {
+  verifyOrdersReadAccess,
+  ORDERS_READ_HEADER_ISSUED,
+  ORDERS_READ_HEADER_SIGNATURE,
+} from '@/lib/order-engine/read-auth'
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -58,18 +63,35 @@ export async function GET(req: NextRequest) {
         .then(r => r.count ?? 0),
     ])
 
-    // Get recent executions count (last 24h). order_executions has no `wallet`
-    // or `executed_at` column — timestamp is `created_at`, wallet is via join to orders.
-    const oneDayAgo = new Date(Date.now() - 86400 * 1000).toISOString()
-    let execQuery = supabase
-      .from('order_executions')
-      .select('*, orders!inner(wallet)', { count: 'exact', head: true })
-      .gte('created_at', oneDayAgo)
-    // If wallet filter provided, only count executions for that wallet's orders
+    // [A97 S-3] One wallet's fills in the last 24 h include its LIVE orders' (their progress, which the executions route
+    // shows only with the wallet's read signature): for `?wallet=W` the count is returned only with W's valid read
+    // signature, otherwise the field is left out and the fills table is not read. The counts by status above stay open, and
+    // the count with no wallet (every wallet's fills together) is unchanged.
+    let includeRecent = true
     if (wallet) {
-      execQuery = execQuery.eq('orders.wallet', wallet.toLowerCase())
+      const auth = await verifyOrdersReadAccess({
+        wallet,
+        issuedAt: req.headers.get(ORDERS_READ_HEADER_ISSUED),
+        signature: req.headers.get(ORDERS_READ_HEADER_SIGNATURE),
+      })
+      includeRecent = auth.ok
     }
-    const { count: recentExecutions } = await execQuery
+
+    let recentExecutions: number | null = null
+    if (includeRecent) {
+      // Get recent executions count (last 24h). order_executions has no `wallet`
+      // or `executed_at` column — timestamp is `created_at`, wallet is via join to orders.
+      const oneDayAgo = new Date(Date.now() - 86400 * 1000).toISOString()
+      let execQuery = supabase
+        .from('order_executions')
+        .select('*, orders!inner(wallet)', { count: 'exact', head: true })
+        .gte('created_at', oneDayAgo)
+      // If wallet filter provided, only count executions for that wallet's orders
+      if (wallet) {
+        execQuery = execQuery.eq('orders.wallet', wallet.toLowerCase())
+      }
+      recentExecutions = (await execQuery).count
+    }
 
     return NextResponse.json({
       total,
@@ -78,7 +100,7 @@ export async function GET(req: NextRequest) {
       cancelled,
       expired,
       failed,
-      recentExecutions24h: recentExecutions ?? 0,
+      ...(includeRecent ? { recentExecutions24h: recentExecutions ?? 0 } : {}),
     })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Internal error'

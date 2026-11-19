@@ -22,6 +22,7 @@ import {
   ORDERS_READ_HEADER_ISSUED,
   ORDERS_READ_HEADER_SIGNATURE,
 } from '@/lib/order-engine/read-auth'
+import { withOrdersReadCacheControl } from '../../read-cache'
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
@@ -32,7 +33,15 @@ function getSupabase() {
   return createClient(url, key, { auth: { persistSession: false } })
 }
 
+// [A97 S-7] Every answer, 4xx included: Cache-Control: private, no-store (read-cache.ts).
 export async function GET(
+  req: NextRequest,
+  ctx: { params: Promise<{ id: string }> },
+) {
+  return withOrdersReadCacheControl(await readExecutions(req, ctx))
+}
+
+async function readExecutions(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
