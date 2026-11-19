@@ -117,22 +117,26 @@ Keeper code: Draft PR, **Auditor required**. Tables: `fix-keeper-errors-no-signa
 - [x] `agent-verify.sh --keeper --codeql`: red on eeaf3661 (one CodeQL alert in my own test), fixed in 1a38a830, ONE run on
       1a38a830: PASS; evidence; push.
 
+### Owner answers, round 3 (asked once, 2026-11-19; they supersede the goal text)
+
+1. "Each of the audit's 30 CLI runs FAILS on b367f054 first": 23 of 30 do (14 print the key; 9 chain-verify runs lack the words R2-3 adds). The 7 `host:port/v2/<key>`
+   echoes pass there: b367f054 already redacts them (the audit measured 14/30 leaking). Owner: accept 23/30 and record it; the 7 stay unchanged, as guards.
+2. "agent-verify ONCE on the last code commit": the one verify is the single run on 1a38a830 (PASS). The reboot-killed attempt on b8afe818 (no result) and the red run on
+   eeaf3661 (CodeQL 14 vs 13, an alert in my own new test, fixed in 1a38a830) are recorded as they happened (tables §R3-6). No further run.
+
 ### Evidence, round 3 (A93; tables in `fix-keeper-errors-no-signature.tables.md` §R3)
 
-1. R2-1 (H) fixed: redact.js:248 SECRET_ENV_NAMES, :282 literals (URL userinfo/segments/query values, never the host; else whole; >= 12), :554 redactSecretLiterals,
-   :213 redactUrl first+last, :672/:774 redactError (fields as read, then last; the cap after), alert.js:92 (`&lt;redacted&gt;`), list-missing-fills.mjs:44 + backfill-execution.mjs:48
-   (every print). Red on b367f054 first: redact-a93-r2-1-cli (the audit's 30 runs: its 14 path-only echoes; + 2 print runs), -sinks (3 sites x 4 sinks, 12/12), -forms (12 leak
-   cases); + -names, -fuzz. R2-2 (L) fixed: list-missing-fills.mjs:72 isHttpUrl, :257 + backfill-execution.mjs:140 refuse by name (redact-a93-r2-2-cli-url). R2-3 (L) fixed:
-   chain-verify.js:259 appends `details`, redacted, cut after the scrub, one line (-r2-3-boot-details). R2-2/R2-3 tests red on b367f054 and 68f5ab28 (13/14; a guard holds).
-2. Names: RPC_URL, BACKFILL_RPC_URL, FLASHBOTS_RPC_URL, TERASWAP_API_URL, VAULT_ADDR, SUPABASE_URL (URL parts); SUPABASE_SERVICE_ROLE_KEY, TELEGRAM_BOT_TOKEN,
-   EXECUTOR_PRIVATE_KEY (also without 0x), HEALTH_TOKEN, COINGECKO_API_KEY, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN (whole). Never logged; one mask.
-3. Fuzz seeds 1-2000 x 60 x 9 sinks (Node 22; 1-200 Node 20; CI 1-12): 0 readable; the first design failed 23/500 (secrets holding `% \ &`), fixed (§R3-3). Mutants 19/19 +
-   8/8 (§R3-4). Split by a line break: removed whole in every sink, also where redactError drops line 2; by a plain space: not matched (by design). p1-viem: 0 fragments.
-4. agent-verify on eeaf3661 (load1 6.5): all PASS but CodeQL 14 vs 13, one new js/incomplete-sanitization in my forms test:140, fixed in 1a38a830 (same text as a constant).
-   ONE run on 1a38a830 (load1 9.84): **PASS**: suite 11,363/0, lint +0/+0, tsc 0, build, parity 123, rpc-budget 36, CodeQL 13 = 13, keeper Node 20 + 22 2,300/0/0; classifiers
-   vs origin/main 0/40,000. Verified CODE commit 1a38a830; docs commit = the one adding this. diff --stat b367f054..1a38a830: 41 files +4,525/−93 (keeper 13 files +1,655/−61,
-   feedback +14, main's 27 +2,856/−32). https://github.com/TeraHashAlpha/teraswap/compare/main...fix/keeper-errors-no-signature  NOT verified: CI; real Telegram/provider/
-   Supabase/chain (stubs); Linux; fuzz past 2000; executor.js raw body prints (below). A first attempt (~20:40) was cut by a reboot, no result.
+1. R2-1 (H) fixed: redact.js:248 SECRET_ENV_NAMES, :282 literals, :554 redactSecretLiterals, :213 redactUrl (first + last), :672/:774 redactError (fields, then last; cap
+   after), alert.js:92, list-missing-fills.mjs:44 + backfill-execution.mjs:48 (every print). Tests redact-a93-r2-1-{cli,sinks,forms,names,fuzz}; on b367f054: 23 of the
+   audit's 30 CLI runs fail (answer 1), 12/12 sinks, 12 forms cases. R2-2 (L) fixed: list-missing-fills.mjs:72, :257, backfill-execution.mjs:140 (redact-a93-r2-2-cli-url).
+   R2-3 (L) fixed: chain-verify.js:259 (redact-a93-r2-3-boot-details). R2-2/R2-3 tests red on b367f054 and 68f5ab28 (13/14).
+2. URL parts (userinfo, path segments, query values; never the host): RPC_URL, BACKFILL_RPC_URL, FLASHBOTS_RPC_URL, TERASWAP_API_URL, VAULT_ADDR, SUPABASE_URL. Whole:
+   SUPABASE_SERVICE_ROLE_KEY, TELEGRAM_BOT_TOKEN, EXECUTOR_PRIVATE_KEY (+ without 0x), HEALTH_TOKEN, COINGECKO_API_KEY, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN.
+3. Fuzz seeds 1-2000 x 60 x 9 sinks (Node 22; 1-200 Node 20; CI 1-12): 0 readable. Mutants 19/19 + 8/8 (§R3-4). Split by a line break: removed whole, also where redactError
+   drops line 2; by a plain space: not matched (by design). Probes: 0 signature fragments; classifiers vs origin/main 0 of 40,000 differ.
+4. ONE run on 1a38a830 (answer 2), load1 9.84: PASS (suite 11,363/0, CodeQL 13 = 13, keeper 2,300 x Node 20/22). SHAs: verified CODE 1a38a830; docs 95613438 + this trim.
+   diff --stat b367f054..1a38a830: 41 files +4,525/−93 (keeper 13 +1,655/−61; main's 27). https://github.com/TeraHashAlpha/teraswap/compare/main...fix/keeper-errors-no-signature
+   NOT verified: CI; real Telegram/provider/Supabase/chain (stubs); Linux; fuzz past seed 2000; executor.js raw body prints (below).
 
 ## Feedback — round 3 (A93)
 

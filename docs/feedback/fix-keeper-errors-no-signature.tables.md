@@ -258,7 +258,7 @@ rigs (mutation scripts, archives) were lost when the machine rebooted at ~20:45;
 |---|---|---|
 | redact-a93-r2-1-forms (21) | 12 fail: every leak case (path, query, userinfo, %-encoded, case, non-URL value, `\/`, `%252F`, host-like, split, Details:, `&lt;redacted&gt;`); 6 guards pass (kept values, floor, unset, 3 classifier) | 21/21 |
 | redact-a93-r2-1-sinks (13) | 12/12 sinks fail (3 call sites x log line, monitor :70, :126, alertOps) | 13/13 |
-| redact-a93-r2-1-cli (32) | 16 fail: the audit's 14 path-only runs (echoPath + express404 x the 7 methods outside chain-verify) + both print-scrub runs; 16 pass (7 schemeless echoes, already redacted; 9 chain-verify runs, which printed no provider words before R2-3) | 32/32 |
+| redact-a93-r2-1-cli (32), final file | 25 fail: the audit's 14 path-only runs (echoPath + express404 x the 7 methods outside chain-verify, the key printed) + 9 chain-verify runs (no provider words before R2-3) + both print-scrub runs; 7 pass: the schemeless `host:port/v2/<key>` echoes, already redacted on b367f054 (owner answer 1: 23 of 30 first-red accepted, the 7 kept as guards). The commit-1 version of the file: 16 fail, 16 pass. | 32/32 |
 | redact-a93-r2-2-cli-url (8), r2-3-boot-details (6) | 13 fail, 1 guard passes (no details: no suffix) — same on 68f5ab28 | 14/14 |
 | redact-a93-r2-1-names (7), -fuzz (12 seeds) | new API (import fails) | 7/7, 12/12 |
 
