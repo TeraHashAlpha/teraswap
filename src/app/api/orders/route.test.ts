@@ -53,7 +53,7 @@ vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
     rpc: async () => ({ data: true, error: null }),
     from: () => ({
-      select: () => ({ or: () => ({ limit: async () => ({ data: [], error: null }) }) }),
+      select: () => ({ eq: () => ({ or: () => ({ limit: () => ({ abortSignal: async () => ({ data: [], error: null }) }) }) }) }),
       insert: () => ({ select: () => ({ single: async () => ({ data: null, error: { message: 'no database in this test' } }) }) }),
     }),
   }),

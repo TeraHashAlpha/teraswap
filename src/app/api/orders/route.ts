@@ -16,7 +16,9 @@ import { verifyRouterDataHash } from '@/lib/order-engine/canonical-route'
 import { STOP_LOSS_DEFERRED_REASON, LIMIT_TP_CHAIN_ID } from '@/lib/order-engine/limit-launch'
 import { ORDER_EIP712_TYPES, ORDER_V3_EIP712_TYPES, MAX_ORDER_SLIPPAGE_BPS } from '@/lib/order-engine/types'
 // [fix/orders-server-side-order-hash, audit 2026-11-16 S-5] The stored order hash is the server's.
-import { computeOrderHash, normalizeOrderHashText } from '@/lib/order-engine/order-hash'
+import {
+  computeOrderHash, normalizeOrderHashText, orderSignatureEncodings, canonicalOrderSignature, describeCallerText, callerTextDigest,
+} from '@/lib/order-engine/order-hash'
 import { getDcaMinChunkUsd } from '@/lib/order-engine/dca-custom'
 // [FEAT-DCA-FLOOR-TIERS] Server-side floor tier + the consent it requires.
 import { checkTokenOnChain } from '@/lib/order-engine/token-on-chain'
@@ -36,6 +38,63 @@ import { NATIVE_ETH } from '@/lib/constants'
 import { fetchDefiLlamaPrice } from '@/lib/defillama'
 import { computeTokenAmountUsd, fetchErc20Decimals } from '@/lib/chainlink'
 import { getChainConfig } from '@/lib/chains/registry'
+
+// [A89 R2-3] A deadline for the whole function (owner decision 2026-11-18: 30 s). Before it the route had none, so a hung
+// dependency held the request for the platform's default. The signature lookup has its own 3 s deadline below.
+export const maxDuration = 30
+
+/** [A89 R2-3] The pre-insert signature lookup gives up after this long (fail closed: 503). */
+const SIGNATURE_LOOKUP_TIMEOUT_MS = 3_000
+
+// ── [A86 S-4/S-5] The stored order_data is BUILT by the server (used by POST only) ────────────────────────────────────
+// The keeper builds the on-chain struct ONLY from order_data (executor.js "Use order_data directly") and decides v2/v3 by
+// order_data.maxSlippageBps being present (executor-routing.js:25). order_data used to be the caller's copy, so a row could
+// be stored active whose order_data was not the signed order (the contract then answers "Invalid signature"), and a
+// v2-signed order whose copy carried maxSlippageBps was routed to V3. Now every signed field comes from the message the
+// signer was recovered from, in the shapes the keeper's builder reads (getAddress / BigInt / Number):
+//   address, bytes32  the signed text (viem validated it during recovery);
+//   uint256           a decimal string of BigInt(value), the integer viem hashed (viem coerces with BigInt, toHex.js);
+//   uint8, uint16     a number.
+// The fields are those of the schema the signature was recovered under, so maxSlippageBps is there if and only if the
+// route decided v3. From the caller's orderData only routerData is kept, and only when it hashes to the signed
+// routerDataHash. No other key is stored (owner decision 2026-11-18: the token symbols/decimals some callers add are
+// dropped; the keeper reads them only as fallbacks behind the row's own columns).
+type SignedOrderData = Record<string, string | number>
+type OrderSchema = { readonly Order: readonly { readonly name: string; readonly type: string }[] }
+
+function signedOrderData(types: OrderSchema, message: Record<string, unknown>): SignedOrderData {
+  const out: SignedOrderData = {}
+  for (const { name, type } of types.Order) {
+    const value = message[name] as string | number | bigint | boolean
+    if (type === 'address' || type === 'bytes32') out[name] = String(value)
+    else if (type === 'uint256') out[name] = BigInt(value).toString()
+    else out[name] = Number(BigInt(value)) // uint8, uint16
+  }
+  return out
+}
+
+/** order_data keys the differs line may name; any other caller key is only counted (its name is caller text). */
+const ORDER_DATA_KEYS = [
+  ...ORDER_V3_EIP712_TYPES.Order.map((f) => f.name),
+  'routerData', 'tokenInSymbol', 'tokenOutSymbol', 'tokenInDecimals', 'tokenOutDecimals',
+]
+const ORDER_DATA_KEY_SET = new Set<string>(ORDER_DATA_KEYS)
+
+/** [A86 S-4] The keys whose value in the caller's orderData is not the stored one (absent orderData: every key). */
+function orderDataDifferences(caller: Record<string, unknown> | null, built: SignedOrderData) {
+  const fields = new Set<string>()
+  let otherKeys = 0
+  if (!caller) {
+    for (const key of Object.keys(built)) fields.add(key)
+  } else {
+    for (const key of Object.keys(caller)) {
+      if (!ORDER_DATA_KEY_SET.has(key)) { otherKeys += 1; continue }
+      if (!Object.hasOwn(built, key) || JSON.stringify(caller[key]) !== JSON.stringify(built[key])) fields.add(key)
+    }
+    for (const key of Object.keys(built)) if (!Object.hasOwn(caller, key)) fields.add(key)
+  }
+  return { fields: ORDER_DATA_KEYS.filter((k) => fields.has(k)), otherKeys }
+}
 
 // [CHORE-DCA-WETH-INPUT] Conditional order types whose INPUT must be an ERC-20 (never native ETH).
 const CONDITIONAL_ORDER_TYPES = new Set(['limit', 'stop_loss', 'dca'])
@@ -289,6 +348,8 @@ export async function POST(req: NextRequest) {
     // (executor resolution, domain, typed-data schema, extra validation) branches on it. Never
     // trust the client's claim that this is/isn't v3 beyond this one typed field — the recovered
     // signer check below is what actually proves the order was signed under the claimed schema.
+    // [A86 S-5] This is the ONLY place v3 is decided: the stored order_data carries maxSlippageBps if and only if this is
+    // true (signedOrderData), so the keeper's presence test (executor-routing.js:25) reads this decision back.
     const isV3Order = typeof body.maxSlippageBps === 'number'
 
     // [FEAT-DCA-FLOOR-TIERS / Auditor L-01] A v3 DCA must carry the WRAPPED native as tokenOut, as
@@ -357,6 +418,8 @@ export async function POST(req: NextRequest) {
     // [fix/orders-server-side-order-hash, audit 2026-11-16 S-5] Set below from the typed data the signer
     // is recovered from; the ONLY value ever stored in order_hash. body.orderHash is compared, never stored.
     let serverOrderHash: `0x${string}`
+    // [A86 S-4] The signed fields as they are stored in order_data (signedOrderData), set in the same block.
+    let signedData: SignedOrderData
     {
       try {
         const domain = isV3Order ? getOrderExecutorV3Domain(chainId) : getOrderExecutorDomain(chainId)
@@ -392,6 +455,12 @@ export async function POST(req: NextRequest) {
         // cancelledOrders / dcaExecutions and the OrderExecuted topic. The domain only enters the
         // digest recovery checked. Proven against the contracts in OrderHashDifferential.t.sol.
         serverOrderHash = computeOrderHash({ types, message })
+        // [A86 S-4] The stored copy of the signed fields must hash to the same order. It does by construction (BigInt is
+        // viem's own coercion); checked so a future encoding difference fails here, not as a row the keeper cannot execute.
+        signedData = signedOrderData(types, message)
+        if (computeOrderHash({ types, message: signedData }) !== serverOrderHash) {
+          throw new Error('the signed fields could not be stored as signed')
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'unknown'
         return NextResponse.json({ error: `Signature verification failed: ${msg}` }, { status: 400 })
@@ -444,6 +513,8 @@ export async function POST(req: NextRequest) {
     }
 
     // [Audit M-07] Cross-validate order_data blob against top-level fields
+    // [A86 S-4] Kept as it was: what it refuses is still refused. The stored order_data no longer depends on it (it is
+    // built from the verified message below); a difference it does not refuse is logged there by key name.
     if (body.orderData) {
       const od = body.orderData
       const mismatchFields: string[] = []
@@ -488,30 +559,37 @@ export async function POST(req: NextRequest) {
     // Scoped to v3 specifically: v3 is where pinned routes exist and where the executor enforces
     // the hash. The legacy v2 non-DCA path is left byte-identical (it is separately unexecutable
     // — threat-model P1c — but that is not this sprint's to change).
-    if (isV3Order && orderTypeEnum !== ORDER_TYPE_DCA) {
-      const storedRouterData = body.orderData?.routerData
+    // [A86 S-4] Straight-line, so the hash check below runs ONCE for every order: a pinned (v3 non-DCA) order is refused
+    // on it exactly as before (same checks, same order, same answers); for every order, the stored order_data keeps the
+    // caller's routerData only when it holds (routerDataMatchesSigned, used where order_data is built).
+    const pinnedOrder = isV3Order && orderTypeEnum !== ORDER_TYPE_DCA
+    const storedRouterData = body.orderData?.routerData
 
-      // codeql[js/user-controlled-bypass] — routerDataHash is part of the EIP-712 message just
-      // verified, so this reads a signature-bound value; the contract re-enforces RouterDataRequired.
-      if (!body.routerDataHash || body.routerDataHash === zeroHash) {
-        return NextResponse.json(
-          {
-            error:
-              'Non-DCA orders must commit to a real routerDataHash — the executor rejects ZeroHash ' +
-              '(RouterDataRequired), so such an order could never execute.',
-          },
-          { status: 400 },
-        )
-      }
-      // codeql[js/user-controlled-bypass] — presence precondition for the cryptographic check on the
-      // next lines: verifyRouterDataHash compares these unsigned bytes against the SIGNED hash.
-      if (!storedRouterData) {
-        return NextResponse.json(
-          { error: 'Non-DCA orders must include the pinned calldata in orderData.routerData' },
-          { status: 400 },
-        )
-      }
-      if (!verifyRouterDataHash(storedRouterData, body.routerDataHash)) {
+    // codeql[js/user-controlled-bypass] — routerDataHash is part of the EIP-712 message just
+    // verified, so this reads a signature-bound value; the contract re-enforces RouterDataRequired.
+    if (pinnedOrder && (!body.routerDataHash || body.routerDataHash === zeroHash)) {
+      return NextResponse.json(
+        {
+          error:
+            'Non-DCA orders must commit to a real routerDataHash — the executor rejects ZeroHash ' +
+            '(RouterDataRequired), so such an order could never execute.',
+        },
+        { status: 400 },
+      )
+    }
+    // codeql[js/user-controlled-bypass] — presence precondition for the cryptographic check on the
+    // next lines: verifyRouterDataHash compares these unsigned bytes against the SIGNED hash.
+    if (pinnedOrder && !storedRouterData) {
+      return NextResponse.json(
+        { error: 'Non-DCA orders must include the pinned calldata in orderData.routerData' },
+        { status: 400 },
+      )
+    }
+    // signedData.routerDataHash is the signed text: for a pinned order it is body.routerDataHash (non-zero, checked above).
+    const routerDataMatchesSigned = typeof storedRouterData === 'string' &&
+      verifyRouterDataHash(storedRouterData as `0x${string}`, signedData.routerDataHash as `0x${string}`)
+    if (pinnedOrder) {
+      if (!routerDataMatchesSigned) {
         return NextResponse.json(
           { error: 'orderData.routerData does not hash to the signed routerDataHash' },
           { status: 400 },
@@ -739,13 +817,22 @@ export async function POST(req: NextRequest) {
     // docs/feedback/fix-orders-server-side-order-hash.md.
     // [A86 S-7] The line is written once the request's outcome is known (stored / exists / error), so it never
     // names a row this request did not store: `serverHash` is the hash of the signed order, `outcome` says what
-    // happened to it. It never carries the signature or the wallet; the caller's text appears only when it has the
-    // shape of a hash (0x/0X/no prefix + 64 hex), anything else as `<string len N>` (a caller that put its
-    // signature in orderHash leaves no fragment of it in the log), a non-string by its type.
+    // happened to it. It never carries the signature or the wallet.
+    // [A95 S-1] Nor any text the caller sent: the caller's orderHash appears only as its SHAPE (<hash-shaped> /
+    // <string len N> / <type T>) and the first 16 hex of its keccak256, to match two lines about one text. A text that mixes
+    // signature hex with other hex has the shape of a hash, so no rule about which hex "belongs to the signature" can be
+    // complete (A89 R2-1 had one); the line carries none of it.
+    // [A86 S-3] The 4 texts of this signature that recover the same signer (v 27/28 or 0/1, s or its twin n − s).
+    const signatureTexts = orderSignatureEncodings(body.signature) ?? [body.signature.toLowerCase()]
+    // [A95 S-2] What the row stores: the one text of this signature the executors accept (v 27/28, low s, lower case, 0x).
+    // Recovery above accepted whichever of the 4 texts the caller sent (viem takes v 0/1 and the high-s twin), but the
+    // executors' ECDSA.recover refuses those: a row holding one could never execute. Same signer, same hash. Every check
+    // has run on the text as sent; nothing accepted before is refused. (Always non-null here: recovery succeeded on a
+    // 130-hex text with v 0/1/27/28; the fallback keeps the text as sent rather than refuse.)
+    const storedSignature = canonicalOrderSignature(body.signature) ?? body.signature
     const callerHashMismatch = normalizeOrderHashText(body.orderHash) !== serverOrderHash
     const logHashMismatch = (outcome: 'stored' | 'exists' | 'error') => {
       if (!callerHashMismatch) return
-      const text: unknown = body.orderHash
       console.warn(JSON.stringify({
         event: 'orders_order_hash_mismatch',
         mode: 'observe',
@@ -754,30 +841,66 @@ export async function POST(req: NextRequest) {
         version: isV3Order ? 3 : 2,
         orderType: orderTypeLabel,
         serverHash: serverOrderHash,
-        callerHash: typeof text !== 'string'
-          ? `<${typeof text}>`
-          : /^(?:0[xX])?[0-9a-fA-F]{64}$/.test(text) ? text : `<string len ${text.length}>`,
+        callerHash: describeCallerText(body.orderHash),
+        callerHashDigest: callerTextDigest(body.orderHash),
       }))
+    }
+
+    // [A86 S-4/S-5] The order_data this row stores: the signed fields (signedData, from the verified message), plus the
+    // caller's routerData only when it hashes to the SIGNED routerDataHash (routerDataMatchesSigned: the one check of the
+    // pinned-route block above, which refuses on it for a v3 non-DCA order; for every other order a routerData that fails
+    // it is dropped, never refused). A caller orderData that differs is not refused (the request is answered as before):
+    // one line names the keys.
+    const callerOrderData = body.orderData && typeof body.orderData === 'object' && !Array.isArray(body.orderData)
+      ? (body.orderData as Record<string, unknown>)
+      : null
+    const orderData: SignedOrderData = {
+      ...signedData,
+      ...(routerDataMatchesSigned ? { routerData: storedRouterData as string } : {}),
+    }
+    const orderDataDiff = orderDataDifferences(callerOrderData, orderData)
+    const logOrderDataDiffers = (outcome: 'stored' | 'exists' | 'error') => {
+      if (orderDataDiff.fields.length === 0 && orderDataDiff.otherKeys === 0) return
+      console.warn(JSON.stringify({
+        event: 'orders_order_data_differs',
+        outcome,
+        chainId,
+        version: isV3Order ? 3 : 2,
+        orderType: orderTypeLabel,
+        serverHash: serverOrderHash,
+        fields: orderDataDiff.fields,
+        otherKeys: orderDataDiff.otherKeys,
+      }))
+    }
+    const logOutcome = (outcome: 'stored' | 'exists' | 'error') => {
+      logHashMismatch(outcome)
+      logOrderDataDiffers(outcome)
     }
 
     // [A86 S-3] One signed order is stored once, whatever order_hash text an older row carries. Rows written before
     // PR #708 kept the caller's text (a UUID, upper case, 0X, no prefix, another hash), so unique_order_hash cannot see
-    // them; their signature column can. Any row whose signature is one of the 4 texts that recover the same signer
-    // (orderSignatureEncodings: v 27/28 or 0/1, s or its twin n − s) is this order: 409, nothing written. Each text is
-    // compared case-insensitively and exactly: it is 0x + 130 hex (checked above, and rebuilt from the parsed bytes),
-    // so no LIKE/PostgREST pattern character (% _ *) reaches the filter. Fail closed if the lookup cannot answer.
-    // (Imported here, not in the import block, to keep this change inside POST.)
-    const { orderSignatureEncodings } = await import('@/lib/order-engine/order-hash')
-    const sameSignature = (orderSignatureEncodings(body.signature) ?? [body.signature.toLowerCase()])
-      .map((text) => `signature.ilike.${text}`)
-      .join(',')
-    const existing = await supabase.from('orders').select('id').or(sameSignature).limit(1)
+    // them; their signature column can. Any row whose signature is one of the 4 texts that recover the same signer is
+    // this order: 409, nothing written. Each text is compared case-insensitively and exactly: it is 0x + 130 hex (checked
+    // above, and rebuilt from the parsed bytes), so no LIKE/PostgREST pattern character (% _ *) reaches the filter.
+    // [A89 R2-4] Scoped to this wallet (recovery proved message.owner = body.wallet signed it, so a row holding this
+    // signature has this owner): the lookup uses idx_orders_wallet instead of scanning the table. Every stored wallet is
+    // lower case (orders_normalize_wallet trigger, schema.sql:270-287).
+    // [A89 R2-3] At most SIGNATURE_LOOKUP_TIMEOUT_MS, retries included (postgrest-js stops retrying once the signal has
+    // fired). Fail closed if the lookup cannot answer in time.
+    const sameSignature = signatureTexts.map((text) => `signature.ilike.${text}`).join(',')
+    const existing = await supabase
+      .from('orders')
+      .select('id')
+      .eq('wallet', body.wallet.toLowerCase())
+      .or(sameSignature)
+      .limit(1)
+      .abortSignal(AbortSignal.timeout(SIGNATURE_LOOKUP_TIMEOUT_MS))
     if (existing.error) {
-      logHashMismatch('error')
+      logOutcome('error')
       return NextResponse.json({ error: 'Could not check for an existing order. Try again shortly.' }, { status: 503 })
     }
     if ((existing.data ?? []).length > 0) {
-      logHashMismatch('exists')
+      logOutcome('exists')
       return NextResponse.json({ error: 'Order already exists' }, { status: 409 })
     }
 
@@ -798,7 +921,7 @@ export async function POST(req: NextRequest) {
         price_condition: priceConditionLabel,
         expiry: body.expiry,
         nonce: body.nonce,
-        signature: body.signature,
+        signature: storedSignature,
         // [S-5] The server's hash of the signed order, never body.orderHash. A row written by this code carries that
         // hash, so unique_order_hash refuses a second row for it whatever text is sent; a row written before PR #708
         // may carry other text, and the signature lookup above is what refuses a second row for it [A86 S-3].
@@ -806,7 +929,8 @@ export async function POST(req: NextRequest) {
         dca_interval: body.dcaInterval ?? 0,
         dca_total: body.dcaTotal ?? 1,
         router: body.router.toLowerCase(),
-        order_data: body.orderData ?? null,
+        // [A86 S-4/S-5] Built above from the verified message, never the caller's copy.
+        order_data: orderData,
         token_in_decimals: body.tokenInDecimals ?? 18,
         token_out_decimals: body.tokenOutDecimals ?? 18,
         // [CHORE-ORDER-API-CHAIN-AWARE] Persist the VERIFIED signed chainId (not process.env.CHAIN_ID)
@@ -828,14 +952,14 @@ export async function POST(req: NextRequest) {
       // code, including a concurrent request for the same order that passed the signature lookup at the same time.
       // A row written before PR #708 under other text does not fire it; the lookup above refuses that case [A86 S-3].
       if (error.code === '23505') {
-        logHashMismatch('exists')
+        logOutcome('exists')
         return NextResponse.json({ error: 'Order already exists (duplicate hash)' }, { status: 409 })
       }
-      logHashMismatch('error')
+      logOutcome('error')
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    logHashMismatch('stored')
+    logOutcome('stored')
     return NextResponse.json({ order: data }, { status: 201 })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Internal error'

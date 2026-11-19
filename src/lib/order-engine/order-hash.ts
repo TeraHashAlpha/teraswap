@@ -26,7 +26,7 @@
  *
  * No local imports on purpose: plain-Node scripts load this file through type stripping.
  */
-import { hashStruct, hashTypedData, type Hex, type TypedDataDomain } from 'viem'
+import { hashStruct, hashTypedData, keccak256, toBytes, type Hex, type TypedDataDomain } from 'viem'
 
 /** An EIP-712 schema with an `Order` primary type (ORDER_EIP712_TYPES or ORDER_V3_EIP712_TYPES). */
 export type OrderTypes = {
@@ -70,6 +70,27 @@ export function normalizeOrderHashText(text: unknown): string | null {
   if (typeof text !== 'string') return null
   const lower = text.toLowerCase()
   return lower.startsWith('0x') ? lower : `0x${lower}`
+}
+
+const HASH_SHAPE_RE = /^(?:0[xX])?[0-9a-fA-F]{64}$/
+
+/**
+ * [A95 S-1] How a caller-supplied (or stored, caller-written) text may appear in a log or a report: its SHAPE only,
+ * never the text. `<hash-shaped>` (0x/0X/no prefix + 64 hex), `<string len N>` for any other string, `<type T>` for
+ * anything that is not a string. A text that mixes hex of a signature with other hex has the shape of a hash, so a
+ * shape is all a log may carry: no rule about which hex is "a fragment of the signature" can be complete.
+ */
+export function describeCallerText(value: unknown): string {
+  if (typeof value !== 'string') return `<type ${typeof value}>`
+  return HASH_SHAPE_RE.test(value) ? '<hash-shaped>' : `<string len ${value.length}>`
+}
+
+/**
+ * [A95 S-1] The first 16 hex of keccak256(utf-8 text): lets two log lines about the same text be matched without the text.
+ * null when the value is not a string.
+ */
+export function callerTextDigest(value: unknown): string | null {
+  return typeof value === 'string' ? keccak256(toBytes(value)).slice(2, 18) : null
 }
 
 /** The order of the secp256k1 group. */

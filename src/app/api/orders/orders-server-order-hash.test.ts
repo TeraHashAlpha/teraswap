@@ -27,7 +27,7 @@ const fake = vi.hoisted(() => {
   return {
     rows: [] as Record<string, unknown>[],
     /** [A86 S-3] Every `or` filter the route sent, and how many rows each lookup found. */
-    lookups: [] as { filter: string; found: number }[],
+    lookups: [] as { filter: string; wallet: string; found: number }[],
     /** When set, each lookup waits until `needed` lookups have arrived: requests racing past the lookup together. */
     barrier: null as null | { needed: number; arrived: number; release: () => void; open: Promise<void> },
     lookupError: null as null | { message: string },
@@ -51,27 +51,34 @@ vi.mock('@supabase/supabase-js', () => ({
     from: (table: string) => {
       if (table !== 'orders') throw new Error(`unexpected table ${table}`)
       return {
-        // [A86 S-3] The route's lookup: .select('id').or('signature.ilike.<t>,…').limit(1)
+        // [A86 S-3] The route's lookup: .select('id').eq('wallet', <lower>).or('signature.ilike.<t>,…').limit(1)
+        // .abortSignal(<3 s>) [A89 R2-3/R2-4]. Both filters apply (PostgREST ANDs them).
         select: (cols: string) => ({
-          or: (filter: string) => ({
-            limit: async (n: number) => {
-              if (cols !== 'id') throw new Error(`unexpected select ${cols}`)
-              const terms = filter.split(',').map((term) => {
-                const m = /^signature\.ilike\.(.*)$/s.exec(term)
-                if (!m) throw new Error(`unexpected filter term ${term}`)
-                return m[1]
-              })
-              const barrier = fake.barrier
-              if (barrier) {
-                barrier.arrived += 1
-                if (barrier.arrived >= barrier.needed) barrier.release()
-                await barrier.open
-              }
-              if (fake.lookupError) return { data: null, error: fake.lookupError }
-              const hits = fake.rows.filter((r) => terms.some((t) => ilike(r.signature, t)))
-              fake.lookups.push({ filter, found: hits.length })
-              return { data: hits.slice(0, n).map((r) => ({ id: r.id })), error: null }
-            },
+          eq: (column: string, wallet: string) => ({
+            or: (filter: string) => ({
+              limit: (n: number) => ({
+                abortSignal: async (signal: AbortSignal) => {
+                  if (cols !== 'id') throw new Error(`unexpected select ${cols}`)
+                  if (column !== 'wallet') throw new Error(`unexpected eq column ${column}`)
+                  if (!(signal instanceof AbortSignal)) throw new Error('the lookup must carry an AbortSignal')
+                  const terms = filter.split(',').map((term) => {
+                    const m = /^signature\.ilike\.(.*)$/s.exec(term)
+                    if (!m) throw new Error(`unexpected filter term ${term}`)
+                    return m[1]
+                  })
+                  const barrier = fake.barrier
+                  if (barrier) {
+                    barrier.arrived += 1
+                    if (barrier.arrived >= barrier.needed) barrier.release()
+                    await barrier.open
+                  }
+                  if (fake.lookupError) return { data: null, error: fake.lookupError }
+                  const hits = fake.rows.filter((r) => r.wallet === wallet && terms.some((t) => ilike(r.signature, t)))
+                  fake.lookups.push({ filter, wallet, found: hits.length })
+                  return { data: hits.slice(0, n).map((r) => ({ id: r.id })), error: null }
+                },
+              }),
+            }),
           }),
         }),
         insert: (row: Record<string, unknown>) => ({
@@ -239,7 +246,7 @@ describe('POST /api/orders stores the server hash [S-5]', () => {
   })
 
   it.each([
-    ['another order\'s hash', WRONG_A, WRONG_A],
+    ['another order\'s hash', WRONG_A, '<hash-shaped>'],
     ['not a hash at all', 'not-a-hash', '<string len 10>'],
   ])('wrong hash text (%s) is stored as the server hash and logged once, without the signature', async (_label, text, callerHash) => {
     const { body, hash } = await signedDca(3)
@@ -249,7 +256,7 @@ describe('POST /api/orders stores the server hash [S-5]', () => {
     expect(fake.rows.map((r) => r.order_hash)).toEqual([hash])
     expect(mismatchLines()).toEqual([{
       event: 'orders_order_hash_mismatch', mode: 'observe', outcome: 'stored', chainId: 8453, version: 3, orderType: 'dca',
-      serverHash: hash, callerHash,
+      serverHash: hash, callerHash, callerHashDigest: keccak256(toBytes(String(text))).slice(2, 18),
     }])
     const logged = warn.mock.calls.map((c: unknown[]) => String(c[0])).join('\n')
     expect(logged).not.toContain(String(body.signature).slice(2, 42))
@@ -286,7 +293,7 @@ describe('POST /api/orders stores the server hash [S-5]', () => {
     const res = await post({ ...body, orderHash: WRONG_B })
     expect(res.status).toBe(201)
     expect(fake.rows.map((r) => r.order_hash)).toEqual([hash])
-    expect(mismatchLines()).toMatchObject([{ outcome: 'stored', version: 2, chainId: 1, serverHash: hash, callerHash: WRONG_B }])
+    expect(mismatchLines()).toMatchObject([{ outcome: 'stored', version: 2, chainId: 1, serverHash: hash, callerHash: '<hash-shaped>' }])
     expect((await post(body)).status).toBe(409)
   })
 
@@ -339,7 +346,16 @@ describe('orderData that differs from the signed order where M-07 does not compa
       expect(b.status).toBe(409)
       expect(b.json.error).toMatch(/^Order already exists/)
       expect(fake.rows).toHaveLength(1)
-      expect(fake.rows[0]).toMatchObject({ order_hash: hash, order_data: firstData })
+      // [A86 S-4] CHANGED: the stored order_data is the SIGNED order (signedDca's orderData is exactly the signed fields
+      // in the client's shapes), never the caller's bent copy firstData. The first post's differs line names the bent keys.
+      expect(fake.rows[0]).toMatchObject({ order_hash: hash })
+      expect(fake.rows[0].order_data).toEqual(orderData)
+      expect(fake.rows[0].order_data).not.toEqual(firstData)
+      const differs = warn.mock.calls
+        .map((c: unknown[]) => { try { return JSON.parse(String(c[0])) } catch { return null } })
+        .filter((x: Record<string, unknown> | null) => x?.event === 'orders_order_data_differs')
+      expect(differs[0]).toMatchObject({ outcome: 'stored', serverHash: hash, otherKeys: 0 })
+      expect(new Set(differs[0].fields)).toEqual(new Set(Object.keys(first)))
     },
   )
 })
@@ -458,7 +474,7 @@ describe('one signed order is stored once, rows written before the fix included 
 })
 
 // [A86 S-7] The observe line is written once the outcome is known, says what that outcome was, and carries the caller's
-// text only when it has the shape of a hash.
+// text only as a shape and a digest [A95 S-1: no text of the caller's, whatever its shape].
 describe('the orders_order_hash_mismatch line [A86 S-7]', () => {
   const METHODS = ['log', 'info', 'warn', 'error', 'debug'] as const
 
@@ -474,7 +490,7 @@ describe('the orders_order_hash_mismatch line [A86 S-7]', () => {
       expect(res.status).toBe(201)
       expect(mismatchLines()).toEqual([{
         event: 'orders_order_hash_mismatch', mode: 'observe', outcome: 'stored', chainId: 8453, version: 3, orderType: 'dca',
-        serverHash: hash, callerHash: `<string len ${len}>`,
+        serverHash: hash, callerHash: `<string len ${len}>`, callerHashDigest: keccak256(toBytes(spell(String(body.signature)))).slice(2, 18),
       }])
       const printed = [warn, ...others]
         .flatMap((spy) => spy.mock.calls.map((c: unknown[]) => c.map(String).join(' ')))
@@ -494,7 +510,7 @@ describe('the orders_order_hash_mismatch line [A86 S-7]', () => {
     warn.mockImplementation(() => { rowsWhenLogged.push(fake.rows.length) })
     expect((await post({ ...body, orderHash: WRONG_A })).status).toBe(201)
     expect(rowsWhenLogged).toEqual([1])
-    expect(mismatchLines()).toMatchObject([{ outcome: 'stored', serverHash: hash, callerHash: WRONG_A }])
+    expect(mismatchLines()).toMatchObject([{ outcome: 'stored', serverHash: hash, callerHash: '<hash-shaped>' }])
   })
 
   it('a re-post refused with 409 logs outcome "exists" and names no row as stored by it', async () => {
@@ -503,7 +519,7 @@ describe('the orders_order_hash_mismatch line [A86 S-7]', () => {
     expect(mismatchLines()).toEqual([])
     expect((await post({ ...body, orderHash: WRONG_B })).status).toBe(409)
     const [line] = mismatchLines()
-    expect(line).toMatchObject({ outcome: 'exists', serverHash: hash, callerHash: WRONG_B })
+    expect(line).toMatchObject({ outcome: 'exists', serverHash: hash, callerHash: '<hash-shaped>' })
     expect(line).not.toHaveProperty('storedHash')
     expect(fake.rows).toHaveLength(1)
   })
