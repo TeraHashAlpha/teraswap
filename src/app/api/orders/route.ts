@@ -17,7 +17,7 @@ import { STOP_LOSS_DEFERRED_REASON, LIMIT_TP_CHAIN_ID } from '@/lib/order-engine
 import { ORDER_EIP712_TYPES, ORDER_V3_EIP712_TYPES, MAX_ORDER_SLIPPAGE_BPS } from '@/lib/order-engine/types'
 // [fix/orders-server-side-order-hash, audit 2026-11-16 S-5] The stored order hash is the server's.
 import {
-  computeOrderHash, normalizeOrderHashText, orderSignatureEncodings, describeCallerText, callerTextDigest,
+  computeOrderHash, normalizeOrderHashText, orderSignatureEncodings, canonicalOrderSignature, describeCallerText, callerTextDigest,
 } from '@/lib/order-engine/order-hash'
 import { getDcaMinChunkUsd } from '@/lib/order-engine/dca-custom'
 // [FEAT-DCA-FLOOR-TIERS] Server-side floor tier + the consent it requires.
@@ -824,6 +824,12 @@ export async function POST(req: NextRequest) {
     // complete (A89 R2-1 had one); the line carries none of it.
     // [A86 S-3] The 4 texts of this signature that recover the same signer (v 27/28 or 0/1, s or its twin n − s).
     const signatureTexts = orderSignatureEncodings(body.signature) ?? [body.signature.toLowerCase()]
+    // [A95 S-2] What the row stores: the one text of this signature the executors accept (v 27/28, low s, lower case, 0x).
+    // Recovery above accepted whichever of the 4 texts the caller sent (viem takes v 0/1 and the high-s twin), but the
+    // executors' ECDSA.recover refuses those: a row holding one could never execute. Same signer, same hash. Every check
+    // has run on the text as sent; nothing accepted before is refused. (Always non-null here: recovery succeeded on a
+    // 130-hex text with v 0/1/27/28; the fallback keeps the text as sent rather than refuse.)
+    const storedSignature = canonicalOrderSignature(body.signature) ?? body.signature
     const callerHashMismatch = normalizeOrderHashText(body.orderHash) !== serverOrderHash
     const logHashMismatch = (outcome: 'stored' | 'exists' | 'error') => {
       if (!callerHashMismatch) return
@@ -915,7 +921,7 @@ export async function POST(req: NextRequest) {
         price_condition: priceConditionLabel,
         expiry: body.expiry,
         nonce: body.nonce,
-        signature: body.signature,
+        signature: storedSignature,
         // [S-5] The server's hash of the signed order, never body.orderHash. A row written by this code carries that
         // hash, so unique_order_hash refuses a second row for it whatever text is sent; a row written before PR #708
         // may carry other text, and the signature lookup above is what refuses a second row for it [A86 S-3].
