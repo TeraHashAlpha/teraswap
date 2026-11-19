@@ -38,3 +38,12 @@ Diff vs origin/main: 19 files, +1134/-18 (route +33, client helper +32, tests +5
 
 ## Premise check and the one question
 Premise TRUE, checked before any edit: the route selected `wallet` only (no status test, no signature check) and origin/main's `orders-privacy-clause.test.ts:124` pinned live fills as "RETURNED (200)"; after the change exactly the 4 live-order cases flipped, nothing else. So nothing to ask on the premise. Asked ONCE anyway, on three readings; owner: keep all (e2e rig in repo, signer registry in `read-auth.ts`, headers sent on finished orders too).
+
+## Round 2 (A97, audited at 302f9cec: 0C/2H) — checklist (evidence replaces it)
+- [x] merge origin/main e0c00390 (PR #718), signed, clean
+- [ ] C1 S-1/S-4/S-8: registry {address, sign} per mount; recover before store; drop foreign entry on read; sign first for live
+- [ ] C1 tests: browser switch path v1+v2 (FAIL on 302f9cec first), registry lifecycle, store property
+- [ ] C2 S-2/S-3/S-7: analytics recentTrades finished-only; stats recentExecutions24h signed-only; Cache-Control on 3 GETs
+- [ ] C2 tests: analytics differential vs origin/main; browser Analytics v1+v2
+- [ ] C3 S-5/S-6: hard-coded terminal set; proof comments re-cited; test retitled; privacy sentence checked
+- [ ] mutants x5; agent-verify --codeql once; evidence 1-5; push

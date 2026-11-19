@@ -16,7 +16,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   setOrdersReadSigner,
-  getOrdersReadSigner,
+  OrdersReadSignerUnavailableError,
   type SignTypedDataFn,
 } from '@/lib/order-engine/read-auth'
 import { useAccount, useChainId, useSignTypedData, useReadContract, useWriteContract, useSwitchChain } from 'wagmi'
@@ -448,15 +448,37 @@ export function useOrderEngine() {
   // below is exercised exactly as before.
   const orderExecutorV3 = getOrderExecutorV3(chainId)
   const { signTypedDataAsync } = useSignTypedData()
-  // [A87b R2-1] The fills of a LIVE order need the same read signature as the list: hand the other readers
-  // (executions-client.ts) this hook's signer, so they take the list's sign-once path instead of prompting on their own.
+  // [A97 S-1] The account connected NOW (updated on every account change): a read message for a wallet is signed only
+  // while that wallet is the connected account, and wagmi is told which account must sign (`account`), so it refuses rather
+  // than let another account sign a message naming this one (until this effect has run, wagmi's own check covers it).
+  const connectedRef = useRef(address)
   useEffect(() => {
-    const signer: SignTypedDataFn = (typed) => signTypedDataAsync(typed as Parameters<typeof signTypedDataAsync>[0])
-    setOrdersReadSigner(signer)
-    return () => {
-      if (getOrdersReadSigner() === signer) setOrdersReadSigner(null)
-    }
-  }, [signTypedDataAsync])
+    connectedRef.current = address
+  }, [address])
+  const readSignerFor = useCallback(
+    (wallet: string): SignTypedDataFn =>
+      async (typed) => {
+        if (connectedRef.current?.toLowerCase() !== wallet.toLowerCase()) throw new OrdersReadSignerUnavailableError()
+        try {
+          return await signTypedDataAsync({ ...typed, account: wallet as `0x${string}` } as Parameters<typeof signTypedDataAsync>[0])
+        } catch (err) {
+          // wagmi: the account is not (any more) one the connector holds — the same case as above, not a refusal.
+          if (err instanceof Error && err.name === 'ConnectorAccountNotFoundError') throw new OrdersReadSignerUnavailableError()
+          throw err
+        }
+      },
+    [signTypedDataAsync],
+  )
+  // [A87b R2-1, A97 S-1/S-4] The fills of a LIVE order need the same read signature as the list: hand the other readers
+  // (executions-client.ts) this mount's { address, signer }, so they take the list's sign-once path instead of prompting
+  // on their own, and only for the wallet that is connected. One entry per mount: unmounting removes only this one, and
+  // with no account connected this mount holds none.
+  const signerOwnerRef = useRef<object>({})
+  useEffect(() => {
+    const owner = signerOwnerRef.current
+    setOrdersReadSigner(owner, address ? { address, sign: readSignerFor(address) } : null)
+    return () => setOrdersReadSigner(owner, null)
+  }, [address, readSignerFor])
   const { writeContractAsync } = useWriteContract()
   // [fix/cross-chain-order-cancel] Cancel resolves its executor/domain from the ORDER's chain, never
   // the wallet's active one — when they differ this requests a switch instead of falling through.
@@ -491,9 +513,9 @@ export function useOrderEngine() {
       return await fetchFn()
     } catch (err) {
       if (!(err instanceof ReadAuthRequiredError) || !address) throw err
-      const outcome = await ensureOrdersReadAuth(address, (typed) =>
-        signTypedDataAsync(typed as Parameters<typeof signTypedDataAsync>[0]),
-      )
+      const outcome = await ensureOrdersReadAuth(address, readSignerFor(address))
+      // [A97 S-4] 'unavailable' = this wallet is no longer the connected account: not a refusal, so no "Sign to view".
+      if (outcome === 'unavailable') return []
       if (outcome !== 'ok') {
         setReadAuthDenied(true)
         return []
@@ -1398,9 +1420,7 @@ export function useOrderEngine() {
   const requestOrdersReadAuth = useCallback(async () => {
     if (!address) return
     retryOrdersReadAuth(address)
-    const outcome = await ensureOrdersReadAuth(address, (typed) =>
-      signTypedDataAsync(typed as Parameters<typeof signTypedDataAsync>[0]),
-    )
+    const outcome = await ensureOrdersReadAuth(address, readSignerFor(address))
     if (outcome !== 'ok') return
     setReadAuthDenied(false)
     try {
@@ -1412,7 +1432,7 @@ export function useOrderEngine() {
     } catch {
       /* the poll will pick the list up on its next tick */
     }
-  }, [address, signTypedDataAsync])
+  }, [address, readSignerFor])
 
   return {
     orders,

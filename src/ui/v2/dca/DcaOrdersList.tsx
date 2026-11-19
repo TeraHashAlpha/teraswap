@@ -114,7 +114,7 @@ export function DcaPositionCard({ order, latestEvent, connectedChainId, onCancel
   const chainName = getChainName(chainId)
   const reduced = useReducedMotion()
 
-  const { executions, lastFillAtMs } = useOrderExecutions(order.id, order.order.owner, { enabled: isLive, latestEvent })
+  const { executions, lastFillAtMs } = useOrderExecutions(order.id, order.order.owner, { enabled: isLive, live: isLive, latestEvent })
   const targetMs = nextBuyTarget(order, lastFillAtMs)
   const now = useNow(isLive, targetMs)
   const view = countdownView(targetMs, terminalLabel(order), now)
