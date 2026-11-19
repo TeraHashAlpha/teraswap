@@ -129,3 +129,6 @@ workers/*/node_modules/
 /playwright-report/
 /playwright/.cache/
 .env*
+
+# [fix/catalog-refresh-drops-untrusted] tokens:sync decision artifacts (PR-body sections, blocked summary) — read by the workflow, never committed
+/catalog-refresh-report/

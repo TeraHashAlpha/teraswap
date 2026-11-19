@@ -9,7 +9,7 @@
  *
  *   node scripts/token-catalog/auto-merge-eligibility.mjs --base <rev> --head <rev> \
  *     --head-ref <branch> --guard <success|failure|...> --pr-author <login> \
- *     --expected-author <login> --ci-triggered <true|false> [--run-id <id>] [--checklist-file <path>]
+ *     --expected-author <login> --ci-triggered <true|false> [--run-id <id>] [--checklist-file <path>] [--decision-file <path>]
  *
  * stdout: `eligible=true|false` then one `reason=` line per failed check. With $GITHUB_OUTPUT set,
  * `eligible` is also appended there. ALWAYS exits 0 once it has a verdict; any internal error
@@ -26,11 +26,15 @@
  *   C8 existing   [stricter than the brief] no existing row changes address/symbol/decimals;
  *                 trust-fixture changes stay inside this chain
  *   C9 ci         [stricter than the brief] the PR was opened with the PAT, so CI actually runs
+ *   C10 held-back [fix/catalog-refresh-drops-untrusted, owner rule D] ZERO sources held back by the growth
+ *                 breaker. The count comes from the refresh's own decision file (--decision-file,
+ *                 catalog-refresh-report/decision.<chain>.json); missing / unreadable / not a number => NOT eligible.
+ *                 With C3 (0 removals) and C4 (additions within the cap) these are the three owner conditions.
  *
  * Plain Node ESM, no dependency beyond `viem` (already a repo dependency, EIP-55 checksum).
  */
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { getAddress } from 'viem'
 
@@ -91,7 +95,8 @@ const short = (rows, n = 5) =>
  * Pure verdict. `input`:
  *  { guard, ciTriggered, prAuthor, expectedAuthor, headRef, runId?, files: string[],
  *    before: {tokens}, after: {tokens}, trustBefore, trustAfter,
- *    commit: { count, parentIsBase, author, headline } }
+ *    commit: { count, parentIsBase, author, headline },
+ *    heldBackSources: number of sources the growth breaker held back (undefined = unknown => not eligible) }
  */
 export function evaluateEligibility(input, cfg = ELIGIBILITY_DEFAULTS) {
   const checks = []
@@ -192,6 +197,15 @@ export function evaluateEligibility(input, cfg = ELIGIBILITY_DEFAULTS) {
   // C9
   checks.push(check('C9', 'PR opened with the PAT (CI runs)', input.ciTriggered === true, input.ciTriggered === true ? 'CATALOG_PR_TOKEN path' : 'GITHUB_TOKEN fallback — CI never starts, auto-merge would wait forever'))
 
+  // C10 [rule D] a held-back source means this PR was built on a previous snapshot of it: the owner decides
+  const held = input.heldBackSources
+  checks[checks.length] = check(
+    'C10',
+    'No source held back by the growth breaker',
+    Number.isInteger(held) && held === 0,
+    Number.isInteger(held) ? `${held} source(s) held back` : 'held-back count unknown (decision file missing or unreadable) — fail closed',
+  )
+
   const failed = checks.filter((x) => !x.pass)
   return {
     eligible: failed.length === 0,
@@ -215,6 +229,16 @@ export function renderChecklist(result) {
 
 function git(...args) {
   return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] })
+}
+/** [rule D] number of held-back sources in the refresh's decision file, or undefined when it cannot be read. */
+export function heldBackCountFrom(decisionFile) {
+  if (!decisionFile) return undefined
+  try {
+    const doc = JSON.parse(readFileSync(decisionFile, 'utf8'))
+    return Array.isArray(doc?.heldBackSources) ? doc.heldBackSources.length : undefined
+  } catch {
+    return undefined
+  }
 }
 function showJson(rev, file) {
   try {
@@ -252,6 +276,7 @@ export function gatherFromGit(args) {
     expectedAuthor: args['expected-author'],
     headRef: args['head-ref'],
     runId: args['run-id'],
+    heldBackSources: heldBackCountFrom(args['decision-file']),
     files,
     before: Number.isInteger(chainId) ? showJson(base, catalogFile(chainId)) : null,
     after: Number.isInteger(chainId) ? showJson(head, catalogFile(chainId)) : null,
