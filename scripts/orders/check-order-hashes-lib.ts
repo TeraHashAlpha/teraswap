@@ -17,13 +17,13 @@
  * [A86 S-8] Addresses are lower-cased before hashing: the keeper's getAddress accepts a mixed-case address whose
  * checksum is wrong, so the hash must not refuse it.
  *
- * Nothing this module returns carries a signature: field errors name the field, never its value, and stored texts
- * pass through safeText() before they are reported.
+ * Nothing this module returns carries a signature: field errors name the field, never its value, and a stored text is
+ * reported as a shape and a digest (safeText, storedDigest), never as the text [A95 S-1].
  *
  * Read-only: no network, no database, no environment.
  */
 // @ts-expect-error TS5097 - Node's native type stripping requires the .ts extension; tsc is noEmit here
-import { computeOrderHash, canonicalOrderSignature } from '../../src/lib/order-engine/order-hash.ts'
+import { computeOrderHash, canonicalOrderSignature, describeCallerText, callerTextDigest } from '../../src/lib/order-engine/order-hash.ts'
 // @ts-expect-error TS5097 - same
 import { ORDER_EIP712_TYPES, ORDER_V3_EIP712_TYPES } from '../../src/lib/order-engine/order-eip712-types.ts'
 
@@ -32,7 +32,6 @@ const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const BYTES32_RE = /^0x[0-9a-fA-F]{64}$/
 const UINT256_MAX = (1n << 256n) - 1n
 const HASH_SHAPE_RE = /^(?:0[xX])?[0-9a-fA-F]{64}$/
-const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
 
 export type Verdict =
   | { id: unknown; chain_id: unknown; verdict: 'match'; stored: string; computed: string }
@@ -50,14 +49,19 @@ export interface Groups {
 }
 
 /**
- * A stored order_hash text as it may be printed: a hash-shaped or UUID-shaped text as is, any other string as
- * `<string len N>` (a pre-#708 row may hold a caller's arbitrary text, a signature included), null as null, another
- * type by its type.
+ * [A95 S-1] A stored order_hash as it may be printed: its SHAPE, never the text. A pre-#708 row holds whatever the caller
+ * sent, and a hash-shaped text can mix hex of the row's own signature with other hex, so no stored text that is not the
+ * computed hash is printed at all: `<hash-shaped>`, `<string len N>` or `<type T>` (describeCallerText), null as null.
+ * The first 16 hex of its keccak256 (storedDigest) lets two reports about one text be matched.
  */
 export function safeText(value: unknown): unknown {
   if (value === null || value === undefined) return null
-  if (typeof value !== 'string') return `<${typeof value}>`
-  return HASH_SHAPE_RE.test(value) || UUID_RE.test(value) ? value : `<string len ${value.length}>`
+  return describeCallerText(value)
+}
+
+/** [A95 S-1] The digest printed beside a stored text's shape; null for null / not a string. */
+export function storedDigest(value: unknown): string | null {
+  return callerTextDigest(value)
 }
 
 /** The keeper's struct (executor.js orderStruct), as an EIP-712 message for the server function. */
