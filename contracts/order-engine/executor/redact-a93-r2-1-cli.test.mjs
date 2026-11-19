@@ -19,7 +19,7 @@ import assert from "node:assert/strict"
 import { createServer } from "node:http"
 import { once } from "node:events"
 import { spawn } from "node:child_process"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -148,8 +148,7 @@ async function supabaseStub({ status = 200, echoKey = false } = {}) {
 }
 
 /** Run `node <cli> …args` from an empty cwd (no .env.executor), env built from scratch. */
-async function runCli(cli, args, env) {
-  const cwd = mkdtempSync(join(tmpdir(), "a93-r21-cli-"))
+async function runCli(cli, args, env, { cwd = mkdtempSync(join(tmpdir(), "a93-r21-cli-")) } = {}) {
   cwds.push(cwd)
   const child = spawn(process.execPath, [join(HERE, cli), ...args], {
     cwd,
@@ -255,5 +254,128 @@ describe("[A93 R2-1] every print of each CLI is scrubbed, not only what passes r
     assert.equal(run.exitCode, 1, run.all)
     assert.match(run.stderr, /^FATAL: orders lookup failed: HTTP 401 \{"message":"Invalid API key: <redacted>"\}$/m)
     assertNoSecret(run, "401 body")
+  })
+
+  // ── [A93 R3-1] STDOUT. Each CLI's say() is the only thing between a printed value and the terminal: removing the scrub
+  // from it (or from one call) kept all 2,300 keeper tests green. One run per say() call that can carry text from the
+  // operator's arguments, the provider or the database; each asserts on STDOUT alone and that the line was reached
+  // (a `<redacted>` where the secret was). The calls that carry no such text are listed in the feedback file.
+
+  /** A JSON-RPC stub whose answer to each method in `answers` is that value (every other method: the happy path). */
+  async function rpcStubWith(answers) {
+    const handle = await listen((req, res) => {
+      let raw = ""
+      req.on("data", (c) => (raw += c))
+      req.on("end", () => {
+        const call = JSON.parse(raw)
+        const result = call.method in answers ? answers[call.method] : happy(call.method, call.params)
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result }))
+      })
+    })
+    return { ...handle, keyedUrl: `http://127.0.0.1:${handle.port}/v2/${KEY}?apikey=${QUERY}` }
+  }
+
+  const ORDER_ROW = { id: "0b3c9e1a-0000-4000-8000-000000000000", order_type: "dca", status: "active", dca_executed: 0, dca_total: 3, chain_id: 8453, token_in_symbol: "WETH", token_out_symbol: "USDC", router: "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5", created_at: "2023-11-14T22:13:20.000Z" }
+
+  /** A PostgREST stub for backfill: the order row (with `order` overrides), no recorded fills, and the insert's answer. */
+  async function supabaseRoutes({ order = {}, insert = 201 } = {}) {
+    return listen((req, res) => {
+      req.resume()
+      req.on("end", () => {
+        if (req.method === "GET") {
+          const rows = req.url.includes("/orders?order_hash=eq.") ? [{ ...ORDER_ROW, ...order }] : []
+          res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(rows))
+        } else if (req.method === "POST" && insert !== 201) {
+          res.writeHead(insert, { "content-type": "application/json" }).end(JSON.stringify({ message: `Invalid API key: ${req.headers.apikey}` }))
+        } else {
+          res.writeHead(req.method === "POST" ? 201 : 204).end()
+        }
+      })
+    })
+  }
+
+  const backfill = (rpc, sb, { args = [TX], extraEnv = {} } = {}) =>
+    runCli("backfill-execution.mjs", args, { BACKFILL_RPC_URL: rpc.keyedUrl, SUPABASE_URL: `http://127.0.0.1:${sb.port}`, ...extraEnv })
+
+  test("backfill-execution say() @ the banner: the transaction argument is the keyed RPC URL, pasted by mistake", { timeout: 90_000 }, async () => {
+    const rpc = await rpcStub("none", "echoPath")
+    const run = await backfill(rpc, await supabaseRoutes(), { args: [rpc.keyedUrl] })
+    assertNoSecret({ all: run.stdout }, "backfill banner")
+    assert.match(run.stdout, /^=== Backfill http:\/\/127\.0\.0\.1:\d+\/v2\/<redacted>\?apikey=<redacted> \(apply=false\) via RPC host=127\.0\.0\.1:\d+ ===$/m, run.all)
+  })
+
+  test("backfill-execution say() @ the receipt line: a provider whose receipt echoes the request target in `to`", { timeout: 90_000 }, async () => {
+    const rpc = await rpcStubWith({ eth_getTransactionReceipt: { ...RECEIPT, to: `no route for /v2/${KEY}?apikey=${QUERY}` } })
+    const run = await backfill(rpc, await supabaseRoutes())
+    assertNoSecret({ all: run.stdout }, "backfill receipt line")
+    assert.match(run.stdout, /^receipt: status=success block=5 to=no route for \/v2\/<redacted>\?apikey=<redacted> gasUsed=21000$/m, run.all)
+  })
+
+  test("backfill-execution say() @ the order line: a database row whose text echoes the service key", { timeout: 90_000 }, async () => {
+    const rpc = await rpcStub("none", "echoPath")
+    const run = await backfill(rpc, await supabaseRoutes({ order: { router: `gateway ${SERVICE_KEY}` } }))
+    assert.equal(run.exitCode, 0, run.all)
+    assertNoSecret({ all: run.stdout }, "backfill order line")
+    assert.match(run.stdout, /^order: id=0b3c9e1a-0000-4000-8000-000000000000 .* router=gateway <redacted>$/m, run.all)
+  })
+
+  test("backfill-execution say() @ the scan log: the provider fails eth_getLogs and echoes the request target", { timeout: 90_000 }, async () => {
+    const rpc = await rpcStub("eth_getLogs", "echoPath")
+    const run = await backfill(rpc, await supabaseRoutes())
+    assert.equal(run.exitCode, 1, run.all)
+    assertNoSecret({ all: run.stdout }, "backfill scan log")
+    assert.match(run.stdout, /^\[list-missing-fills\] range error on 0-16 \([^]*Details: no route for \/v2\/<redacted>\?apikey=<redacted>\), retrying 0-16 at half chunk size$/m, run.all)
+  })
+
+  test("backfill-execution say() @ the row to write: the order's id is text from the database", { timeout: 90_000 }, async () => {
+    const rpc = await rpcStub("none", "echoPath")
+    const run = await backfill(rpc, await supabaseRoutes({ order: { id: SERVICE_KEY } }))
+    assert.equal(run.exitCode, 0, run.all)
+    assertNoSecret({ all: run.stdout }, "backfill row to write")
+    assert.match(run.stdout, /order_executions row to write: \{[^}]*order_id: '<redacted>'/s, run.all)
+  })
+
+  test("backfill-execution say() @ the write result: BACKFILL_APPLY=1, the insert answers 401 with a body that echoes the service key", { timeout: 90_000 }, async () => {
+    const rpc = await rpcStub("none", "echoPath")
+    const run = await backfill(rpc, await supabaseRoutes({ insert: 401 }), { extraEnv: { BACKFILL_APPLY: "1" } })
+    assert.equal(run.exitCode, 0, run.all)
+    assertNoSecret({ all: run.stdout }, "backfill write result")
+    assert.match(run.stdout, /order_executions write: \{[^}]*error: 'HTTP 401 \{"message":"Invalid API key: <redacted>"\}'/s, run.all)
+  })
+
+  const listMissing = (rpc, sb, args, opts) =>
+    runCli("list-missing-fills.mjs", args, { RPC_URL: rpc.keyedUrl, SUPABASE_URL: `http://127.0.0.1:${sb.port}` }, opts)
+
+  test("list-missing-fills say() @ the table: a provider whose log echoes the request target in `transactionHash`", { timeout: 90_000 }, async () => {
+    const rpc = await rpcStubWith({ eth_getLogs: [{ ...LOG, transactionHash: `no route for /v2/${KEY}?apikey=${QUERY}` }] })
+    const tmp = mkdtempSync(join(tmpdir(), "a93-r31-out-"))
+    cwds.push(tmp)
+    const run = await listMissing(rpc, await supabaseStub(), ["--from-block", "1", "--out", join(tmp, "o.txt")])
+    assert.equal(run.exitCode, 0, run.all)
+    assertNoSecret({ all: run.stdout }, "list-missing-fills table")
+    assert.match(run.stdout, /^5 {2}\| {2}no route for \/v2\/<redacted>\?apikey=<redacted> {2}\| /m, run.all)
+  })
+
+  test("list-missing-fills say() @ the result line: the keyed RPC URL pasted as --out", { timeout: 90_000 }, async () => {
+    const rpc = await rpcStub("none", "echoPath")
+    // The file name is the pasted URL, under the cwd: its directories exist, so the write succeeds and the line is printed.
+    const cwd = mkdtempSync(join(tmpdir(), "a93-r31-cwd-"))
+    mkdirSync(join(cwd, "http:", `127.0.0.1:${rpc.port}`, "v2"), { recursive: true })
+    const run = await listMissing(rpc, await supabaseStub(), ["--from-block", "1", "--out", rpc.keyedUrl], { cwd })
+    assert.equal(run.exitCode, 0, run.all)
+    assertNoSecret({ all: run.stdout }, "list-missing-fills result line")
+    assert.match(run.stdout, /^Wrote 1 missing hash\(es\) to http:\/\/127\.0\.0\.1:\d+\/v2\/<redacted>\?apikey=<redacted>$/m, run.all)
+  })
+
+  test("list-missing-fills say() @ the scan log and the boot line: a run that prints both, with the key in the provider URL only", { timeout: 90_000 }, async () => {
+    const rpc = await rpcStub("none", "echoPath")
+    const tmp = mkdtempSync(join(tmpdir(), "a93-r31-out-"))
+    cwds.push(tmp)
+    const run = await listMissing(rpc, await supabaseStub(), ["--from-block", "1", "--out", join(tmp, "o.txt")])
+    assert.equal(run.exitCode, 0, run.all)
+    assertNoSecret({ all: run.stdout }, "list-missing-fills boot lines")
+    assert.match(run.stdout, /^\[chain-verify\] eth_chainId = 8453 — matches CHAIN_ID$/m, run.all)
+    assert.match(run.stdout, /^chain=8453 executor=0x686b4f812291F4De238E59ED00BA6dD6129e60a0 \(\d+ bytes of code\)$/m, run.all)
+    assert.match(run.stdout, /^on-chain=1 recorded=0 missing=1$/m, run.all)
   })
 })
