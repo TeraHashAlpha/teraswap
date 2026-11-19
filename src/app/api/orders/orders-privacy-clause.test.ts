@@ -143,7 +143,8 @@ describe('LIVE orders need the wallet\'s read signature, as reading the order do
     expect(body.executions[0].tx_hash).toBe(fillHashByOrder.get(String(order.id)))
   })
 
-  it('the only gate is the wallet parameter: another wallet gets 403 and no fill, a missing wallet gets 400', async () => {
+  // [A97 S-6] Retitled: since A87b R2-1 the wallet parameter is the only gate for a FINISHED order, not for every order.
+  it('a FINISHED order\'s fills: the wallet parameter is the gate, another wallet gets 403 and no fill, a missing wallet gets 400', async () => {
     const order = orderOf('executed')
     const other = await EXECUTIONS(req(`/api/orders/${order.id}/executions?wallet=${OTHER}`), idParams(order.id))
     expect(other.status).toBe(403)

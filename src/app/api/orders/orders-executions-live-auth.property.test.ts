@@ -11,6 +11,9 @@
  *
  * A failing case names its seed, case number, status, auth state and path, never a signature value. Replay one case by
  * running its seed alone.
+ *
+ * [A97 S-5] Which statuses count as finished is written out below (FINISHED), not read from the code: the oracle of a
+ * property must not be the set under test, or a change to that set changes what the property expects with it.
  */
 import { describe, it, expect, vi } from 'vitest'
 import { NextRequest } from 'next/server'
@@ -19,8 +22,10 @@ import {
   buildOrdersReadTypedData,
   ORDERS_READ_HEADER_ISSUED,
   ORDERS_READ_HEADER_SIGNATURE,
-  PUBLIC_ORDER_STATUSES,
 } from '@/lib/order-engine/read-auth'
+
+/** The orders whose fills anyone may read with the wallet parameter: finished ones (owner-decided boundary, A87b R2-1). */
+const FINISHED: ReadonlySet<string> = new Set(['executed', 'cancelled', 'expired', 'failed'])
 import type { Row } from '@/test-utils/fake-postgrest'
 import { DB_ORDER_STATUSES, makeExecutionRow, makeOrderRow, makeOrdersDb, prng, randomHex } from '@/test-utils/orders-db-fixture'
 
@@ -118,7 +123,7 @@ describe('property: a live order\'s fills and progress never leave without the o
       const requested = WALLETS[requestedIdx]
       const state = pick(rand, STATES)
       const status = String(target.status)
-      const finished = PUBLIC_ORDER_STATUSES.has(status)
+      const finished = FINISHED.has(status)
       const owns = requested === String(target.wallet)
       const path = `/api/orders/${id}/executions?wallet=${requested}`
       const label = `seed ${seed} case ${i}: ${unknownId ? 'unknown id' : status} auth=${state} ${owns ? 'owner' : 'not-owner'}`

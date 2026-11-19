@@ -168,35 +168,42 @@ export const PRIVACY_LOCAL_STORAGE_NOTE =
 export const PRIVACY_PROVIDERS_NOTE =
   'Our hosting and network providers, Vercel and Cloudflare, process every request to the Interface, including your IP address, in order to deliver it, under their own policies. We do not ask them for analytics.'
 // [fix/privacy-leftovers-a78b S-10] Privacy §6. Verified against the routes: /api/analytics (no auth, every confirmed swap and
-// confirmed order fill, newest 50 in `recentTrades` with the wallet cut to first 6 + last 4 characters), the tab renders pair,
-// route, time and a tx link and no wallet; /api/analytics/personal and /api/analytics/export take `?wallet=` with no signature.
+// confirmed order fill in the totals; `recentTrades` = the newest 50 of them minus the fills of orders that are not finished
+// [A97 S-2, owner decision 2026-11-19: analytics/route.ts:328-331, :490], with the wallet cut to first 6 + last 4 characters),
+// the tab renders pair, route, time and a tx link and no wallet; /api/analytics/personal and /api/analytics/export take
+// `?wallet=` with no signature. So "the tab lists recent swaps and order fills" lists an order's fills once the order is finished.
 // [S-22] Sentence 2: the feed rows render pair, source, time and tx link only (AnalyticsDashboard.tsx:114-134, v2 AnalyticsTab.tsx:87-105),
-// while /api/analytics returns each trade whole with only `wallet` shortened (analytics/route.ts:469-472): amountIn, amountOut, volumeUsd
+// while /api/analytics returns each trade whole with only `wallet` shortened (analytics/route.ts:488-493): amountIn, amountOut, volumeUsd
 // (TradeEvent, analytics-types.ts:25-30) stay in the response.
-// [S-13, A87 S-1] The last sentence, clause by clause (line numbers at the head of fix/order-signature-not-returned, PR #709):
-//  - "swap history" = /api/history swaps: wallet param only (history/route.ts:50), swaps read with no proof (:86-92); the proof
+// [S-13, A87 S-1, A97 S-6] The last sentence, clause by clause (line numbers re-checked at the head of PR #719, A97 round 2):
+//  - "swap history" = /api/history swaps: wallet param only (history/route.ts:50), swaps read with no proof (:86-91); the proof
 //    gates only the fills (:106-115).
 //  - "swap statistics" = /api/analytics/personal: wallet param, no signature check in the file (analytics/personal/route.ts:40).
 //  - "swap export" = /api/analytics/export: wallet param, swaps read with no proof (analytics/export/route.ts:155, :212).
-//  - "the records of its executed, cancelled, expired or failed orders" = /api/orders GET needs no proof when every status is
-//    terminal (orders/route.ts:844-861, PUBLIC_ORDER_STATUSES at read-auth.ts:37-42); by id, the same (orders/[id]/route.ts:61-76).
+//  - "the records of its executed, cancelled, expired or failed orders" = the list GET (orders/route.ts:972-974, body :977-1053)
+//    needs no proof when every status asked for is terminal (:1010-1011, PUBLIC_ORDER_STATUSES at read-auth.ts:37-42); by id,
+//    the same (orders/[id]/route.ts:70-85).
 //  - "without the signature that authorised each order" = every orders read selects the order-read-columns.ts allow-list, which
-//    leaves `signature` out with or without a read signature (orders/route.ts:870, orders/[id]/route.ts:45; owner decision
+//    leaves `signature` out with or without a read signature (orders/route.ts:1036, orders/[id]/route.ts:54; owner decision
 //    2026-11-17; pinned by orders-read-no-signature.test.ts).
-//  - "a count of its orders by status" = /api/orders/stats: no auth, wallet filter (orders/stats/route.ts:24, :33), buckets (:41-59).
-//  - "open orders ... need a signature from that wallet" = 401 READ_AUTH_REQUIRED (orders/route.ts:852-859; by id
-//    orders/[id]/route.ts:61-76; the fills and progress of an open order, orders/[id]/executions/route.ts:69-84 [A87b R2-1]).
+//  - "a count of its orders by status" = /api/orders/stats: no auth, wallet filter (orders/stats/route.ts:29, :38), buckets (:46-64).
+//    Its 24 h fill count (`recentExecutions24h`, live orders' fills included) is returned for a wallet only with that wallet's
+//    read signature (:70-81, :103) [A97 S-3].
+//  - "open orders ... need a signature from that wallet" = 401 READ_AUTH_REQUIRED (list orders/route.ts:1012-1027, the 401 at
+//    :1018-1026; by id orders/[id]/route.ts:70-85; the fills and progress of an open order, orders/[id]/executions/route.ts:78-93
+//    [A87b R2-1]). The Analytics feed lists no fill of an open order (analytics/route.ts:490) [A97 S-2].
 //  - "the DCA fills in a wallet's history need a signature from that wallet" = /api/history withholds the fills without the read
 //    signature (history/route.ts:106-115, `fillsIncluded: false`).
 //  - "the fills of a finished order can be read with its record" = /api/orders/[id]/executions asks for the wallet parameter only
-//    for a finished order (orders/[id]/executions/route.ts:44), checks that the order belongs to it (:60) and returns the
-//    order_executions rows (:86-90); the status test (:69, PUBLIC_ORDER_STATUSES, the same terminal set orders/[id]/route.ts:61
+//    for a finished order (orders/[id]/executions/route.ts:49), checks that the order belongs to it (:69) and returns the
+//    order_executions rows (:95-99); the status test (:78, PUBLIC_ORDER_STATUSES, the same terminal set orders/[id]/route.ts:70
 //    uses) skips the read signature for exactly those four statuses. A finished order's fills are public on-chain transactions.
 //  - the same route for an order that is NOT finished (active, executing, any status outside that set) answers 401
-//    READ_AUTH_REQUIRED unless the wallet's valid read signature is attached (:69-84), before the fills are read: so "open
+//    READ_AUTH_REQUIRED unless the wallet's valid read signature is attached (:78-93), before the fills are read: so "open
 //    orders ... need a signature from that wallet" holds for an open DCA's fills and progress too [A87b R2-1, owner decision
-//    2026-11-18; it answered them openly before, A87 S-1]. The browser sends the Orders tab's cached read signature for it
-//    (lib/order-engine/executions-client.ts).
+//    2026-11-18; it answered them openly before, A87 S-1]. The browser sends the Orders tab's cached read signature for it,
+//    signed only by that wallet itself (lib/order-engine/executions-client.ts, A97 S-1). Every answer of those three reads is
+//    `Cache-Control: private, no-store` (orders/read-cache.ts) [A97 S-7].
 // Each half of the last clause is proved by orders-privacy-clause.test.ts (the whole status x auth matrix: orders-executions-live-auth.test.ts
 // and its seeded property); the sentence is pinned by privacy-copy.test.tsx.
 export const PRIVACY_PUBLIC_ANALYTICS_NOTE =
