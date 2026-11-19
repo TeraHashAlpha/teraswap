@@ -148,3 +148,33 @@ Keeper code: Draft PR, **Auditor required**. Tables: `fix-keeper-errors-no-signa
 - executor.js prints three response bodies through no redactor (:676 Supabase fetch error, :803 orders PATCH, :1028 Swap API error): a gateway echoing the service key
   there would print it. executor.js is off-limits here (as S-6).
 - sendTelegramAlert's final pass writes `0x<hex N>` as a raw tag if a caller passes a raw 130+ hex run (Telegram would refuse it); no caller does today (latent, round 1).
+
+## Round 4 — A96 audit of PR #717 round 3 (blocked 0C/1H), findings R3-1..R3-3
+
+- [x] origin/main moved (e0c00390, PR #718): signed merge 96ad2f1f, no keeper file. [x] C1 R3-1 e338ec3e. [x] C2 R3-2 + R3-3 15463d12. [x] Proof. [x] ONE verify on 15463d12: PASS.
+- No question asked (premise held). Not touched: executor.js, record-execution.js, basket-*, contracts, routes, UI, codeql-local.sh; R3-4..R3-7 out of scope.
+
+### Evidence, round 4 (A96)
+
+1. R3-1 (H) fixed by tests, no production line changed (no new run leaked): redact-a93-r2-1-cli.test.mjs, 9 child-process runs asserting on STDOUT (group extended; runCli got an optional cwd). Mutation, scratch copy:
+   each CLI's say() definition without the scrub is killed (backfill by 5 tests, list-missing-fills by 2); each call alone: backfill :168 banner, :171 receipt, :203 order, :247 row, :298 write result; list :342 table, :348 result line: all killed by the
+   run named after them; all 9 pass on the head. R3-2 (L) fixed: redact.js readSpace (JSON \n \r \t \u000a \u000d \u0009, either case), literalForms (a blank has a third reading, dropped); redact-a96-r3-2-json-breaks.test.mjs (140: REAL viem
+   HttpRequestError, 2 call sites x 4 bodies x 9 sinks): 125 of 139 red on e338ec3e, green on the head. R3-3 (L) fixed: chain-verify.js:260 (head scrubbed first, then redactUrls, then flatten; dedupe scrubbed vs scrubbed); redact-a96-r3-3-boot-head.test.mjs (9, one real HttpRequestError): 7 red on e338ec3e.
+2. say() calls (bkf = backfill-execution.mjs, lmf = list-missing-fills.mjs). Run covers: bkf :168 :171 :203 :247 :298, lmf :342 :348 (each its own run; :228/:313 scan-log run printed the range-error line). No run, mutant survives, cannot carry text:
+   bkf :185 (hex/bigint), :243 :272 :290 (numbers, ISO dates), :275 :285 :293 :308 :310 (constants), :284 :306 (ok/status); lmf :322 (address validated ^0x[0-9a-f]{40}$, chain-verify.js:~380), :343 (counts). :228 and :313 carry only redactError text, whose last step is the same
+   scrub (redact.js redactError): equivalent mutants, they survive. No other console.* output (env.js:50 is stderr, redacted).
+3. Fuzz found two regressions of my own change, both fixed before the verify (seed 9: a secret holding \T vs its lower-cased echo \t -> escape letters read in either case; seed 383: a break swallows a secret's own \t -> blank gets a "dropped" reading); seeds 1-600 pass (was 1-12 in CI).
+   Probes: 2160 redacted outputs of real viem errors (random signature per round, 6 failure shapes, 3 sites), 0 signature fragments; control: 720 of 720 raw messages hold it. Classifier differential vs origin/main and beb2d0fd: 20,000 cases, identical sha256, 4 decision classes
+   all present. Over-redaction: tx hash, address, order id prefix, revert reason, RPC host survive (R3-2 and R3-3 tests, forms test). Only existing test file changed: redact-a93-r2-1-cli.test.mjs (the group).
+4. ONE run on 15463d12, load1 4.4: PASS (suite 11,424/0, lint +0/+0, tsc 0, build ok, v1v2-parity 123, rpc-budget 36, keeper 2,458 pass on Node 20 and 22). SHAs: verified CODE 15463d12; docs commit follows it (this file only). diff --stat beb2d0fd..15463d12, keeper dir:
+   5 files +599/-21 (chain-verify.js, redact.js, the cli test, two new tests); the rest of the range is main's PR #718. Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/keeper-errors-no-signature
+   NOT verified: CodeQL not verified locally (pack broken on this Mac); CI; Linux; real Telegram/provider/Supabase/chain (stubs); fuzz past seed 600; %0a / &#10; (percent- or entity-encoded breaks) are still not read as line breaks; entity names are case-sensitive (&LT; in a secret vs &lt; in an echo), both pre-existing.
+
+## Feedback — round 4 (A96)
+
+### Edge case
+- Reading `\t` as a blank made a secret's own backslash-t ambiguous after a break; fixed by the dropped reading, not by a rule in the walk. Secrets with more than 6 variable tokens get only the all-decoded / all-written / all-dropped forms (as before for escapes).
+- e338ec3e's message says "ten" runs; it is nine (6 backfill, 3 list-missing-fills).
+
+### Concern
+- redact.js forms grow to 3^k for secrets holding k blanks or `\t`-like pairs (capped at 64, then 3 forms); no real secret has one.
