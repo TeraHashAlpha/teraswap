@@ -176,8 +176,22 @@ Keeper code: Draft PR, **Auditor required**. Tables: `fix-keeper-errors-no-signa
 
 ## Round 5 — A99 audit of PR #717 round 4 (blocked 0C/4H), findings R4-1, R4-2, R4-3, R4-6, R4-8
 
-- [x] origin/main unmoved (e0c00390): no merge. No question asked (premise held).
-- [x] C1 R4-1 + R4-2: one helper (chain-verify.js scrubThenRedactUrls) for the head, the details and describeValue; redact.js composeErrorText fallbacks scrubbed; redact-a99-r4-1-scrub-order.test.mjs.
-- [x] C2 tests only: R4-3 (forms, upper-case \U), R4-8 (backfill :185 child run), R4-6 (json-breaks comment + sink cases).
-- [ ] Proof: classifier differential, mutants, keeper on Node 20 + 22. [ ] ONE verify on the last CODE commit. [ ] Evidence 1-4.
+- [x] origin/main unmoved (e0c00390): no merge. No question asked (premise held). [x] C1 R4-1 + R4-2 ae919c91. [x] C2 tests R4-3, R4-6, R4-8 b5400312. [x] re-pin 895554af, CodeQL fix a4cce00d. [x] Proof. [x] Verify. [x] Evidence.
 - Not touched: executor.js, record-execution.js, basket-*, contracts, routes, UI; R4-4, R4-5, R4-7 out of scope.
+
+### Evidence, round 5 (A99)
+
+1. R4-1 (H): chain-verify.js:236 `scrubThenRedactUrls` (by value, then redactUrls) used by errText head :274 and details :277 and describeValue :295/:297; redact-a99-r4-1-scrub-order.test.mjs: 16 of 23 red on 31edeece (eth_chainId, eth_getCode schemeless, eth_call x LF/CRLF/LF+tab, 3 list-missing-fills child runs, describeValue, 3 redactError fallbacks); all 23 pass. R4-2 (H): same file, 6 tests (real viem Error(string) revert + injected, details "execution reverted"); green on 31edeece by design, red on mutant Q03 (6). R4-3: forms.test :175, red on P08 (1). R4-8: cli.test "decoded event" (hex-shaped service key as tokenIn), red on S185 (1). R4-6: json-breaks comment corrected, whole-message sink asserts the 600-char cap marker (red with the cap raised, 8) + new sink on the HttpRequestError message reaches Details (red with redactError(string) unscrubbed, 1).
+2. Scrub-order sites: chain-verify.js :267 details (fixed, R4-1) and :264 head (already right, now via the helper); :285/:287 describeValue (redactUrls with no by-value scrub; fixed); redact.js composeErrorText :734 (non-object) and :740 (no head) String(err) text reached redactUrlAndHex before the last scrub (fixed, scrubField). Checked, already right: redactUrl :218 (scrub, mask, scrub), redactError fields :726+, alert.js :83/:359, executor.js :2665 (all via redactUrl); rpc-auth.js :124 masks classified text, never printed; both CLIs' say() scrub only.
+3. Verify (2 runs, load1 7.4 and 6.7): run 1 on 895554af: CodeQL 12 vs 11, 1 new js/incomplete-url-substring-sanitization at redact-a93-r2-3-boot-details.test.mjs:61 (my own added assertion), rest PASS; fixed in a4cce00d (assertion dropped, the exact string beside it proves the host is gone). Run 2 on a4cce00d: PASS (suite 11,424/0, lint +0/+0, tsc 0, build ok, parity 123, rpc-budget 36, CodeQL 11 = 11, keeper 2,491 on Node 20 and 22). Verified CODE a4cce00d (first code ae919c91); docs commit after it.
+   diff --stat 31edeece..a4cce00d, keeper dir: 7 files +321/-15. Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/keeper-errors-no-signature
+   Proof: classifier differential (classifyRpcError, classifyMissCause, classifyFailure), 20,000 seeded shapes: head vs origin/main 0 differ; refusals (3 sites + describeValue) and redactError with no secret configured: head vs 31edeece identical hash. Mutants 8/8 (c1) + 4/4 (c2) killed.
+4. NOT verified: CI; Linux; real provider/chain (stubs); differential only with no secret configured (with one, refusal text changes by design); R4-4, R4-5, R4-7 open.
+
+## Feedback — round 5 (A99)
+
+### Edge case
+- The mandated order changes the text of a refusal whose provider words hold a configured URL: `<redacted-url>` became `<redacted-url><redacted>` (the URL pattern stops at the mask's `<`), as the head has printed since A96. Four exact expectations (cli.test echoSchemeless x3, boot-details one) were re-pinned to the new exact text in 895554af; none loosened, the URL and key are still gone. A collapse of the glued mask (as redact.js MASK_IN_PATH does) would restore the old text; not done, to keep the order the audit named.
+
+### Concern
+- redact.js had two more String(err) fallbacks outside the two named sites (listed in evidence 2); contrived (an object with no message and a toString that holds a URL), fixed with the same order.
