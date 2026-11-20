@@ -214,6 +214,7 @@ export type SignTypedDataFn = (typed: ReturnType<typeof buildOrdersReadTypedData
 /**
  * [A97 S-1] Thrown by a signer when the wallet the message names is not the connected account (any more): nothing is
  * asked, nothing is cached and no denial is recorded, because the wallet's owner never saw a prompt to refuse.
+ * [A100 R2-3] The ONLY source of the 'unavailable' outcome.
  */
 export class OrdersReadSignerUnavailableError extends Error {
   constructor() {
@@ -222,13 +223,25 @@ export class OrdersReadSignerUnavailableError extends Error {
   }
 }
 
-/** 'unavailable': the wallet is not the connected account (or nothing is connected); no prompt, no cache, no denial. */
-export type OrdersReadAuthOutcome = 'ok' | 'denied' | 'unavailable'
+/**
+ * 'unavailable': the wallet is not the connected account (or nothing is connected): the signer threw
+ *   OrdersReadSignerUnavailableError and nobody was asked; no cache, no denial, nothing remembered.
+ * 'mismatch' [A100 R2-3]: the wallet WAS the connected account, it was asked, and what came back does not recover to it
+ *   (a smart-contract account such as a Safe or a Coinbase Smart Wallet, whose signature the server's recover check can
+ *   never accept, or a wallet that answered with another account). Remembered for the session like a refusal: the wallet
+ *   is not asked again until its user chooses "Sign to view" (retryOrdersReadAuth).
+ */
+export type OrdersReadAuthOutcome = 'ok' | 'denied' | 'unavailable' | 'mismatch'
 
 /** In-flight dedupe: N concurrent panels → ONE wallet prompt. */
 const inflight = new Map<string, Promise<OrdersReadAuthOutcome>>()
 /** Session denial memory: a rejected prompt is not re-shown automatically. */
 const denied = new Set<string>()
+/**
+ * [A100 R2-3] Session memory of wallets that were asked and answered with a signature that does not recover to them. In
+ * memory only, like `denied` (owner decision 2026-11-20): gone on a page load, never in browser storage.
+ */
+const mismatched = new Set<string>()
 
 /**
  * Ensure this session holds a valid read signature for `wallet` — signing at
@@ -236,9 +249,12 @@ const denied = new Set<string>()
  * session; clear via _readAuthInternal.clearDenial / retryOrdersReadAuth).
  *
  * [A97 S-1] Only `wallet`'s own signature is ever cached: a cached entry is used only if it recovers to `wallet` (one that
- * does not is removed, getVerifiedOrdersReadAuth), and a new signature is stored only if it recovers to `wallet`. A
- * signature from any other account is dropped without a denial ('unavailable'): it means `wallet` was not the account
- * that signed, not that its owner refused.
+ * does not is removed, getVerifiedOrdersReadAuth), and a new signature is stored only if it recovers to `wallet`.
+ *
+ * [A100 R2-3] A signature that does not recover to `wallet` is dropped and the wallet is remembered ('mismatch'): it was
+ * asked once and is not asked again on the next read, poll or fills call, until retryOrdersReadAuth. It is not a refusal
+ * (`denied` is untouched) and not 'unavailable' (that is only the signer saying the wallet is not connected: nobody was
+ * asked, so nothing is remembered and the next call asks).
  */
 export async function ensureOrdersReadAuth(
   wallet: string,
@@ -249,6 +265,7 @@ export async function ensureOrdersReadAuth(
   if (running) return running
   if (await getVerifiedOrdersReadAuth(wallet)) return 'ok'
   if (denied.has(key)) return 'denied'
+  if (mismatched.has(key)) return 'mismatch'
   const pending = inflight.get(key) // another caller may have started while the cache was being checked
   if (pending) return pending
 
@@ -260,7 +277,10 @@ export async function ensureOrdersReadAuth(
         denied.add(key)
         return 'denied'
       }
-      if (!(await isOwnOrdersReadAuth(wallet, { issuedAt, signature }))) return 'unavailable'
+      if (!(await isOwnOrdersReadAuth(wallet, { issuedAt, signature }))) {
+        mismatched.add(key) // asked once; "Sign to view" asks again
+        return 'mismatch'
+      }
       storeOrdersReadAuth(wallet, { issuedAt, signature })
       return 'ok'
     } catch (err) {
@@ -304,9 +324,10 @@ export function getOrdersReadSigner(wallet: string): SignTypedDataFn | null {
   return null
 }
 
-/** Forget a session denial so the UI can offer an explicit "sign to view" retry. */
+/** Forget a session denial, or a remembered mismatch [A100 R2-3], so the UI can offer an explicit "sign to view" retry. */
 export function retryOrdersReadAuth(wallet: string): void {
   denied.delete(wallet.toLowerCase())
+  mismatched.delete(wallet.toLowerCase())
 }
 
 // ── Test-only ───────────────────────────────────────────────────────────────
@@ -314,12 +335,16 @@ export const _readAuthInternal = {
   reset() {
     inflight.clear()
     denied.clear()
+    mismatched.clear()
   },
   clearDenial(wallet: string) {
     denied.delete(wallet.toLowerCase())
   },
   isDenied(wallet: string) {
     return denied.has(wallet.toLowerCase())
+  },
+  isMismatched(wallet: string) {
+    return mismatched.has(wallet.toLowerCase())
   },
   clearSigner() {
     signers.clear()

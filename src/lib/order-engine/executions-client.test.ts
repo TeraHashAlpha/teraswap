@@ -188,6 +188,20 @@ describe('[A97 S-1] only the connected wallet signs, and only for itself', () =>
     expect(_readAuthInternal.isDenied(WALLET)).toBe(false)
   })
 
+  // [A100 R2-3] The same case, read three times: the wallet is asked ONCE, then remembered.
+  it('a signature that does not recover to A: three fills reads (live and not), ONE prompt, each hands back the 401, nothing is sent or stored', async () => {
+    const wrong = vi.fn(signsAs(B)) // registered for A, but the key behind it is B's (a smart-contract account, or another account answered)
+    connect(WALLET, wrong)
+    fetchMock.mockResolvedValue(unauthorized())
+    for (const live of [true, false, true]) expect((await fetchOrderExecutions(ID, WALLET, { live })).status).toBe(401)
+    expect(wrong).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock.mock.calls.every((c) => c.length === 1)).toBe(true) // no headers on any of them
+    expect(getCachedOrdersReadAuth(WALLET)).toBeNull()
+    expect(_readAuthInternal.isMismatched(WALLET)).toBe(true)
+    expect(_readAuthInternal.isDenied(WALLET)).toBe(false)
+  })
+
   it('a cached entry under A signed by B is dropped on read; A, connected, signs its own and the retry carries it', async () => {
     const issuedAt = nowSec()
     storeOrdersReadAuth(WALLET, { issuedAt, signature: await B.signTypedData(buildOrdersReadTypedData(WALLET, issuedAt)) })
@@ -213,7 +227,12 @@ describe('[A100 R2-1] a cached entry that is not the wallet\'s own is never SENT
     storeOrdersReadAuth(WALLET, { issuedAt, signature })
     return signature
   }
-  const sentSignatures = () => fetchMock.mock.calls.map((c) => (c[1] as { headers?: Record<string, string> } | undefined)?.headers?.[ORDERS_READ_HEADER_SIGNATURE])
+  /** What each request carried, as a WORD (a failing assertion then prints words, never a signature): 'none', the planted 'foreign' one, the wallet's cached 'own', or 'other'. */
+  const sent = (planted: string) =>
+    fetchMock.mock.calls.map((c) => {
+      const s = (c[1] as { headers?: Record<string, string> } | undefined)?.headers?.[ORDERS_READ_HEADER_SIGNATURE]
+      return s === undefined ? 'none' : s === planted ? 'foreign' : s === getCachedOrdersReadAuth(WALLET)?.signature ? 'own' : 'other'
+    })
 
   it.each([
     ['B is the connected account', () => connect(B.address, vi.fn(signsAs(B)))],
@@ -225,8 +244,8 @@ describe('[A100 R2-1] a cached entry that is not the wallet\'s own is never SENT
       const planted = await plantForeign()
       const res = await fetchOrderExecutions(ID, WALLET, { live })
       expect(res.status).toBe(401)
-      expect(sentSignatures()).not.toContain(planted)
-      expect(getCachedOrdersReadAuth(WALLET)).toBeNull()
+      expect(sent(planted).every((s) => s === 'none')).toBe(true)
+      expect(getCachedOrdersReadAuth(WALLET) === null).toBe(true)
     }
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(fetchMock.mock.calls.every((c) => c.length === 1)).toBe(true) // plain fetch(url): no headers at all
@@ -242,9 +261,8 @@ describe('[A100 R2-1] a cached entry that is not the wallet\'s own is never SENT
     expect(res.status).toBe(200) // the fills show
     expect(signerA).toHaveBeenCalledTimes(1)
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const own = getCachedOrdersReadAuth(WALLET)!
-    expect(own.signature).not.toBe(planted)
-    expect(sentSignatures()).toEqual([own.signature])
+    expect(getCachedOrdersReadAuth(WALLET)!.signature === planted).toBe(false)
+    expect(sent(planted)).toEqual(['own'])
   })
 
   it('the owner IS connected, order not marked live: the first request goes out WITHOUT the entry, then one prompt and the retry carries the owner\'s own', async () => {
@@ -256,8 +274,7 @@ describe('[A100 R2-1] a cached entry that is not the wallet\'s own is never SENT
     expect(res.status).toBe(200)
     expect(signerA).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]).toEqual([URL])
-    expect(sentSignatures()).toEqual([undefined, getCachedOrdersReadAuth(WALLET)!.signature])
-    expect(sentSignatures()).not.toContain(planted)
+    expect(sent(planted)).toEqual(['none', 'own'])
   })
 })
 

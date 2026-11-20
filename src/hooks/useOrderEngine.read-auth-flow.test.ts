@@ -10,6 +10,9 @@
  *
  * R2-1: a foreign entry cached under the connected wallet is dropped unsent: one prompt, the list loads, poll and fills
  *       carry the wallet's own signature; with its owner not connected, no request carries it either.
+ * R2-3: a wallet whose signature does not recover to it (a smart-contract account: here a third key answers for it) is
+ *       asked ONCE: not again on a remount, on the poll or on a fills read; the "Sign to view" state shows, and using it
+ *       asks once more. That state follows the connected account (owner decision 2026-11-20).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
@@ -17,10 +20,16 @@ import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 // Published Anvil/Hardhat default account #0 (value-allowlisted in .gitleaks.toml): NOT a secret. B and C are generated per run.
 const KEY_A = privateKeyToAccount('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80')
 const KEY_B = privateKeyToAccount(generatePrivateKey())
+const KEY_C = privateKeyToAccount(generatePrivateKey())
 const A = KEY_A.address
 const B = KEY_B.address
 
-const wallet = vi.hoisted(() => ({ connected: undefined as string | undefined }))
+/**
+ * `answers[account]`: how the wallet answers a prompt for that (lowercased) account. Default: with its own key.
+ * 'smart' = a third key answers (a smart-contract account: the signature never recovers to the account);
+ * 'refuse' = the user rejects the prompt.
+ */
+const wallet = vi.hoisted(() => ({ connected: undefined as string | undefined, answers: {} as Record<string, 'smart' | 'refuse'> }))
 const wagmiSign = vi.hoisted(() => vi.fn<(args: Record<string, unknown>) => Promise<string>>())
 
 vi.mock('wagmi', () => ({
@@ -51,7 +60,12 @@ import {
 } from '@/lib/order-engine/read-auth'
 import { fetchOrderExecutions } from '@/lib/order-engine/executions-client'
 
-const KEYS: Record<string, typeof KEY_A> = { [A.toLowerCase()]: KEY_A, [B.toLowerCase()]: KEY_B }
+// Event-driven waits: each returns as soon as its condition holds. The ceiling is far above what a loaded machine needs
+// (the library's default of 1 s is not, with real signature recovery in the path); the tests' own timeout matches it.
+vi.setConfig({ testTimeout: 60_000 })
+const until = (check: () => void) => waitFor(check, { timeout: 15_000, interval: 20 })
+
+const KEYS: Record<string, typeof KEY_A> ={ [A.toLowerCase()]: KEY_A, [B.toLowerCase()]: KEY_B }
 
 function liveDca(owner: string, n: number): OrderRow {
   const hash = `0x${String(n).repeat(64)}`
@@ -84,6 +98,13 @@ const fetchMock = vi.fn(async (url: string, init?: { headers?: Record<string, st
   return new Response(JSON.stringify({ orders: rows[w] ?? [] }), { status: 200 })
 })
 const of = (route: Seen['route'], w?: string) => seen.filter((s) => s.route === route && (!w || s.wallet === w.toLowerCase()))
+/** How many times the wallet was asked to sign for `account`. */
+const promptsFor = (account: string) => wagmiSign.mock.calls.filter((c) => String(c[0].account).toLowerCase() === account.toLowerCase()).length
+/** Wait until `n` MORE status polls of `w` have been answered (the poll runs every 40 ms here; 10 s in the app). */
+async function morePolls(w: string, n: number) {
+  const from = of('poll', w).length
+  await until(() => expect(of('poll', w).length).toBeGreaterThanOrEqual(from + n))
+}
 
 /** An entry under `owner` signed by `by` (B's signature under A = what a build without the recover check left behind). */
 async function plant(owner: string, by: typeof KEY_A): Promise<void> {
@@ -99,6 +120,7 @@ beforeEach(() => {
   seen = []
   rows = { [A.toLowerCase()]: [liveDca(A, 1)] }
   wallet.connected = A
+  wallet.answers = {}
   wagmiSign.mockReset()
   // wagmi with an injected wallet: signs with the account it is told to use, refuses one that is not connected.
   wagmiSign.mockImplementation(async (args) => {
@@ -108,8 +130,10 @@ beforeEach(() => {
       err.name = 'ConnectorAccountNotFoundError'
       throw err
     }
+    if (wallet.answers[account] === 'refuse') throw new Error('User rejected the request')
     const { account: _a, ...typed } = args
-    return KEYS[account].signTypedData(typed as Parameters<typeof KEY_A.signTypedData>[0])
+    const key = wallet.answers[account] === 'smart' ? KEY_C : KEYS[account]
+    return key.signTypedData(typed as Parameters<typeof KEY_A.signTypedData>[0])
   })
   fetchMock.mockClear()
   vi.stubGlobal('fetch', fetchMock)
@@ -123,8 +147,8 @@ describe('[A100 R2-1] a foreign entry cached under a wallet is never sent by the
   it('its owner IS connected: dropped unsent, ONE prompt, the list loads, the poll and the fills carry the owner\'s own signature', async () => {
     await plant(A, KEY_B)
     const view = renderHook(() => useOrderEngine())
-    await waitFor(() => expect(view.result.current.orders).toHaveLength(1))
-    await waitFor(() => expect(of('poll').length).toBeGreaterThanOrEqual(2))
+    await until(() => expect(view.result.current.orders).toHaveLength(1))
+    await until(() => expect(of('poll').length).toBeGreaterThanOrEqual(2))
     let fills!: Response
     await act(async () => { fills = await fetchOrderExecutions('ord-1', A, { live: true }) })
     expect(fills.status).toBe(200) // the fills show
@@ -142,10 +166,10 @@ describe('[A100 R2-1] a foreign entry cached under a wallet is never sent by the
 
   it('its owner is NOT connected (B is, A\'s live order still on screen): the fills reads of A\'s order carry nothing, nobody is asked for A', async () => {
     const view = renderHook(() => useOrderEngine())
-    await waitFor(() => expect(view.result.current.orders).toHaveLength(1))
+    await until(() => expect(view.result.current.orders).toHaveLength(1))
     wallet.connected = B
     view.rerender()
-    await waitFor(() => expect(of('list', B).length).toBeGreaterThan(0)) // B's own list read (B signs for B)
+    await until(() => expect(of('list', B).length).toBeGreaterThan(0)) // B's own list read (B signs for B)
     wagmiSign.mockClear()
     seen = []
     await plant(A, KEY_B)
@@ -159,6 +183,98 @@ describe('[A100 R2-1] a foreign entry cached under a wallet is never sent by the
     expect(seen.filter((s) => s.sig === 'foreign')).toEqual([])
     expect(wagmiSign.mock.calls.filter((c) => String(c[0].account).toLowerCase() === A.toLowerCase())).toEqual([])
     expect(_readAuthInternal.isDenied(A)).toBe(false)
+    view.unmount()
+  })
+})
+
+describe('[A100 R2-3] a wallet whose signature does not recover to it is asked ONCE, then shown "Sign to view"', () => {
+  it('a smart-contract account from the start: one prompt on the first read; two more mounts of the Orders tab (tab cycles) ask nothing; "Sign to view" shows on each', async () => {
+    wallet.answers[A.toLowerCase()] = 'smart'
+    const first = renderHook(() => useOrderEngine())
+    await until(() => expect(first.result.current.readAuthDenied).toBe(true))
+    expect(promptsFor(A)).toBe(1)
+    expect(first.result.current.orders).toEqual([]) // the server never accepts its signature: nothing of the live order is shown
+    first.unmount()
+    for (let cycle = 0; cycle < 2; cycle++) {
+      const again = renderHook(() => useOrderEngine())
+      await until(() => expect(again.result.current.readAuthDenied).toBe(true))
+      again.unmount()
+    }
+    expect(promptsFor(A)).toBe(1)
+    expect(of('list', A).map((s) => s.sig)).toEqual(['none', 'none', 'none']) // three reads, nothing foreign sent, nothing cached
+    expect(getCachedOrdersReadAuth(A)).toBeNull()
+    expect(_readAuthInternal.isMismatched(A)).toBe(true)
+    expect(_readAuthInternal.isDenied(A)).toBe(false)
+  })
+
+  it('a smart-contract account B switched in while A\'s live order stays listed: ONE prompt, the poll and the fills reads ask nothing; "Sign to view" asks once more', async () => {
+    wallet.answers[B.toLowerCase()] = 'smart'
+    const view = renderHook(() => useOrderEngine())
+    await until(() => expect(view.result.current.orders).toHaveLength(1))
+    expect(view.result.current.readAuthDenied).toBe(false)
+    wallet.connected = B
+    view.rerender()
+    await until(() => expect(view.result.current.readAuthDenied).toBe(true)) // the existing "Sign to view" state
+    expect(view.result.current.orders).toHaveLength(1) // A's order is still listed, so the status poll keeps running, as B
+    await morePolls(B, 5)
+    for (const live of [true, false]) {
+      await act(async () => { await fetchOrderExecutions('ord-9', B, { live }) }) // B's own fills reads
+      await act(async () => { await fetchOrderExecutions('ord-1', A, { live }) }) // the fills of A's order, still on screen
+    }
+    expect(promptsFor(B)).toBe(1) // not one per poll (cc282e0a: one every 10 s)
+    expect(promptsFor(A)).toBe(1) // A's own first read; nothing after B connected
+    expect(seen.filter((s) => s.sig === 'foreign')).toEqual([])
+    expect(_readAuthInternal.isMismatched(B)).toBe(true)
+
+    await act(async () => { await view.result.current.requestOrdersReadAuth() }) // the user uses "Sign to view"
+    expect(promptsFor(B)).toBe(2)
+    expect(view.result.current.readAuthDenied).toBe(true) // still does not recover: the state stays
+    await morePolls(B, 5)
+    expect(promptsFor(B)).toBe(2) // and the poll still asks nothing
+    view.unmount()
+  })
+
+  it('the "Sign to view" state follows the connected account: up for smart-contract B, down for A (whose orders load), up again for B, no new prompt', async () => {
+    wallet.answers[B.toLowerCase()] = 'smart'
+    const view = renderHook(() => useOrderEngine())
+    await until(() => expect(view.result.current.orders).toHaveLength(1))
+    wallet.connected = B
+    view.rerender()
+    await until(() => expect(view.result.current.readAuthDenied).toBe(true))
+    wallet.connected = A
+    view.rerender()
+    expect(view.result.current.readAuthDenied).toBe(false) // at once: it was B's
+    await morePolls(A, 3) // A's reads go on with its cached signature
+    expect(view.result.current.readAuthDenied).toBe(false)
+    wallet.connected = B
+    view.rerender()
+    expect(view.result.current.readAuthDenied).toBe(true)
+    await morePolls(B, 3)
+    expect(view.result.current.readAuthDenied).toBe(true)
+    expect([promptsFor(A), promptsFor(B)]).toEqual([1, 1])
+    view.unmount()
+  })
+
+  it('the same after a REFUSAL: A refused, B (whose signature is already cached) connects: the state is down, although nothing was signed to lower it', async () => {
+    wallet.connected = B
+    rows = { [A.toLowerCase()]: [liveDca(A, 1)], [B.toLowerCase()]: [liveDca(B, 2)] }
+    const view = renderHook(() => useOrderEngine())
+    await until(() => expect(view.result.current.orders.map((o) => o.id)).toEqual(['ord-2'])) // B signed once; its signature is cached
+    wallet.answers[A.toLowerCase()] = 'refuse'
+    wallet.connected = A
+    view.rerender()
+    await until(() => expect(view.result.current.readAuthDenied).toBe(true))
+    expect(_readAuthInternal.isDenied(A)).toBe(true)
+    wallet.connected = B
+    view.rerender()
+    expect(view.result.current.readAuthDenied).toBe(false)
+    await morePolls(B, 3)
+    expect(view.result.current.readAuthDenied).toBe(false)
+    expect([promptsFor(A), promptsFor(B)]).toEqual([1, 1])
+    wallet.connected = A
+    view.rerender()
+    await until(() => expect(view.result.current.readAuthDenied).toBe(true)) // A's own read finds the refusal remembered
+    expect(promptsFor(A)).toBe(1) // and does not ask again
     view.unmount()
   })
 })

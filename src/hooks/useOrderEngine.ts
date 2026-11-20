@@ -495,7 +495,13 @@ export function useOrderEngine() {
   // [AUDIT-W6 / W6-M-01] Active-order reads need one session signature. True
   // when the user rejected the prompt — the UI offers an explicit retry
   // (requestOrdersReadAuth) instead of popup-spamming.
-  const [readAuthDenied, setReadAuthDenied] = useState(false)
+  // [A100 R2-3] Also true when the wallet was asked and its signature does not recover to it (a smart-contract account,
+  // or a wallet that answered with another account): asked once, then this "Sign to view" state instead of a prompt on
+  // every read. The state remembers WHICH wallet it is for and shows only while that wallet is the connected account
+  // (owner decision 2026-11-20): it used to be one flag per mount, which stayed up after a switch to a wallet whose
+  // orders load fine.
+  const [readAuthDeniedFor, setReadAuthDeniedFor] = useState<string | null>(null)
+  const readAuthDenied = !!address && readAuthDeniedFor === address.toLowerCase()
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   // [P200] Guard: don't persist the initial empty array before the async load
   // resolves — otherwise the save effect would clobber the encrypted store.
@@ -516,11 +522,13 @@ export function useOrderEngine() {
       const outcome = await ensureOrdersReadAuth(address, readSignerFor(address))
       // [A97 S-4] 'unavailable' = this wallet is no longer the connected account: not a refusal, so no "Sign to view".
       if (outcome === 'unavailable') return []
+      // 'denied' (refused) or [A100 R2-3] 'mismatch' (asked, the signature does not recover to this wallet): "Sign to view"
+      // for THIS wallet; read-auth.ts remembers both, so the next read or poll comes back here without a prompt.
       if (outcome !== 'ok') {
-        setReadAuthDenied(true)
+        setReadAuthDeniedFor(address.toLowerCase())
         return []
       }
-      setReadAuthDenied(false)
+      setReadAuthDeniedFor(null)
       return fetchFn()
     }
   }
@@ -1417,12 +1425,13 @@ export function useOrderEngine() {
 
   // [AUDIT-W6 / W6-M-01] Explicit user retry after a rejected read-signature
   // prompt: forget the session denial, sign, and reload the list.
+  // [A100 R2-3] The same for a remembered mismatch: this is the one way such a wallet is asked again (once per use).
   const requestOrdersReadAuth = useCallback(async () => {
     if (!address) return
     retryOrdersReadAuth(address)
     const outcome = await ensureOrdersReadAuth(address, readSignerFor(address))
     if (outcome !== 'ok') return
-    setReadAuthDenied(false)
+    setReadAuthDeniedFor(null)
     try {
       const rows = await fetchUserOrders(address)
       if (rows.length > 0) {

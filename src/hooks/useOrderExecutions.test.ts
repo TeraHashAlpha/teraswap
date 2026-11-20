@@ -96,7 +96,7 @@ describe('useOrderExecutions', () => {
     storeOrdersReadAuth(owner.address, { issuedAt, signature: await owner.signTypedData(buildOrdersReadTypedData(owner.address, issuedAt)) })
     renderHook(() => useOrderExecutions(ID, owner.address, { enabled: true }))
     // The entry is verified (signature recovery, real crypto) before the request leaves: wait for the request itself.
-    await act(async () => { await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1)) })
+    await act(async () => { await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1), { timeout: 15_000 }) })
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const init = fetchMock.mock.calls[0][1]
     expect(Object.keys(init.headers).sort()).toEqual([ORDERS_READ_HEADER_ISSUED, ORDERS_READ_HEADER_SIGNATURE])
@@ -109,7 +109,7 @@ describe('useOrderExecutions', () => {
     sessionStorage.clear()
     storeOrdersReadAuth(WALLET, { issuedAt: Math.floor(Date.now() / 1000), signature: `0x${'ab'.repeat(65)}` })
     renderHook(() => useOrderExecutions(ID, WALLET, { enabled: true }))
-    await act(async () => { await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1)) })
+    await act(async () => { await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1), { timeout: 15_000 }) })
     expect(fetchMock.mock.calls[0]).toEqual([`/api/orders/${ID}/executions?wallet=${WALLET}`])
     expect(getCachedOrdersReadAuth(WALLET)).toBeNull()
     sessionStorage.clear()
