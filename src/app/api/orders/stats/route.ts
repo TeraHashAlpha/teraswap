@@ -67,15 +67,14 @@ export async function GET(req: NextRequest) {
     // shows only with the wallet's read signature): for `?wallet=W` the count is returned only with W's valid read
     // signature, otherwise the field is left out and the fills table is not read. The counts by status above stay open, and
     // the count with no wallet (every wallet's fills together) is unchanged.
-    let includeRecent = true
-    if (wallet) {
-      const auth = await verifyOrdersReadAccess({
-        wallet,
-        issuedAt: req.headers.get(ORDERS_READ_HEADER_ISSUED),
-        signature: req.headers.get(ORDERS_READ_HEADER_SIGNATURE),
-      })
-      includeRecent = auth.ok
-    }
+    // The signature is checked on EVERY request, so whether it is checked never depends on the query string (CodeQL
+    // js/user-controlled-bypass); with no wallet it cannot hold (verifyOrdersReadAccess never throws) and is not needed.
+    const auth = await verifyOrdersReadAccess({
+      wallet: wallet ?? '',
+      issuedAt: req.headers.get(ORDERS_READ_HEADER_ISSUED),
+      signature: req.headers.get(ORDERS_READ_HEADER_SIGNATURE),
+    })
+    const includeRecent = !wallet || auth.ok
 
     let recentExecutions: number | null = null
     if (includeRecent) {

@@ -80,4 +80,21 @@ describe('GET /api/orders/stats: the wallet\'s 24 h fill count needs its read si
     expect(body.recentExecutions24h).toBe(14)
     expect(body.total).toBe(7)
   })
+
+  it('no wallet, whatever read headers come along (none, valid, malformed): the same all-wallets answer', async () => {
+    const answers = []
+    const headerSets: Array<Record<string, string>> = [
+      {},
+      await headersFor(owner, WALLET),
+      { [ORDERS_READ_HEADER_ISSUED]: 'x', [ORDERS_READ_HEADER_SIGNATURE]: '0x12' },
+    ]
+    for (const headers of headerSets) {
+      const res = await get('', headers)
+      expect(res.status).toBe(200)
+      answers.push(await res.json())
+    }
+    expect(answers.map((a) => a.recentExecutions24h)).toEqual([14, 14, 14])
+    expect(answers[1]).toEqual(answers[0])
+    expect(answers[2]).toEqual(answers[0])
+  })
 })
