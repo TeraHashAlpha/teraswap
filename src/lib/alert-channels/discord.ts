@@ -6,7 +6,7 @@
  */
 
 import type { AlertPayload } from '../alert-wrapper'
-import { CHANNEL_FETCH_TIMEOUT_MS } from './utils'
+import { scrubAlertText, CHANNEL_FETCH_TIMEOUT_MS } from './utils'
 
 export const VALID_WEBHOOK_PREFIXES = [
   'https://discord.com/api/webhooks/',
@@ -55,30 +55,38 @@ export async function sendDiscordAlert(
     ? '[GRACE] Alert received during grace period — may resolve automatically.'
     : undefined
 
-  const res = await fetch(webhookUrl, {
-    signal: AbortSignal.timeout(CHANNEL_FETCH_TIMEOUT_MS),
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      ...(content ? { content } : {}),
-      embeds: [
-        {
-          title: `${gracePrefix}Source ${payload.to.toUpperCase()}: ${payload.sourceId}`,
-          color: embedColour(payload.to),
-          fields: [
-            { name: 'Transition', value: `${payload.from} \u2192 ${payload.to}`, inline: true },
-            { name: 'Reason', value: payload.reason || 'unknown', inline: true },
-            { name: 'Time', value: payload.timestamp, inline: false },
-          ],
-          footer: { text: 'TeraSwap Monitor' },
-          url: 'https://www.teraswap.app/admin/monitor',
-        },
-      ],
-    }),
-  })
+  // [fix/keeper-errors-no-signature] Every error this channel throws goes through the shared scrub (the webhook URL
+  // and its token masked by value, keyed URLs, long hex, cap) — callers log err.message.
+  let res: Response
+  try {
+    res = await fetch(webhookUrl, {
+      signal: AbortSignal.timeout(CHANNEL_FETCH_TIMEOUT_MS),
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...(content ? { content } : {}),
+        embeds: [
+          {
+            title: `${gracePrefix}Source ${payload.to.toUpperCase()}: ${payload.sourceId}`,
+            color: embedColour(payload.to),
+            fields: [
+              { name: 'Transition', value: `${payload.from} \u2192 ${payload.to}`, inline: true },
+              // [fix/keeper-errors-no-signature] Scrubbed and capped at 1,000 (Discord refuses a field over 1,024).
+              { name: 'Reason', value: scrubAlertText(payload.reason || 'unknown'), inline: true },
+              { name: 'Time', value: payload.timestamp, inline: false },
+            ],
+            footer: { text: 'TeraSwap Monitor' },
+            url: 'https://www.teraswap.app/admin/monitor',
+          },
+        ],
+      }),
+    })
+  } catch (err) {
+    throw new Error(scrubAlertText(err, { secrets: [webhookUrl] }))
+  }
 
   if (!res.ok) {
     const body = await res.text().catch(() => '?')
-    throw new Error(`Discord webhook ${res.status}: ${body}`)
+    throw new Error(scrubAlertText(`Discord webhook ${res.status}: ${body}`, { secrets: [webhookUrl] }))
   }
 }

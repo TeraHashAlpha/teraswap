@@ -58,6 +58,8 @@ import { keccak256, stringToHex } from "viem"
 // rejection is tagged on the refusal (rpcAuth / rpcAuthSignal) so executor.js can say so loudly. The
 // retry bound, every check and every refusal are unchanged — an auth error still refuses the boot.
 import { classifyRpcError, RPC_AUTH } from "./rpc-auth.js"
+// [A93 R2-3] The provider's `details` on a boot refusal: every configured secret removed by value before it is cut.
+import { redactSecretLiterals } from "./redact.js"
 
 // ── The identity read ────────────────────────────────────────────────────────────────────────
 // Minimal ABI: the auto-generated getter for `bytes32 public constant ORDER_TYPEHASH`.
@@ -233,7 +235,56 @@ export function redactUrls(text) {
   return out.replace(HEX_SECRET, "<redacted-secret>")
 }
 
-const errText = (err) => redactUrls((err && err.shortMessage) || (err && err.message) || String(err))
+/**
+ * [A99 R4-1, R4-2] The ONE order in which text that came from outside is made safe for a boot refusal: every configured
+ * secret removed BY VALUE first, then redactUrls. The other way round, a URL whose key the provider split with a line
+ * break loses its first half to the URL pattern (which stops at the break) and the scrub can no longer match the half
+ * that is left. errText's head, its details and describeValue all go through here, so the three cannot drift apart;
+ * the flatten (a line break becomes a plain space) comes after, in errText, for the same reason.
+ */
+function scrubThenRedactUrls(text) {
+  return redactUrls(redactSecretLiterals(text))
+}
+
+/**
+ * [A92 S-2] ONE line. viem's short message for a revert is two lines ("…reverted with the following reason:" then the
+ * reason), and executor.js prints a refusal through redactError, which keeps the first line of a message: the reason
+ * was lost at boot. Every line break (`\n`, `\r\n`, a lone `\r`) and the whitespace around it becomes one space. A split
+ * and a trim per line, not a `\s*\n\s*` pattern: that backtracks over a long run of spaces with no newline in it.
+ */
+const flatten = (s) =>
+  s
+    .split(/\r\n?|\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .join(" ")
+
+/**
+ * [A93 R2-3] The provider's own words: for a JSON-RPC error viem's short message is generic ("Missing or invalid
+ * parameters.", "RPC Request failed.") and the node's answer is in `details` (for an HTTP error page, its body), which
+ * never reached the refusal. Appended when it adds something: every configured secret removed by value (a path echoed
+ * with no host has nothing redactUrls anchors on), then redactUrls, then cut to DETAILS_MAX — the cut comes after the
+ * scrub, so it never leaves half a secret — and on the same one line.
+ * [A96 R3-3] The head gets the same scrub, FIRST: before redactUrls and before the flatten, which turns a line break into
+ * a plain space (a key a provider split over two lines, in a revert reason, would read `half half` and never match). Head
+ * and details are then both scrubbed, so `head.includes(details)` compares like with like and the provider's words, which
+ * viem puts on both, are printed once.
+ * [A99 R4-1] The details had the two steps the other way round (redactUrls first): a URL whose key was split by a line
+ * break lost its first half to the URL pattern and the second half printed on every restart. Both now go through
+ * scrubThenRedactUrls, the one place the order is written.
+ */
+const DETAILS_MAX = 300
+function errText(err) {
+  const head = flatten(scrubThenRedactUrls((err && err.shortMessage) || (err && err.message) || String(err)))
+  let details = ""
+  try {
+    if (err && typeof err.details === "string") details = flatten(scrubThenRedactUrls(err.details))
+  } catch {
+    details = "" // a getter that throws: no details
+  }
+  if (details === "" || head.includes(details)) return head
+  return `${head} — details: ${details.length > DETAILS_MAX ? `${details.slice(0, DETAILS_MAX)}…` : details}`
+}
 
 /**
  * Render an unexpected RPC answer for an error message. Deliberately NOT bare JSON.stringify:
@@ -245,9 +296,9 @@ function describeValue(value) {
   if (typeof value === "bigint") return `${value}n`
   try {
     const json = JSON.stringify(value)
-    return redactUrls(json === undefined ? String(value) : json)
+    return scrubThenRedactUrls(json === undefined ? String(value) : json)
   } catch {
-    return redactUrls(String(value))
+    return scrubThenRedactUrls(String(value))
   }
 }
 
