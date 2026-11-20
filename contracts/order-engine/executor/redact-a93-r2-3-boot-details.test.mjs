@@ -55,7 +55,10 @@ describe("[A93 R2-3] a boot refusal carries the provider's words, redacted, on o
 
   test("a full URL in the details is redacted whole (redactUrls)", async () => {
     const err = await refusal(viemLike("RPC Request failed.", `upstream refused https://rpc.example.org/v2/${KEY}`))
-    assert.ok(err.message.includes("— details: upstream refused <redacted-url> —"), err.message)
+    // [A99 R4-1] The configured key is masked BEFORE the URL pattern runs (it stops at the `<` of the mask), so a trailing `<redacted>`
+    // follows `<redacted-url>`: the head of the refusal has always read this way. Neither the host, the path nor the key is in it.
+    assert.ok(err.message.includes("— details: upstream refused <redacted-url><redacted> —"), err.message)
+    assert.ok(!err.message.includes("rpc.example.org"), err.message)
   })
 
   test("multi-line details become one line", async () => {

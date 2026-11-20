@@ -208,7 +208,9 @@ const CHAIN_VERIFY = new Set(["eth_chainId", "eth_getCode", "eth_call"])
 const CHAIN_VERIFY_WORDS = {
   echoPath: /— details: no route for \/v2\/<redacted>\?apikey=<redacted> — /,
   express404: /— details: "<pre>Cannot POST \/v2\/<redacted>\?apikey=<redacted><\/pre>" — /,
-  echoSchemeless: /— details: upstream refused request to <redacted-url> — /,
+  // [A99 R4-1] The configured secrets go first, then the URL pattern: the key and the query value are masks by the time it runs, and
+  // it stops at the `<` of the first (the same text the head of the refusal has printed since A96 R3-3). The URL is as gone as ever.
+  echoSchemeless: /— details: upstream refused request to <redacted-url><redacted>\?apikey=<redacted> — /,
 }
 
 describe("[A93 R2-1] the audit's 30 CLI runs: a provider echo of the request target never prints the key", { concurrency: 6 }, () => {
