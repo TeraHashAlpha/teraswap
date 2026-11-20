@@ -12,6 +12,7 @@ import {
   ORDERS_READ_HEADER_ISSUED,
   ORDERS_READ_HEADER_SIGNATURE,
 } from '@/lib/order-engine/read-auth'
+import { withOrdersReadCacheControl } from '../read-cache'
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -20,7 +21,13 @@ function getSupabase() {
   return createClient(url, key, { auth: { persistSession: false } })
 }
 
+// [A100 R2-4] Every answer (200, 503, 500): Cache-Control: private, no-store (read-cache.ts). With `?wallet=W` and W's read
+// signature the answer carries W's 24 h fill count, and the signature is in headers, which no cache keys on.
 export async function GET(req: NextRequest) {
+  return withOrdersReadCacheControl(await readStats(req))
+}
+
+async function readStats(req: NextRequest) {
   const supabase = getSupabase()
   if (!supabase) {
     return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })

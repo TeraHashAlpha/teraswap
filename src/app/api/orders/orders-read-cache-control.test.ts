@@ -3,6 +3,7 @@
  * [A97 S-7] GET /api/orders, GET /api/orders/:id and GET /api/orders/:id/executions answer one wallet, and a live order only
  * with that wallet's read signature (headers): every answer they give, 200 and 4xx alike, says
  * `Cache-Control: private, no-store`, so neither a browser nor a shared cache keeps or reuses one. Real handlers, fake PostgREST.
+ * [A100 R2-4] GET /api/orders/stats too: every answer it gives (200 with and without a wallet or a signature, 500, 503).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
@@ -25,6 +26,7 @@ vi.mock('@/lib/kv-rate-limiter', async () => ({
 import { GET as LIST } from './route'
 import { GET as BY_ID } from './[id]/route'
 import { GET as EXECUTIONS } from './[id]/executions/route'
+import { GET as STATS } from './stats/route'
 
 // Anvil #0 (value-allowlisted in .gitleaks.toml, NOT a secret).
 const account = privateKeyToAccount('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80')
@@ -86,5 +88,28 @@ describe('every answer of the three orders reads is private, no-store (A97 S-7)'
     ]
     expect(answers.map((r) => r.status)).toEqual([400, 403, 401, 200, 200])
     for (const r of answers) expect(r.headers.get('cache-control')).toBe('private, no-store')
+  })
+
+  // [A100 R2-4] With `?wallet=W` and W's read signature the stats answer carries W's 24 h fill count (stats/route.ts): the
+  // same header on EVERY stats answer, the error ones included.
+  it('GET /api/orders/stats: 200 (no wallet), 200 (wallet, unsigned), 200 (wallet, signed: its 24 h fill count), 500 (the database throws), 503 (no database)', async () => {
+    try {
+      const answers = [
+        await STATS(req('/api/orders/stats')),
+        await STATS(req(`/api/orders/stats?wallet=${WALLET}`)),
+        await STATS(req(`/api/orders/stats?wallet=${WALLET}`, await signed())),
+      ]
+      const [open, unsigned, withSignature] = await Promise.all(answers.map((r) => r.clone().json()))
+      // The third is the answer that is the wallet's alone (its 24 h fill count is in it; the unsigned one leaves it out).
+      expect(['recentExecutions24h' in open, 'recentExecutions24h' in unsigned, 'recentExecutions24h' in withSignature]).toEqual([true, false, true])
+      db ={ client: { from: () => { throw new Error('database down') } } } as unknown as typeof db
+      answers.push(await STATS(req(`/api/orders/stats?wallet=${WALLET}`, await signed())))
+      for (const name of ['SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']) vi.stubEnv(name, '')
+      answers.push(await STATS(req('/api/orders/stats')))
+      expect(answers.map((r) => r.status)).toEqual([200, 200, 200, 500, 503])
+      for (const r of answers) expect(r.headers.get('cache-control')).toBe('private, no-store')
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 })

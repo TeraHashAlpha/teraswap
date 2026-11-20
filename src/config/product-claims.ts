@@ -186,9 +186,9 @@ export const PRIVACY_PROVIDERS_NOTE =
 //  - "without the signature that authorised each order" = every orders read selects the order-read-columns.ts allow-list, which
 //    leaves `signature` out with or without a read signature (orders/route.ts:1036, orders/[id]/route.ts:54; owner decision
 //    2026-11-17; pinned by orders-read-no-signature.test.ts).
-//  - "a count of its orders by status" = /api/orders/stats: no auth, wallet filter (orders/stats/route.ts:29, :38), buckets (:46-64).
+//  - "a count of its orders by status" = /api/orders/stats: no auth, wallet filter (orders/stats/route.ts:36, :45), buckets (:53-71).
 //    Its 24 h fill count (`recentExecutions24h`, live orders' fills included) is returned for a wallet only with that wallet's
-//    read signature (:72-80, :102) [A97 S-3].
+//    read signature (:79-87, :109) [A97 S-3; these five line numbers re-checked at A100 round 3, the route moved 7 lines down].
 //  - "open orders ... need a signature from that wallet" = 401 READ_AUTH_REQUIRED (list orders/route.ts:1012-1027, the 401 at
 //    :1018-1026; by id orders/[id]/route.ts:70-85; the fills and progress of an open order, orders/[id]/executions/route.ts:78-93
 //    [A87b R2-1]). The Analytics feed lists no fill of an open order (analytics/route.ts:490) [A97 S-2].
@@ -202,8 +202,8 @@ export const PRIVACY_PROVIDERS_NOTE =
 //    READ_AUTH_REQUIRED unless the wallet's valid read signature is attached (:78-93), before the fills are read: so "open
 //    orders ... need a signature from that wallet" holds for an open DCA's fills and progress too [A87b R2-1, owner decision
 //    2026-11-18; it answered them openly before, A87 S-1]. The browser sends the Orders tab's cached read signature for it,
-//    signed only by that wallet itself (lib/order-engine/executions-client.ts, A97 S-1). Every answer of those three reads is
-//    `Cache-Control: private, no-store` (orders/read-cache.ts) [A97 S-7].
+//    signed only by that wallet itself (lib/order-engine/executions-client.ts, A97 S-1). Every answer of those three reads, and
+//    of the stats read, is `Cache-Control: private, no-store` (orders/read-cache.ts) [A97 S-7, A100 R2-4].
 // Each half of the last clause is proved by orders-privacy-clause.test.ts (the whole status x auth matrix: orders-executions-live-auth.test.ts
 // and its seeded property); the sentence is pinned by privacy-copy.test.tsx.
 export const PRIVACY_PUBLIC_ANALYTICS_NOTE =

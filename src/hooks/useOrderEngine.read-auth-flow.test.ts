@@ -13,6 +13,8 @@
  * R2-3: a wallet whose signature does not recover to it (a smart-contract account: here a third key answers for it) is
  *       asked ONCE: not again on a remount, on the poll or on a fills read; the "Sign to view" state shows, and using it
  *       asks once more. That state follows the connected account (owner decision 2026-11-20).
+ * R2-2: 'unavailable' (the wallet the read names is not the connected account any more) is not a refusal: the hook ends
+ *       that read quietly and never raises "Sign to view" for it (useOrderEngine.ts, `if (outcome === 'unavailable') return []`).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
@@ -29,8 +31,16 @@ const B = KEY_B.address
  * 'smart' = a third key answers (a smart-contract account: the signature never recovers to the account);
  * 'refuse' = the user rejects the prompt.
  */
-const wallet = vi.hoisted(() => ({ connected: undefined as string | undefined, answers: {} as Record<string, 'smart' | 'refuse'> }))
+const wallet = vi.hoisted(() => ({
+  /** The account React (useAccount) reports. */
+  connected: undefined as string | undefined,
+  /** The account the wallet itself is on, when it has already moved and React has not re-rendered yet (default: `connected`). */
+  inWallet: undefined as string | undefined,
+  answers: {} as Record<string, 'smart' | 'refuse'>,
+}))
 const wagmiSign = vi.hoisted(() => vi.fn<(args: Record<string, unknown>) => Promise<string>>())
+/** [R2-2] What each of the HOOK's own ensureOrdersReadAuth calls resolved to: [wallet, outcome]. The real function does the work. */
+const outcomes = vi.hoisted(() => [] as Array<[string, string]>)
 
 vi.mock('wagmi', () => ({
   useSwitchChain: () => ({ switchChainAsync: vi.fn().mockResolvedValue(undefined) }),
@@ -40,10 +50,16 @@ vi.mock('wagmi', () => ({
   useWriteContract: () => ({ writeContractAsync: vi.fn() }),
   useReadContract: () => ({ data: 0n, isLoading: false, refetch: vi.fn().mockResolvedValue({ data: 0n }) }),
 }))
-// The list fetchers stay REAL (they build the read headers); only the poll interval is shortened.
+// The list fetchers stay REAL (they build the read headers); the poll interval is shortened, and the hook's calls of the
+// REAL ensureOrdersReadAuth are noted with their outcome (so a test can wait for "the hook was told 'unavailable'").
 vi.mock('@/lib/order-engine', async () => {
   const actual = await vi.importActual<typeof import('@/lib/order-engine')>('@/lib/order-engine')
-  return { ...actual, ORDER_POLL_INTERVAL_MS: 40 }
+  const ensureOrdersReadAuth: typeof actual.ensureOrdersReadAuth = (w, sign) => {
+    const result = actual.ensureOrdersReadAuth(w, sign)
+    void result.then((outcome) => void outcomes.push([w.toLowerCase(), outcome]))
+    return result
+  }
+  return { ...actual, ORDER_POLL_INTERVAL_MS: 40, ensureOrdersReadAuth }
 })
 
 import { renderHook, act, waitFor } from '@testing-library/react'
@@ -65,7 +81,7 @@ import { fetchOrderExecutions } from '@/lib/order-engine/executions-client'
 vi.setConfig({ testTimeout: 60_000 })
 const until = (check: () => void) => waitFor(check, { timeout: 15_000, interval: 20 })
 
-const KEYS: Record<string, typeof KEY_A> ={ [A.toLowerCase()]: KEY_A, [B.toLowerCase()]: KEY_B }
+const KEYS: Record<string, typeof KEY_A> = { [A.toLowerCase()]: KEY_A, [B.toLowerCase()]: KEY_B }
 
 function liveDca(owner: string, n: number): OrderRow {
   const hash = `0x${String(n).repeat(64)}`
@@ -83,6 +99,8 @@ function liveDca(owner: string, n: number): OrderRow {
 type Seen = { route: 'list' | 'poll' | 'fills'; wallet: string; sig: 'none' | 'own' | 'foreign' }
 let seen: Seen[] = []
 let rows: Record<string, OrderRow[]> = {}
+/** [R2-2] The server holds its answer to the NEXT list read of `wallet` until `open` resolves (a request in flight). */
+let gate: { wallet: string; open: Promise<void> } | null = null
 const fetchMock = vi.fn(async (url: string, init?: { headers?: Record<string, string> }) => {
   const u = new URL(url, 'http://localhost')
   const w = (u.searchParams.get('wallet') ?? '').toLowerCase()
@@ -92,6 +110,11 @@ const fetchMock = vi.fn(async (url: string, init?: { headers?: Record<string, st
     sig = (await verifyOrdersReadAccess({ wallet: w, issuedAt: h[ORDERS_READ_HEADER_ISSUED], signature: h[ORDERS_READ_HEADER_SIGNATURE] })).ok ? 'own' : 'foreign'
   }
   const route: Seen['route'] = u.pathname === '/api/orders' ? (u.searchParams.get('hashes') ? 'poll' : 'list') : 'fills'
+  if (gate && route === 'list' && w === gate.wallet) {
+    const held = gate
+    gate = null
+    await held.open
+  }
   seen.push({ route, wallet: w, sig })
   if (sig !== 'own') return new Response(JSON.stringify({ code: 'READ_AUTH_REQUIRED' }), { status: 401 })
   if (route === 'fills') return new Response(JSON.stringify({ executions: [{ id: 'f1', execution_number: 1, status: 'confirmed' }], order: null }), { status: 200 })
@@ -119,13 +142,17 @@ beforeEach(() => {
   _readAuthInternal.clearSigner()
   seen = []
   rows = { [A.toLowerCase()]: [liveDca(A, 1)] }
+  gate = null
+  outcomes.length = 0
   wallet.connected = A
+  wallet.inWallet = undefined
   wallet.answers = {}
   wagmiSign.mockReset()
-  // wagmi with an injected wallet: signs with the account it is told to use, refuses one that is not connected.
+  // wagmi with an injected wallet: signs with the account it is told to use, refuses one the wallet is not on.
   wagmiSign.mockImplementation(async (args) => {
     const account = String(args.account ?? wallet.connected).toLowerCase()
-    if (!wallet.connected || account !== wallet.connected.toLowerCase()) {
+    const holds = wallet.inWallet ?? wallet.connected
+    if (!holds || account !== holds.toLowerCase()) {
       const err = new Error(`Account "${account}" not found for connector`)
       err.name = 'ConnectorAccountNotFoundError'
       throw err
@@ -275,6 +302,55 @@ describe('[A100 R2-3] a wallet whose signature does not recover to it is asked O
     view.rerender()
     await until(() => expect(view.result.current.readAuthDenied).toBe(true)) // A's own read finds the refusal remembered
     expect(promptsFor(A)).toBe(1) // and does not ask again
+    view.unmount()
+  })
+})
+
+// The line under test: useOrderEngine.ts `if (outcome === 'unavailable') return []` (:518 at cc282e0a, :524 here). Without it
+// the next statement raises "Sign to view" for a wallet that refused nothing; both tests below then fail.
+describe('[A100 R2-2] \'unavailable\' is not a refusal: the hook never raises "Sign to view" for it', () => {
+  it('the wallet moved to another account before React re-rendered (wagmi refuses the account): the read ends quietly, "Sign to view" never shows, nothing is remembered', async () => {
+    wallet.inWallet = B // the wallet is on B already; React still reports A
+    const shown: boolean[] = []
+    const view = renderHook(() => {
+      const engine = useOrderEngine()
+      shown.push(engine.readAuthDenied)
+      return engine
+    })
+    await until(() => expect(outcomes).toEqual([[A.toLowerCase(), 'unavailable']])) // the hook's read of A was told so
+    await until(() => expect(view.result.current.isLoading).toBe(false)) // and that read has ended
+    expect(view.result.current.readAuthDenied).toBe(false)
+    expect(shown.includes(true)).toBe(false) // not even for one render
+    expect(view.result.current.orders).toEqual([])
+    expect(promptsFor(A)).toBe(1) // wagmi was asked for A once, and refused the account
+    expect(of('list', A).map((s) => s.sig)).toEqual(['none']) // no retry: there is nothing to send
+    expect([_readAuthInternal.isDenied(A), _readAuthInternal.isMismatched(A)]).toEqual([false, false])
+    view.unmount()
+  })
+
+  it('A\'s list read is still in flight when the account switches to B: its 401 asks nobody, and back on A "Sign to view" does not show', async () => {
+    let open!: () => void
+    gate = { wallet: A.toLowerCase(), open: new Promise<void>((resolve) => (open = resolve)) }
+    const shown: Array<[string | undefined, boolean]> = []
+    const view = renderHook(() => {
+      const engine = useOrderEngine()
+      shown.push([wallet.connected, engine.readAuthDenied])
+      return engine
+    })
+    await until(() => expect(fetchMock).toHaveBeenCalled()) // A's unsigned list read is out; the server holds its answer
+    wallet.connected = B
+    view.rerender()
+    await until(() => expect(of('list', B).map((s) => s.sig)).toEqual(['none', 'own'])) // B's own read: asked once, signed
+    open() // A's 401 arrives now, with B connected
+    await until(() => expect(outcomes.some(([w, o]) => w === A.toLowerCase() && o === 'unavailable')).toBe(true))
+    expect(promptsFor(A)).toBe(0) // the hook's own check: wagmi was never asked for A
+    wallet.connected = A
+    view.rerender()
+    expect(view.result.current.readAuthDenied).toBe(false) // at once, before A's new read answers
+    await until(() => expect(view.result.current.orders).toHaveLength(1)) // A reads again: asked once, its order loads
+    expect(shown.filter(([, up]) => up)).toEqual([]) // "Sign to view" was never up, for either account
+    expect([promptsFor(A), promptsFor(B)]).toEqual([1, 1])
+    expect([_readAuthInternal.isDenied(A), _readAuthInternal.isMismatched(A)]).toEqual([false, false])
     view.unmount()
   })
 })
