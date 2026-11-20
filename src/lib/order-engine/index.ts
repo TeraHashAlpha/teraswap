@@ -64,18 +64,16 @@ export type { BitmapPosition, InvalidationBatch } from './v3-nonce-bitmap'
 export { createOrderInSupabase, fetchUserOrders, fetchActiveOrders, cancelOrderInSupabase } from './supabase'
 export type { OrderRow } from './supabase'
 // [AUDIT-W6 / W6-M-01] Per-session proof-of-ownership for active-order reads.
+// [A100 R2-1] The cache accessors and the two header names are NOT re-exported: read headers are built in one place
+// (ordersReadHeaders, which verifies the entry first); the server routes import the header names from './read-auth'.
 export {
   buildOrdersReadTypedData,
   verifyOrdersReadAccess,
   ensureOrdersReadAuth,
   retryOrdersReadAuth,
   ordersReadHeaders,
-  getCachedOrdersReadAuth,
-  storeOrdersReadAuth,
   ReadAuthRequiredError,
   PUBLIC_ORDER_STATUSES,
-  ORDERS_READ_HEADER_ISSUED,
-  ORDERS_READ_HEADER_SIGNATURE,
   ORDERS_READ_TTL_MS,
   ORDERS_READ_PURPOSE,
 } from './read-auth'

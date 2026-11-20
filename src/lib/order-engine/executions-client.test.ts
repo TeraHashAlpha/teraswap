@@ -205,6 +205,62 @@ describe('[A97 S-1] only the connected wallet signs, and only for itself', () =>
   })
 })
 
+describe('[A100 R2-1] a cached entry that is not the wallet\'s own is never SENT', () => {
+  /** What a build without the recover check left behind: B's signature cached under A. */
+  async function plantForeign(): Promise<string> {
+    const issuedAt = nowSec()
+    const signature = await B.signTypedData(buildOrdersReadTypedData(WALLET, issuedAt))
+    storeOrdersReadAuth(WALLET, { issuedAt, signature })
+    return signature
+  }
+  const sentSignatures = () => fetchMock.mock.calls.map((c) => (c[1] as { headers?: Record<string, string> } | undefined)?.headers?.[ORDERS_READ_HEADER_SIGNATURE])
+
+  it.each([
+    ['B is the connected account', () => connect(B.address, vi.fn(signsAs(B)))],
+    ['nothing is connected', () => {}],
+  ])('the owner is NOT connected (%s): 0 requests carry it, live or not, and it is removed', async (_label, setup) => {
+    setup()
+    fetchMock.mockResolvedValue(unauthorized())
+    for (const live of [false, true]) {
+      const planted = await plantForeign()
+      const res = await fetchOrderExecutions(ID, WALLET, { live })
+      expect(res.status).toBe(401)
+      expect(sentSignatures()).not.toContain(planted)
+      expect(getCachedOrdersReadAuth(WALLET)).toBeNull()
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls.every((c) => c.length === 1)).toBe(true) // plain fetch(url): no headers at all
+    expect(_readAuthInternal.isDenied(WALLET)).toBe(false)
+  })
+
+  it('the owner IS connected, live order: the entry is dropped, ONE prompt, ONE request, carrying the owner\'s own signature', async () => {
+    const planted = await plantForeign()
+    const signerA = vi.fn(signsAs(A))
+    connect(WALLET, signerA)
+    fetchMock.mockImplementation(async (_u: string, init?: { headers?: Record<string, string> }) => (init?.headers ? ok() : unauthorized()))
+    const res = await fetchOrderExecutions(ID, WALLET, { live: true })
+    expect(res.status).toBe(200) // the fills show
+    expect(signerA).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const own = getCachedOrdersReadAuth(WALLET)!
+    expect(own.signature).not.toBe(planted)
+    expect(sentSignatures()).toEqual([own.signature])
+  })
+
+  it('the owner IS connected, order not marked live: the first request goes out WITHOUT the entry, then one prompt and the retry carries the owner\'s own', async () => {
+    const planted = await plantForeign()
+    const signerA = vi.fn(signsAs(A))
+    connect(WALLET, signerA)
+    fetchMock.mockResolvedValueOnce(unauthorized()).mockResolvedValueOnce(ok())
+    const res = await fetchOrderExecutions(ID, WALLET)
+    expect(res.status).toBe(200)
+    expect(signerA).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]).toEqual([URL])
+    expect(sentSignatures()).toEqual([undefined, getCachedOrdersReadAuth(WALLET)!.signature])
+    expect(sentSignatures()).not.toContain(planted)
+  })
+})
+
 describe('[A97 S-8] a live order signs FIRST when nothing valid is cached (no 401 in the console)', () => {
   it('live, owner connected, empty cache: one prompt, then ONE request that already carries the headers', async () => {
     const signer = vi.fn(signsAs(A))

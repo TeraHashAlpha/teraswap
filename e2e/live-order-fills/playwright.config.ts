@@ -14,15 +14,24 @@ import { resolve } from 'node:path'
  *
  * `ORDERS_E2E_OUT` is a directory that receives one JSON report per UI (the prompt counts, the executions calls, the console).
  * Same CSP, service-worker and capture discipline as e2e/third-party-hosts. Ports differ from every other rig so they can coexist.
+ *
+ * [A100 R2-1] `RACE_WRITER_APP_DIR=/path/to/origin-main-tree` (built the same way) starts that tree too, on two more ports:
+ * foreign-entry.pw.ts then lets origin/main's own code write the foreign cache entry (its account-switch race) and hands
+ * that very entry to the tree under test, instead of signing an equivalent one in the test process.
  */
 const REPO_ROOT = resolve(__dirname, '../..')
 const APP_DIR = process.env.CAPTURE_APP_DIR ? resolve(process.env.CAPTURE_APP_DIR) : REPO_ROOT
+const WRITER_DIR = process.env.RACE_WRITER_APP_DIR ? resolve(process.env.RACE_WRITER_APP_DIR) : null
 export const UPSTREAM_PORT = 3953
 export const DB_PORT = 3954
 export const V1_PORT = 3951
 export const V2_PORT = 3952
 export const V1_URL = `http://127.0.0.1:${V1_PORT}`
 export const V2_URL = `http://127.0.0.1:${V2_PORT}`
+export const WRITER_V1_PORT = 3955
+export const WRITER_V2_PORT = 3956
+/** The origin/main build that writes the foreign entry (null unless RACE_WRITER_APP_DIR is set). */
+export const WRITER_URLS = WRITER_DIR ? { v1: `http://127.0.0.1:${WRITER_V1_PORT}`, v2: `http://127.0.0.1:${WRITER_V2_PORT}` } : null
 
 /**
  * Server-only names. `/api/rpc` reads from the local JSON-RPC stub; the orders routes read the local PostgREST shim
@@ -54,5 +63,11 @@ export default defineConfig({
   webServer: [
     { command: `npx next start -p ${V1_PORT}`, cwd: APP_DIR, url: V1_URL, reuseExistingServer: false, timeout: 120_000, env: { ...SERVER_ENV, UI_V2_ENABLED: '' } },
     { command: `npx next start -p ${V2_PORT}`, cwd: APP_DIR, url: V2_URL, reuseExistingServer: false, timeout: 120_000, env: { ...SERVER_ENV, UI_V2_ENABLED: 'true' } },
+    ...(WRITER_DIR && WRITER_URLS
+      ? [
+          { command: `npx next start -p ${WRITER_V1_PORT}`, cwd: WRITER_DIR, url: WRITER_URLS.v1, reuseExistingServer: false, timeout: 120_000, env: { ...SERVER_ENV, UI_V2_ENABLED: '' } },
+          { command: `npx next start -p ${WRITER_V2_PORT}`, cwd: WRITER_DIR, url: WRITER_URLS.v2, reuseExistingServer: false, timeout: 120_000, env: { ...SERVER_ENV, UI_V2_ENABLED: 'true' } },
+        ]
+      : []),
   ],
 })

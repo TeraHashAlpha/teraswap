@@ -3,7 +3,8 @@
  *
  * The route needs the wallet's read signature for a LIVE order (orders/[id]/executions/route.ts) and ignores it for a
  * finished one. So every caller goes through here: it sends the read-signature headers the Orders tab already holds
- * (ordersReadHeaders — cached for the session, nothing new is signed for them), and on a 401 takes the SAME
+ * (ordersReadHeaders — cached for the session, nothing new is signed for them; [A100 R2-1] verified to be the wallet's
+ * own before every send, an entry signed by any other account is dropped unsent), and on a 401 takes the SAME
  * sign-once-and-retry path the order list uses (ensureOrdersReadAuth: one prompt however many panels ask, a refusal
  * remembered for the session), then retries ONCE. With nothing cached and no signer the 401 is handed back as it came,
  * so the caller shows no fills rather than inventing any.
@@ -37,8 +38,9 @@ export async function fetchOrderExecutions(
   opts: { live?: boolean } = {},
 ): Promise<Response> {
   const url = orderExecutionsUrl(orderId, wallet)
-  const get = () => {
-    const headers = ordersReadHeaders(wallet)
+  // [A100 R2-1] ordersReadHeaders verifies the cached entry before it is sent: one that is not `wallet`'s own is dropped.
+  const get = async () => {
+    const headers = await ordersReadHeaders(wallet)
     return headers ? fetch(url, { headers }) : fetch(url)
   }
   const signer = getOrdersReadSigner(wallet)

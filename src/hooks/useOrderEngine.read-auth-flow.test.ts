@@ -1,0 +1,164 @@
+// @vitest-environment jsdom
+/**
+ * [A100] The Orders tab's read-signature flow end to end in the hook: the REAL useOrderEngine, the REAL list fetchers
+ * (fetchUserOrders, fetchActiveOrders), the REAL fills client and read-auth, against a mock server that behaves like the
+ * routes: an orders read answers 200 only with the read signature of the wallet its URL names, else 401. The server notes
+ * for every request whose signature it carried ('none', the wallet's 'own', or a 'foreign' one), never the value.
+ *
+ * wagmi is a mock that behaves like wagmi with an injected wallet: it signs with the account it is told to use and refuses
+ * (ConnectorAccountNotFoundError) an account that is not the connected one. Real signatures (viem local accounts).
+ *
+ * R2-1: a foreign entry cached under the connected wallet is dropped unsent: one prompt, the list loads, poll and fills
+ *       carry the wallet's own signature; with its owner not connected, no request carries it either.
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
+
+// Published Anvil/Hardhat default account #0 (value-allowlisted in .gitleaks.toml): NOT a secret. B and C are generated per run.
+const KEY_A = privateKeyToAccount('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80')
+const KEY_B = privateKeyToAccount(generatePrivateKey())
+const A = KEY_A.address
+const B = KEY_B.address
+
+const wallet = vi.hoisted(() => ({ connected: undefined as string | undefined }))
+const wagmiSign = vi.hoisted(() => vi.fn<(args: Record<string, unknown>) => Promise<string>>())
+
+vi.mock('wagmi', () => ({
+  useSwitchChain: () => ({ switchChainAsync: vi.fn().mockResolvedValue(undefined) }),
+  useAccount: () => ({ address: wallet.connected }),
+  useChainId: () => 1,
+  useSignTypedData: () => ({ signTypedDataAsync: wagmiSign }),
+  useWriteContract: () => ({ writeContractAsync: vi.fn() }),
+  useReadContract: () => ({ data: 0n, isLoading: false, refetch: vi.fn().mockResolvedValue({ data: 0n }) }),
+}))
+// The list fetchers stay REAL (they build the read headers); only the poll interval is shortened.
+vi.mock('@/lib/order-engine', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/order-engine')>('@/lib/order-engine')
+  return { ...actual, ORDER_POLL_INTERVAL_MS: 40 }
+})
+
+import { renderHook, act, waitFor } from '@testing-library/react'
+import { useOrderEngine, flushOrderWrites } from './useOrderEngine'
+import type { OrderRow } from '@/lib/order-engine'
+import {
+  ORDERS_READ_HEADER_ISSUED,
+  ORDERS_READ_HEADER_SIGNATURE,
+  _readAuthInternal,
+  buildOrdersReadTypedData,
+  getCachedOrdersReadAuth,
+  storeOrdersReadAuth,
+  verifyOrdersReadAccess,
+} from '@/lib/order-engine/read-auth'
+import { fetchOrderExecutions } from '@/lib/order-engine/executions-client'
+
+const KEYS: Record<string, typeof KEY_A> = { [A.toLowerCase()]: KEY_A, [B.toLowerCase()]: KEY_B }
+
+function liveDca(owner: string, n: number): OrderRow {
+  const hash = `0x${String(n).repeat(64)}`
+  return {
+    id: `ord-${n}`, wallet: owner.toLowerCase(), order_hash: hash, order_type: 'dca', status: 'active', chain_id: 1,
+    token_in: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', token_out: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+    token_in_symbol: 'USDC', token_out_symbol: 'WETH', token_in_decimals: 6, token_out_decimals: 18,
+    amount_in: '100000000', min_amount_out: '0', target_price: '0', price_feed: '0x0000000000000000000000000000000000000000',
+    expiry: String(Math.floor(Date.now() / 1000) + 86_400), nonce: 1, router: '0x0000000000000000000000000000000000000000',
+    dca_interval: 3600, dca_total: 5, dca_executed: 2, order_data: { owner, orderType: 2 }, tx_hash: null, amount_out: null, error: null,
+    created_at: new Date().toISOString(), executed_at: null,
+  } as OrderRow
+}
+
+type Seen = { route: 'list' | 'poll' | 'fills'; wallet: string; sig: 'none' | 'own' | 'foreign' }
+let seen: Seen[] = []
+let rows: Record<string, OrderRow[]> = {}
+const fetchMock = vi.fn(async (url: string, init?: { headers?: Record<string, string> }) => {
+  const u = new URL(url, 'http://localhost')
+  const w = (u.searchParams.get('wallet') ?? '').toLowerCase()
+  const h = init?.headers
+  let sig: Seen['sig'] = 'none'
+  if (h?.[ORDERS_READ_HEADER_SIGNATURE]) {
+    sig = (await verifyOrdersReadAccess({ wallet: w, issuedAt: h[ORDERS_READ_HEADER_ISSUED], signature: h[ORDERS_READ_HEADER_SIGNATURE] })).ok ? 'own' : 'foreign'
+  }
+  const route: Seen['route'] = u.pathname === '/api/orders' ? (u.searchParams.get('hashes') ? 'poll' : 'list') : 'fills'
+  seen.push({ route, wallet: w, sig })
+  if (sig !== 'own') return new Response(JSON.stringify({ code: 'READ_AUTH_REQUIRED' }), { status: 401 })
+  if (route === 'fills') return new Response(JSON.stringify({ executions: [{ id: 'f1', execution_number: 1, status: 'confirmed' }], order: null }), { status: 200 })
+  return new Response(JSON.stringify({ orders: rows[w] ?? [] }), { status: 200 })
+})
+const of = (route: Seen['route'], w?: string) => seen.filter((s) => s.route === route && (!w || s.wallet === w.toLowerCase()))
+
+/** An entry under `owner` signed by `by` (B's signature under A = what a build without the recover check left behind). */
+async function plant(owner: string, by: typeof KEY_A): Promise<void> {
+  const issuedAt = Math.floor(Date.now() / 1000)
+  storeOrdersReadAuth(owner, { issuedAt, signature: await by.signTypedData(buildOrdersReadTypedData(owner, issuedAt)) })
+}
+
+beforeEach(() => {
+  localStorage.clear()
+  sessionStorage.clear()
+  _readAuthInternal.reset()
+  _readAuthInternal.clearSigner()
+  seen = []
+  rows = { [A.toLowerCase()]: [liveDca(A, 1)] }
+  wallet.connected = A
+  wagmiSign.mockReset()
+  // wagmi with an injected wallet: signs with the account it is told to use, refuses one that is not connected.
+  wagmiSign.mockImplementation(async (args) => {
+    const account = String(args.account ?? wallet.connected).toLowerCase()
+    if (!wallet.connected || account !== wallet.connected.toLowerCase()) {
+      const err = new Error(`Account "${account}" not found for connector`)
+      err.name = 'ConnectorAccountNotFoundError'
+      throw err
+    }
+    const { account: _a, ...typed } = args
+    return KEYS[account].signTypedData(typed as Parameters<typeof KEY_A.signTypedData>[0])
+  })
+  fetchMock.mockClear()
+  vi.stubGlobal('fetch', fetchMock)
+})
+afterEach(async () => {
+  vi.unstubAllGlobals()
+  await flushOrderWrites()
+})
+
+describe('[A100 R2-1] a foreign entry cached under a wallet is never sent by the Orders tab', () => {
+  it('its owner IS connected: dropped unsent, ONE prompt, the list loads, the poll and the fills carry the owner\'s own signature', async () => {
+    await plant(A, KEY_B)
+    const view = renderHook(() => useOrderEngine())
+    await waitFor(() => expect(view.result.current.orders).toHaveLength(1))
+    await waitFor(() => expect(of('poll').length).toBeGreaterThanOrEqual(2))
+    let fills!: Response
+    await act(async () => { fills = await fetchOrderExecutions('ord-1', A, { live: true }) })
+    expect(fills.status).toBe(200) // the fills show
+    expect(seen.filter((s) => s.sig === 'foreign')).toEqual([]) // 0 requests carried it
+    expect(of('list').map((s) => s.sig)).toEqual(['none', 'own']) // unsigned first (the entry was dropped), then the owner's own
+    expect(of('poll').every((s) => s.sig === 'own')).toBe(true)
+    expect(of('fills').map((s) => s.sig)).toEqual(['own'])
+    expect(wagmiSign).toHaveBeenCalledTimes(1)
+    expect(String(wagmiSign.mock.calls[0][0].account).toLowerCase()).toBe(A.toLowerCase())
+    expect(view.result.current.readAuthDenied).toBe(false)
+    const kept = getCachedOrdersReadAuth(A)!
+    expect((await verifyOrdersReadAccess({ wallet: A, issuedAt: kept.issuedAt, signature: kept.signature })).ok).toBe(true)
+    view.unmount()
+  })
+
+  it('its owner is NOT connected (B is, A\'s live order still on screen): the fills reads of A\'s order carry nothing, nobody is asked for A', async () => {
+    const view = renderHook(() => useOrderEngine())
+    await waitFor(() => expect(view.result.current.orders).toHaveLength(1))
+    wallet.connected = B
+    view.rerender()
+    await waitFor(() => expect(of('list', B).length).toBeGreaterThan(0)) // B's own list read (B signs for B)
+    wagmiSign.mockClear()
+    seen = []
+    await plant(A, KEY_B)
+    for (const live of [true, false, true]) {
+      let res!: Response
+      await act(async () => { res = await fetchOrderExecutions('ord-1', A, { live }) })
+      expect(res.status).toBe(401)
+      await plant(A, KEY_B) // planted again before the next read: every read verifies what it is about to send
+    }
+    expect(of('fills', A).map((s) => s.sig)).toEqual(['none', 'none', 'none'])
+    expect(seen.filter((s) => s.sig === 'foreign')).toEqual([])
+    expect(wagmiSign.mock.calls.filter((c) => String(c[0].account).toLowerCase() === A.toLowerCase())).toEqual([])
+    expect(_readAuthInternal.isDenied(A)).toBe(false)
+    view.unmount()
+  })
+})

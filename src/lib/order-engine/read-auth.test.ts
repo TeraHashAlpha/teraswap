@@ -108,13 +108,48 @@ describe('session cache + headers (client side)', () => {
     expect(getCachedOrdersReadAuth(WALLET)).toBeNull()
   })
 
+  // [A100 R2-1] ordersReadHeaders is async now (it verifies the entry before handing it out): the calls are awaited.
   it('ordersReadHeaders returns the two headers when cached, null when not', async () => {
-    expect(ordersReadHeaders(WALLET)).toBeNull()
+    expect(await ordersReadHeaders(WALLET)).toBeNull()
     const auth = await signReadAuth()
     storeOrdersReadAuth(WALLET, auth)
-    const headers = ordersReadHeaders(WALLET) as Record<string, string>
+    const headers = (await ordersReadHeaders(WALLET)) as Record<string, string>
     expect(headers[ORDERS_READ_HEADER_ISSUED]).toBe(String(auth.issuedAt))
     expect(headers[ORDERS_READ_HEADER_SIGNATURE]).toBe(auth.signature)
+  })
+})
+
+describe('[A100 R2-1] ordersReadHeaders hands out only the wallet\'s OWN cached signature', () => {
+  it('an entry under the wallet signed by ANOTHER account gives no headers and is removed (never sent, whoever is connected)', async () => {
+    const foreign = await signReadAuth(otherAccount, WALLET) // the other account's signature over a message naming WALLET
+    storeOrdersReadAuth(WALLET, foreign)
+    expect(getCachedOrdersReadAuth(WALLET)?.signature).toBe(foreign.signature) // it IS in the cache…
+    expect(await ordersReadHeaders(WALLET)).toBeNull() // …and is not handed out
+    expect(getCachedOrdersReadAuth(WALLET)).toBeNull() // …and is gone
+  })
+
+  it('an entry that is the other account\'s own read signature (its message, its key) is not this wallet\'s either', async () => {
+    storeOrdersReadAuth(WALLET, await signReadAuth(otherAccount, otherAccount.address))
+    expect(await ordersReadHeaders(WALLET)).toBeNull()
+    expect(getCachedOrdersReadAuth(WALLET)).toBeNull()
+  })
+
+  it('an entry that is no signature at all gives no headers and is removed', async () => {
+    storeOrdersReadAuth(WALLET, { issuedAt: nowSec(), signature: `0x${'ab'.repeat(65)}` })
+    expect(await ordersReadHeaders(WALLET)).toBeNull()
+    expect(getCachedOrdersReadAuth(WALLET)).toBeNull()
+  })
+
+  it('the wallet\'s own entry is handed out as it is, every time, and stays cached', async () => {
+    const own = await signReadAuth()
+    storeOrdersReadAuth(WALLET, own)
+    for (let i = 0; i < 3; i++) {
+      expect(await ordersReadHeaders(WALLET.toLowerCase())).toEqual({
+        [ORDERS_READ_HEADER_ISSUED]: String(own.issuedAt),
+        [ORDERS_READ_HEADER_SIGNATURE]: own.signature,
+      })
+    }
+    expect(getCachedOrdersReadAuth(WALLET)?.signature).toBe(own.signature)
   })
 })
 

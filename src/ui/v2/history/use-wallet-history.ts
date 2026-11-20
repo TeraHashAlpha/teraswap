@@ -25,7 +25,8 @@ export function useWalletHistory() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/history?wallet=${address}&limit=50`, { headers: ordersReadHeaders(address) ?? undefined })
+      // [A100 R2-1] As v1: the cached entry is verified before it is sent (one that is not this wallet's own is dropped).
+      const res = await fetch(`/api/history?wallet=${address}&limit=50`, { headers: (await ordersReadHeaders(address)) ?? undefined })
       if (!res.ok) throw new Error(`API returned ${res.status}`)
       const json = await res.json()
       if (json.error) {

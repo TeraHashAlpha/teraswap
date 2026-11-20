@@ -192,13 +192,20 @@ export async function getVerifiedOrdersReadAuth(wallet: string): Promise<OrdersR
   return null
 }
 
-/** Headers for an orders read, or null when the session has no valid auth. */
-export function ordersReadHeaders(wallet: string): Record<string, string> | null {
-  const cached = getCachedOrdersReadAuth(wallet)
-  if (!cached) return null
+/**
+ * Headers for an orders read, or null when the session holds no signature of `wallet`'s own.
+ *
+ * [A100 R2-1] The ONE place a cached read signature becomes request headers, and it takes the entry through
+ * getVerifiedOrdersReadAuth first: a signature that does not recover to `wallet` (a build without that check wrote such
+ * entries under the wrong wallet in an account-switch race) is removed and never leaves the browser, whoever is connected.
+ * Async because recovery is. No other file reads the cache or names the two headers (read-auth.send-guard.test.ts).
+ */
+export async function ordersReadHeaders(wallet: string): Promise<Record<string, string> | null> {
+  const verified = await getVerifiedOrdersReadAuth(wallet)
+  if (!verified) return null
   return {
-    [ORDERS_READ_HEADER_ISSUED]: String(cached.issuedAt),
-    [ORDERS_READ_HEADER_SIGNATURE]: cached.signature,
+    [ORDERS_READ_HEADER_ISSUED]: String(verified.issuedAt),
+    [ORDERS_READ_HEADER_SIGNATURE]: verified.signature,
   }
 }
 

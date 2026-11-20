@@ -13,6 +13,10 @@
  * when the signer refused or returned garbage, never for "another account signed" or "not connected".
  * Not vacuous: each seed stores own signatures, refuses foreign ones, drops planted ones and records refusals.
  * A failing step names its seed and step, never a signature value.
+ *
+ * [A100 R2-1] And nothing foreign is ever SENT: the mock server notes every request whose read headers do not recover to
+ * the wallet its URL names (there must be none, in any step), and a planted entry is gone after ANY fills read of its
+ * wallet, the owner connected or not. Not vacuous: each seed reads a planted entry with its owner not connected.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
@@ -67,16 +71,20 @@ const recoversTo = async (wallet: string, e: { issuedAt: number; signature: stri
   (await verifyOrdersReadAccess({ wallet, issuedAt: e.issuedAt, signature: e.signature })).ok
 
 const fetchMock = vi.fn()
+/** [A100 R2-1] Requests whose read headers were NOT the URL wallet's own signature (the path only; never the value). */
+let foreignSent: string[] = []
 beforeEach(() => {
   sessionStorage.clear()
   _readAuthInternal.reset()
   _readAuthInternal.clearSigner()
+  foreignSent = []
   vi.stubGlobal('fetch', fetchMock)
   // The server: 200 only with the named wallet's own valid read signature on a live order, else 401.
   fetchMock.mockImplementation(async (url: string, init?: { headers?: Record<string, string> }) => {
     const wallet = new URL(url, 'http://x').searchParams.get('wallet')!
     const h = init?.headers
     const okSig = h ? await recoversTo(wallet, { issuedAt: Number(h['x-orders-read-issued']), signature: h['x-orders-read-signature'] }) : false
+    if (h && !okSig) foreignSent.push(new URL(url, 'http://x').pathname)
     return okSig ? { status: 200, ok: true, json: async () => ({}) } : { status: 401, ok: false, json: async () => ({}) }
   })
 })
@@ -90,7 +98,7 @@ describe('property: a cached read signature always recovers to the wallet it is 
     const rand = prng(seed)
     const failures: string[] = []
     const planted = new Set<number>()
-    const seen = { storedOwn: 0, refusedForeign: 0, droppedPlanted: 0, refusalsRecorded: 0, notConnected: 0 }
+    const seen = { storedOwn: 0, refusedForeign: 0, droppedPlanted: 0, refusalsRecorded: 0, notConnected: 0, plantedReadNotConnected: 0 }
     const owner = {}
 
     for (let step = 0; step < STEPS; step++) {
@@ -122,13 +130,16 @@ describe('property: a cached read signature always recovers to the wallet it is 
         const kind = SIGNERS[Math.floor(rand() * 3)] // self / other / garbage
         setOrdersReadSigner(owner, c < 3 ? { address: WALLETS[c], sign: makeSigner(kind, c, rand) } : null)
         const deniedBefore = _readAuthInternal.isDenied(WALLETS[w])
+        const hadPlant = planted.has(w)
         await fetchOrderExecutions(`order-${step}`, WALLETS[w], { live: rand() < 0.7 })
         if (c !== w) {
           seen.notConnected++
+          if (hadPlant) seen.plantedReadNotConnected++
           if (!deniedBefore && _readAuthInternal.isDenied(WALLETS[w])) failures.push(`${label}: refusal recorded for a wallet that is not connected`)
-        } else {
-          planted.delete(w) // read through ensureOrdersReadAuth when the owner is connected
         }
+        // [A100 R2-1] Any fills read verifies the entry before sending it: a planted one is gone, the owner connected or not
+        // (the check below then holds every entry under W to "recovers to W").
+        planted.delete(w)
       } else if (op < 0.9) {
         // What 302f9cec could leave behind: another account's signature cached under W.
         const issuedAt = Math.floor(Date.now() / 1000)
@@ -146,6 +157,8 @@ describe('property: a cached read signature always recovers to the wallet it is 
     }
 
     expect(failures).toEqual([])
+    expect(foreignSent).toEqual([]) // [A100 R2-1] no request ever carried a signature that was not its wallet's own
+    expect(seen.plantedReadNotConnected).toBeGreaterThan(0)
     expect(seen.storedOwn).toBeGreaterThan(0)
     expect(seen.refusedForeign).toBeGreaterThan(0)
     expect(seen.droppedPlanted).toBeGreaterThan(0)
