@@ -172,6 +172,23 @@ describe("[A93 R2-1] a configured secret never survives, in any form, in any sin
     assert.equal(redactError(short), "refused /v2/<redacted>")
   })
 
+  // [A99 R4-3] redact.js readEscape reads the `u` of a `\uXXXX` escape in either case (a provider that upper-cases the whole
+  // echo writes `\U0041`). Restoring the lower-case-only test (`d === 117`, mutant P08) kept every test green.
+  test("[A99 R4-3] the key echoed as upper-cased \\UXXXX escapes, and as a mix of \\u and \\U with upper-case hex", async () => {
+    const hex4 = (ch) => ch.charCodeAt(0).toString(16).padStart(4, "0")
+    const upper = [...KEY].map((ch) => `\\U${hex4(ch).toUpperCase()}`).join("")
+    const mixed = [...KEY].map((ch, i) => (i % 2 === 0 ? `\\u${hex4(ch).toUpperCase()}` : `\\U${hex4(ch)}`)).join("")
+    for (const [label, echo] of Object.entries({ "upper-cased \\U": upper, "mixed \\u and \\U": mixed })) {
+      const text = `Cannot POST /v2/${echo} (404)`
+      for (const [sink, out] of await sinks(text)) {
+        assert.ok(/redacted/.test(out), `${label} | ${sink}: the key is not masked:\n${out}`)
+        assert.ok(!/\\u00[0-9a-f]{2}/i.test(out), `${label} | ${sink}: an escape of the key is still in:\n${out}`)
+        assert.deepEqual(leaks(out, KEY), [], `${label} | ${sink}:\n${out}`)
+      }
+      assert.equal(redactUrl(text), "Cannot POST /v2/<redacted> (404)", label)
+    }
+  })
+
   test("the provider's words inside a viem-shaped error: the Details: line", async () => {
     const err = Object.assign(new Error(["RPC Request failed.", "", `URL: https://${RPC_HOST}`, `Details: no route for /v2/${KEY}?apikey=${QUERY}`, "Version: viem@2.47.10"].join("\n")), {
       name: "RpcRequestError",

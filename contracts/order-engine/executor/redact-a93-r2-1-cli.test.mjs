@@ -343,6 +343,29 @@ describe("[A93 R2-1] every print of each CLI is scrubbed, not only what passes r
     assert.match(run.stdout, /order_executions write: \{[^}]*error: 'HTTP 401 \{"message":"Invalid API key: <redacted>"\}'/s, run.all)
   })
 
+  // [A99 R4-8] backfill-execution.mjs prints the ABI-decoded OrderExecuted log (`decoded OrderExecuted: { orderHash, tokenIn, ... }`),
+  // which is chain data: an address field can hold a configured secret when the secret is hex-shaped (a 40-digit key). That call
+  // was the one say() whose scrub no test pinned: with it removed (mutant S185) all 2,458 tests stayed green, and the marker below
+  // reached stdout. The service-role key here IS an address-shaped hex string, and the receipt's log carries it as `tokenIn`.
+  test("backfill-execution say() @ the decoded event: a hex-shaped configured key sits in the log data (tokenIn)", { timeout: 90_000 }, async () => {
+    const HEX_KEY = "0xa1b2c3d4e5f60718293a4b5c6d7e8f9012345678" // DUMMY: 40 hex digits, a valid address; configured as the service key
+    const log = {
+      ...LOG,
+      data: encodeAbiParameters(
+        ORDER_EXECUTED_EVENT.inputs.filter((i) => !i.indexed),
+        [HEX_KEY, "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", 10n ** 18n, 3_000_000_000n, 1000n],
+      ),
+    }
+    const rpc = await rpcStubWith({ eth_getTransactionReceipt: { ...RECEIPT, logs: [log] } })
+    const run = await backfill(rpc, await supabaseRoutes(), { extraEnv: { SUPABASE_SERVICE_ROLE_KEY: HEX_KEY } })
+    assert.equal(run.exitCode, 0, run.all)
+    // Neither the address, nor the digits without the 0x, in any case, anywhere on stdout or stderr.
+    const lower = run.all.toLowerCase()
+    assert.ok(!lower.includes(HEX_KEY.toLowerCase()) && !lower.includes(HEX_KEY.slice(2).toLowerCase()), `the hex key is in the output:\n${run.all}`)
+    // The line was reached, and the key is a mask in it (the decoded log is a multi-line util.inspect object).
+    assert.match(run.stdout, /^decoded OrderExecuted: \{[^}]*tokenIn: '<redacted>'/ms, run.all)
+  })
+
   const listMissing = (rpc, sb, args, opts) =>
     runCli("list-missing-fills.mjs", args, { RPC_URL: rpc.keyedUrl, SUPABASE_URL: `http://127.0.0.1:${sb.port}` }, opts)
 

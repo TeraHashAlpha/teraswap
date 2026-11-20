@@ -83,6 +83,11 @@ const SINKS = {
   "keeper log line: redactError(the error)": async (err) => `  Order ${ORDER_ID.slice(0, 8)}... error: ${redactError(err)}`,
   "redactError(the HttpRequestError itself)": async (err) => redactError(err.walk((e) => e?.name === "HttpRequestError")),
   "redactError(its message as a string)": async (err) => redactError(err.message),
+  // [A99 R4-6] The line above is the WHOLE viem message (Contract Call block, Request Arguments, ...): longer than redactError's
+  // 600-character cap, so what it returns is cut before the Details: line and holds none of the provider's words. This one is
+  // the HttpRequestError's own message, which is short: its Details: line (the JSON-quoted body, the key split by `\n`) reaches
+  // the output, so the split key is really there to be removed.
+  "redactError(the HttpRequestError's message as a string)": async (err) => redactError(err.walk((e) => e?.name === "HttpRequestError").message),
   "redactUrl(its message)": async (err) => redactUrl(err.message),
   "CLI print: say() of its message": async (err) => redactSecretLiterals(format("FATAL:", err.message)),
   "sendTelegramAlert(esc(its message))": (err) => telegram(() => sendTelegramAlert(esc(err.message))),
@@ -125,16 +130,19 @@ describe("[A96 R3-2] fixtures: viem JSON-quotes the body, so the break reaches t
   })
 })
 
-describe("[A96 R3-2] a key split by a JSON escape in a real viem error: 2 sites x 4 bodies x 9 sinks, nothing of it comes out", () => {
+describe("[A96 R3-2] a key split by a JSON escape in a real viem error: 2 sites x 4 bodies x 10 sinks, nothing of it comes out", () => {
   for (const site of Object.keys(SITES)) {
     for (const body of Object.keys(BODIES)) {
       for (const [sink, render] of Object.entries(SINKS)) {
         test(`${site} | ${body} -> ${sink}`, async () => {
           const out = await render(errors[`${site} | ${body}`])
           assert.deepEqual(leaks(out), [], `leaked:\n${out}`)
-          // redactError on a viem message AS A STRING keeps its first line only ("HTTP request failed."), by design and as on
-          // origin/main: the Details: line, where the provider's words are, is not read from a string. Every other sink keeps them.
-          if (sink !== "redactError(its message as a string)") {
+          // redactError on the WHOLE viem message as a string is cut at this PR's 600-character cap (ERROR_TEXT_MAX; origin/main has
+          // no cap): the Details: line, where the provider's words are, is past the cut, so the output is a head and the visible
+          // marker, and the words are NOT expected. Every other sink keeps them (the short string above reads the Details: line).
+          if (sink === "redactError(its message as a string)") {
+            assert.ok(out.length <= 600 && out.includes("…[truncated"), `expected the 600-character cap marker:\n${out}`)
+          } else {
             assert.match(out, /Cannot POST \/v2\/(?:<|&lt;)redacted(?:>|&gt;)/, `the provider's words are gone:\n${out}`)
           }
         })
