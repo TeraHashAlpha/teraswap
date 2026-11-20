@@ -71,6 +71,7 @@ import {
   _readAuthInternal,
   buildOrdersReadTypedData,
   getCachedOrdersReadAuth,
+  retryOrdersReadAuth,
   storeOrdersReadAuth,
   verifyOrdersReadAccess,
 } from '@/lib/order-engine/read-auth'
@@ -302,6 +303,48 @@ describe('[A100 R2-3] a wallet whose signature does not recover to it is asked O
     view.rerender()
     await until(() => expect(view.result.current.readAuthDenied).toBe(true)) // A's own read finds the refusal remembered
     expect(promptsFor(A)).toBe(1) // and does not ask again
+    view.unmount()
+  })
+})
+
+describe('[A100 R2-3] the "Sign to view" state comes DOWN when the wallet\'s own signature arrives', () => {
+  it('"Sign to view" after a refusal, and this time the user signs: asked once more, the state is down, the list loads', async () => {
+    wallet.answers[A.toLowerCase()] = 'refuse'
+    const view = renderHook(() => useOrderEngine())
+    await until(() => expect(view.result.current.readAuthDenied).toBe(true))
+    expect(view.result.current.orders).toEqual([])
+    delete wallet.answers[A.toLowerCase()]
+    await act(async () => { await view.result.current.requestOrdersReadAuth() })
+    expect(view.result.current.readAuthDenied).toBe(false)
+    await until(() => expect(view.result.current.orders).toHaveLength(1))
+    expect(promptsFor(A)).toBe(2) // the refused prompt, and the one "Sign to view" raised
+    expect(of('list', A).map((s) => s.sig)).toEqual(['none', 'own'])
+    await morePolls(A, 3)
+    expect(view.result.current.readAuthDenied).toBe(false)
+    expect(promptsFor(A)).toBe(2)
+    view.unmount()
+  })
+
+  it('"Sign to view" was used on ANOTHER Orders surface: this one\'s next poll signs through the shared path and lowers its own state', async () => {
+    // B (its signature cached) has a live order listed; A connects and refuses: the state is up for A, and the poll goes on as A.
+    wallet.connected = B
+    rows = { [A.toLowerCase()]: [liveDca(A, 1)], [B.toLowerCase()]: [liveDca(B, 2)] }
+    const view = renderHook(() => useOrderEngine())
+    await until(() => expect(view.result.current.orders.map((o) => o.id)).toEqual(['ord-2']))
+    wallet.answers[A.toLowerCase()] = 'refuse'
+    wallet.connected = A
+    view.rerender()
+    await until(() => expect(view.result.current.readAuthDenied).toBe(true))
+    await morePolls(A, 2) // each answered 401; the refusal is remembered, nobody is asked
+    expect(promptsFor(A)).toBe(1)
+    // On another mounted Orders surface the user uses "Sign to view" for A (the refusal is forgotten) and will sign.
+    delete wallet.answers[A.toLowerCase()]
+    retryOrdersReadAuth(A)
+    await until(() => expect(view.result.current.readAuthDenied).toBe(false)) // lowered by this surface's own next poll
+    expect(promptsFor(A)).toBe(2) // that poll's prompt: one, shared
+    await morePolls(A, 2)
+    expect(of('poll', A).slice(-2).map((s) => s.sig)).toEqual(['own', 'own'])
+    expect(promptsFor(A)).toBe(2)
     view.unmount()
   })
 })
