@@ -173,3 +173,11 @@ Keeper code: Draft PR, **Auditor required**. Tables: `fix-keeper-errors-no-signa
 
 ### Concern
 - redact.js forms grow to 3^k for secrets holding k blanks or `\t`-like pairs (capped at 64, then 3 forms); no real secret has one.
+
+## Round 5 — A99 audit of PR #717 round 4 (blocked 0C/4H), findings R4-1, R4-2, R4-3, R4-6, R4-8
+
+- [x] origin/main unmoved (e0c00390): no merge. No question asked (premise held).
+- [x] C1 R4-1 + R4-2: one helper (chain-verify.js scrubThenRedactUrls) for the head, the details and describeValue; redact.js composeErrorText fallbacks scrubbed; redact-a99-r4-1-scrub-order.test.mjs.
+- [ ] C2 tests only: R4-3 (forms, upper-case \U), R4-8 (backfill :185 child run), R4-6 (json-breaks comment + sink cases).
+- [ ] Proof: classifier differential, mutants, keeper on Node 20 + 22. [ ] ONE verify on the last CODE commit. [ ] Evidence 1-4.
+- Not touched: executor.js, record-execution.js, basket-*, contracts, routes, UI; R4-4, R4-5, R4-7 out of scope.

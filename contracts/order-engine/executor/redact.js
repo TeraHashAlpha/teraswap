@@ -731,13 +731,15 @@ function composeErrorText(err) {
   // [A93 R2-1] Every text read from the error is scrubbed WHOLE, as it came, before a line is dropped or folded (a key
   // split over two lines would lose its second half to the line filter below, or become `half half` in oneLine) and
   // before redactUrl's decoder folds an escape the key itself holds.
-  if (typeof err !== "object") return typeof err === "string" ? scrubField(err) : safeString(err)
+  // [A99 R4-1] safeString(err) is text from the error too (a toString that holds a URL with a split key): scrubbed WHOLE,
+  // as read, like every other field, because redactUrlAndHex runs before the last scrub and would eat half of it.
+  if (typeof err !== "object") return scrubField(typeof err === "string" ? err : safeString(err))
   const name = readString(err, "name")
   const short = scrubField(readString(err, "shortMessage"))
   const message = scrubField(readString(err, "message"))
   const nl = message ? message.indexOf("\n") : -1
   const head = short || (message ? (nl === -1 ? message : message.slice(0, nl)) : "")
-  if (!head) return safeString(err)
+  if (!head) return scrubField(safeString(err))
   let first = oneLine(head, LINE_MAX)
   // The class says what failed (ContractFunctionExecutionError, HttpRequestError, TypeError); a plain `Error` says
   // nothing, and its existing log lines carry no prefix (chainlink-debug-read.test.mjs pins one).
