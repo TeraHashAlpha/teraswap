@@ -154,10 +154,11 @@ export async function createOrderInSupabase(params: {
 // read signature (read-auth.ts). Cached headers are attached when present; a
 // 401 READ_AUTH_REQUIRED throws ReadAuthRequiredError so useOrderEngine can
 // sign once per session and retry.
+// [A100 R2-1] ordersReadHeaders verifies the cached entry first: one that is not this wallet's own is dropped, never sent.
 export async function fetchUserOrders(wallet: string): Promise<OrderRow[]> {
   try {
     const res = await fetch(`/api/orders?wallet=${wallet}`, {
-      headers: ordersReadHeaders(wallet) ?? undefined,
+      headers: (await ordersReadHeaders(wallet)) ?? undefined,
     })
     if (res.status === 401) throw new ReadAuthRequiredError()
     if (!res.ok) return []
@@ -184,9 +185,9 @@ export async function fetchActiveOrders(wallet: string, orderHashes: readonly st
   const rows: OrderRow[] = []
   try {
     for (let i = 0; i < hashes.length; i += ORDER_POLL_MAX_HASHES) {
-      // [W6-M-01] By-hash reads can include live strategy → same session signature.
+      // [W6-M-01] By-hash reads can include live strategy → same session signature ([A100 R2-1] verified before it is sent).
       const res = await fetch(`/api/orders?wallet=${wallet}&hashes=${hashes.slice(i, i + ORDER_POLL_MAX_HASHES).join(',')}`, {
-        headers: ordersReadHeaders(wallet) ?? undefined,
+        headers: (await ordersReadHeaders(wallet)) ?? undefined,
       })
       if (res.status === 401) throw new ReadAuthRequiredError()
       if (!res.ok) continue

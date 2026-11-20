@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { formatUnits } from 'viem'
 import { explorerTxUrl } from '@/lib/chains/tokens'
 import { fmtToken, fmtUsd, fmtGas } from '@/lib/format'
+import { fetchOrderExecutions } from '@/lib/order-engine/executions-client'
 
 /** Raw row shape returned by GET /api/orders/:id/executions. */
 interface Execution {
@@ -47,6 +48,8 @@ interface ExecutionTimelineProps {
   dcaExecuted?: number
   /** Chain the order executed on (orders.chain_id). Drives the tx explorer link; defaults to mainnet. */
   chainId?: number
+  /** [A97 S-8] The order is live: its read signature is made sure of before the fetch. */
+  live?: boolean
 }
 
 // ── Formatters ─────────────────────────────────────────
@@ -149,6 +152,7 @@ export default function ExecutionTimeline({
   dcaTotal,
   dcaExecuted,
   chainId = 1,
+  live = false,
 }: ExecutionTimelineProps) {
   const [executions, setExecutions] = useState<Execution[]>([])
   const [orderMeta, setOrderMeta] = useState<OrderMeta | null>(null)
@@ -159,7 +163,7 @@ export default function ExecutionTimeline({
     if (!orderId || !wallet) return
 
     setLoading(true)
-    fetch(`/api/orders/${orderId}/executions?wallet=${wallet}`)
+    fetchOrderExecutions(orderId, wallet, { live })
       .then(res => res.json())
       .then(data => {
         setExecutions(Array.isArray(data.executions) ? data.executions : [])
@@ -168,7 +172,7 @@ export default function ExecutionTimeline({
       })
       .catch(() => setError('Failed to load executions'))
       .finally(() => setLoading(false))
-  }, [orderId, wallet])
+  }, [orderId, wallet, live])
 
   // Resolve the rows to render: real executions OR a single synthetic entry
   // if the order has been executed but no per-fill rows exist (legacy data).

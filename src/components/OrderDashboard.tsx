@@ -9,6 +9,7 @@ import { OrderType, PriceCondition } from '@/lib/order-engine'
 import type { AutonomousOrder, AutonomousOrderStatus } from '@/lib/order-engine'
 import { chainlinkAggregatorAbi } from '@/lib/chainlink'
 import { failedOrderReason } from '@/lib/order-engine/failed-reason'
+import { isLiveOrderStatus } from '@/lib/order-engine/executions-client'
 import { explorerTxUrl } from '@/lib/chains/tokens'
 import { getChainName } from '@/lib/chains/registry'
 import ExecutionTimeline from './ExecutionTimeline'
@@ -435,6 +436,7 @@ function OrderCard({
               chainId={order.chainId ?? 1}
               dcaTotal={order.dcaTotal}
               enabled={expanded}
+              live={isLiveOrderStatus(order.status)}
             />
           )}
 
@@ -453,6 +455,7 @@ function OrderCard({
               dcaTotal={order.dcaTotal}
               dcaExecuted={order.dcaExecuted}
               chainId={orderChainId}
+              live={isLiveOrderStatus(order.status)}
             />
           )}
 

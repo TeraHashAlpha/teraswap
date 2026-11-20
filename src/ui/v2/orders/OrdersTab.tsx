@@ -9,6 +9,7 @@ import { getChainName } from '@/lib/chains/registry'
 import { explorerTxUrl } from '@/lib/chains/tokens'
 import { fmtDate } from '@/lib/format'
 import { failedOrderReason } from '@/lib/order-engine/failed-reason'
+import { isLiveOrderStatus } from '@/lib/order-engine/executions-client'
 import { OrderType, type AutonomousOrder } from '@/lib/order-engine'
 import { BLOCK_POLL_MS } from '@/lib/rpc-polling'
 import { playTouchMP3 } from '@/lib/sounds'
@@ -105,7 +106,7 @@ export function OrderRow({ order, expanded, onToggle, onCancel, onRemove, connec
   const received = receivedText(order)
   const showHistory = showsExecutionHistory(order)
   // ONE read of the order's fills while open, feeding the DCA summary and the execution history (v1 fetches them twice).
-  const ex = useOrderExecutions(order.id, order.order.owner, { enabled: expanded && (isDCA || showHistory) })
+  const ex = useOrderExecutions(order.id, order.order.owner, { enabled: expanded && (isDCA || showHistory), live: isLiveOrderStatus(order.status) })
 
   return (
     <article className="ts-orders-row" data-testid="order-row" data-order-id={order.id} data-status={order.status} data-type={type.label}>

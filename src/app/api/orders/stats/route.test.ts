@@ -58,8 +58,19 @@ describe('GET /api/orders/stats — recentExecutions24h', () => {
     mockEq.mockClear()
     capturedSelects.length = 0
 
-    const wallet = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-    const req = new NextRequest(`https://x.test/api/orders/stats?wallet=${wallet}`)
+    // [A97 S-3] The wallet's 24 h count is read only with its own read signature (stats-read-signature.test.ts), so this
+    // request carries one (published Anvil/Hardhat account #0, value-allowlisted in .gitleaks.toml, NOT a secret).
+    const { privateKeyToAccount } = await import('viem/accounts')
+    const { buildOrdersReadTypedData, ORDERS_READ_HEADER_ISSUED, ORDERS_READ_HEADER_SIGNATURE } = await import('@/lib/order-engine/read-auth')
+    const account = privateKeyToAccount('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80')
+    const wallet = account.address.toLowerCase()
+    const issuedAt = Math.floor(Date.now() / 1000)
+    const req = new NextRequest(`https://x.test/api/orders/stats?wallet=${wallet}`, {
+      headers: {
+        [ORDERS_READ_HEADER_ISSUED]: String(issuedAt),
+        [ORDERS_READ_HEADER_SIGNATURE]: await account.signTypedData(buildOrdersReadTypedData(wallet, issuedAt)),
+      },
+    })
     await GET(req)
 
     const execSelect = capturedSelects.find((s) => s.includes('orders!inner'))

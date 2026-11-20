@@ -62,6 +62,9 @@ function execRow(overrides: Record<string, unknown> = {}, orderOverrides: Record
       router: '0x6A000F20005980200259B80c5102003040001068', // Augustus V6 → velora
       dca_total: 10,
       amount_in: tenWeth,
+      // [A97 S-2] The route now selects the parent's status; a fill is listed in recentTrades only once its order is
+      // finished, so this fixture's order is a finished one (the live case: analytics-live-fills.test.ts).
+      status: 'executed',
       ...orderOverrides,
     },
     ...overrides,
