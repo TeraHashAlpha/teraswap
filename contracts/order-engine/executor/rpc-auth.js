@@ -61,7 +61,9 @@
 import { closeSync, constants, fchmodSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import { redactUrl } from "./redact.js"
+// [A92 S-5] URL-only: the classifier reads the text it read on origin/main. redactUrl's `0x` hex scrub put a `>` in
+// front of a word glued to a long hex run ("0x<hex 130>unauthorized"), so `\bunauthorized\b` matched where it had not.
+import { redactUrlOnly } from "./redact.js"
 
 export const RPC_AUTH = "auth"
 export const RPC_TRANSIENT = "transient"
@@ -119,7 +121,7 @@ function walk(err) {
     if ([e.data, e.raw, e.data && typeof e.data === "object" ? e.data.data : null].some(isHexRevertData)) revertData = true
     e = e.cause
   }
-  return { statuses, names, revertData, text: redactUrl(parts.join(" \n ")).toLowerCase() }
+  return { statuses, names, revertData, text: redactUrlOnly(parts.join(" \n ")).toLowerCase() }
 }
 
 /**
