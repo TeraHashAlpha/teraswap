@@ -11,7 +11,7 @@
 
 import type { AlertPayload } from '../alert-wrapper'
 import { forLog } from '../log-sanitize'
-import { escapeHtml, CHANNEL_FETCH_TIMEOUT_MS } from './utils'
+import { escapeHtml, scrubAlertText, CHANNEL_FETCH_TIMEOUT_MS } from './utils'
 
 // ── Delivery retry (ONE retry, Telegram only) ─────────
 //
@@ -45,9 +45,10 @@ class TelegramAttemptError extends Error {
   }
 }
 
-/** Strip the bot token (and its `bot<token>` URL form) from anything that could reach a log or an error. */
+/** Strip the bot token (and its `bot<token>` URL form) from anything that could reach a log or an error.
+ *  [fix/keeper-errors-no-signature] Through the one shared scrub (every channel secret, keyed URLs, long hex, cap). */
 function scrubToken(text: string, botToken: string): string {
-  return text.split(botToken).join('[redacted]')
+  return scrubAlertText(text, { secrets: [botToken] })
 }
 
 /** Telegram's `parameters.retry_after` (seconds) from a 429 body, as ms; undefined when absent or malformed. */
@@ -138,7 +139,8 @@ export async function sendTelegramAlert(payload: AlertPayload, options?: Telegra
 
   const isGrace = options?.grace === true
   const safeSourceId = escapeHtml(payload.sourceId)
-  const safeReason = escapeHtml(payload.reason || 'unknown')
+  // [fix/keeper-errors-no-signature] The reason can be an upstream error's text: scrubbed before it is sent.
+  const safeReason = escapeHtml(scrubAlertText(payload.reason || 'unknown'))
 
   // [API-H-03] Grace alerts use ⏸️ prefix instead of state emoji
   const emoji = isGrace ? '\u23F8\uFE0F' // ⏸️

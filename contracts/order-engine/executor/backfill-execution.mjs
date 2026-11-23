@@ -36,7 +36,17 @@ import { fileURLToPath } from "node:url"
 import { resolve } from "node:path"
 import { createPublicClient, http } from "viem"
 import { decodeOrderExecuted, ORDER_EXECUTED_EVENT, buildExecutionRow, recordExecutionRow } from "./record-execution.js"
-import { scanLogsChunked, resolveBlockFromTimestamp } from "./list-missing-fills.mjs"
+import { scanLogsChunked, resolveBlockFromTimestamp, isHttpUrl } from "./list-missing-fills.mjs"
+// [A92 S-1] An error is printed through redactError, never as err.message: viem's message carries `URL: <RPC_URL>`,
+// the provider key in its path (redact-a92-s1-cli.test.mjs).
+import { redactError, redactSecretLiterals } from "./redact.js"
+import { format } from "node:util"
+
+// [A93 R2-1] EVERY line this CLI prints passes the configured-secret scrub last: a provider that echoes only the request
+// path (`Cannot POST /v2/<key>`) gives redactError no host to anchor on, and a Supabase or gateway error body is printed
+// as it came (`orders lookup failed: HTTP 401 <body>`). Nothing below calls console.* directly.
+const say = (...args) => console.log(redactSecretLiterals(format(...args)))
+const sayErr = (...args) => console.error(redactSecretLiterals(format(...args)))
 
 // ── Pure / injectable helpers (exported for backfill-execution.test.mjs; no client, no network) ──
 
@@ -123,12 +133,18 @@ async function main() {
   const expectedPrefix = positional[1] || ""
 
   if (!SUPABASE_URL || !SUPABASE_KEY) {
-    console.error("FATAL: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in the environment.")
+    sayErr("FATAL: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in the environment.")
     process.exit(1)
   }
+  for (const [name, value] of [["SUPABASE_URL", SUPABASE_URL], ["BACKFILL_RPC_URL", RPC_URL]]) {
+    if (!isHttpUrl(value)) {
+      sayErr(`FATAL: ${name} is not a valid http(s) URL.`) // [A93 R2-2] the name, never the value
+      process.exit(1)
+    }
+  }
   if (!txHash) {
-    console.error("Usage: node backfill-execution.mjs <txHash> [expectedOrderIdPrefix]")
-    console.error("       node backfill-execution.mjs <txHash> --repair")
+    sayErr("Usage: node backfill-execution.mjs <txHash> [expectedOrderIdPrefix]")
+    sayErr("       node backfill-execution.mjs <txHash> --repair")
     process.exit(1)
   }
 
@@ -146,42 +162,45 @@ async function main() {
 
   const client = createPublicClient({ transport: http(RPC_URL) })
 
-  console.log(`\n=== Backfill ${txHash} (apply=${APPLY}${REPAIR ? ", repair" : ""}) via RPC ${RPC_URL} ===`)
+  // [A92 S-1] The RPC by HOST only: BACKFILL_RPC_URL routinely carries the provider key in its path, query or userinfo,
+  // and `new URL(…).host` drops all three (same rule as executor.js's boot refusal). [A93 R2-2] It parses: checked above.
+  const rpcHost = new URL(RPC_URL).host
+  say(`\n=== Backfill ${txHash} (apply=${APPLY}${REPAIR ? ", repair" : ""}) via RPC host=${rpcHost} ===`)
 
   const receipt = await client.getTransactionReceipt({ hash: txHash })
-  console.log(
+  say(
     `receipt: status=${receipt.status} block=${receipt.blockNumber} to=${receipt.to} gasUsed=${receipt.gasUsed}`,
   )
   if (receipt.status !== "success") {
-    console.error("REFUSING: receipt status is not 'success' — never record an un-confirmed execution.")
+    sayErr("REFUSING: receipt status is not 'success' — never record an un-confirmed execution.")
     process.exit(1)
   }
 
   // receipt.to is the OrderExecutor contract the keeper called executeOrder on.
   const decoded = decodeOrderExecuted(receipt.logs, receipt.to)
   if (!decoded) {
-    console.error("FATAL: no OrderExecuted event found in this tx's logs.")
+    sayErr("FATAL: no OrderExecuted event found in this tx's logs.")
     process.exit(1)
   }
-  console.log("decoded OrderExecuted:", decoded)
+  say("decoded OrderExecuted:", decoded)
 
   // Exact, unique lookup by the on-chain order hash.
   const ores = await supabaseFetch(`orders?order_hash=eq.${decoded.orderHash}&select=*`)
   if (!ores.ok) {
-    console.error(`FATAL: orders lookup failed: HTTP ${ores.status} ${await ores.text()}`)
+    sayErr(`FATAL: orders lookup failed: HTTP ${ores.status} ${await ores.text()}`)
     process.exit(1)
   }
   const orders = await ores.json()
   const order = Array.isArray(orders) ? orders[0] : null
   if (!order) {
-    console.error(`FATAL: no order with order_hash=${decoded.orderHash}`)
+    sayErr(`FATAL: no order with order_hash=${decoded.orderHash}`)
     process.exit(1)
   }
   if (expectedPrefix && !String(order.id).startsWith(expectedPrefix)) {
-    console.error(`FATAL: order id ${order.id} does not start with expected prefix ${expectedPrefix}`)
+    sayErr(`FATAL: order id ${order.id} does not start with expected prefix ${expectedPrefix}`)
     process.exit(1)
   }
-  console.log(
+  say(
     `order: id=${order.id} type=${order.order_type} status=${order.status} ` +
       `dca_executed=${order.dca_executed} dca_total=${order.dca_total} chain_id=${order.chain_id} ` +
       `pair=${order.token_in_symbol}->${order.token_out_symbol} router=${order.router}`,
@@ -206,7 +225,7 @@ async function main() {
       }),
     getLatestBlock: async () => Number(await client.getBlockNumber()),
     getBlockTimestamp: async (n) => Number((await client.getBlock({ blockNumber: BigInt(n) })).timestamp),
-    log: (msg) => console.log(msg),
+    log: (msg) => say(msg),
   })
 
   // Block timestamp for both order_executions.created_at and dca_last_exec.
@@ -221,15 +240,15 @@ async function main() {
   }
 
   const execRow = buildExecutionRow({ dbOrder: order, txHash, receipt, decoded, executionNumber, blockTimestamp })
-  console.log(
+  say(
     `chain-derived: execution_number=${executionNumber} of ${totalOnChain} on-chain fill(s), ` +
       `created_at=${execRow.created_at || "(block timestamp unavailable)"}`,
   )
-  console.log("order_executions row to write:", execRow)
+  say("order_executions row to write:", execRow)
 
   if (REPAIR) {
     if (!canRepair(blockTimestamp)) {
-      console.error(
+      sayErr(
         "FATAL: --repair could not fetch this tx's block timestamp — refusing to patch " +
           "execution_number without created_at (never patch half of the pair).",
       )
@@ -238,22 +257,22 @@ async function main() {
 
     const existingRes = await supabaseFetch(`order_executions?tx_hash=eq.${txHash}&select=id`)
     if (!existingRes.ok) {
-      console.error(`FATAL: order_executions lookup failed: HTTP ${existingRes.status} ${await existingRes.text()}`)
+      sayErr(`FATAL: order_executions lookup failed: HTTP ${existingRes.status} ${await existingRes.text()}`)
       process.exit(1)
     }
     const existingRows = await existingRes.json()
     const target = resolveRepairTarget(existingRows)
     if (!target.ok) {
-      console.error(
+      sayErr(
         `FATAL: --repair requires exactly 1 existing order_executions row for tx_hash=${txHash} (found ${target.count})`,
       )
       process.exit(1)
     }
     const patch = { execution_number: execRow.execution_number, created_at: execRow.created_at }
-    console.log("order_executions REPAIR patch to apply:", patch)
+    say("order_executions REPAIR patch to apply:", patch)
 
     if (!APPLY) {
-      console.log("\nDRY RUN — nothing written. Re-run with BACKFILL_APPLY=1 to apply.\n")
+      say("\nDRY RUN — nothing written. Re-run with BACKFILL_APPLY=1 to apply.\n")
       process.exit(0)
     }
 
@@ -262,21 +281,21 @@ async function main() {
       headers: { Prefer: "return=minimal" },
       body: JSON.stringify(patch),
     })
-    console.log(`order_executions repair: ok=${pres.ok} status=${pres.status}`)
-    console.log("\nDone.\n")
+    say(`order_executions repair: ok=${pres.ok} status=${pres.status}`)
+    say("\nDone.\n")
     process.exit(0)
   }
 
   const orderPatch = computeOrderPatch({ order, executionNumber, blockIso })
-  console.log("orders patch to apply:", orderPatch)
+  say("orders patch to apply:", orderPatch)
 
   if (!APPLY) {
-    console.log("\nDRY RUN — nothing written. Re-run with BACKFILL_APPLY=1 to apply.\n")
+    say("\nDRY RUN — nothing written. Re-run with BACKFILL_APPLY=1 to apply.\n")
     process.exit(0)
   }
 
   const rec = await recordExecutionRow(supabaseFetch, execRow)
-  console.log("order_executions write:", rec)
+  say("order_executions write:", rec)
 
   if (Object.keys(orderPatch).length > 1) {
     const pres = await supabaseFetch(`orders?id=eq.${order.id}`, {
@@ -284,17 +303,17 @@ async function main() {
       headers: { Prefer: "return=minimal" },
       body: JSON.stringify(orderPatch),
     })
-    console.log(`orders patch: ok=${pres.ok} status=${pres.status}`)
+    say(`orders patch: ok=${pres.ok} status=${pres.status}`)
   } else {
-    console.log("orders patch: nothing to change")
+    say("orders patch: nothing to change")
   }
-  console.log("\nDone.\n")
+  say("\nDone.\n")
 }
 
 const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])
 if (isMainModule) {
   main().catch((err) => {
-    console.error(`FATAL: ${err instanceof Error ? err.message : String(err)}`)
+    sayErr(`FATAL: ${redactError(err)}`)
     process.exit(1)
   })
 }

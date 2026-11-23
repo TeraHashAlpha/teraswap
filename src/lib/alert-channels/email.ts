@@ -6,7 +6,7 @@
  */
 
 import type { AlertPayload } from '../alert-wrapper'
-import { escapeHtml, CHANNEL_FETCH_TIMEOUT_MS } from './utils'
+import { escapeHtml, scrubAlertText, CHANNEL_FETCH_TIMEOUT_MS } from './utils'
 
 /** [P110/M-04] Channel-level options mirroring the Telegram shape. */
 export interface EmailAlertOptions {
@@ -28,7 +28,8 @@ export async function sendEmailAlert(
   }
 
   const safeSourceId = escapeHtml(payload.sourceId)
-  const safeReason = escapeHtml(payload.reason || 'unknown')
+  // [fix/keeper-errors-no-signature] The reason can be an upstream error's text: scrubbed before it is sent.
+  const safeReason = escapeHtml(scrubAlertText(payload.reason || 'unknown'))
 
   const isGrace = options?.grace === true
   const gracePrefix = isGrace ? '[GRACE] ' : ''
@@ -61,23 +62,30 @@ export async function sendEmailAlert(
     '</div>',
   ].join('\n')
 
-  const res = await fetch('https://api.resend.com/emails', {
-    signal: AbortSignal.timeout(CHANNEL_FETCH_TIMEOUT_MS),
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: 'TeraSwap Alerts <alerts@teraswap.app>',
-      to: [emailTo],
-      subject,
-      html,
-    }),
-  })
+  // [fix/keeper-errors-no-signature] Every error this channel throws goes through the shared scrub (the API key and
+  // any other channel secret masked by value, keyed URLs, long hex, cap) — callers log err.message.
+  let res: Response
+  try {
+    res = await fetch('https://api.resend.com/emails', {
+      signal: AbortSignal.timeout(CHANNEL_FETCH_TIMEOUT_MS),
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: 'TeraSwap Alerts <alerts@teraswap.app>',
+        to: [emailTo],
+        subject,
+        html,
+      }),
+    })
+  } catch (err) {
+    throw new Error(scrubAlertText(err, { secrets: [apiKey] }))
+  }
 
   if (!res.ok) {
     const body = await res.text().catch(() => '?')
-    throw new Error(`Resend API ${res.status}: ${body}`)
+    throw new Error(scrubAlertText(`Resend API ${res.status}: ${body}`, { secrets: [apiKey] }))
   }
 }
