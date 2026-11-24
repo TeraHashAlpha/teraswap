@@ -50,7 +50,9 @@ const ALLOWED = {
   'scripts/check-deployed-sources.mjs': 'its stdout is written after the one exit (the failure path exits first), a short fixed summary',
   'scripts/dca-feeds/batch.ts': 'every exit precedes the only stdout write (the config, a single write at the very end)',
   'scripts/dca-feeds/build-config.mjs': 'the one exit is the usage refusal at the top, before any stdout; the rest is a few lines per chain',
+  'scripts/check-color-contrast.mjs': 'prints 807 bytes: the report covers a fixed set of status-colour pairs, whatever the config it is given',
   'scripts/dca-feeds/candidates.ts': 'every exit precedes the only stdout write (the report, a single write at the very end)',
+  'scripts/dca-feeds/plan.ts': 'ONE JSON of the in-repo config\'s enabled rows (28 today, tens of KB); the test below fails when that count passes 40',
   'scripts/dca-feeds/verify.ts': 'one line per feed row of the in-repo config (tens of rows) plus a header per chain',
   'scripts/fiat/build-eur-usd-feed.mjs': 'the one exit precedes the only stdout write (the feed file text, written last)',
   'scripts/gen-claude-state.mjs': 'the CLAUDE.md state block (about 4 KB) or a one-line status',
@@ -114,6 +116,12 @@ describe('scripts that write to stdout must not end with process.exit', () => {
     expect(stale, 'these no longer have the pattern (or do not exist): delete the entry').toEqual([])
     const thin = Object.entries(ALLOWED).filter(([, why]) => typeof why !== 'string' || why.trim().length < 25).map(([f]) => f)
     expect(thin, 'give each entry a real reason').toEqual([])
+  })
+
+  it('plan.ts stays allowlisted only while its JSON is small: at most 40 enabled rows (about 2.5 KB each, estimated, not run: it needs a live RPC)', () => {
+    const cfg = JSON.parse(readFileSync(join(ROOT, 'src/config/dca-feed-registrations.json'), 'utf8'))
+    const enabled = Object.values(cfg.chains).flatMap((c) => c.rows).filter((r) => r.enabled).length
+    expect(enabled, 'plan.ts prints one JSON for all enabled rows, then exits: past ~50 rows it can pass a pipe. Set process.exitCode there and drop its ALLOWED entry').toBeLessThanOrEqual(40)
   })
 
   it('the detector: what it flags and what it leaves alone', () => {
