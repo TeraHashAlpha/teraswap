@@ -11,7 +11,6 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { checkRows, groupRows } from './check-order-hashes-lib'
-// @ts-expect-error TS5097 the harness is plain .mjs next to its .d.mts
 import { runWithHeldBackStdout } from '../lib/held-back-reader.mjs'
 
 const ROOT = resolve(__dirname, '../..')
