@@ -45,3 +45,36 @@ export function runWithHeldBackStdout({ command, args, cwd, env, input, releaseW
     child.stdin.end(input ?? '')
   })
 }
+
+/**
+ * Same idea for scripts whose big output may be on stderr (a failure report) or stdout: BOTH are held back until fd 3 receives its
+ * first byte (see signal-after-main.mjs) or the child exits, whichever comes first.
+ *
+ * @param {{command: string, args: string[], cwd?: string, env?: Record<string,string|undefined>, input?: string}} o
+ * @returns {Promise<{code: number|null, signal: string|null, stdout: Buffer, stderr: Buffer, signalled: boolean}>}
+ */
+export function runWithHeldBackOutput({ command, args, cwd, env, input }) {
+  return new Promise((resolveRun, rejectRun) => {
+    const child = spawn(command, args, { cwd, env: env ?? process.env, stdio: ['pipe', 'pipe', 'pipe', 'pipe'] })
+    const out = []
+    const err = []
+    let released = false
+    let signalled = false
+    const release = () => {
+      if (released) return
+      released = true
+      child.stdout.on('data', (c) => out.push(c))
+      child.stderr.on('data', (c) => err.push(c))
+      child.stdout.resume()
+      child.stderr.resume()
+    }
+    child.stdout.pause()
+    child.stderr.pause()
+    child.stdio[3].on('data', () => { signalled = true; release() })
+    child.on('error', rejectRun)
+    child.on('exit', release)
+    child.on('close', (code, signal) => resolveRun({ code, signal, stdout: Buffer.concat(out), stderr: Buffer.concat(err), signalled }))
+    child.stdin.on('error', () => { /* the child may exit before reading all of its input */ })
+    child.stdin.end(input ?? '')
+  })
+}
