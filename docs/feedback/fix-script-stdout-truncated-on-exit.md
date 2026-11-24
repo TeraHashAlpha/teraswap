@@ -14,7 +14,10 @@ fix what can pass a 64 KB pipe; the guard flags any other file unless allowliste
   131,514 B · keeper `backfill-execution.mjs` 131,055 B (stub RPC refuses ranges: 1,000 retry lines). Keeper CLIs via `exit-drained.js`: same text, same codes.
   `check-color-contrast.mjs` too: its report is a fixed 807 B (strict 6-digit hex only), so a REAL pipe never fills and no real-pipe test can fail on main. Its repro
   is a SIMULATION (`lib/async-stdio.mjs`: stdout queued, flushed on the next loop turn): origin/main delivers an empty report, the branch the whole report, same exit code.
-- **Allowlisted, not fixed**: 21 files (fixed text / in-repo list, each with a reason in the guard; read, not run).
+- **Allowlisted, not fixed, 24 files** (each with a written reason in `ALLOWED` of the guard; read, not run; sites: `git grep -n 'process\.exit(' -- scripts`):
+  capture-endpoint-baseline, check-agents-parity, check-bash3-compat, check-circular, check-deployed-sources, dca-feeds/{batch,build-config,candidates,verify},
+  fiat/build-eur-usd-feed, gen-claude-state, generate-arbitrum-catalog, goal-lint, og-image/build, setup-telegram-webhook, sync-readme-deployments,
+  sync-token-categories, token-catalog/{refresh-issue,report-diff}, verify-{arbitrum-addresses,arbitrum-chainlink-feeds,base-cbeth-feeds,curve-pool-types,deployed-sources}.
 - Exempt: `executor.js`, `exit-drained.js`. Guard = file-level text rule (stdout write AND `process.exit`, comment lines dropped); stale or reason-less entries fail it.
 
 ## 3. Tests and mutation proof
@@ -27,4 +30,4 @@ for audit-gate, plan, backfill, contrast the unfixed run is the origin/main file
 1. 33e7cae7 FAIL (tsc+build, TS2578 in my test). 2. 93f2750c PASS. 3. ca6da82a PASS. 4. 5b5558fb PASS. 5. 8591097d PASS. 6. **239f14f6 PASS** = last CODE commit: suite 11,625/0 fail,
 lint +0/+0, tsc 0, build ok, parity 123, rpc-budget 36, codeql 11/11 new 0, keeper node20+22 2532. This file = docs-only commit on top.
 `origin/main...239f14f6`: 22 files, +1063 −119. Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/script-stdout-truncated-on-exit
-NOT verified: **Linux CI** (the PR #720 failure itself), plan.ts against a real RPC (stub only), the 21 allowlisted scripts beyond reading them.
+NOT verified: **Linux CI** (the PR #720 failure itself), plan.ts against a real RPC (stub only), the 24 allowlisted scripts beyond reading them.
