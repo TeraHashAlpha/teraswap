@@ -325,3 +325,112 @@ describe('agent-verify uses npx --no-install and treats a missing tool as FAIL (
     expect(lineOf(r.stdout, 'tsc')).toMatch(/FAIL\s+missing tool: tsc/)
   }, 150000)
 })
+
+// ---- pinned CodeQL pack + tool failure --------------------------------------------------------------------------------
+describe('agent-verify --codeql: pinned query pack and tool failure', () => {
+  const LOCAL = path.join(path.dirname(SCRIPT), 'codeql-local.sh')
+  const localText = readFileSync(LOCAL, 'utf8')
+  const PIN = /^CODEQL_JS_PACK_VERSION="\$\{CODEQL_JS_PACK_VERSION:-([0-9]+\.[0-9]+\.[0-9]+)\}"$/m.exec(localText)?.[1]
+  const STUB = [
+    '#!/bin/sh',
+    'echo "$*" >> "$STUB_LOG"',
+    'case "$1 $2 $3" in',
+    '  "codeql version "*) if [ "$3" = "--format=terse" ]; then echo 9.9.9; else echo "CodeQL command-line toolchain release 9.9.9."; fi ;;',
+    '  "codeql pack download") ;;',
+    '  "codeql resolve extensions") if [ -n "${STUB_RESOLVE_FAIL:-}" ]; then echo "Invalid data extension file" >&2; exit 2; fi ;;',
+    '  "codeql database create") mkdir -p "$4" ;;',
+    '  "codeql database analyze") for a in "$@"; do case "$a" in --output=*) out="${a#--output=}";; esac; done; printf \'{"runs":[{"results":[]}]}\' > "$out" ;;',
+    'esac',
+    '',
+  ].join('\n')
+
+  // A throw-away git repo holding the two real scripts, a stub `gh` on PATH, and the script's own check_codeql functions.
+  function rig({ resolveFail = false, extraEnv = {} } = {}) {
+    const home = mkdtempSync(path.join(dir, 'cq-'))
+    const repo = path.join(home, 'repo')
+    mkdirSync(path.join(repo, 'scripts'), { recursive: true })
+    writeFileSync(path.join(repo, 'scripts', 'codeql-local.sh'), readFileSync(LOCAL), { mode: 0o755 })
+    const bin = path.join(home, 'bin')
+    mkdirSync(bin)
+    writeFileSync(path.join(bin, 'gh'), STUB, { mode: 0o755 })
+    const git = (...a) => execFileSync('git', ['-C', repo, ...a], { stdio: 'ignore' })
+    git('init', '-q', '-b', 'main')
+    git('add', 'scripts')
+    git('-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'x')
+    const log = path.join(home, 'gh.log')
+    const lines = readFileSync(SCRIPT, 'utf8').split('\n')
+    const cut = (from, to) => lines.slice(lines.findIndex((l) => l.startsWith(from)), lines.findIndex((l) => l.startsWith(to))).join('\n')
+    const prog = [
+      'set -u; set -o pipefail',
+      `ROOT=${JSON.stringify(repo)}; OUT=${JSON.stringify(home)}; RESULTS=${JSON.stringify(path.join(home, 'res.tsv'))}; BASE_REF=HEAD`,
+      'CODEQL_QLS="codeql/javascript-queries:codeql-suites/javascript-security-extended.qls"',
+      cut('record()', '# ---------- checks'),
+      cut('CODEQL_DIFF_JS=', 'find_node_major()'),
+      'check_codeql',
+      'cat "$RESULTS"',
+    ].join('\n')
+    const nodeDir = path.dirname(execFileSync('bash', ['-c', 'command -v node'], { encoding: 'utf8' }).trim())
+    const r = spawnSync('bash', ['-c', prog], {
+      encoding: 'utf8',
+      env: { HOME: home, PATH: `${bin}:/usr/bin:/bin:${nodeDir}`, STUB_LOG: log, ...(resolveFail ? { STUB_RESOLVE_FAIL: '1' } : {}), ...extraEnv },
+    })
+    const calls = (() => { try { return readFileSync(log, 'utf8').split('\n').filter(Boolean) } catch { return [] } })()
+    return { r, calls, home, row: r.stdout.split('\n').find((l) => l.startsWith('codeql\t')) }
+  }
+
+  it('the pin is ONE variable at the top of codeql-local.sh, a plain x.y.z, env-overridable', () => {
+    expect(PIN).toMatch(/^\d+\.\d+\.\d+$/)
+    expect(localText.split('\n').filter((l) => /^\s*CODEQL_JS_PACK_VERSION=/.test(l))).toHaveLength(1) // one assignment, no second copy
+    expect(localText.split('\n').filter((l) => /\b[0-9]+\.[0-9]+\.[0-9]+\b/.test(l) && !l.trimStart().startsWith('#'))).toHaveLength(1) // and no other literal version in code
+    expect(localText.indexOf('CODEQL_JS_PACK_VERSION=')).toBeLessThan(localText.indexOf('gh codeql pack download'))
+  })
+
+  it('pack not readable by the CLI: ONE tool-failure record with both versions, FAIL, no database create, base never built', () => {
+    const { r, calls, home, row } = rig({ resolveFail: true })
+    expect(r.stdout.split('\n').filter((l) => l.startsWith('codeql\t'))).toHaveLength(1)
+    expect(row).toBe(`codeql\tFAIL\ttool failure: codeql-local: TOOL FAILURE: pack ${PIN} not readable by CLI 9.9.9`)
+    expect(calls.filter((c) => c.startsWith('codeql resolve extensions'))).toHaveLength(1) // head only: no second attempt for base
+    expect(calls.filter((c) => c.startsWith('codeql database create'))).toHaveLength(0)
+    expect(calls.filter((c) => c.startsWith('codeql pack download'))).toHaveLength(1)
+    expect(() => readFileSync(path.join(home, 'cq-base.log'))).toThrow()
+    // a FAIL row never passes the run
+    const f = format([...PASS, ['codeql', 'FAIL', row.split('\t')[2]]])
+    expect(f.status).toBe(1)
+    expect(lineOf(f.stdout, 'codeql')).toMatch(/FAIL\s+tool failure: codeql-local: TOOL FAILURE: pack .* not readable by CLI 9\.9\.9/)
+  })
+
+  it('codeql-local.sh itself exits 3 with exactly the one stderr line', () => {
+    const home = mkdtempSync(path.join(dir, 'cql-'))
+    const bin = path.join(home, 'bin')
+    mkdirSync(bin)
+    writeFileSync(path.join(bin, 'gh'), STUB, { mode: 0o755 })
+    const r = spawnSync('bash', [LOCAL, 'codeql/javascript-queries:codeql-suites/javascript-security-extended.qls'], {
+      encoding: 'utf8',
+      env: { HOME: home, PATH: `${bin}:/usr/bin:/bin`, STUB_LOG: path.join(home, 'l'), STUB_RESOLVE_FAIL: '1', CODEQL_OUT: path.join(home, 'out') },
+    })
+    expect(r.status).toBe(3)
+    expect(r.stderr.trim()).toBe(`codeql-local: TOOL FAILURE: pack ${PIN} not readable by CLI 9.9.9`)
+  })
+
+  it('success: download, resolve and analyze all carry the pinned version; the summary names pack and CLI', () => {
+    const { calls, row } = rig()
+    expect(calls).toContain(`codeql pack download codeql/javascript-queries@${PIN}`)
+    const analyze = calls.filter((c) => c.startsWith('codeql database analyze'))
+    expect(analyze).toHaveLength(2) // head + base
+    for (const c of analyze) expect(c).toContain(`codeql/javascript-queries@${PIN}:codeql-suites/javascript-security-extended.qls`)
+    expect(calls.find((c) => c.startsWith('codeql resolve extensions'))).toContain(`codeql/javascript-queries@${PIN}:`)
+    // no reference to the pack anywhere is unpinned
+    for (const c of calls.filter((c) => c.includes('javascript-queries'))) expect(c.replace(`javascript-queries@${PIN}`, '')).not.toContain('javascript-queries')
+    expect(row).toMatch(new RegExp(`^codeql\\tPASS\\t.*\\(pack ${PIN.replace(/\./g, '\\.')}, CLI 9\\.9\\.9\\)$`))
+  })
+
+  it('CODEQL_JS_PACK_VERSION overrides the version in the download AND the query references', () => {
+    const { calls, row } = rig({ extraEnv: { CODEQL_JS_PACK_VERSION: '7.8.9' } })
+    expect(calls).toContain('codeql pack download codeql/javascript-queries@7.8.9')
+    for (const c of calls.filter((c) => c.includes('javascript-queries'))) {
+      expect(c).toContain('javascript-queries@7.8.9')
+      expect(c).not.toContain(`@${PIN}`)
+    }
+    expect(row).toContain('(pack 7.8.9, CLI 9.9.9)')
+  })
+})
