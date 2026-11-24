@@ -60,6 +60,7 @@ export default function MissionControlCard({
 
   const { executions, lastFillAtMs } = useOrderExecutions(order.id, order.order.owner, {
     enabled: isLive,
+    live: isLive,
     latestEvent,
   })
 

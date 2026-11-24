@@ -38,6 +38,8 @@ interface DCAPositionStatsProps {
   fills?: FillRow[]
   /** Whether the owning surface is visible/active (gates the self-fetch). */
   enabled?: boolean
+  /** [A97 S-8] The order is live: its read signature is made sure of before the self-fetch. */
+  live?: boolean
 }
 
 // ── Formatters ─────────────────────────────────────────
@@ -72,8 +74,9 @@ export default function DCAPositionStats({
   dcaTotal,
   fills,
   enabled = true,
+  live = false,
 }: DCAPositionStatsProps) {
-  const self = useOrderExecutions(orderId, wallet, { enabled: fills === undefined && enabled })
+  const self = useOrderExecutions(orderId, wallet, { enabled: fills === undefined && enabled, live })
   const rows: FillRow[] = fills ?? self.executions
 
   const stats = useMemo(

@@ -13,6 +13,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import type { OrderEngineEvent } from '@/lib/order-engine'
+import { fetchOrderExecutions } from '@/lib/order-engine/executions-client'
 
 export interface FillRow {
   id: string
@@ -44,9 +45,10 @@ const REFRESH_MS = 30_000
 export function useOrderExecutions(
   orderId: string,
   wallet: string | undefined,
-  opts: { enabled?: boolean; latestEvent?: OrderEngineEvent | null } = {},
+  opts: { enabled?: boolean; latestEvent?: OrderEngineEvent | null; live?: boolean } = {},
 ) {
-  const { enabled = true, latestEvent = null } = opts
+  // [A97 S-8] `live`: the order is live, so its read signature is made sure of before the first request.
+  const { enabled = true, latestEvent = null, live = false } = opts
   const [executions, setExecutions] = useState<FillRow[]>([])
   const [orderMeta, setOrderMeta] = useState<OrderExecMeta | null>(null)
   const [loading, setLoading] = useState(true)
@@ -57,7 +59,10 @@ export function useOrderExecutions(
     if (!enabled || !orderId || !wallet) return
     if (!force && typeof document !== 'undefined' && document.hidden) return
     try {
-      const res = await fetch(`/api/orders/${orderId}/executions?wallet=${wallet}`)
+      const res = await fetchOrderExecutions(orderId, wallet, { live })
+      // [A87b R2-1] A live order's fills need the read signature. Still 401 after the sign-once path (refused, or no
+      // Orders surface mounted): keep what is on screen, never blank it as if the order had no fills.
+      if (res.status === 401) return
       const data = await res.json()
       setExecutions(Array.isArray(data.executions) ? data.executions : [])
       setOrderMeta(data.order ?? null)
@@ -66,7 +71,7 @@ export function useOrderExecutions(
     } finally {
       setLoading(false)
     }
-  }, [enabled, orderId, wallet])
+  }, [enabled, orderId, wallet, live])
 
   // Mount + 30s poll (poll respects tab visibility); refetch when the tab becomes visible again.
   useEffect(() => {

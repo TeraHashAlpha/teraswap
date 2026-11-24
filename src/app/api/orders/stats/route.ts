@@ -7,6 +7,12 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import {
+  verifyOrdersReadAccess,
+  ORDERS_READ_HEADER_ISSUED,
+  ORDERS_READ_HEADER_SIGNATURE,
+} from '@/lib/order-engine/read-auth'
+import { withOrdersReadCacheControl } from '../read-cache'
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -15,7 +21,13 @@ function getSupabase() {
   return createClient(url, key, { auth: { persistSession: false } })
 }
 
+// [A100 R2-4] Every answer (200, 503, 500): Cache-Control: private, no-store (read-cache.ts). With `?wallet=W` and W's read
+// signature the answer carries W's 24 h fill count, and the signature is in headers, which no cache keys on.
 export async function GET(req: NextRequest) {
+  return withOrdersReadCacheControl(await readStats(req))
+}
+
+async function readStats(req: NextRequest) {
   const supabase = getSupabase()
   if (!supabase) {
     return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
@@ -58,18 +70,34 @@ export async function GET(req: NextRequest) {
         .then(r => r.count ?? 0),
     ])
 
-    // Get recent executions count (last 24h). order_executions has no `wallet`
-    // or `executed_at` column — timestamp is `created_at`, wallet is via join to orders.
-    const oneDayAgo = new Date(Date.now() - 86400 * 1000).toISOString()
-    let execQuery = supabase
-      .from('order_executions')
-      .select('*, orders!inner(wallet)', { count: 'exact', head: true })
-      .gte('created_at', oneDayAgo)
-    // If wallet filter provided, only count executions for that wallet's orders
-    if (wallet) {
-      execQuery = execQuery.eq('orders.wallet', wallet.toLowerCase())
+    // [A97 S-3] One wallet's fills in the last 24 h include its LIVE orders' (their progress, which the executions route
+    // shows only with the wallet's read signature): for `?wallet=W` the count is returned only with W's valid read
+    // signature, otherwise the field is left out and the fills table is not read. The counts by status above stay open, and
+    // the count with no wallet (every wallet's fills together) is unchanged.
+    // The signature is checked on EVERY request, so whether it is checked never depends on the query string (CodeQL
+    // js/user-controlled-bypass); with no wallet it cannot hold (verifyOrdersReadAccess never throws) and is not needed.
+    const auth = await verifyOrdersReadAccess({
+      wallet: wallet ?? '',
+      issuedAt: req.headers.get(ORDERS_READ_HEADER_ISSUED),
+      signature: req.headers.get(ORDERS_READ_HEADER_SIGNATURE),
+    })
+    const includeRecent = !wallet || auth.ok
+
+    let recentExecutions: number | null = null
+    if (includeRecent) {
+      // Get recent executions count (last 24h). order_executions has no `wallet`
+      // or `executed_at` column — timestamp is `created_at`, wallet is via join to orders.
+      const oneDayAgo = new Date(Date.now() - 86400 * 1000).toISOString()
+      let execQuery = supabase
+        .from('order_executions')
+        .select('*, orders!inner(wallet)', { count: 'exact', head: true })
+        .gte('created_at', oneDayAgo)
+      // If wallet filter provided, only count executions for that wallet's orders
+      if (wallet) {
+        execQuery = execQuery.eq('orders.wallet', wallet.toLowerCase())
+      }
+      recentExecutions = (await execQuery).count
     }
-    const { count: recentExecutions } = await execQuery
 
     return NextResponse.json({
       total,
@@ -78,7 +106,7 @@ export async function GET(req: NextRequest) {
       cancelled,
       expired,
       failed,
-      recentExecutions24h: recentExecutions ?? 0,
+      ...(includeRecent ? { recentExecutions24h: recentExecutions ?? 0 } : {}),
     })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Internal error'

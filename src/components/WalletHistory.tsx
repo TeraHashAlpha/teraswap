@@ -128,8 +128,9 @@ export default function WalletHistory() {
       // when this session already holds one (signed once for the Orders tab).
       // Present ⇒ the server merges this wallet's DCA fills into the feed; absent
       // ⇒ instant swaps only, exactly as before. Never prompts from here.
+      // [A100 R2-1] The cached entry is verified first: one that is not this wallet's own is dropped, never sent.
       const res = await fetch(`/api/history?wallet=${address}&limit=50`, {
-        headers: ordersReadHeaders(address) ?? undefined,
+        headers: (await ordersReadHeaders(address)) ?? undefined,
       })
       if (!res.ok) throw new Error(`API returned ${res.status}`)
       const json = await res.json()

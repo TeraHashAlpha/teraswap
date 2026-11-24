@@ -31,6 +31,7 @@ import {
   ORDER_POLL_MAX_HASHES,
 } from '@/lib/order-engine/read-auth'
 import { withOrderReadColumns } from './order-read-columns'
+import { withOrdersReadCacheControl } from './read-cache'
 import { getDcaFreezeState } from '@/lib/dca-freeze'
 import { checkRateLimit, ORDER_CREATE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { bodySizeGuard, clientIp } from '@/lib/body-limit'
@@ -968,7 +969,12 @@ export async function POST(req: NextRequest) {
 }
 
 // ── GET — List user's orders ───────────────────────────────
+// [A97 S-7] Every answer, 4xx included: Cache-Control: private, no-store (read-cache.ts).
 export async function GET(req: NextRequest) {
+  return withOrdersReadCacheControl(await listOrders(req))
+}
+
+async function listOrders(req: NextRequest) {
   const wallet = req.nextUrl.searchParams.get('wallet')
   const status = req.nextUrl.searchParams.get('status')
 
