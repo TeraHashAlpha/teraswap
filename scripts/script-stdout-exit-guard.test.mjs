@@ -49,7 +49,6 @@ const ALLOWED = {
   'scripts/check-deployed-sources.mjs': 'its stdout is written after the one exit (the failure path exits first), a short fixed summary',
   'scripts/dca-feeds/batch.ts': 'every exit precedes the only stdout write (the config, a single write at the very end)',
   'scripts/dca-feeds/build-config.mjs': 'the one exit is the usage refusal at the top, before any stdout; the rest is a few lines per chain',
-  'scripts/check-color-contrast.mjs': 'prints 807 bytes whatever its input: only three strict 6-digit hex colours are accepted, so no config can make the report longer',
   'scripts/dca-feeds/candidates.ts': 'every exit precedes the only stdout write (the report, a single write at the very end)',
   'scripts/dca-feeds/verify.ts': 'one line per feed row of the in-repo config (tens of rows) plus a header per chain',
   'scripts/fiat/build-eur-usd-feed.mjs': 'the one exit precedes the only stdout write (the feed file text, written last)',
