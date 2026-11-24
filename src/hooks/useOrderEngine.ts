@@ -14,6 +14,11 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import {
+  setOrdersReadSigner,
+  OrdersReadSignerUnavailableError,
+  type SignTypedDataFn,
+} from '@/lib/order-engine/read-auth'
 import { useAccount, useChainId, useSignTypedData, useReadContract, useWriteContract, useSwitchChain } from 'wagmi'
 import { keccak256, encodeAbiParameters, toBytes } from 'viem'
 import {
@@ -443,6 +448,37 @@ export function useOrderEngine() {
   // below is exercised exactly as before.
   const orderExecutorV3 = getOrderExecutorV3(chainId)
   const { signTypedDataAsync } = useSignTypedData()
+  // [A97 S-1] The account connected NOW (updated on every account change): a read message for a wallet is signed only
+  // while that wallet is the connected account, and wagmi is told which account must sign (`account`), so it refuses rather
+  // than let another account sign a message naming this one (until this effect has run, wagmi's own check covers it).
+  const connectedRef = useRef(address)
+  useEffect(() => {
+    connectedRef.current = address
+  }, [address])
+  const readSignerFor = useCallback(
+    (wallet: string): SignTypedDataFn =>
+      async (typed) => {
+        if (connectedRef.current?.toLowerCase() !== wallet.toLowerCase()) throw new OrdersReadSignerUnavailableError()
+        try {
+          return await signTypedDataAsync({ ...typed, account: wallet as `0x${string}` } as Parameters<typeof signTypedDataAsync>[0])
+        } catch (err) {
+          // wagmi: the account is not (any more) one the connector holds — the same case as above, not a refusal.
+          if (err instanceof Error && err.name === 'ConnectorAccountNotFoundError') throw new OrdersReadSignerUnavailableError()
+          throw err
+        }
+      },
+    [signTypedDataAsync],
+  )
+  // [A87b R2-1, A97 S-1/S-4] The fills of a LIVE order need the same read signature as the list: hand the other readers
+  // (executions-client.ts) this mount's { address, signer }, so they take the list's sign-once path instead of prompting
+  // on their own, and only for the wallet that is connected. One entry per mount: unmounting removes only this one, and
+  // with no account connected this mount holds none.
+  const signerOwnerRef = useRef<object>({})
+  useEffect(() => {
+    const owner = signerOwnerRef.current
+    setOrdersReadSigner(owner, address ? { address, sign: readSignerFor(address) } : null)
+    return () => setOrdersReadSigner(owner, null)
+  }, [address, readSignerFor])
   const { writeContractAsync } = useWriteContract()
   // [fix/cross-chain-order-cancel] Cancel resolves its executor/domain from the ORDER's chain, never
   // the wallet's active one — when they differ this requests a switch instead of falling through.
@@ -459,7 +495,13 @@ export function useOrderEngine() {
   // [AUDIT-W6 / W6-M-01] Active-order reads need one session signature. True
   // when the user rejected the prompt — the UI offers an explicit retry
   // (requestOrdersReadAuth) instead of popup-spamming.
-  const [readAuthDenied, setReadAuthDenied] = useState(false)
+  // [A100 R2-3] Also true when the wallet was asked and its signature does not recover to it (a smart-contract account,
+  // or a wallet that answered with another account): asked once, then this "Sign to view" state instead of a prompt on
+  // every read. The state remembers WHICH wallet it is for and shows only while that wallet is the connected account
+  // (owner decision 2026-11-20): it used to be one flag per mount, which stayed up after a switch to a wallet whose
+  // orders load fine.
+  const [readAuthDeniedFor, setReadAuthDeniedFor] = useState<string | null>(null)
+  const readAuthDenied = !!address && readAuthDeniedFor === address.toLowerCase()
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   // [P200] Guard: don't persist the initial empty array before the async load
   // resolves — otherwise the save effect would clobber the encrypted store.
@@ -477,14 +519,16 @@ export function useOrderEngine() {
       return await fetchFn()
     } catch (err) {
       if (!(err instanceof ReadAuthRequiredError) || !address) throw err
-      const outcome = await ensureOrdersReadAuth(address, (typed) =>
-        signTypedDataAsync(typed as Parameters<typeof signTypedDataAsync>[0]),
-      )
+      const outcome = await ensureOrdersReadAuth(address, readSignerFor(address))
+      // [A97 S-4] 'unavailable' = this wallet is no longer the connected account: not a refusal, so no "Sign to view".
+      if (outcome === 'unavailable') return []
+      // 'denied' (refused) or [A100 R2-3] 'mismatch' (asked, the signature does not recover to this wallet): "Sign to view"
+      // for THIS wallet; read-auth.ts remembers both, so the next read or poll comes back here without a prompt.
       if (outcome !== 'ok') {
-        setReadAuthDenied(true)
+        setReadAuthDeniedFor(address.toLowerCase())
         return []
       }
-      setReadAuthDenied(false)
+      setReadAuthDeniedFor(null)
       return fetchFn()
     }
   }
@@ -1381,14 +1425,13 @@ export function useOrderEngine() {
 
   // [AUDIT-W6 / W6-M-01] Explicit user retry after a rejected read-signature
   // prompt: forget the session denial, sign, and reload the list.
+  // [A100 R2-3] The same for a remembered mismatch: this is the one way such a wallet is asked again (once per use).
   const requestOrdersReadAuth = useCallback(async () => {
     if (!address) return
     retryOrdersReadAuth(address)
-    const outcome = await ensureOrdersReadAuth(address, (typed) =>
-      signTypedDataAsync(typed as Parameters<typeof signTypedDataAsync>[0]),
-    )
+    const outcome = await ensureOrdersReadAuth(address, readSignerFor(address))
     if (outcome !== 'ok') return
-    setReadAuthDenied(false)
+    setReadAuthDeniedFor(null)
     try {
       const rows = await fetchUserOrders(address)
       if (rows.length > 0) {
@@ -1398,7 +1441,7 @@ export function useOrderEngine() {
     } catch {
       /* the poll will pick the list up on its next tick */
     }
-  }, [address, signTypedDataAsync])
+  }, [address, readSignerFor])
 
   return {
     orders,

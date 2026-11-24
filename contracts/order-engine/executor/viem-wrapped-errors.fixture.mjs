@@ -204,12 +204,13 @@ export async function startRpcStub() {
     /**
      * The error thrown by publicClient.readContract(canExecute) when `eth_call` answers `spec`.
      * (executor.js: `const [canExec, reason] = await publicClient.readContract({ … functionName: "canExecute" … })`)
+     * [fix/keeper-errors-no-signature] `signature` overrides the order signature (default unchanged).
      */
-    async readError(spec) {
+    async readError(spec, { signature = SIGNATURE } = {}) {
       current = { spec, failAt: "eth_call" }
       const timeout = spec.hang ? 40 : 5_000
       try {
-        await publicClient(timeout).readContract({ address: EXECUTOR, abi: ORDER_EXECUTOR_V3_ABI, functionName: "canExecute", args: [ORDER_STRUCT, SIGNATURE] })
+        await publicClient(timeout).readContract({ address: EXECUTOR, abi: ORDER_EXECUTOR_V3_ABI, functionName: "canExecute", args: [ORDER_STRUCT, signature] })
       } catch (err) {
         return err
       }
@@ -219,8 +220,9 @@ export async function startRpcStub() {
      * The error thrown by walletClient.writeContract(executeOrder) when `failAt` answers `spec`
      * (`eth_estimateGas` by default — the keeper passes no `gas`; or `eth_sendRawTransaction`).
      * (executor.js: `const txHash = await txWalletClient.writeContract({ … functionName: "executeOrder", … maxFeePerGas, maxPriorityFeePerGas })`)
+     * [fix/keeper-errors-no-signature] `signature` / `routerData` override the call's args (defaults unchanged).
      */
-    async writeError(spec, { failAt = "eth_estimateGas" } = {}) {
+    async writeError(spec, { failAt = "eth_estimateGas", signature = SIGNATURE, routerData = ROUTER_DATA } = {}) {
       current = { spec, failAt }
       const timeout = spec.hang ? 40 : 5_000
       try {
@@ -228,7 +230,7 @@ export async function startRpcStub() {
           address: EXECUTOR,
           abi: ORDER_EXECUTOR_V3_ABI,
           functionName: "executeOrder",
-          args: [ORDER_STRUCT, SIGNATURE, ROUTER_DATA],
+          args: [ORDER_STRUCT, signature, routerData],
           maxFeePerGas: 1_000_000_000n,
           maxPriorityFeePerGas: 1_000_000n,
         })

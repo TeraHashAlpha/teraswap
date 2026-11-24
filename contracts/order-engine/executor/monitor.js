@@ -11,7 +11,15 @@
 import { createServer } from "http"
 import { sendTelegramAlert, sendTelegramHeartbeat, esc } from "./alert.js"
 // [fix/executor-alert-masking-rpc-auth] "Last error:" is a viem message (RPC URL, key in the path).
-import { redactError } from "./redact.js"
+// [fix/keeper-errors-no-signature] …and, for an order call, the order's signature (redactError keeps neither).
+import { redactError, capAlertText } from "./redact.js"
+
+/**
+ * [fix/keeper-errors-no-signature] A87 S-2: the monitor's alert text, once formatted, is cut to this (with the
+ * visible marker) before it is sent: Telegram refuses a message over 4,096 characters and the alert is lost.
+ * sendTelegramAlert adds its envelope (about 100 characters plus the hostname) and caps the whole at 4,000.
+ */
+export const MONITOR_ALERT_MAX = 3_500
 
 const ALERT_COOLDOWN_MS = 5 * 60 * 1000 // 5 minutes
 const CONSECUTIVE_ERROR_THRESHOLD = 3
@@ -59,7 +67,7 @@ export class ExecutorMonitor {
     if (this.consecutiveErrors >= CONSECUTIVE_ERROR_THRESHOLD) {
       this._sendCooldownAlert(
         "consecutive_errors",
-        `⚠️ ${this.consecutiveErrors} consecutive errors!\nLast error: ${esc(redactError(this.stats.lastError?.message || "unknown"))}`
+        `⚠️ ${this.consecutiveErrors} consecutive errors!\nLast error${orderTag(this.stats.lastError?.orderId)}: ${esc(redactError(this.stats.lastError?.message || "unknown"))}`
       )
     }
 
@@ -250,6 +258,18 @@ export class ExecutorMonitor {
     if (now - lastSent < ALERT_COOLDOWN_MS) return
 
     this.alertCooldown.set(type, now)
-    sendTelegramAlert(message)
+    sendTelegramAlert(capAlertText(message, MONITOR_ALERT_MAX))
   }
+}
+
+/**
+ * [A92 S-3, owner answer 4] Which order the "Last error" alert is about: ` (order 0b3c9e1a…)`, the first 8 characters
+ * of the id executor.js stores in stats.lastError (a database UUID, the same prefix its log lines print), or nothing
+ * when there is none. Escaped like every other value in the alert's HTML. Declared down here so the alert lines keep
+ * the numbers the tests cite (monitor.js:70, :126).
+ * @param {unknown} orderId
+ */
+function orderTag(orderId) {
+  if (typeof orderId !== "string" || orderId === "") return ""
+  return ` (order ${esc(orderId.slice(0, 8))}…)`
 }

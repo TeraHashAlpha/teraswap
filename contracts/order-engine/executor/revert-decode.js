@@ -84,15 +84,23 @@ export function decodeExecutorMarketRevert(data) {
 }
 
 /**
+ * [A92 S-4] How many links of a `cause` chain extractRevertData reads. A real viem chain is under ten deep; a `cause`
+ * getter that returns a fresh object on every read is a chain with no end that the `seen` set never stops (each link
+ * is new), and walking it exhausted the heap (exit 134).
+ */
+export const REVERT_DATA_MAX_DEPTH = 16
+
+/**
  * Best-effort extraction of raw revert data from a viem error chain, so the
- * caller can feed it to decodeSwapFailed(). Returns null if none is found.
+ * caller can feed it to decodeSwapFailed(). Returns null if none is found
+ * within REVERT_DATA_MAX_DEPTH links.
  * @param {unknown} err
  * @returns {string | null}
  */
 export function extractRevertData(err) {
   let e = err
   const seen = new Set()
-  while (e && typeof e === "object" && !seen.has(e)) {
+  for (let depth = 0; e && typeof e === "object" && depth < REVERT_DATA_MAX_DEPTH && !seen.has(e); depth++) {
     seen.add(e)
     if (typeof e.data === "string" && e.data.startsWith("0x")) return e.data
     if (typeof e.raw === "string" && e.raw.startsWith("0x")) return e.raw

@@ -5,10 +5,20 @@
  * the full keyed RPC URL to Telegram.
  *
  * redactUrl(text)  — every URL keeps scheme + host[:port] (the operator still sees WHICH provider)
- *                    and loses userinfo, path, query and fragment: `https://host/REDACTED`.
- * redactError(err) — the error's text (`message`, which is where viem puts `URL:` and `Details:`),
- *                    through redactUrl, optionally truncated AFTER redaction (a slice taken first
- *                    could cut the URL into a shape the patterns no longer see).
+ *                    and loses userinfo, path, query and fragment: `https://host/REDACTED`; a `0x` hex run of
+ *                    130+ digits (a signature, calldata, a raw transaction) becomes `0x<hex N>`.
+ * redactUrlOnly(t) — [A92 S-5] the same URL redaction WITHOUT the hex scrub, for text that is classified and never
+ *                    printed (rpc-auth.js): it reads exactly the text it read on origin/main.
+ * redactError(err) — [fix/keeper-errors-no-signature, A87 S-2] a SHORT text built from the error's fields, never its
+ *                    whole `message`: viem's message for a contract call prints the call's `args:` — the order's
+ *                    EIP-712 signature — and its request `data:`. See redactError below for what it keeps.
+ * capAlertText(t)  — a Telegram HTML text cut below Telegram's 4,096 limit with a visible marker, never inside a tag
+ *                    or an entity, open tags closed (Telegram refuses a longer or unbalanced text: the alert is lost).
+ * redactSecretLiterals(t) — [A93 R2-1] every CONFIGURED secret (SECRET_ENV_NAMES, read from the environment by name)
+ *                    replaced by `<redacted>` wherever it stands, in any case, percent-encoded or not: the first and the
+ *                    last step of redactUrl (so of sendTelegramAlert's final pass), the last of redactError (whose
+ *                    fields are scrubbed as read, too), and of every line the operator CLIs print. A provider that
+ *                    echoes only the request target (`Cannot POST /v2/<key>`) gives the URL patterns no host to anchor on.
  *
  * What is read first [A74 S-5]: the text is DECODED to a fixpoint (percent, stacked percent, JSON/JS and octal
  * escapes, HTML entities — for `/ : @ ? # \\ %` only), so an encoded delimiter cannot hide a URL; text nested
@@ -34,6 +44,9 @@
  * nested repetition (a redactor that backtracks inside an alert path is a denial of service); backslash
  * runs are clamped to 8 first [S-9].
  */
+
+// [fix/keeper-errors-no-signature] The keeper's own revert decoders (SwapFailed's inner reason, the executor's market errors).
+import { decodeExecutorMarketRevert, decodeSwapFailed, extractRevertData } from "./revert-decode.js"
 
 export const REDACTED = "/REDACTED"
 
@@ -161,12 +174,14 @@ export const AUTHORITY_DROPPED = "[authority-redacted]"
 const PLAIN_HOSTPORT = /^(?:[a-z0-9_.-]{1,255}|\[[0-9a-f:.]{2,45}\])(?::\d{1,5})?$/i
 
 /**
+ * [A92 S-5] The URL redaction alone, with no hex scrub: exactly what redactUrl returned on origin/main 7bd3ec12.
+ * Only for text that is classified and never printed (rpc-auth.js reads the provider's words in it); a printed text
+ * goes through redactUrl.
  * @param {unknown} text
- * @param {{ allowHosts?: readonly string[] }} [opts] — hosts whose path-bearing links survive
- *   (sendTelegramAlert passes ALERT_LINK_HOSTS; nothing else should)
+ * @param {{ allowHosts?: readonly string[] }} [opts]
  * @returns {string}
  */
-export function redactUrl(text, { allowHosts = [] } = {}) {
+export function redactUrlOnly(text, { allowHosts = [] } = {}) {
   const allow = new Set(allowHosts.map((h) => h.toLowerCase()))
   const decoded = normalise(text)
   if (decoded === null) return OVER_ENCODED // nested deeper than any real error: say nothing rather than half
@@ -189,21 +204,668 @@ export function redactUrl(text, { allowHosts = [] } = {}) {
 }
 
 /**
- * The printable text of an error, redacted. Never throws.
+ * @param {unknown} text
+ * @param {{ allowHosts?: readonly string[], html?: boolean }} [opts] — allowHosts: hosts whose path-bearing links
+ *   survive (sendTelegramAlert passes ALERT_LINK_HOSTS; nothing else should); html: the text is Telegram HTML, so a
+ *   configured secret becomes `&lt;redacted&gt;` (a raw `<redacted>` is a tag Telegram refuses: the alert is lost)
+ * @returns {string}
+ */
+export function redactUrl(text, opts) {
+  // [A93 R2-1] The configured secrets by value, FIRST (as the text came: the decoder below folds escapes, and a secret
+  // that holds one would no longer read as itself) and LAST (what the decoder revealed, `%252F` -> `/`): a path echoed
+  // with no host in front of it survives the URL pass.
+  const html = opts?.html === true
+  return redactSecretLiterals(redactUrlAndHex(redactSecretLiterals(text, { html }), opts), { html })
+}
+
+// [A93 R2-1] A secret already masked inside a URL path stops the URL pattern's tail at `<` (`https://host/v2/<redacted>`
+// would read `https://host/REDACTED<redacted>`): the mask and the rest of that tail are part of the redacted path.
+const MASK_IN_PATH = /\/REDACTED(?:<redacted>[^\s"'<>(),]*)+/g
+
+/** redactUrl without the secret scrub: for redactError, which scrubs its own fields first and its text last. */
+function redactUrlAndHex(text, opts) {
+  // [fix/keeper-errors-no-signature] The URL redaction, then a `0x` hex run of 130+ digits: executor.js logs a fatal
+  // error as redactUrl(err.stack), and a viem stack repeats the whole message (the order signature in `args:`); every
+  // Telegram alert passes here last (sendTelegramAlert). Only the `0x` form: a bare run of the letters a-f is
+  // ordinary text to this function (redact-s6-schemeless.test.mjs and redact-shapes.test.mjs pin such runs).
+  return redactUrlOnly(text, opts)
+    .replace(MASK_IN_PATH, REDACTED)
+    .replace(HEX_RUN_0X, (m) => `0x<hex ${m.length - 2}>`)
+}
+
+// ── [A93 R2-1] Configured secrets, removed by their literal value ─────────────────────────────────────────────────────
+// A provider error that echoes only the request TARGET (`no route for /v2/<key>?apikey=<key>`, an Express-style
+// `Cannot POST /v2/<key>` page) has no host in front of the path, so no URL pattern above sees it; it reached the keeper
+// log, the Telegram alerts and the CLIs' output. The keeper knows its secrets — they are in its environment — so they
+// are removed by value, the way the app removes its bot token (src/lib/alert-channels/utils.ts scrubAlertText).
+
+/**
+ * Every environment variable whose value is, or carries, a secret: read by the keeper (executor.js and its modules), by
+ * the operator CLIs, or by the SDK the keeper signs with. A value that is an http(s)/ws(s) URL gives its userinfo, each
+ * path segment and each query value (never the host: the operator must still see WHICH provider failed); any other
+ * value is a secret whole, and also without its `0x` prefix (a private key is printed either way).
+ */
+export const SECRET_ENV_NAMES = Object.freeze([
+  "RPC_URL", // executor.js, list-missing-fills.mjs
+  "BACKFILL_RPC_URL", // backfill-execution.mjs
+  "FLASHBOTS_RPC_URL", // executor.js
+  "TERASWAP_API_URL", // executor.js (the swap route API)
+  "VAULT_ADDR", // executor.js (a Vault signer address; not wired yet)
+  "SUPABASE_URL", // executor.js, both CLIs
+  "SUPABASE_SERVICE_ROLE_KEY", // executor.js, both CLIs
+  "TELEGRAM_BOT_TOKEN", // alert.js
+  "EXECUTOR_PRIVATE_KEY", // executor.js (the plaintext signer)
+  "HEALTH_TOKEN", // executor.js (the /health bearer token)
+  "COINGECKO_API_KEY", // price-sources.js
+  "AWS_ACCESS_KEY_ID", // kms-signer.js: @aws-sdk/client-kms reads the AWS credentials from the environment
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+])
+/** A configured value or URL part shorter than this is never treated as a secret (`v2`, `base`, `rpc`, `api`). */
+export const SECRET_MIN_LENGTH = 12
+/** What stands in for a configured secret. */
+export const SECRET_MASK = "<redacted>"
+const SECRET_MASK_HTML = "&lt;redacted&gt;"
+/** What a text becomes when the scrub itself cannot run (a text too long to hold twice in memory): fail closed. */
+export const SECRET_SCRUB_FAILED = "[REDACTED: text too long to scrub]"
+
+const URL_PROTOCOLS = new Set(["http:", "https:", "ws:", "wss:"])
+const decodeLoose = (s) => {
+  try {
+    return decodeURIComponent(s)
+  } catch {
+    return s
+  }
+}
+
+/** The configured secret literals in `env`, read by NAME (SECRET_ENV_NAMES). Never logged, never returned to a caller. */
+function secretLiterals(env) {
+  const out = new Set()
+  const keep = (s) => {
+    if (s.length >= SECRET_MIN_LENGTH) out.add(s)
+  }
+  for (const name of SECRET_ENV_NAMES) {
+    const raw = env[name]
+    if (typeof raw !== "string") continue // unset
+    const value = raw.trim()
+    let url = null
+    try {
+      url = new URL(value)
+    } catch {
+      /* not a URL: the whole value is the secret */
+    }
+    if (url !== null && URL_PROTOCOLS.has(url.protocol)) {
+      keep(decodeLoose(url.username))
+      keep(decodeLoose(url.password))
+      for (const segment of url.pathname.split("/")) keep(decodeLoose(segment))
+      // `?<key>` with no `=` is a value too (the whole pair)
+      for (const pair of url.search.slice(1).split("&")) keep(decodeLoose(pair.slice(pair.indexOf("=") + 1)))
+    } else {
+      keep(value)
+      if (/^0x/i.test(value)) keep(value.slice(2))
+    }
+  }
+  return [...out]
+}
+
+// The scrub compares CANONICAL bytes, so one search finds every way a secret is written: each `%XX` is the byte it
+// encodes (any mix of encoded and plain characters, either hex case), each HTML entity (`&amp;` `&lt;` `&#47;` `&#x2F;`,
+// what Telegram's HTML text carries) and each JSON / JS string escape (`\"` `\'` `\\` `\/` `/`, an error body
+// quoted as JSON) is its character, ASCII letters are lower case (an upper-cased or lower-cased echo), and a line break
+// with the spaces and tabs around it is nothing at all (a key split over two lines is still the key; [A96 R3-2] a break
+// or a tab written as a JSON escape, `\n` `\r` `\t` `\u000a` `\u000d` `\u0009`, is the same break or tab). Other characters
+// are their UTF-8 bytes. A plain space that touches no line break is an ordinary character.
+// One pass over the text, a map back to its positions, an indexOf per form: linear, no regex (a pattern per secret
+// character overflows V8's regex compiler at about 1,200 characters, and an AWS session token is longer).
+const ENTITY_AT = /&(?:(amp|lt|gt|quot|apos)|#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6}));/y
+const NAMED_ENTITY = { amp: 38, lt: 60, gt: 62, quot: 34, apos: 39 }
+const isHexCode = (c) => (c >= 48 && c <= 57) || (c >= 65 && c <= 70) || (c >= 97 && c <= 102)
+const hexValue = (c) => (c <= 57 ? c - 48 : (c | 32) - 87)
+const lowerByte = (b) => (b >= 65 && b <= 90 ? b + 32 : b)
+const isBlank = (c) => c === 32 || c === 9
+const isBreak = (c) => c === 10 || c === 13
+
+/** Emit the UTF-8 bytes of `cp`, ASCII lower-cased, each with the source span [start, end). Stops when emit says so. */
+function emitCodePoint(cp, start, end, emit) {
+  if (cp < 0x80) return emit(lowerByte(cp), start, end)
+  if (cp < 0x800) return emit(0xc0 | (cp >> 6), start, end) || emit(0x80 | (cp & 63), start, end)
+  if (cp < 0x10000) {
+    return emit(0xe0 | (cp >> 12), start, end) || emit(0x80 | ((cp >> 6) & 63), start, end) || emit(0x80 | (cp & 63), start, end)
+  }
+  return (
+    emit(0xf0 | (cp >> 18), start, end) ||
+    emit(0x80 | ((cp >> 12) & 63), start, end) ||
+    emit(0x80 | ((cp >> 6) & 63), start, end) ||
+    emit(0x80 | (cp & 63), start, end)
+  )
+}
+
+/**
+ * [A96 R3-2] A blank or a line break at `i`: `{ brk, byte, len }`, or null. A literal space, tab, CR or LF; with `decode`, also
+ * how a JSON string writes them: `\n` `\r` (breaks), `\t` (a blank), and `\u000a` `\u000d` (breaks) `\u0009` (a blank), either
+ * hex case. viem's HttpRequestError quotes the HTTP body as JSON, so a key the provider broke over two lines arrives as
+ * `half\n   half`: the walk must read that `\n` as the line break it is, or the two halves never join.
+ */
+function readSpace(text, i, n, decode) {
+  const c = text.charCodeAt(i)
+  if (isBlank(c)) return { brk: false, byte: c, len: 1 }
+  if (isBreak(c)) return { brk: true, byte: c, len: 1 }
+  if (decode && c === 92 && i + 1 < n) {
+    // The letter is read in either case, like every ASCII letter in the walk: a secret that holds `\T` is echoed lower-cased
+    // as `\t`, and the text and the secret must read that pair alike (else the lower-cased echo never matches).
+    const d = text.charCodeAt(i + 1) | 32
+    if (d === 110 || d === 114) return { brk: true, byte: d === 110 ? 10 : 13, len: 2 } // \n \r
+    if (d === 116) return { brk: false, byte: 9, len: 2 } // \t
+    if (d === 117 && i + 5 < n && [2, 3, 4, 5].every((k) => isHexCode(text.charCodeAt(i + k)))) {
+      const cp = parseInt(text.slice(i + 2, i + 6), 16)
+      if (cp === 10 || cp === 13) return { brk: true, byte: cp, len: 6 }
+      if (cp === 9) return { brk: false, byte: 9, len: 6 }
+    }
+  }
+  return null
+}
+
+/** The escape that starts at `i` (`%XX`; `\"` `\'` `\\` `\/` `\uXXXX`; an HTML entity): `{ byte | cp, len }`, or null. */
+function readEscape(text, i, n) {
+  const c = text.charCodeAt(i)
+  if (c === 37 && i + 2 < n && isHexCode(text.charCodeAt(i + 1)) && isHexCode(text.charCodeAt(i + 2))) {
+    return { byte: lowerByte(hexValue(text.charCodeAt(i + 1)) * 16 + hexValue(text.charCodeAt(i + 2))), len: 3 }
+  }
+  if (c === 92 && i + 1 < n) {
+    const d = text.charCodeAt(i + 1)
+    if (d === 34 || d === 39 || d === 92 || d === 47) return { byte: d, len: 2 }
+    if ((d | 32) === 117 && i + 5 < n && [2, 3, 4, 5].every((k) => isHexCode(text.charCodeAt(i + k)))) {
+      return { cp: parseInt(text.slice(i + 2, i + 6), 16), len: 6 }
+    }
+  }
+  if (c === 38) {
+    ENTITY_AT.lastIndex = i
+    const m = ENTITY_AT.exec(text)
+    const cp = m === null ? -1 : m[1] ? NAMED_ENTITY[m[1]] : m[2] ? Number(m[2]) : parseInt(m[3], 16)
+    if (cp >= 0 && cp <= 0x10ffff) return { cp, len: m[0].length }
+  }
+  return null
+}
+
+/**
+ * Walk `text` as canonical bytes (see above); `emit(byte, start, end)` returning true stops the walk. With `decode`
+ * false, no escape is read (only the case and the line breaks): the PLAIN walk, for a secret that holds `%`, `\` or
+ * `&` itself — written as it is, such a secret can merge with the text around it into an escape (`<key>\` before
+ * `/rest` reads `\/`) that the decoding walk would fold.
+ */
+function eachCanonicalByte(text, emit, decode = true) {
+  const n = text.length
+  let i = 0
+  while (i < n) {
+    const space = readSpace(text, i, n, decode)
+    if (space !== null) {
+      // A run of blanks; if a line break follows it, the run, the break and every blank or break after it are nothing.
+      let j = i
+      let next = space
+      while (next !== null && !next.brk) {
+        j += next.len
+        next = j < n ? readSpace(text, j, n, decode) : null
+      }
+      if (next !== null) {
+        while (next !== null) {
+          j += next.len
+          next = j < n ? readSpace(text, j, n, decode) : null
+        }
+        i = j
+        continue
+      }
+      while (i < j) {
+        const blank = readSpace(text, i, n, decode)
+        if (emit(blank.byte, i, i + blank.len)) return
+        i += blank.len
+      }
+      continue
+    }
+    if (decode) {
+      const e = readEscape(text, i, n)
+      if (e !== null) {
+        if (e.byte !== undefined ? emit(e.byte, i, i + e.len) : emitCodePoint(e.cp, i, i + e.len, emit)) return
+        i += e.len
+        continue
+      }
+    }
+    const cp = text.codePointAt(i)
+    const len = cp > 0xffff ? 2 : 1
+    if (emitCodePoint(cp, i, i + len, emit)) return
+    i += len
+  }
+}
+
+/** The canonical byte string of `text`, one char per byte (`decode`: see eachCanonicalByte). */
+function canonical(text, decode = true) {
+  const parts = []
+  let chunk = []
+  eachCanonicalByte(text, (b) => {
+    chunk.push(b)
+    if (chunk.length === 8192) {
+      parts.push(String.fromCharCode.apply(null, chunk))
+      chunk = []
+    }
+    return false
+  }, decode)
+  parts.push(String.fromCharCode.apply(null, chunk))
+  return parts.join("")
+}
+
+/** A text's UTF-8 bytes, ASCII lower-cased, nothing decoded: how it reads when every character is percent-encoded. */
+function rawBytes(text) {
+  const parts = []
+  for (const ch of text) emitCodePoint(ch.codePointAt(0), 0, 0, (b) => (parts.push(String.fromCharCode(b)), false))
+  return parts.join("")
+}
+
+/** Escape-like tokens of one literal read both ways in every combination up to this many; beyond, all or none. */
+const MAX_ESCAPE_TOKENS = 6
+/** The end of a value that could be the start of an escape (at most 9 characters: `&#x10ffff`). */
+const ESCAPE_START_TAIL = /(?:%[0-9a-f]?|\\(?:u[0-9a-f]{0,3})?|&[#a-z0-9]{0,8})$/i
+
+/**
+ * The canonical forms of a literal. A real key holds no escape-like token and has one form. A literal that does (a
+ * `%XX`, an entity, a `\` escape or a line break in the configured value itself) reads differently depending on how
+ * each of its characters was written: a token written plainly is decoded by the walk, a token with any character
+ * encoded is not. Every combination is a form (64 at most).
+ */
+function literalForms(literal) {
+  const tokens = [] // { decoded, raw }, in order; a skipped line break is { decoded: "" }
+  let pos = 0
+  let current = null
+  eachCanonicalByte(literal, (b, start, end) => {
+    if (current !== null && start === current.start) {
+      current.decoded += String.fromCharCode(b)
+      return false
+    }
+    if (start > pos) tokens.push({ decoded: "", raw: rawBytes(literal.slice(pos, start)) })
+    current = { start, end, decoded: String.fromCharCode(b), raw: rawBytes(literal.slice(start, end)) }
+    tokens.push(current)
+    pos = end
+    return false
+  })
+  if (pos < literal.length) tokens.push({ decoded: "", raw: rawBytes(literal.slice(pos)) })
+  // [A96 R3-2] A blank (a space or tab, or `\t` / `\u0009` written as the escape) has a third reading: in the TEXT a line break
+  // beside it swallows it (`Z*` LF `\ty)` reads `Z*y)`), so a secret holding one is also searched with that blank dropped.
+  for (const t of tokens) {
+    const src = t.start === undefined ? null : literal.slice(t.start, t.end)
+    const space = src === null ? null : readSpace(src, 0, src.length, true)
+    t.options = [...new Set(space !== null && !space.brk && space.len === src.length ? [t.decoded, t.raw, ""] : [t.decoded, t.raw])]
+  }
+  const variable = tokens.filter((t) => t.options.length > 1)
+  const combos = variable.reduce((n, t) => n * t.options.length, 1)
+  const forms = new Set()
+  const build = (pick) => {
+    let v = 0
+    return tokens.map((t) => (t.options.length > 1 ? t.options[Math.min(pick(v++), t.options.length - 1)] : t.options[0])).join("")
+  }
+  if (combos > 2 ** MAX_ESCAPE_TOKENS) {
+    for (const reading of [0, 1, 2]) forms.add(build(() => reading)) // all as decoded, all as written, all blanks dropped
+  } else {
+    for (let n = 0; n < combos; n++) {
+      forms.add(
+        build((i) => {
+          // digit i of n, in the mixed radix of the variable tokens (the same order as the tokens)
+          let rest = n
+          for (let k = 0; k < i; k++) rest = Math.floor(rest / variable[k].options.length)
+          return rest % variable[i].options.length
+        }),
+      )
+    }
+  }
+  forms.delete("")
+  return [...forms]
+}
+
+/** Every configured secret's canonical forms (`decoded`), and the raw bytes of each one that holds `%`, `\` or `&`
+ *  (`plain`, matched by the plain walk). */
+function secretForms(env) {
+  const decoded = new Set()
+  const plain = new Set()
+  for (const literal of secretLiterals(env)) {
+    for (const form of literalForms(literal)) decoded.add(form)
+    if (/[%\\&]/.test(literal)) plain.add(rawBytes(literal))
+    // A value that ends where an escape could begin (`%`, `%4`, `\`, `\u12`, `&`, `&#x2`) merges with the text after it
+    // (`<key>\` + `"` reads `"`, `<key>%` + `de` reads one byte): also search for it without that tail.
+    const tail = ESCAPE_START_TAIL.exec(literal)
+    if (tail !== null && tail.index >= SECRET_MIN_LENGTH) for (const form of literalForms(literal.slice(0, tail.index))) decoded.add(form)
+  }
+  return { decoded: [...decoded], plain: [...plain], none: decoded.size === 0 }
+}
+
+// [A93 R2-1] Built lazily, ONCE, at the first scrub: every entrypoint imports ./env.js first, so .env.executor is in
+// process.env before anything is redacted (env.js's own "could not load" warning runs only when no file was loaded).
+let configuredForms = null
+function configuredSecretForms() {
+  if (configuredForms === null) configuredForms = secretForms(process.env)
+  return configuredForms
+}
+
+/** The source spans of `text` that read as one of `forms` under the walk `decode` selects; sorted, disjoint. */
+function spansOf(text, forms, decode) {
+  if (forms.length === 0) return []
+  const canon = canonical(text, decode)
+  const found = []
+  for (const form of forms) {
+    for (let k = canon.indexOf(form); k !== -1; k = canon.indexOf(form, k + 1)) found.push([k, k + form.length])
+  }
+  if (found.length === 0) return []
+  found.sort((x, y) => x[0] - y[0])
+  const merged = []
+  for (const [lo, hi] of found) {
+    const last = merged[merged.length - 1]
+    if (last && lo < last[1]) last[1] = Math.max(last[1], hi)
+    else merged.push([lo, hi])
+  }
+  // Second walk: canonical byte index -> source span. The ranges are sorted and disjoint, so at most one starts and at
+  // most one ends at any byte.
+  const spans = merged.map(() => [0, 0])
+  let k = 0
+  let r = 0
+  eachCanonicalByte(
+    text,
+    (_b, start, end) => {
+      if (k === merged[r][0]) spans[r][0] = start
+      if (k === merged[r][1] - 1) {
+        spans[r][1] = end
+        r++
+      }
+      k++
+      return r === merged.length
+    },
+    decode,
+  )
+  return spans
+}
+
+/** `text` with every span that reads as one of the configured forms replaced by `mask`. */
+function scrubForms(text, forms, mask) {
+  const spans = [...spansOf(text, forms.decoded, true), ...spansOf(text, forms.plain, false)].sort((x, y) => x[0] - y[0])
+  if (spans.length === 0) return text
+  let out = ""
+  let last = 0
+  for (const [start, end] of spans) {
+    if (start < last) {
+      last = Math.max(last, end) // overlapping spans (two walks, or one multi-byte character): one mask
+      continue
+    }
+    out += text.slice(last, start) + mask
+    last = end
+  }
+  return out + text.slice(last)
+}
+
+/**
+ * [A93 R2-1] `text` with every configured secret (SECRET_ENV_NAMES, by value, at least SECRET_MIN_LENGTH characters)
+ * replaced by `<redacted>`: plain, percent-encoded (any mix), any case, HTML- or JSON-escaped, or split by a line break. Never
+ * throws; never says which secret or which variable matched. Not for text that is classified (rpc-auth.js,
+ * retry-policy.js read the raw error): a decision must not depend on what is configured.
+ * @param {unknown} text
+ * @param {{ html?: boolean }} [opts] — html: the mask is `&lt;redacted&gt;` (Telegram HTML)
+ * @returns {string}
+ */
+export function redactSecretLiterals(text, { html = false } = {}) {
+  const s = typeof text === "string" ? text : safeString(text)
+  try {
+    const forms = configuredSecretForms()
+    return forms.none ? s : scrubForms(s, forms, html ? SECRET_MASK_HTML : SECRET_MASK)
+  } catch {
+    return SECRET_SCRUB_FAILED // a text too long to hold twice: say nothing rather than everything
+  }
+}
+
+// ── [fix/keeper-errors-no-signature] A87 S-2: what an error may say in a log line or an alert ──────────────────────
+// viem's message for a contract call is the whole call: the Contract Call block prints `args:` (the order struct and
+// its EIP-712 signature), Raw Call / Request Arguments print `data:` (the calldata, which embeds the same signature),
+// Request body prints the JSON-RPC request. Measured on origin/main for canExecute and executeOrder under revert, RPC
+// error and timeout: 9 of 9 put the signature in the log line and the Telegram text, which ran to 14,907 characters
+// (Telegram refuses more than 4,096; the alert was lost). viem's shortMessage never carries the arguments.
+
+/** The longest text redactError returns. */
+export const ERROR_TEXT_MAX = 600
+/** Every keeper Telegram text is cut to this (Telegram's limit is 4,096 characters after entity parsing). */
+export const ALERT_TEXT_MAX = 4_000
+/** The start of the visible marker a cut text ends with: `…[truncated N chars]`. */
+export const TRUNCATED = "…[truncated"
+/** @param {number} n */
+export const truncatedMarker = (n) => `${TRUNCATED} ${n} chars]`
+
+const UNPRINTABLE = "[unprintable error]"
+// viem's own diagnostic lines, kept from a multi-line message (owner answer 1, 2026-11-18): where the call went,
+// what the transport answered, what the node said (`Details: … not on whitelist` is the INC-2026-10-30-001 auth
+// signal). [A92 S-3] And from viem's Contract Call block, which contract and which function: the `address:` line,
+// and the `function:` line cut at its parenthesis (the name, never the parameter list). The block's `args:` line (the
+// order and its signature) and `sender:` line are not kept. Every other line of the message is dropped.
+const KEPT_LINE = /[ \t]{0,8}(URL|Status|Details|address|function):/y
+const MAX_KEPT_LINES = 8
+// The blocks the scrub removes from whatever text remains (a string handed in, a first line, a kept line): an
+// `args:` or `data:` line, and a `Request Arguments:` / `Raw Call Arguments:` header with its indented lines.
+const DROPPED_LINE = /^[ \t]{0,64}(?:args|data)[ \t]{0,8}:/i
+const BLOCK_HEAD = /^[ \t]{0,64}(?:Request|Raw Call) Arguments[ \t]{0,8}:/i
+const BLOCK_HINT = /(?:^|\n)[ \t]{0,64}(?:args|data|Request Arguments|Raw Call Arguments)[ \t]{0,8}:/i
+// Any run of 130+ hex digits (a 65-byte signature is 130; calldata, raw transactions, revert blobs are longer).
+const HEX_RUN = /[0-9a-f]{130,}/gi
+const HEX_RUN_0X = /0x[0-9a-f]{130,}/gi
+// What reaches the URL redactor is bounded first (a multi-megabyte message costs one linear scan, no more). The
+// cut lands on whitespace: a URL, a userinfo and a hex run are each one whitespace-free token, so none is split
+// into a shape the patterns no longer see; a token with no whitespace before the bound is dropped whole.
+const PRE_MAX = 16_384
+const LINE_MAX = 4_096
+const REASON_MAX = 512
+const ERROR_NAME = /^[A-Za-z_$][\w$]{0,79}$/
+
+/** A string property, or undefined; a getter that throws reads as absent. */
+function readString(obj, key) {
+  try {
+    const v = obj[key]
+    return typeof v === "string" ? v : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function safeString(v) {
+  try {
+    return String(v)
+  } catch {
+    return UNPRINTABLE
+  }
+}
+
+/** At most `max` characters, cut where whitespace begins (see PRE_MAX). @returns {{ text: string, cut: number }} */
+function preSlice(s, max) {
+  if (s.length <= max) return { text: s, cut: 0 }
+  let end = max
+  while (end > 0 && !/\s/.test(s[end])) end--
+  return { text: s.slice(0, end), cut: s.length - end }
+}
+
+const oneLine = (s, max) => preSlice(s, max).text.replace(/[ \t]*[\r\n][\r\n \t]*/g, " ").trim()
+
+/** viem's / the executor's decoded revert reason anywhere in the cause chain, or null. Never throws. */
+function revertReason(err) {
+  let data = null
+  try {
+    data = extractRevertData(err)
+  } catch {
+    /* a hostile getter on the chain: no data */
+  }
+  try {
+    const sf = decodeSwapFailed(data)
+    if (sf) return `SwapFailed: ${sf.reason}`
+  } catch {
+    /* not decodable */
+  }
+  try {
+    const seen = new Set()
+    let e = err
+    for (let depth = 0; e !== null && typeof e === "object" && depth < 16 && !seen.has(e); depth++) {
+      seen.add(e)
+      if (readString(e, "name") === "ContractFunctionRevertedError") {
+        const reason = readString(e, "reason")
+        if (reason) return reason
+        const decoded = e.data
+        const errorName = decoded !== null && typeof decoded === "object" ? readString(decoded, "errorName") : undefined
+        if (errorName) return errorName
+      }
+      e = e.cause
+    }
+  } catch {
+    /* a hostile getter: what was read so far */
+  }
+  try {
+    const market = decodeExecutorMarketRevert(data)
+    if (market) return market.name
+  } catch {
+    /* not decodable */
+  }
+  return null
+}
+
+const scrubField = (s) => (typeof s === "string" ? redactSecretLiterals(s) : s)
+
+/** The text redactError starts from: name, short message, revert reason, viem's URL/Status/Details lines. */
+function composeErrorText(err) {
+  if (err === null || err === undefined) return String(err)
+  // [A93 R2-1] Every text read from the error is scrubbed WHOLE, as it came, before a line is dropped or folded (a key
+  // split over two lines would lose its second half to the line filter below, or become `half half` in oneLine) and
+  // before redactUrl's decoder folds an escape the key itself holds.
+  // [A99 R4-1] safeString(err) is text from the error too (a toString that holds a URL with a split key): scrubbed WHOLE,
+  // as read, like every other field, because redactUrlAndHex runs before the last scrub and would eat half of it.
+  if (typeof err !== "object") return scrubField(typeof err === "string" ? err : safeString(err))
+  const name = readString(err, "name")
+  const short = scrubField(readString(err, "shortMessage"))
+  const message = scrubField(readString(err, "message"))
+  const nl = message ? message.indexOf("\n") : -1
+  const head = short || (message ? (nl === -1 ? message : message.slice(0, nl)) : "")
+  if (!head) return scrubField(safeString(err))
+  let first = oneLine(head, LINE_MAX)
+  // The class says what failed (ContractFunctionExecutionError, HttpRequestError, TypeError); a plain `Error` says
+  // nothing, and its existing log lines carry no prefix (chainlink-debug-read.test.mjs pins one).
+  if (name && name !== "Error" && ERROR_NAME.test(name)) first = `${name}: ${first}`
+  const reason = scrubField(revertReason(err))
+  if (reason) {
+    const r = oneLine(reason, REASON_MAX)
+    if (r && !first.includes(r)) first = `${first} — reason: ${r}`
+  }
+  const lines = [first]
+  // viem's diagnostic lines, in the message's order; a sticky match at each line start (no copy of other lines).
+  for (let i = nl; i !== -1 && lines.length <= MAX_KEPT_LINES; i = message.indexOf("\n", i + 1)) {
+    KEPT_LINE.lastIndex = i + 1
+    const key = KEPT_LINE.exec(message)
+    if (key === null) continue
+    const end = message.indexOf("\n", i + 1)
+    let line = message.slice(i + 1, end === -1 ? message.length : end)
+    if (key[1] === "function") {
+      const paren = line.indexOf("(")
+      if (paren !== -1) line = line.slice(0, paren)
+    }
+    lines.push(oneLine(line, LINE_MAX))
+  }
+  return lines.join("\n")
+}
+
+/** Drop the `args:` / `data:` lines and the Request / Raw Call Arguments blocks. */
+function dropBlocks(s) {
+  if (!BLOCK_HINT.test(s)) return s
+  const kept = []
+  let inBlock = false
+  for (const line of s.split("\n")) {
+    if (inBlock && /^[ \t]/.test(line) && line.trim() !== "") continue
+    inBlock = false
+    if (BLOCK_HEAD.test(line)) {
+      inBlock = true
+      continue
+    }
+    if (!DROPPED_LINE.test(line)) kept.push(line)
+  }
+  return kept.join("\n")
+}
+
+/**
+ * `s` cut to at most `max` characters ending with the marker, or `s` itself when it fits and nothing was cut before.
+ * @param {string} s @param {number} max @param {number} [alreadyCut] — characters an earlier bound removed
+ */
+function capText(s, max, alreadyCut = 0) {
+  if (alreadyCut === 0 && s.length <= max) return s
+  const room = max - truncatedMarker(s.length + alreadyCut).length - 1
+  let keep = Math.max(0, Math.min(s.length, room))
+  if (keep > 0 && keep < s.length && /[\uD800-\uDBFF]/.test(s[keep - 1])) keep-- // never half a surrogate pair
+  const out = `${s.slice(0, keep)}${keep > 0 ? " " : ""}${truncatedMarker(s.length - keep + alreadyCut)}`
+  return out.length <= max ? out : out.slice(0, max)
+}
+
+/**
+ * The printable text of an error for a log line or an alert, redacted and short. Never throws (non-errors, circular
+ * cause chains, getters that throw). In order:
+ *   1. `Name: shortMessage` (else the first line of `message`; a string is taken as it is; no prefix for a plain
+ *      `Error`), then ` — reason: …` with
+ *      the decoded revert reason when the error carries one (viem's Error(string)/Panic text or custom error name,
+ *      or the executor's SwapFailed inner reason), then viem's `URL:`, `Status:` and `Details:` lines and [A92 S-3]
+ *      its Contract Call `address:` line and `function:` name (cut at the parenthesis), in the message's order;
+ *   2. every URL redaction (redactUrl);
+ *   3. the scrub: `args:` / `data:` lines and Request / Raw Call Arguments blocks removed, any run of 130+ hex
+ *      digits replaced by `<hex N>`;
+ *   4. [A93 R2-1] every configured secret replaced by `<redacted>` (redactSecretLiterals) — the last step that changes
+ *      what the text says (every text read from the error — a string, `shortMessage`, `message`, the revert reason —
+ *      is also scrubbed whole, as read, before step 1 drops or folds a line and before redactUrl's decoder runs);
+ *   5. the cap: ERROR_TEXT_MAX (600) characters, or `max` when smaller, ending with `…[truncated N chars]`. The cap only
+ *      removes characters; a scrub after it could no longer recognise a secret the cap had cut in half.
  * @param {unknown} err — an Error (viem or not), a string, or anything else
- * @param {{ max?: number }} [opts] — truncate to `max` characters AFTER redaction
+ * @param {{ max?: number }} [opts] — a lower cap for one call site
  * @returns {string}
  */
 export function redactError(err, { max } = {}) {
-  let text
+  const cap = Number.isInteger(max) && max > 0 ? Math.min(max, ERROR_TEXT_MAX) : ERROR_TEXT_MAX
+  let text = UNPRINTABLE
+  let cut = 0
   try {
-    if (err == null || typeof err !== "object") text = String(err)
-    else if (typeof err.message === "string" && err.message) text = err.message
-    else if (typeof err.shortMessage === "string" && err.shortMessage) text = err.shortMessage
-    else text = String(err)
+    ;({ text, cut } = preSlice(composeErrorText(err), PRE_MAX))
   } catch {
-    text = "[unprintable error]"
+    /* unprintable */
   }
-  const out = redactUrl(text)
-  return Number.isInteger(max) && max > 0 && out.length > max ? out.slice(0, max) : out
+  let out = UNPRINTABLE
+  try {
+    out = redactSecretLiterals(dropBlocks(redactUrlAndHex(text)).replace(HEX_RUN, (m) => `<hex ${m.length}>`))
+  } catch {
+    /* unprintable */
+  }
+  return capText(out, cap, cut)
+}
+
+const OPEN_OR_CLOSE_TAG = /<(\/?)([a-z][a-z0-9-]{0,15})(?:\s[^<>]{0,2048})?>/gi
+
+/**
+ * A Telegram HTML text cut to at most `max` characters, ending with the marker; an alert is never dropped for its
+ * length. The cut never lands inside a tag or an entity (every `&` in a Telegram HTML text opens one), and each tag
+ * left open is closed: Telegram refuses an unbalanced text and the alert would be lost. The limit counts the HTML
+ * source, which is never shorter than what Telegram counts after parsing the entities.
+ * @param {unknown} text @param {number} [max]
+ * @returns {string}
+ */
+export function capAlertText(text, max = ALERT_TEXT_MAX) {
+  const s = typeof text === "string" ? text : safeString(text)
+  if (s.length <= max) return s
+  let keep = Math.max(0, max - truncatedMarker(s.length).length - 1)
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const lt = s.lastIndexOf("<", keep - 1)
+    if (lt !== -1 && lt > s.lastIndexOf(">", keep - 1)) keep = lt
+    const amp = s.lastIndexOf("&", keep - 1)
+    if (amp !== -1 && amp > s.lastIndexOf(";", keep - 1)) keep = amp
+    if (keep > 0 && /[\uD800-\uDBFF]/.test(s[keep - 1])) keep--
+    const head = s.slice(0, keep)
+    const open = []
+    for (const m of head.matchAll(OPEN_OR_CLOSE_TAG)) {
+      const tag = m[2].toLowerCase()
+      if (m[1] === "") open.push(tag)
+      else if (open.lastIndexOf(tag) !== -1) open.splice(open.lastIndexOf(tag), 1)
+    }
+    const out = `${head}${open.reverse().map((t) => `</${t}>`).join("")}\n${truncatedMarker(s.length - keep)}`
+    if (out.length <= max) return out
+    keep = Math.max(0, keep - (out.length - max))
+  }
+  // Pathological nesting: plain text (tags removed, entities kept whole), then the cut.
+  const plain = s.slice(0, keep).replace(/<[^<>]{0,2048}>/g, "")
+  return `${plain}\n${truncatedMarker(s.length - plain.length)}`.slice(0, max)
 }

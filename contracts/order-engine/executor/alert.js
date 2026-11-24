@@ -12,7 +12,7 @@ import { scoreTier } from "./freeze-score.js"
 // [fix/executor-alert-masking-rpc-auth] INC-2026-10-30-001: an alertOps detail carried viem's
 // `URL: https://<provider>/v2/<key>` line to Telegram. Every free-text field is redacted here, and
 // sendTelegramAlert redacts the whole outgoing text as a last line of defence.
-import { redactError, redactUrl, ALERT_LINK_HOSTS } from "./redact.js"
+import { redactError, redactUrl, ALERT_LINK_HOSTS, ALERT_TEXT_MAX, capAlertText } from "./redact.js"
 
 const HOST = hostname()
 
@@ -75,16 +75,23 @@ export async function sendTelegramAlert(message) {
   const now = new Date().toISOString()
   // Last line of defence: whatever a caller put in `message`, no URL path/query/userinfo leaves the
   // host — except a public tx link to one of the keeper's own block explorers (event-watcher.js).
-  const text = redactUrl(
-    [
-      `🚨 <b>TeraSwap Executor Alert</b>`,
-      `Host: ${HOST}`,
-      `Time: ${now}`,
-      `Chain: ${chainId}`,
-      ``,
-      message,
-    ].join("\n"),
-    { allowHosts: ALERT_LINK_HOSTS },
+  // [fix/keeper-errors-no-signature] Then the cap: Telegram refuses a text over 4,096 characters and the
+  // alert is lost; a longer one is cut (tags closed, entities whole) and ends with a visible marker.
+  // [A93 R2-1] redactUrl's last step removes every configured secret by value (`html`: as `&lt;redacted&gt;`, a raw
+  // `<redacted>` is a tag Telegram refuses). It runs before the cap, which only removes characters.
+  const text = capAlertText(
+    redactUrl(
+      [
+        `🚨 <b>TeraSwap Executor Alert</b>`,
+        `Host: ${HOST}`,
+        `Time: ${now}`,
+        `Chain: ${chainId}`,
+        ``,
+        message,
+      ].join("\n"),
+      { allowHosts: ALERT_LINK_HOSTS, html: true },
+    ),
+    ALERT_TEXT_MAX,
   )
 
   try {

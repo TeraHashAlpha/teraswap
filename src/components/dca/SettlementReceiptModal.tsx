@@ -16,6 +16,7 @@ import { useAccount } from 'wagmi'
 import { formatUnits } from 'viem'
 import type { AutonomousOrder } from '@/lib/order-engine'
 import { getWhitelistedRouters } from '@/lib/order-engine'
+import { fetchOrderExecutions } from '@/lib/order-engine/executions-client'
 import {
   buildSettlementReceipt,
   type SettlementReceipt,
@@ -138,12 +139,13 @@ export default function SettlementReceiptModal({ order, onClose }: Props) {
       setError(!settlementStatus ? 'This position is not yet settled.' : null)
       return
     }
+    const wallet = address // narrowed here; the async closure below cannot see the guard above
 
     async function run() {
       setLoading(true)
       setError(null)
       try {
-        const res = await fetch(`/api/orders/${order.id}/executions?wallet=${address}`)
+        const res = await fetchOrderExecutions(order.id, wallet)
         if (!res.ok) throw new Error('Could not load fill history.')
         const data = await res.json()
         const fills: FetchedFill[] = Array.isArray(data.executions) ? data.executions : []
