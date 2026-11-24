@@ -18,6 +18,9 @@ fix what can pass a 64 KB pipe; the guard flags any other file unless allowliste
   capture-endpoint-baseline, check-agents-parity, check-bash3-compat, check-circular, check-deployed-sources, dca-feeds/{batch,build-config,candidates,verify},
   fiat/build-eur-usd-feed, gen-claude-state, generate-arbitrum-catalog, goal-lint, og-image/build, setup-telegram-webhook, sync-readme-deployments,
   sync-token-categories, token-catalog/{refresh-issue,report-diff}, verify-{arbitrum-addresses,arbitrum-chainlink-feeds,base-cbeth-feeds,curve-pool-types,deployed-sources}.
+  RUN on the branch, output measured: check-agents-parity 95 B, check-bash3-compat 60 B, check-circular 70 B, check-deployed-sources 143 B, sync-token-categories 178 B,
+  `gen-claude-state --check` ≈ 0.8 KB (stderr), `sync-readme-deployments --check` ≈ 0.8 KB (stderr); all exit 0. NOT run (network or they write files): the verify-* scripts,
+  capture-endpoint-baseline, setup-telegram-webhook, generate-arbitrum-catalog, og-image/build, dca-feeds/{batch,candidates,verify,build-config}, goal-lint, token-catalog/*.
 - Exempt: `executor.js`, `exit-drained.js`. Guard = file-level text rule (stdout write AND `process.exit`, comment lines dropped); stale or reason-less entries fail it.
 
 ## 3. Tests and mutation proof
