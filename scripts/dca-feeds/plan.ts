@@ -15,11 +15,14 @@ import { ABI, SentinelError, buildContext, parseArgs, readOnchain, readTokenDeci
 const { chains } = parseArgs(process.argv.slice(2))
 const out: any[] = []
 let exitCode = 0
+// [fix/script-stdout-truncated-on-exit] No process.exit: the JSON below is one big stdout write, and exiting drops what a slow pipe
+// has not taken yet. A refusal still prints no JSON and exits 2; every other path sets the code and lets the process end.
+let refused = false
 
 for (const key of chains) {
   let ctx
   try { ctx = await buildContext(key) } catch (e) {
-    if (e instanceof SentinelError) { console.error(`REFUSING (${key}): ${e.message}`); process.exit(2) }
+    if (e instanceof SentinelError) { console.error(`REFUSING (${key}): ${e.message}`); refused = true; break }
     throw e
   }
   const { chain, executor, admin, clients, rows, controls } = ctx
@@ -60,5 +63,9 @@ for (const key of chains) {
     `${count(i => i.status === 'BLOCKED')} BLOCKED, ${count(i => i.status === 'unchanged (skipped)')} unchanged (skipped)`)
   out.push({ chain: chain.name, chainId: chain.id, executor, admin, delaySeconds: delay, graceSeconds: grace, controls, items })
 }
-console.log(JSON.stringify(out, (_k, v) => (typeof v === 'bigint' ? v.toString() : v), 2))
-process.exit(exitCode)
+if (refused) {
+  process.exitCode = 2
+} else {
+  console.log(JSON.stringify(out, (_k, v) => (typeof v === 'bigint' ? v.toString() : v), 2))
+  process.exitCode = exitCode
+}
