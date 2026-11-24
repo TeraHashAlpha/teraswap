@@ -42,7 +42,6 @@ const EXEMPT_DAEMONS = {
  * measured per run: "fixed" = literal text, "in-repo list" = a loop over a table that lives in this repository.
  */
 const ALLOWED = {
-  'scripts/audit-gate.mjs': 'one summary line, one line per allowlisted or stale advisory (audit-allowlist.json holds 6 entries), then the verdict',
   'scripts/capture-endpoint-baseline.ts': 'one line per monitored endpoint (the in-repo MONITORED_ENDPOINTS list) plus a few fixed lines',
   'scripts/check-agents-parity.mjs': 'two fixed one-line messages; the exits are the failure paths that print to stderr',
   'scripts/check-bash3-compat.mjs': 'its only stdout line is fixed text written after the one exit (the failure path exits first)',
