@@ -70,6 +70,8 @@ const INVENTED_HASHES = [repeated('11'), repeated('aa'), repeated('bb'), repeate
 /** A stub RPC, as a node that has none of these transactions: it proves its chain and answers null. */
 function installStubRpc(): { reads: () => number } {
   let reads = 0
+  // A read that answers null is asked once more after a pause (chain-read.ts): no pause here. Main has no such read.
+  process.env.SWAP_VERIFY_MISSING_RETRY_MS = '0'
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const host = new URL(String(input)).host
     const chain = host === 'mainnet.base.org' ? 8453 : host === 'arb1.arbitrum.io' ? 42161 : 1

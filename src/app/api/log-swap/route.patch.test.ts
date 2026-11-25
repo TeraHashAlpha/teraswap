@@ -348,6 +348,26 @@ describe('the row is unchanged when the chain does not confirm it', () => {
     expect([res.status, await res.json()]).toEqual([202, { ok: false, outcome: 'not_found' }])
     expect(JSON.stringify(rows())).toBe(before)
     expect(vi.mocked(trackWalletAction)).not.toHaveBeenCalled()
+    // Asked twice, never a third time.
+    expect(rpc.reads().map((r) => r.method)).toEqual(['eth_getTransactionByHash', 'eth_getTransactionByHash'])
+  })
+
+  // The browser sends its confirmation once, right after it saw the receipt. A provider's node that is one block
+  // behind answers null: the one retry finds it, and the swap is not left pending for ever.
+  it.each([
+    ['the transaction', 'eth_getTransactionByHash', ['eth_getTransactionByHash', 'eth_getTransactionByHash', 'eth_getTransactionReceipt']],
+    ['the receipt', 'eth_getTransactionReceipt', ['eth_getTransactionByHash', 'eth_getTransactionReceipt', 'eth_getTransactionReceipt']],
+  ])('a node that had not caught up: %s is null on the first asking, there on the second -> 200, verified', async (_name, method, reads) => {
+    const f = R.mainnetFcTokenToToken
+    state.db = createFakeSwapsDb({ swaps: [pendingRow(sender(f))] })
+    vi.unstubAllGlobals()
+    let asked = 0
+    rpc = installStubChainRpc({ override: (c) => (c.method === method && ++asked === 1 ? null : undefined) })
+    const res = await patch({ txHash: f.hash, wallet: sender(f) })
+    expect([res.status, await res.json()]).toEqual([200, { ok: true }])
+    expect(rows()[0]).toMatchObject({ status: 'confirmed', tx_hash: f.hash.toLowerCase(), verified_kind: 'fee_collector' })
+    expect(rows()[0].verified_at).not.toBeNull()
+    expect(rpc.reads().map((r) => r.method)).toEqual(reads)
   })
 
   it.each([
@@ -438,7 +458,9 @@ describe('one transaction, one row', () => {
     state.db = createFakeSwapsDb({ swaps: [pendingRow(sender(f), { chain_id: 8453 })] })
     rpc.reset()
     expect((await patch({ txHash: f.hash, wallet: sender(f) })).status).toBe(202)
-    expect(rpc.reads()).toEqual([{ chainId: 8453, method: 'eth_getTransactionByHash', hash: f.hash.toLowerCase() }])
+    // Asked on Base and nowhere else; "no such transaction" is asked once more before it is the answer (chain-read.ts).
+    const baseRead = { chainId: 8453, method: 'eth_getTransactionByHash', hash: f.hash.toLowerCase() }
+    expect(rpc.reads()).toEqual([baseRead, baseRead])
   })
 })
 

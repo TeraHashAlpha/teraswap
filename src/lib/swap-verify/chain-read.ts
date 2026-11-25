@@ -5,10 +5,12 @@
  * - The endpoint must have PROVED it serves the row's chain (`eth_chainId`, cached per endpoint by
  *   rpc-chain-identity). Anything but `verified` refuses the read: here an outage is not allowed to
  *   fall through, because the answer decides whether a row becomes public.
- * - Every attempt has an explicit timeout, and there is one retry at most.
+ * - Every attempt has an explicit timeout, and there is one retry at most, whatever the first attempt ended with:
+ *   an error (retried at once), or `null` (asked once more after a short pause). `null` right after a transaction
+ *   confirmed is what a provider's node answers when it has not caught up with the node the browser read from; the
+ *   browser sends its confirmation once, and a row left pending has no hash to find it by later. A second `null` is
+ *   the answer.
  * - An error never carries the URL (provider keys live in URL paths): callers get a short code.
- *
- * A `null` result is an answer ("no such transaction yet"), not an error, and is not retried.
  */
 import { assertChainIdentity, createJsonRpcChainIdProbe } from '@/lib/rpc-chain-identity'
 import { serverOnlyRpcUrl } from '@/lib/rpc-env'
@@ -17,6 +19,18 @@ import { serverOnlyRpcUrl } from '@/lib/rpc-env'
 export const SWAP_VERIFY_RPC_TIMEOUT_MS = 4_000
 /** Attempts per read: the first one and one retry at most. */
 export const SWAP_VERIFY_RPC_ATTEMPTS = 2
+/** The pause before the one retry of a read that answered `null`. */
+export const SWAP_VERIFY_MISSING_RETRY_DELAY_MS = 1_500
+
+/**
+ * The pause, in milliseconds. `SWAP_VERIFY_MISSING_RETRY_MS` shortens it (the tests set 0); it can never lengthen it
+ * past the default, and anything that is not a whole number of milliseconds is ignored.
+ */
+function missingRetryDelayMs(): number {
+  const raw = process.env.SWAP_VERIFY_MISSING_RETRY_MS
+  if (raw === undefined || !/^\d{1,4}$/.test(raw)) return SWAP_VERIFY_MISSING_RETRY_DELAY_MS
+  return Math.min(Number(raw), SWAP_VERIFY_MISSING_RETRY_DELAY_MS)
+}
 
 export type ChainReadMethod = 'eth_getTransactionByHash' | 'eth_getTransactionReceipt'
 
@@ -70,11 +84,19 @@ export const readChain: ChainRead = async (chainId, method, params) => {
   if (verdict.status !== 'verified') throw new ChainReadError('rpc_unverified')
 
   for (let attempt = 1; attempt <= SWAP_VERIFY_RPC_ATTEMPTS; attempt++) {
+    const last = attempt === SWAP_VERIFY_RPC_ATTEMPTS
+    let result: unknown
     try {
-      return await postJsonRpc(url, method, params)
+      result = await postJsonRpc(url, method, params)
     } catch {
       // Timeout, transport error, HTTP error, JSON-RPC error envelope or an unparseable body: one retry, then give up.
+      if (last) break
+      continue
     }
+    if (result !== null || last) return result
+    // "Not there (yet)": the one retry, after a pause.
+    const pause = missingRetryDelayMs()
+    if (pause > 0) await new Promise((resolve) => setTimeout(resolve, pause))
   }
   throw new ChainReadError('rpc_error')
 }

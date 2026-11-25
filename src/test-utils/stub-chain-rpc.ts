@@ -34,6 +34,8 @@ export interface StubChainRpcOptions {
 export function installStubChainRpc(options: StubChainRpcOptions = {}) {
   const fixtures = options.fixtures ?? ALL_SWAP_RECEIPTS
   const calls: StubRpcCall[] = []
+  // A read that answers null is asked once more after a pause (chain-read.ts): no pause in tests.
+  process.env.SWAP_VERIFY_MISSING_RETRY_MS = '0'
 
   const stub = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = new URL(String(input))

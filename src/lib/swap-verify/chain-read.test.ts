@@ -5,9 +5,9 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { __resetChainIdentityCache } from '@/lib/rpc-chain-identity'
-import { ChainReadError, SWAP_VERIFY_RPC_ATTEMPTS, SWAP_VERIFY_RPC_TIMEOUT_MS, readChain } from './chain-read'
+import { ChainReadError, SWAP_VERIFY_MISSING_RETRY_DELAY_MS, SWAP_VERIFY_RPC_ATTEMPTS, SWAP_VERIFY_RPC_TIMEOUT_MS, readChain } from './chain-read'
 
-const NAMES = ['RPC_URL_1', 'RPC_URL_8453', 'RPC_URL_42161', 'RPC_URL', 'NEXT_PUBLIC_RPC_URL', 'NEXT_PUBLIC_BASE_RPC_URL', 'NEXT_PUBLIC_ARBITRUM_RPC_URL'] as const
+const NAMES = ['RPC_URL_1', 'RPC_URL_8453', 'RPC_URL_42161', 'RPC_URL', 'NEXT_PUBLIC_RPC_URL', 'NEXT_PUBLIC_BASE_RPC_URL', 'NEXT_PUBLIC_ARBITRUM_RPC_URL', 'SWAP_VERIFY_MISSING_RETRY_MS'] as const
 const saved: Record<string, string | undefined> = {}
 const HASH = `0x${'ab'.repeat(32)}`
 
@@ -71,7 +71,7 @@ describe('which endpoint answers', () => {
 
   it('mainnet: RPC_URL_1, then the legacy RPC_URL', async () => {
     process.env.RPC_URL = 'https://legacy-mainnet.example'
-    const net = stubFetch(() => 1, () => ok(null))
+    const net = stubFetch(() => 1, () => ok({ found: true }))
     await readChain(1, 'eth_getTransactionReceipt', [HASH])
     expect(new URL(net.reads()[0].url).host).toBe('legacy-mainnet.example')
     __resetChainIdentityCache()
@@ -104,7 +104,7 @@ describe('the endpoint must have proved it serves the row\'s chain', () => {
 
   it('the proof is asked once per endpoint, not once per read', async () => {
     process.env.RPC_URL_1 = 'https://mainnet.example'
-    const net = stubFetch(() => 1, () => ok(null))
+    const net = stubFetch(() => 1, () => ok({ found: true }))
     await readChain(1, 'eth_getTransactionByHash', [HASH])
     await readChain(1, 'eth_getTransactionReceipt', [HASH])
     await readChain(1, 'eth_getTransactionByHash', [HASH])
@@ -113,15 +113,70 @@ describe('the endpoint must have proved it serves the row\'s chain', () => {
   })
 })
 
-describe('one retry at most, an explicit timeout, and a null answer is an answer', () => {
+describe('a null answer ("no such transaction yet") is asked once more, after a pause', () => {
   beforeEach(() => {
     process.env.RPC_URL_1 = 'https://mainnet.example/v2/SECRET-KEY'
+    process.env.SWAP_VERIFY_MISSING_RETRY_MS = '0'
   })
 
-  it('a null result is returned as it is and is not retried', async () => {
+  it('null twice: null is the answer, after exactly two reads (never a third)', async () => {
     const net = stubFetch(() => 1, () => ok(null))
     await expect(readChain(1, 'eth_getTransactionReceipt', [HASH])).resolves.toBeNull()
+    expect(net.reads()).toHaveLength(SWAP_VERIFY_RPC_ATTEMPTS)
+  })
+
+  it('null, then the transaction (the node caught up): the second answer is returned', async () => {
+    const net = stubFetch(() => 1, (_sent, attempt) => ok(attempt === 1 ? null : { hash: HASH }))
+    await expect(readChain(1, 'eth_getTransactionByHash', [HASH])).resolves.toEqual({ hash: HASH })
+    expect(net.reads()).toHaveLength(2)
+  })
+
+  it('null, then a failure: rpc_error (the null is not kept as the answer), two reads', async () => {
+    const net = stubFetch(() => 1, (_sent, attempt) => (attempt === 1 ? ok(null) : new Response('x', { status: 502 })))
+    await expect(readChain(1, 'eth_getTransactionByHash', [HASH])).rejects.toMatchObject({ code: 'rpc_error' })
+    expect(net.reads()).toHaveLength(2)
+  })
+
+  it('a failure, then null: the one retry is spent, null is the answer, two reads', async () => {
+    const net = stubFetch(() => 1, (_sent, attempt) => (attempt === 1 ? new Response('x', { status: 502 }) : ok(null)))
+    await expect(readChain(1, 'eth_getTransactionByHash', [HASH])).resolves.toBeNull()
+    expect(net.reads()).toHaveLength(2)
+  })
+
+  it('an answer that is not null is never asked again', async () => {
+    const net = stubFetch(() => 1, () => ok({ hash: HASH }))
+    await readChain(1, 'eth_getTransactionByHash', [HASH])
     expect(net.reads()).toHaveLength(1)
+  })
+
+  // The pause on a fake clock: the second read is sent exactly when the pause ends, not before.
+  const pauses: Array<[string, string | undefined, number]> = [
+    ['not set: the default', undefined, SWAP_VERIFY_MISSING_RETRY_DELAY_MS],
+    ['a shorter pause', '200', 200],
+    ['a longer pause is capped at the default', '9999', SWAP_VERIFY_MISSING_RETRY_DELAY_MS],
+    ['not a number: the default', 'soon', SWAP_VERIFY_MISSING_RETRY_DELAY_MS],
+    ['negative: the default', '-5', SWAP_VERIFY_MISSING_RETRY_DELAY_MS],
+    ['a fraction: the default', '0.5', SWAP_VERIFY_MISSING_RETRY_DELAY_MS],
+    ['empty: the default', '', SWAP_VERIFY_MISSING_RETRY_DELAY_MS],
+  ]
+  it.each(pauses)('SWAP_VERIFY_MISSING_RETRY_MS %s', async (_name, value, expected) => {
+    if (value === undefined) delete process.env.SWAP_VERIFY_MISSING_RETRY_MS
+    else process.env.SWAP_VERIFY_MISSING_RETRY_MS = value
+    expect(SWAP_VERIFY_MISSING_RETRY_DELAY_MS).toBe(1_500)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const net = stubFetch(() => 1, () => ok(null))
+    const pending = readChain(1, 'eth_getTransactionReceipt', [HASH])
+    await vi.advanceTimersByTimeAsync(expected - 1)
+    expect(net.reads()).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1)
+    await expect(pending).resolves.toBeNull()
+    expect(net.reads()).toHaveLength(2)
+  })
+})
+
+describe('one retry at most and an explicit timeout', () => {
+  beforeEach(() => {
+    process.env.RPC_URL_1 = 'https://mainnet.example/v2/SECRET-KEY'
   })
 
   const failures: Array<[string, () => Response | Promise<Response>]> = [
@@ -187,7 +242,7 @@ describe('one retry at most, an explicit timeout, and a null answer is an answer
     vi.stubGlobal('fetch', vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
       inits.push(init as RequestInit)
       const body = JSON.parse(String(init?.body)) as { method: string }
-      return Response.json({ jsonrpc: '2.0', id: 1, result: body.method === 'eth_chainId' ? '0x1' : null })
+      return Response.json({ jsonrpc: '2.0', id: 1, result: body.method === 'eth_chainId' ? '0x1' : { status: '0x1' } })
     }))
     await readChain(1, 'eth_getTransactionReceipt', [HASH])
     const read = inits.find((i) => String(i.body).includes('eth_getTransactionReceipt')) as RequestInit

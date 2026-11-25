@@ -57,6 +57,10 @@ function describe(): Array<Record<string, unknown>> {
   })
 }
 
+// The stored rows are old: a transaction the node does not have is not "not there yet". A null answer is still asked
+// once more (chain-read.ts), with no pause between the two reads.
+process.env.SWAP_VERIFY_MISSING_RETRY_MS = '0'
+
 void main({
   argv: process.argv.slice(2),
   readStdin,
