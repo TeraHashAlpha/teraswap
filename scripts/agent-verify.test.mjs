@@ -421,7 +421,8 @@ describe('agent-verify --codeql: pinned query pack and tool failure', () => {
     expect(calls.find((c) => c.startsWith('codeql resolve extensions'))).toContain(`codeql/javascript-queries@${PIN}:`)
     // no reference to the pack anywhere is unpinned
     for (const c of calls.filter((c) => c.includes('javascript-queries'))) expect(c.replace(`javascript-queries@${PIN}`, '')).not.toContain('javascript-queries')
-    expect(row).toMatch(new RegExp(`^codeql\\tPASS\\t.*\\(pack ${PIN.replace(/\./g, '\\.')}, CLI 9\\.9\\.9\\)$`))
+    expect(row.startsWith('codeql\tPASS\t')).toBe(true)
+    expect(row.endsWith(`(pack ${PIN}, CLI 9.9.9)`)).toBe(true)
   })
 
   it('CODEQL_JS_PACK_VERSION overrides the version in the download AND the query references', () => {
