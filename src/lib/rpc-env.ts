@@ -143,6 +143,30 @@ export function serverRpcUrl(chainId: number): string {
   return url
 }
 
+/** The server names for `chainId` that are not a `NEXT_PUBLIC_*` name (the deprecated L2 fallbacks are left out). */
+function serverOnlyNames(chainId: number): readonly string[] {
+  return (SERVER_NAMES[chainId] ?? []).filter((n) => !n.startsWith('NEXT_PUBLIC_'))
+}
+
+/**
+ * [ADR-029] Which env NAME `serverOnlyRpcUrl` uses for `chainId`, or `public-default`. Name only, as `rpcEnvSource`.
+ */
+export function serverOnlyRpcSource(chainId: number): string {
+  return firstSet(serverOnlyNames(chainId)) ?? RPC_SOURCE_DEFAULT
+}
+
+/**
+ * [ADR-029] Server RPC URL for `chainId` that NEVER comes from a `NEXT_PUBLIC_*` name: `RPC_URL_<id>` (mainnet: then the
+ * legacy `RPC_URL`), else the public default. The swap-log verification reads the chain through this and nothing else, so
+ * a value that was ever meant for the browser can not decide whether a swap is confirmed. Throws on an unknown chain.
+ */
+export function serverOnlyRpcUrl(chainId: number): string {
+  const name = firstSet(serverOnlyNames(chainId))
+  const url = (name ? readEnv(name) : undefined) ?? PUBLIC_DEFAULT[chainId]
+  if (!url) throw new Error(`rpc-env: no RPC resolver for chain ${chainId}`)
+  return url
+}
+
 /**
  * The value of the legacy `NEXT_PUBLIC_*` name for `chainId`, or `undefined` when unset. The two L2 names
  * resolve on the server only and are `undefined` in the browser (see the header); [SEC-5] mainnet has no

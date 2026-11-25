@@ -11,6 +11,8 @@ import {
   browserRpcUrl,
   browserRpcEnvUrl,
   rpcEnvSource,
+  serverOnlyRpcUrl,
+  serverOnlyRpcSource,
   _resetRpcSourceLog,
   RPC_SOURCE_DEFAULT,
 } from './rpc-env'
@@ -70,6 +72,39 @@ describe('server order', () => {
   it('throws on a chain with no resolver (never a silent mainnet fallback)', () => {
     expect(() => serverRpcUrl(10)).toThrow(/chain 10/)
     expect(() => browserRpcUrl(10)).toThrow(/chain 10/)
+  })
+})
+
+// [ADR-029] The swap-log verification reads the chain through a resolver that has NO NEXT_PUBLIC step at all.
+describe('server-only order (serverOnlyRpcUrl): RPC_URL_<id> > public default, never a NEXT_PUBLIC_* value', () => {
+  it.each([
+    [8453, 'RPC_URL_8453', 'NEXT_PUBLIC_BASE_RPC_URL', 'https://mainnet.base.org'],
+    [42161, 'RPC_URL_42161', 'NEXT_PUBLIC_ARBITRUM_RPC_URL', 'https://arb1.arbitrum.io/rpc'],
+  ])('chain %i: the deprecated browser name is skipped even when it is the only one set', (id, srv, pub, dflt) => {
+    expect([serverOnlyRpcUrl(id), serverOnlyRpcSource(id)]).toEqual([dflt, RPC_SOURCE_DEFAULT])
+    process.env[pub] = 'https://pub.test'
+    // serverRpcUrl still takes it (unchanged); the server-only resolver does not.
+    expect(serverRpcUrl(id)).toBe('https://pub.test')
+    expect([serverOnlyRpcUrl(id), serverOnlyRpcSource(id)]).toEqual([dflt, RPC_SOURCE_DEFAULT])
+    process.env[srv] = 'https://srv.test'
+    expect([serverOnlyRpcUrl(id), serverOnlyRpcSource(id)]).toEqual(['https://srv.test', srv])
+  })
+
+  it('mainnet: RPC_URL_1 > RPC_URL > public default; NEXT_PUBLIC_RPC_URL is ignored', () => {
+    process.env.NEXT_PUBLIC_RPC_URL = 'https://pub.test'
+    expect([serverOnlyRpcUrl(1), serverOnlyRpcSource(1)]).toEqual(['https://eth.llamarpc.com', RPC_SOURCE_DEFAULT])
+    process.env.RPC_URL = 'https://legacy.test'
+    expect([serverOnlyRpcUrl(1), serverOnlyRpcSource(1)]).toEqual(['https://legacy.test', 'RPC_URL'])
+    process.env.RPC_URL_1 = 'https://srv.test'
+    expect([serverOnlyRpcUrl(1), serverOnlyRpcSource(1)]).toEqual(['https://srv.test', 'RPC_URL_1'])
+  })
+
+  it('the legacy mainnet RPC_URL never answers for Base or Arbitrum, and an unknown chain throws', () => {
+    process.env.RPC_URL = 'https://legacy-mainnet.test'
+    expect(serverOnlyRpcUrl(8453)).toBe('https://mainnet.base.org')
+    expect(serverOnlyRpcUrl(42161)).toBe('https://arb1.arbitrum.io/rpc')
+    expect(() => serverOnlyRpcUrl(10)).toThrow(/chain 10/)
+    expect(serverOnlyRpcSource(10)).toBe(RPC_SOURCE_DEFAULT)
   })
 })
 
