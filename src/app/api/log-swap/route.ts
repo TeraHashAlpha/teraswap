@@ -1,17 +1,27 @@
 import { randomUUID } from 'node:crypto'
 import { NextResponse, type NextRequest } from 'next/server'
-// [P114/M-03] POST inserts through the logger (INSERT-only) client. Its two reads (are the verification columns
-// there, how many pending rows has this wallet) and everything PATCH does need the service role: the logger role
-// can neither SELECT nor UPDATE.
+// [P114/M-03] POST inserts through the logger (INSERT-only) client. Its reads (are the verification columns there, how
+// many pending rows has this wallet) and everything PATCH does need the service role: the logger role can neither
+// SELECT nor UPDATE.
 import { getSupabase, getSupabaseLogger } from '@/lib/supabase'
-import { trackSwapFailed } from '@/lib/security-tracker'
 import { trackWalletAction } from '@/lib/wallet-activity-server'
 import { checkRateLimitWithin, LOG_RATE_LIMIT } from '@/lib/kv-rate-limiter'
 import { bodySizeGuard, clientIp } from '@/lib/body-limit'
 import { forLog } from '@/lib/log-sanitize'
-import { parsePendingSwap } from '@/lib/swap-log/input'
-import { PENDING_CAP, PENDING_CAP_WINDOW_MS, countRecentPending, insertPending, verifiedColumnsState } from '@/lib/swap-log/store'
+import { confirmSwap, type ConfirmResult } from '@/lib/swap-log/confirm'
+import { parseConfirmSwap, parsePendingSwap } from '@/lib/swap-log/input'
+import {
+  PENDING_CAP,
+  PENDING_CAP_WINDOW_MS,
+  countRecentPending,
+  findWalletRowByTx,
+  insertPending,
+  verifiedColumnsState,
+} from '@/lib/swap-log/store'
 import { catalogSymbol } from '@/lib/swap-log/symbols'
+
+// A confirmation reads the chain twice (4 s per attempt, one retry each) and prices up to two tokens.
+export const maxDuration = 30
 
 // [AUDIT-W6 / W6-M-02 + W6-L-01] Shared guards for both handlers: body cap +
 // the per-IP budget shared by all log-* routes, BEFORE any parse/DB work.
@@ -44,7 +54,8 @@ function logColumnsMissing(): void {
  *   - status is `pending`, there is no transaction hash, no USD value, no fee amount, no mev figure, whatever the
  *     body says, and no alert or tracker call carries a USD value;
  *   - at most PENDING_CAP pending rows per wallet per hour: the next one is a 429.
- * A row becomes `confirmed` or `failed` only by the server, after it read the transaction on-chain (PATCH).
+ * A row becomes `confirmed` or `failed` only by the server, after it read the transaction on-chain. A transaction hash
+ * sent with the POST (the split-swap client sends one, after its receipt) is handled as a PATCH after the insert.
  * The official client's calls keep their answer: 200 `{ ok: true }`.
  */
 export async function POST(req: NextRequest) {
@@ -78,6 +89,12 @@ export async function POST(req: NextRequest) {
     }
     if (columns === 'unknown') return NextResponse.json({ ok: false, error: 'storage_unavailable' })
 
+    // A repeat of a POST whose transaction this wallet already has verified: nothing to add.
+    if (input.txHash !== null) {
+      const existing = await findWalletRowByTx(db, input.wallet, input.txHash)
+      if (existing !== null && existing !== 'error' && existing.verified_at !== null) return NextResponse.json({ ok: true })
+    }
+
     const pending = await countRecentPending(db, input.wallet, new Date(Date.now() - PENDING_CAP_WINDOW_MS).toISOString())
     if (pending === null) return NextResponse.json({ ok: false, error: 'storage_unavailable' })
     if (pending >= PENDING_CAP) {
@@ -86,9 +103,10 @@ export async function POST(req: NextRequest) {
 
     const tokenInSymbol = catalogSymbol(input.tokenIn, input.chainId)
     const tokenOutSymbol = catalogSymbol(input.tokenOut, input.chainId)
+    const rowId = randomUUID()
 
     const inserted = await insertPending(logger, {
-      id: randomUUID(),
+      id: rowId,
       wallet: input.wallet,
       chain_id: input.chainId,
       source: input.source,
@@ -122,6 +140,13 @@ export async function POST(req: NextRequest) {
       metadata: { status: 'pending', slippage: input.slippage, mevProtected: input.mevProtected, feeCollected: input.feeCollected },
     })
 
+    // The hash was NOT stored with the row: only a verification writes one. Whatever the chain says, the row above
+    // exists and the POST is answered as before.
+    if (input.txHash !== null) {
+      const confirmed = await confirmSwap({ db, wallet: input.wallet, txHash: input.txHash, rowId })
+      if (confirmed.result === 'columns_missing') logColumnsMissing()
+    }
+
     return NextResponse.json({ ok: true })
   } catch {
     // No error text: an error message can carry what the caller sent.
@@ -130,79 +155,77 @@ export async function POST(req: NextRequest) {
   }
 }
 
+/** What each outcome of a confirmation answers (details C). */
+function confirmResponse(confirmed: ConfirmResult): NextResponse {
+  switch (confirmed.result) {
+    // Verified now, or already verified for this wallet and this transaction; or this wallet has no row to confirm
+    // (its POST was refused or never came): in all three the browser's call is answered as before.
+    case 'verified':
+    case 'no_row':
+      return NextResponse.json({ ok: true })
+    // The chain has no such transaction or receipt yet, or could not be read: the row is unchanged; ask again later.
+    case 'not_found':
+      return NextResponse.json({ ok: false, outcome: 'not_found' }, { status: 202 })
+    case 'rejected':
+      return NextResponse.json({ error: 'Transaction not accepted for this swap' }, { status: 422 })
+    case 'duplicate':
+      return NextResponse.json({ error: 'Transaction already recorded' }, { status: 409 })
+    case 'columns_missing':
+      logColumnsMissing()
+      return NextResponse.json({ ok: true })
+    case 'storage_error':
+      console.error('[log-swap] PATCH storage error')
+      return NextResponse.json({ ok: false, error: 'storage_unavailable' })
+  }
+}
+
 /**
  * PATCH /api/log-swap
  *
- * Update a swap record after tx confirmation (add tx_hash, gas, status).
+ * [ADR-029, details C] The browser calls this when it saw the transaction confirm. The body is `{ txHash, wallet }`;
+ * a status, gas figures or mev figures in it are not read. The server then:
+ *   - picks the row of THAT wallet with that hash, else that wallet's latest pending row of the last two hours
+ *     (never a row of another wallet);
+ *   - reads the transaction on the ROW's chain (lib/swap-verify) and, only if it is this wallet's swap, writes status,
+ *     hash, derived tokens, amounts, symbols, USD and gas in one update;
+ *   - 202 when the chain has no such transaction yet, 422 when it is not this row's swap, 409 when it already
+ *     verified a row of another wallet: in all three the row is unchanged.
  */
 export async function PATCH(req: NextRequest) {
   try {
     const refused = await ingestionGuards(req)
     if (refused) return refused
 
-    const supabase = getSupabase()
-    if (!supabase) {
+    const db = getSupabase()
+    if (!db) {
       console.warn('[log-swap] PATCH skipped — Supabase not configured')
       return NextResponse.json({ ok: false, skipped: true, reason: 'supabase_not_configured' })
     }
 
-    const body = await req.json()
-    const { txHash, status, gasUsed, gasPrice, wallet, mevSavingsEstimate, mevSavingsActual } = body
-
-    if (!txHash) {
-      return NextResponse.json(
-        { error: 'txHash is required' },
-        { status: 400 },
-      )
+    let body: unknown
+    try {
+      body = await req.json()
+    } catch {
+      // Not JSON, or longer than the body cap: as before.
+      return NextResponse.json({ ok: true })
     }
 
-    const update: Record<string, unknown> = { status, tx_hash: txHash }
-    if (gasUsed) update.gas_used = gasUsed
-    if (gasPrice) update.gas_price = gasPrice
-    // [LP-05] Optional MEV-savings telemetry — only set when caller provided
-    // a value so we don't overwrite an existing row's columns with NULL.
-    if (mevSavingsEstimate != null) update.mev_savings_estimate = mevSavingsEstimate
-    if (mevSavingsActual != null) update.mev_savings_actual = mevSavingsActual
+    const parsed = parseConfirmSwap(body)
+    if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
+    // No wallet named (the browser's call after the wallet disconnected): there is no row to look for. Answered as
+    // before; nothing is read and nothing is written.
+    if (parsed.value.wallet === null) return NextResponse.json({ ok: true })
 
-    // Track failed swap server-side
-    if (status === 'failed' && wallet) {
-      trackSwapFailed({ wallet, tokenIn: '', tokenOut: '', amountUsd: 0, source: '', error: 'Transaction reverted' })
-      trackWalletAction(wallet, {
-        category: 'swap', action: 'swap_status_update',
-        txHash, metadata: { status: 'failed' },
-      })
+    const columns = await verifiedColumnsState(db)
+    if (columns === 'missing') {
+      logColumnsMissing()
+      return NextResponse.json({ ok: true })
     }
+    if (columns === 'unknown') return NextResponse.json({ ok: false, error: 'storage_unavailable' })
 
-    // Try 1: Match by tx_hash (row already has the hash)
-    const { data: matched, error: err1 } = await supabase
-      .from('swaps')
-      .update(update)
-      .eq('tx_hash', txHash)
-      .select('id')
-
-    if (err1) {
-      console.error('[log-swap] PATCH by tx_hash error:', err1.message)
-    }
-
-    // Try 2: If no row matched (initial log had tx_hash=null), find latest pending for this wallet
-    if ((!matched || matched.length === 0) && wallet) {
-      const { error: err2 } = await supabase
-        .from('swaps')
-        .update(update)
-        .eq('wallet', wallet.toLowerCase())
-        .eq('status', 'pending')
-        .is('tx_hash', null)
-        .order('created_at', { ascending: false })
-        .limit(1)
-
-      if (err2) {
-        console.error('[log-swap] PATCH by wallet fallback error:', err2.message)
-      }
-    }
-
-    return NextResponse.json({ ok: true })
-  } catch (err) {
-    console.error('[log-swap] PATCH Error:', err)
+    return confirmResponse(await confirmSwap({ db, wallet: parsed.value.wallet, txHash: parsed.value.txHash }))
+  } catch {
+    console.error('[log-swap] PATCH failed')
     return NextResponse.json({ ok: true })
   }
 }
