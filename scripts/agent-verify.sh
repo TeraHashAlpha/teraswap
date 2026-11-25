@@ -179,9 +179,18 @@ for (const [k, v] of head) added += Math.max(0, v - (base.get(k) ?? 0))
 console.log(sum(head) + " " + sum(base) + " " + added)
 '
 
-codeql_total() { # dir -> prints total or empty
+# Runs codeql-local.sh in $2 (a checkout) into $1; prints the alert total (empty = none). The script's exit code is kept
+# in "$1.rc" (a command substitution cannot set a variable): 3 = TOOL FAILURE (pack not readable by the installed CLI).
+CODEQL_TOOL_FAILURE_RC=3
+codeql_total() { # dir checkout -> prints total or empty
+  local rc
   CODEQL_OUT="$1" "$2/scripts/codeql-local.sh" "$CODEQL_QLS" 2>"$1.err" | tee "$1.log" | sed -n 's/^total: //p'
+  rc="${PIPESTATUS[0]}"
+  echo "$rc" > "$1.rc"
 }
+
+# "pack X, CLI Y" as printed by codeql-local.sh (empty when it never got that far)
+codeql_versions() { sed -n 's/^codeql-local: //p' "$1.log" 2>/dev/null | grep '^pack ' | head -1; }
 
 check_codeql() {
   local m
@@ -189,20 +198,31 @@ check_codeql() {
   if ! gh codeql version >/dev/null 2>&1; then record codeql FAIL "missing tool: gh codeql (gh extension install github/gh-codeql)"; return; fi
   local head_total base_total basewt
   head_total="$(codeql_total "$OUT/cq-head" "$ROOT")"
+  # A tool failure (pack unreadable by the CLI) is not a finding and is identical for base: ONE record, no base database,
+  # and still a FAIL: a missing CodeQL result never passes. (CLAUDE.md: do not rerun, repair or install; report it.)
+  if [ "$(cat "$OUT/cq-head.rc" 2>/dev/null)" = "$CODEQL_TOOL_FAILURE_RC" ]; then
+    local tf
+    tf="$(grep '^codeql-local: TOOL FAILURE:' "$OUT/cq-head.err" 2>/dev/null | head -1)"
+    record codeql FAIL "tool failure: ${tf:-codeql-local: TOOL FAILURE: (no detail; log: $OUT/cq-head.err)}"
+    return
+  fi
   basewt="$OUT/base-wt"
   if ! (cd "$ROOT" && git worktree add -q --detach "$basewt" "$BASE_REF") >/dev/null 2>&1; then
     record codeql FAIL "cannot create base worktree for $BASE_REF"; return
   fi
   base_total="$(codeql_total "$OUT/cq-base" "$basewt")"
   (cd "$ROOT" && git worktree remove --force "$basewt") >/dev/null 2>&1
+  local ver
+  ver="$(codeql_versions "$OUT/cq-head")"
+  [ -n "$ver" ] && ver=" ($ver)"
   if [ -z "$head_total" ] || [ -z "$base_total" ]; then
-    record codeql FAIL "no result total (head='${head_total}' base='${base_total}'; logs: $OUT/cq-*.log/.err)"; return
+    record codeql FAIL "no result total (head='${head_total}' base='${base_total}'; logs: $OUT/cq-*.log/.err)${ver}"; return
   fi
   local cmp
   cmp="$(node --input-type=module -e "$CODEQL_DIFF_JS" "$OUT/cq-head/result.sarif" "$OUT/cq-base/result.sarif" 2>"$OUT/cq-diff.err")"
-  if [ -z "$cmp" ]; then record codeql FAIL "cannot compare SARIF results (log: $OUT/cq-diff.err)"; return; fi
+  if [ -z "$cmp" ]; then record codeql FAIL "cannot compare SARIF results (log: $OUT/cq-diff.err)${ver}"; return; fi
   set -- $cmp
-  local detail="security-extended: head $1, base $2, new by rule+file+message $3"
+  local detail="security-extended: head $1, base $2, new by rule+file+message $3${ver}"
   if [ "$3" -eq 0 ]; then record codeql PASS "$detail"; else record codeql FAIL "$detail"; fi
 }
 

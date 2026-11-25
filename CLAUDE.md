@@ -30,6 +30,7 @@ Multi-chain meta-aggregator on Ethereum Mainnet (1), Base (8453) and Arbitrum On
 - **PRs:** the owner opens and merges every PR; an agent never opens, merges, approves or closes one. A PR that needs an Auditor pass is opened as Draft — say "Auditor required" in the report.
 - **Branches:** never force-push a branch that has an open PR (it rewrites history under review); any other force-push needs the owner's explicit word (rule 15).
 - **Alerts:** never dismiss, close or suppress a security alert (CodeQL, Dependabot, gitleaks). Fix it, or report it to the owner with the evidence.
+- **agent-verify `--codeql`:** `scripts/agent-verify.sh --codeql` pins the CodeQL query pack (`CODEQL_JS_PACK_VERSION` in `scripts/codeql-local.sh`). A `codeql FAIL tool failure: …` (pack not readable by the installed CLI) is not a finding and not a reason to rerun, repair or install anything; report it and stop.
 - **CI:** NO CI polling — no `gh run watch`, no sleep-and-check loops. Push, report the compare link, stop; the owner reads CI.
 - **Secrets:** never print, echo or log a secret value. Check an env var by NAME (`[ -n "${NAME:-}" ]`) and report set/unset.
 - **Owner-terminal only:** `ssh` to any host, `pm2`, and `cast send` (any on-chain write) run only in the owner's terminal. The agent prepares the exact command and stops.
