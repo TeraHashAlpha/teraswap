@@ -87,6 +87,8 @@ interface Report {
   console: string[]
   pageErrors: string[]
   failedResponses: string[]
+  /** Every response of status 400 or more the page received, by status and path (or host, when not ours), counted. */
+  failedLoads: Record<string, number>
   historyRow: string
   swapsRows: Array<Record<string, unknown>>
   upstreamReads: Record<string, number>
@@ -154,6 +156,14 @@ async function installWallet(context: BrowserContext, prompts: string[]) {
 /** How long the stubbed CoW order stays open before it is reported fulfilled. */
 const SETTLES_AFTER_MS = 8_000
 
+/**
+ * What an image the rig has no file for is answered with (token logos: the app's own logo proxy, or a list's host).
+ * Not a 404: the browser writes one console error per failed image, and how many logos a token list has asked for by
+ * the time it closes depends on the browser's lazy loading, not on the tree. With a 404 the console of two runs of the
+ * SAME build differed by a few such lines (295 against 287), and "console as on main" compared noise.
+ */
+const BLANK_IMAGE = { status: 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>' }
+
 /** The page's own /api calls: the swap log and the history go to the REAL server, the rest is answered here. */
 async function routeApis(context: BrowserContext, origin: string, report: Report) {
   let submittedAt = Date.now()
@@ -167,7 +177,7 @@ async function routeApis(context: BrowserContext, origin: string, report: Report
     }
     if (url.protocol === 'data:' || url.protocol === 'blob:') return route.continue()
     // Nothing leaves the machine.
-    if (url.origin !== origin) return route.fulfill({ status: 404, body: '' })
+    if (url.origin !== origin) return route.fulfill(request.resourceType() === 'image' ? BLANK_IMAGE : { status: 404, body: '' })
     if (!url.pathname.startsWith('/api/')) return route.continue()
 
     const json = (status: number, body: unknown) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
@@ -225,7 +235,7 @@ async function routeApis(context: BrowserContext, origin: string, report: Report
     // "confirmed" one is sent (on main that first call also prices the declared amounts, which takes a moment).
     if (url.pathname === '/api/cow/order-status') return json(200, { uid: ORDER_UID, status: Date.now() - submittedAt >= SETTLES_AFTER_MS ? 'fulfilled' : 'open' })
     if (url.pathname === '/api/cow/trades') return json(200, [{ orderUid: ORDER_UID, txHash: SETTLEMENT_TX, executedBuyAmount: BUY_AMOUNT }])
-    if (url.pathname === '/api/token-logo' || url.pathname === '/api/proxy/logo') return route.fulfill({ status: 404, body: '' })
+    if (url.pathname === '/api/token-logo' || url.pathname === '/api/proxy/logo') return route.fulfill(BLANK_IMAGE)
     return json(200, {})
   })
 }
@@ -266,7 +276,8 @@ const normalize = (line: string) => line.replace(/https?:\/\/127\.0\.0\.1:\d+/g,
 
 for (const { ui, baseURL, flip, amount, receiveToken, search, pickUsdt, ctaReady, cta, openHistory, historyRow } of UIS) {
   test(`${ui} · a CoW swap of a recorded real trade: logged, confirmed, and shown in the wallet's history`, async ({ browser }) => {
-    const report: Report = { ui, tree: IS_BASELINE ? 'main' : 'branch', walletPrompts: [], logSwap: [], console: [], pageErrors: [], failedResponses: [], historyRow: '', swapsRows: [], upstreamReads: {} }
+    const report: Report = { ui, tree: IS_BASELINE ? 'main' : 'branch', walletPrompts: [], logSwap: [], console: [], pageErrors: [], failedResponses: [], failedLoads: {}, historyRow: '', swapsRows: [], upstreamReads: {} }
+    const failedLoads = new Map<string, number>()
     db.db.rows().length = 0
     upstreamReads.length = 0
 
@@ -281,6 +292,11 @@ for (const { ui, baseURL, flip, amount, receiveToken, search, pickUsdt, ctaReady
     page.on('pageerror', (error) => void report.pageErrors.push(normalize(String(error))))
     page.on('response', (response) => {
       const url = new URL(response.url())
+      if (response.status() >= 400) {
+        const ours = url.pathname.startsWith('/_next/static/') ? '/_next/static/<asset>' : url.pathname
+        const what = `${response.status()} ${url.origin === new URL(baseURL).origin ? ours : url.host}`
+        failedLoads.set(what, (failedLoads.get(what) ?? 0) + 1)
+      }
       if (response.status() >= 400 && url.origin === new URL(baseURL).origin && url.pathname.startsWith('/api/') && !/token-logo|proxy\/logo/.test(url.pathname)) {
         report.failedResponses.push(`${response.request().method()} ${url.pathname} ${response.status()}`)
       }
@@ -343,6 +359,7 @@ for (const { ui, baseURL, flip, amount, receiveToken, search, pickUsdt, ctaReady
     const reads = new Map<string, number>()
     for (const read of upstreamReads) reads.set(`${read.chain}:${read.method}`, (reads.get(`${read.chain}:${read.method}`) ?? 0) + 1)
     report.upstreamReads = Object.fromEntries(reads)
+    report.failedLoads = Object.fromEntries([...failedLoads].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
 
     if (process.env.SWAP_LOG_E2E_OUT) {
       mkdirSync(process.env.SWAP_LOG_E2E_OUT, { recursive: true })
