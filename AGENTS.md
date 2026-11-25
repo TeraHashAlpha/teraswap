@@ -1,4 +1,4 @@
-<!-- claude-md-sha256: 07cf0eaf7b82a99bc85bfa1a0eb3d87bc72b15ca69263a874696f38c753e132c -->
+<!-- claude-md-sha256: 8dcf4ada13b415ea8907cfddf8ad7c721088856d196b6d017ccb5851004689c5 -->
 # AGENTS.md — TeraSwap for Grok Build and other non-Claude coding agents
 
 Grok Build reads this file, not `CLAUDE.md`. This file exists so a second coding agent gets the same
@@ -49,6 +49,8 @@ substitute for this rule.
 **Bash compatibility.** Every `.sh` in this repo must run on macOS stock bash 3.2.57 — no `${var,,}` /
 `${var^^}`, no `declare -A`, no `mapfile` / `readarray`, no `globstar`. Lowercase via
 `tr '[:upper:]' '[:lower:]'`. `scripts/check-bash3-compat.mjs` enforces this on every tracked `.sh` file.
+
+**agent-verify `--codeql`.** `scripts/agent-verify.sh --codeql` pins the CodeQL query pack (`CODEQL_JS_PACK_VERSION` in `scripts/codeql-local.sh`). A `codeql FAIL tool failure: …` (pack not readable by the installed CLI) is not a finding and not a reason to rerun, repair or install anything; report it and stop.
 
 **Grok Build launch:** in this repo Grok is launched ONLY via `scripts/grok-dispatch.sh` or from a shell that sourced `scripts/grok-guard.sh`. A bare `grok` here has no credential guard. Their `--deny` flags (`Read(.env*)`, `Bash(security*)`, `Bash(git credential-*)`) do NOT protect `.env*` — measured (`docs/security/GROK-DENY-CANARY-2026-08-28.md`): Grok routes around a denied read by choosing a different command, because a `Bash(...)` deny rule matches the invoked command name, not its arguments, so `Bash(*.env*)` cannot match `cat .env.canary`. Only `--deny "Bash(*)"` actually refuses, and that blocks the whole shell — unusable for real work, so there is no usable middle. Treat those three flags as speed bumps and intent signals only, never as enforcement. What actually holds: (a) `--deny "Bash(*)"`, when acceptable to run unusable-for-real-work; (b) running in a git worktree that does not contain `.env*` at all — `scripts/grok-dispatch.sh` creates its worktree outside this repo (`${TS_WORKTREE_BASE:-$HOME/ts-worktrees}`, never under `.claude/worktrees/`, which is still inside the repo and reachable via `../../../`).
 
