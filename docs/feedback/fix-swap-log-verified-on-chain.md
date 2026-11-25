@@ -8,7 +8,7 @@ Tables and long evidence: `fix-swap-log-verified-on-chain.tables.md` beside this
 - [x] Commit 3: PATCH `{ txHash, wallet }` verifies on-chain, one transaction one row, trackers after confirmation (details C)
 - [x] Commit 4: migration text and schema.sql mirror; code works before it is applied (details E)
 - [x] Commit 5: readers behind `SWAPS_PUBLIC_VERIFIED_ONLY`, default off (details D)
-- [ ] Commit 6: script for stored rows, report mode by default (details F)
+- [x] Commit 6: script for stored rows, report mode by default (details F)
 - [ ] Tests of details G: route replay, property, differential, browser v1 and v2, mutation proof
 - [ ] One `scripts/agent-verify.sh --codeql` run on the last code commit; result here; push
 
