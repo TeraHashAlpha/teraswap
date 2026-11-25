@@ -39,42 +39,50 @@ const redact = (line: string) => line.replace(/(?:0[xX])?[0-9a-fA-F]{130,}/g, (m
 const out = (o: unknown) => console.log(redact(JSON.stringify(o)))
 const err = (s: string) => console.error(redact(s))
 
+/**
+ * [fix/script-stdout-truncated-on-exit] No `process.exit` after output: a pipe's write is asynchronous, and exiting drops what the
+ * kernel has not taken yet (a slow reader got about the first 64 KB of a large export). The exit code is set instead and the
+ * process ends by itself once stdout and stderr have drained; nothing here keeps the event loop alive.
+ */
+function report(rows: unknown[], verdicts: ReturnType<typeof checkRows>): number {
+  const count = { match: 0, 'non-canonical': 0, differs: 0, uncomputable: 0 }
+  verdicts.forEach((v) => {
+    count[v.verdict]++
+    const stored = safeText(v.stored)
+    const digest = storedDigest(v.stored)
+    if (v.verdict === 'differs') {
+      out({ verdict: 'differs', id: v.id, chain_id: v.chain_id, stored, storedDigest: digest, computed: v.computed, version: v.version })
+    } else if (v.verdict === 'non-canonical') {
+      out({ verdict: 'non-canonical', id: v.id, chain_id: v.chain_id, stored, storedDigest: digest, computed: v.computed })
+    } else if (v.verdict === 'uncomputable') {
+      err(`uncomputable ${JSON.stringify({ id: v.id, chain_id: v.chain_id, stored, storedDigest: digest, reason: v.reason })}`)
+    }
+  })
+  const groups = groupRows(rows, verdicts)
+  for (const g of groups.sameComputedHash) out({ group: 'same-computed-hash', computed: g.computed, ids: g.ids })
+  for (const g of groups.sameSignature) out({ group: 'same-signature', ids: g.ids })
+  for (const id of groups.withoutSignature) err(`no-signature ${JSON.stringify({ id })}`)
+
+  if (verdicts.length === 0) err('check-order-hashes: 0 rows: an empty export proves nothing')
+  err(
+    `checked ${verdicts.length} rows: ${count.match} match, ${count['non-canonical']} non-canonical, ${count.differs} differ, ` +
+    `${count.uncomputable} uncomputable, ${groups.withoutSignature.length} without signature; ` +
+    `${groups.sameComputedHash.length} same-computed-hash groups, ${groups.sameSignature.length} same-signature groups`,
+  )
+  const clean = verdicts.length > 0 && count.match === verdicts.length &&
+    groups.sameComputedHash.length === 0 && groups.sameSignature.length === 0 && groups.withoutSignature.length === 0
+  return clean ? 0 : 1
+}
+
 const input = await readStdin()
-let rows: unknown[]
-let verdicts
+let rows: unknown[] = []
+let verdicts: ReturnType<typeof checkRows> | undefined
 try {
   const parsed = JSON.parse(input)
   verdicts = checkRows(parsed)
   rows = parsed
 } catch (e) {
   err(`check-order-hashes: ${e instanceof Error ? e.message : String(e)}`)
-  process.exit(2)
+  process.exitCode = 2
 }
-
-const count = { match: 0, 'non-canonical': 0, differs: 0, uncomputable: 0 }
-verdicts.forEach((v) => {
-  count[v.verdict]++
-  const stored = safeText(v.stored)
-  const digest = storedDigest(v.stored)
-  if (v.verdict === 'differs') {
-    out({ verdict: 'differs', id: v.id, chain_id: v.chain_id, stored, storedDigest: digest, computed: v.computed, version: v.version })
-  } else if (v.verdict === 'non-canonical') {
-    out({ verdict: 'non-canonical', id: v.id, chain_id: v.chain_id, stored, storedDigest: digest, computed: v.computed })
-  } else if (v.verdict === 'uncomputable') {
-    err(`uncomputable ${JSON.stringify({ id: v.id, chain_id: v.chain_id, stored, storedDigest: digest, reason: v.reason })}`)
-  }
-})
-const groups = groupRows(rows, verdicts)
-for (const g of groups.sameComputedHash) out({ group: 'same-computed-hash', computed: g.computed, ids: g.ids })
-for (const g of groups.sameSignature) out({ group: 'same-signature', ids: g.ids })
-for (const id of groups.withoutSignature) err(`no-signature ${JSON.stringify({ id })}`)
-
-if (verdicts.length === 0) err('check-order-hashes: 0 rows: an empty export proves nothing')
-err(
-  `checked ${verdicts.length} rows: ${count.match} match, ${count['non-canonical']} non-canonical, ${count.differs} differ, ` +
-  `${count.uncomputable} uncomputable, ${groups.withoutSignature.length} without signature; ` +
-  `${groups.sameComputedHash.length} same-computed-hash groups, ${groups.sameSignature.length} same-signature groups`,
-)
-const clean = verdicts.length > 0 && count.match === verdicts.length &&
-  groups.sameComputedHash.length === 0 && groups.sameSignature.length === 0 && groups.withoutSignature.length === 0
-process.exit(clean ? 0 : 1)
+if (verdicts) process.exitCode = report(rows, verdicts)

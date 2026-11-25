@@ -36,6 +36,7 @@ import { parseChainIdEnv } from "./boot-config.js"
 // [A92 S-1] An error is printed through redactError, never as err.message: viem's message carries `URL: <RPC_URL>`,
 // the provider key in its path (redact-a92-s1-cli.test.mjs).
 import { redactError, redactSecretLiterals } from "./redact.js"
+import { CliExit, exitAfterDrain } from "./exit-drained.js"
 import { format } from "node:util"
 
 // [A93 R2-1] EVERY line this CLI prints passes the configured-secret scrub last: a provider that echoes only the request
@@ -237,7 +238,7 @@ function requireEnv(name) {
   const value = process.env[name]
   if (!value) {
     sayErr(`FATAL: ${name} must be set in the environment.`)
-    process.exit(1)
+    throw new CliExit(1)
   }
   return value
 }
@@ -246,7 +247,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2))
   if (!args.fromBlock && !args.fromTs) {
     sayErr(USAGE)
-    process.exit(1)
+    throw new CliExit(1)
   }
 
   const RPC_URL = requireEnv("RPC_URL")
@@ -256,14 +257,14 @@ async function main() {
   for (const [name, value] of [["RPC_URL", RPC_URL], ["SUPABASE_URL", SUPABASE_URL]]) {
     if (!isHttpUrl(value)) {
       sayErr(`FATAL: ${name} is not a valid http(s) URL.`) // [A93 R2-2] the name, never the value
-      process.exit(1)
+      throw new CliExit(1)
     }
   }
 
   const chainIdResult = parseChainIdEnv(process.env.CHAIN_ID)
   if (!chainIdResult.ok) {
     sayErr(`FATAL: ${chainIdResult.reason}`)
-    process.exit(1)
+    throw new CliExit(1)
   }
   const CHAIN_ID = chainIdResult.chainId
 
@@ -278,13 +279,13 @@ async function main() {
     fromBlock = Number(args.fromBlock)
     if (!Number.isFinite(fromBlock) || fromBlock < 0) {
       sayErr(`FATAL: --from-block must be a non-negative integer (received ${args.fromBlock})`)
-      process.exit(1)
+      throw new CliExit(1)
     }
   } else {
     const targetTs = Number(args.fromTs)
     if (!Number.isFinite(targetTs)) {
       sayErr(`FATAL: --from-ts must be a unix timestamp (received ${args.fromTs})`)
-      process.exit(1)
+      throw new CliExit(1)
     }
     fromBlock = await resolveBlockFromTimestamp({
       targetTs,
@@ -315,7 +316,7 @@ async function main() {
   } catch (err) {
     sayErr(redactError(err))
     sayErr(`   Refusing to scan against ${maskRpcUrl()}.`)
-    process.exit(1)
+    throw new CliExit(1)
   }
 
   const contract = scan.verified.contracts[0]
@@ -351,7 +352,8 @@ async function main() {
 const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])
 if (isMainModule) {
   main().catch((err) => {
+    if (err instanceof CliExit) return exitAfterDrain(err.code)
     sayErr(`FATAL: ${redactError(err)}`)
-    process.exit(1)
+    exitAfterDrain(1)
   })
 }

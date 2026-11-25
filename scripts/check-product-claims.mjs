@@ -156,5 +156,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const result = extra.length > 0 ? runCheck(ROOT, extra) : runCheck()
   if (result.stdout) process.stdout.write(result.stdout)
   if (result.stderr) process.stderr.write(result.stderr)
-  process.exit(result.code)
+  // [fix/script-stdout-truncated-on-exit] set, don't exit: a pipe's pending writes are dropped by process.exit
+  process.exitCode = result.code
 }
