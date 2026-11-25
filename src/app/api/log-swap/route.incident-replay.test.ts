@@ -233,7 +233,7 @@ describe('the incident, replayed', () => {
     // The caller knows only the victim's address (it is public): it names it, with an invented hash and a status.
     await fire('PATCH', { txHash: repeated('aa'), wallet: VICTIM, status: 'confirmed' })
     await fire('PATCH', { txHash: repeated('bb'), wallet: VICTIM, status: 'failed' })
-    await fire('PATCH', { txHash: repeated('00'), wallet: VICTIM.toUpperCase().replace('0X', '0x'), status: 'confirmed', gasUsed: '1', mevSavingsActual: '999999999999' })
+    await fire('PATCH', { txHash: repeated('00'), wallet: `0x${VICTIM.slice(2).toUpperCase()}`, status: 'confirmed', gasUsed: '1', mevSavingsActual: '999999999999' })
     check('8 PATCH on another wallet\'s pending row')
   })
 

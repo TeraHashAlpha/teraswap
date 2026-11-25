@@ -158,15 +158,21 @@ export interface ConfirmArgs {
   rowId?: string
 }
 
+/** A row is only ever this wallet's. The lookups are already scoped to the wallet; this is the second lock on that door. */
+function ownRow<T extends SwapRowRef | null | 'error'>(row: T, wallet: string): T | null {
+  if (row === null || row === 'error') return row
+  return row.wallet.toLowerCase() === wallet ? row : null
+}
+
 async function chooseRow(args: ConfirmArgs, now: Date): Promise<SwapRowRef | null | 'verified' | 'error'> {
   // 1. The row of THAT wallet that already carries this hash.
-  const byTx = await findWalletRowByTx(args.db, args.wallet, args.txHash)
+  const byTx = ownRow(await findWalletRowByTx(args.db, args.wallet, args.txHash), args.wallet)
   if (byTx === 'error') return 'error'
   if (byTx !== null) return byTx.verified_at !== null ? 'verified' : byTx
 
   // 2. The row a POST just inserted, or else the latest pending row of THAT wallet in the last two hours.
-  if (args.rowId !== undefined) return findWalletRowById(args.db, args.wallet, args.rowId)
-  return findLatestPending(args.db, args.wallet, new Date(now.getTime() - PENDING_MATCH_WINDOW_MS).toISOString())
+  if (args.rowId !== undefined) return ownRow(await findWalletRowById(args.db, args.wallet, args.rowId), args.wallet)
+  return ownRow(await findLatestPending(args.db, args.wallet, new Date(now.getTime() - PENDING_MATCH_WINDOW_MS).toISOString()), args.wallet)
 }
 
 /**
@@ -179,8 +185,6 @@ export async function confirmSwap(args: ConfirmArgs, deps: ConfirmDeps = {}): Pr
   if (row === 'error') return { result: 'storage_error' }
   if (row === 'verified') return { result: 'verified' }
   if (row === null) return { result: 'no_row' }
-  // Defence in depth: the lookups are already scoped to the wallet.
-  if (row.wallet.toLowerCase() !== args.wallet) return { result: 'no_row' }
   if (row.verified_at !== null) return { result: 'verified' }
 
   // One transaction, one row: asked before any chain read, and enforced again by the database on the update.

@@ -329,7 +329,7 @@ describe('row choice: that wallet\'s row with that hash, else that wallet\'s lat
     const f = R.mainnetFcTokenToToken
     // As main stored it: the caller's status, hash, symbols and a USD priced from the DECLARED 500 WETH.
     state.db = createFakeSwapsDb({
-      swaps: [pendingRow(sender(f), { status: 'confirmed', tx_hash: f.hash.toUpperCase().replace('0X', '0x'), amount_in_usd: 1_700_000, token_in_symbol: XSS, created_at: '2026-11-20T09:25:00.000Z' })],
+      swaps: [pendingRow(sender(f), { status: 'confirmed', tx_hash: `0x${f.hash.slice(2).toUpperCase()}`, amount_in_usd: 1_700_000, token_in_symbol: XSS, created_at: '2026-11-20T09:25:00.000Z' })],
     })
     expect((await patch({ txHash: f.hash, wallet: sender(f) })).status).toBe(200)
     expect(rows()[0]).toMatchObject({ status: 'confirmed', verified_kind: 'fee_collector', tx_hash: f.hash.toLowerCase(), amount_in: '46080134130180921522', amount_in_usd: null })
@@ -432,7 +432,7 @@ describe('one transaction, one row', () => {
   it('the hash is matched without regard to letter case, on the row\'s chain only', async () => {
     const f = R.mainnetFcTokenToToken
     state.db = createFakeSwapsDb({ swaps: [pendingRow(sender(f))] })
-    expect((await patch({ txHash: f.hash.toUpperCase().replace('0X', '0x'), wallet: sender(f).toUpperCase().replace('0X', '0x') })).status).toBe(200)
+    expect((await patch({ txHash: `0x${f.hash.slice(2).toUpperCase()}`, wallet: `0x${sender(f).slice(2).toUpperCase()}` })).status).toBe(200)
     expect(rows()[0]).toMatchObject({ status: 'confirmed', tx_hash: f.hash.toLowerCase(), wallet: sender(f) })
     // The same hash named for a row on Base: Base has no such transaction.
     state.db = createFakeSwapsDb({ swaps: [pendingRow(sender(f), { chain_id: 8453 })] })
@@ -558,6 +558,24 @@ describe('the request itself', () => {
     expect(state.db.ops).toEqual([])
     expect(rpc.calls).toEqual([])
     expect(rows()[0].status).toBe('pending')
+  })
+
+  it('every row lookup of a PATCH is scoped to the wallet it names; only the one-transaction-one-row check looks across wallets', async () => {
+    const f = R.mainnetFcTokenToToken
+    state.db = createFakeSwapsDb({ swaps: [pendingRow(sender(f)), pendingRow(ATTACKER)] })
+    await patch({ txHash: f.hash, wallet: sender(f) })
+    const lookups = state.db.ops.filter((o) => o.kind === 'select' && o.table === 'swaps' && o.detail !== 'verified_at, verified_kind')
+    expect(lookups.length).toBeGreaterThanOrEqual(3)
+    const acrossWallets = lookups.filter((o) => !o.filters.includes(`wallet=eq.${sender(f)}`))
+    // The duplicate check: by chain and hash, verified rows only, and it returns an id and a wallet, never a row to write.
+    expect(acrossWallets.map((o) => [o.detail, o.filters])).toEqual([
+      ['id, wallet', ['chain_id=eq.1', `tx_hash=ilike.${f.hash.toLowerCase()}`, 'verified_at=not.is.null', expect.stringMatching(/^id=neq\./), 'limit=1']],
+    ])
+    // The fallback lookup: that wallet, pending, no hash, unverified, inside the two-hour window, newest first, one row.
+    const fallback = lookups.find((o) => o.filters.includes('status=eq.pending'))
+    expect(fallback?.filters).toEqual([
+      `wallet=eq.${sender(f)}`, 'status=eq.pending', 'tx_hash=is.null', 'verified_at=is.null', expect.stringMatching(/^created_at=gte\.\d{4}-/), 'order=created_at.desc', 'limit=1',
+    ])
   })
 
   it('PATCH never uses the insert-only logger client', async () => {

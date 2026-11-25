@@ -88,7 +88,7 @@ function digits(v: unknown): string | null {
   const t = text(v)
   if (t === null) return null
   const whole = /^(\d{1,78})(?:\.0*)?$/.exec(t.trim())
-  return whole ? whole[1].replace(/^0+(?=\d)/, '') : null
+  return whole ? BigInt(whole[1]).toString() : null
 }
 
 function ratio4(numerator: bigint, denominator: bigint): string {

@@ -137,11 +137,21 @@ export function createFakeSwapsDb(options: FakeSwapsDbOptions = {}) {
   const columns: readonly string[] = migrated ? SWAPS_COLUMNS_AFTER : SWAPS_COLUMNS_BEFORE
   const notNull: readonly string[] = migrated ? SWAPS_NOT_NULL_AFTER : SWAPS_NOT_NULL_BEFORE
   const now = options.now ?? (() => new Date())
-  const tables: Record<string, Row[]> = { ...(options.tables ?? {}), swaps: (options.swaps ?? []).map((r) => ({ ...r })) }
+  // A Map, never a plain object: a table name can come from a request (the HTTP shim of e2e/swap-log), and a name
+  // must not be able to reach a property of Object.prototype.
+  const tables = new Map<string, Row[]>(Object.entries(options.tables ?? {}))
+  tables.set('swaps', (options.swaps ?? []).map((r) => ({ ...r })))
   const ops: RecordedOp[] = []
   let sequence = 0
 
-  const rowsOf = (table: string): Row[] => (tables[table] ??= [])
+  const rowsOf = (table: string): Row[] => {
+    let rows = tables.get(table)
+    if (!rows) {
+      rows = []
+      tables.set(table, rows)
+    }
+    return rows
+  }
   const missingColumn = (table: string, column: string): PgError => ({ code: '42703', message: `column ${table}.${column} does not exist` })
 
   function checkColumns(table: string, used: Iterable<string>): PgError | null {
@@ -169,14 +179,14 @@ export function createFakeSwapsDb(options: FakeSwapsDbOptions = {}) {
   function project(table: string, row: Row, selectText: string): Row {
     const text = selectText.trim()
     if (text === '' || text === '*') return table === 'swaps' ? Object.fromEntries(columns.map((c) => [c, row[c] ?? null])) : { ...row }
-    const out: Row = {}
-    for (const item of splitTopLevel(text).map((s) => s.trim())) {
+    const names = splitTopLevel(text).map((s) => {
+      const item = s.trim()
       const open = item.indexOf('(')
       // An embed (`orders(...)`, `orders!inner(...)`): the stored parent object, as it is.
-      const name = open === -1 ? item : item.slice(0, open).split('!')[0]
-      out[name] = row[name] ?? null
-    }
-    return out
+      return open === -1 ? item : item.slice(0, open).split('!')[0]
+    })
+    // Own properties of the row only, so a selected name can not read (or, in the copy, become) anything inherited.
+    return Object.fromEntries(names.map((name) => [name, Object.prototype.hasOwnProperty.call(row, name) ? (row[name] ?? null) : null]))
   }
 
   function selectColumns(selectText: string): string[] {

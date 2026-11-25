@@ -19,7 +19,10 @@ const read = (path: string) => readFileSync(join(ROOT, path), 'utf8')
 function code(sql: string): string {
   return sql
     .split('\n')
-    .map((line) => line.replace(/--.*$/, ''))
+    .map((line) => {
+      const comment = line.indexOf('--')
+      return comment === -1 ? line : line.slice(0, comment)
+    })
     .join('\n')
     .replace(/\s+/g, ' ')
     .trim()

@@ -227,8 +227,28 @@ describe('kind fee_collector: tx.to is that chain\'s FeeCollector and tx.from is
 
   it('the wallet is compared case-insensitively', async () => {
     const f = R.mainnetFcTokenToToken
-    expect((await verify(f, sender(f).toUpperCase().replace('0X', '0x'), 'velora')).result.outcome).toBe('confirmed')
+    expect((await verify(f, `0x${sender(f).slice(2).toUpperCase()}`, 'velora')).result.outcome).toBe('confirmed')
     expect((await verify(f, sender(f).toLowerCase(), 'velora')).result.outcome).toBe('confirmed')
+  })
+
+  it('a SwapWithFee event of ANOTHER user in this wallet\'s transaction is not this wallet\'s swap: nothing is taken from it', async () => {
+    // On-chain the event's user is always the caller, so this receipt can not exist; the function still must not read
+    // a side out of an event that names someone else.
+    const f = R.mainnetFcTokenToEth
+    const collector = FIXTURE_FEE_COLLECTOR[1].toLowerCase()
+    const other = structuredClone(f.receipt)
+    let changed = 0
+    for (const log of other.logs) {
+      const topics = log.topics as string[]
+      if (String(log.address).toLowerCase() === collector && topics.length === 3) {
+        topics[1] = `0x${'0'.repeat(24)}${OTHER_WALLET.slice(2)}`
+        changed++
+      }
+    }
+    expect(changed).toBe(1)
+    const chain = recordedChainRead(ALL_SWAP_RECEIPTS, { eth_getTransactionReceipt: other })
+    const result = await verifySwapOnChain(input(f, sender(f), 'velora'), { read: chain.read })
+    expect(result).toMatchObject({ outcome: 'confirmed', kind: 'fee_collector', derived: { tokenIn: null, amountIn: null, tokenOut: null, amountOut: null } })
   })
 
   it('a SwapWithFee event counts only when the FeeCollector itself emitted it, for this wallet', async () => {

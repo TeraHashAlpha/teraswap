@@ -128,6 +128,9 @@ describe('one retry at most, an explicit timeout, and a null answer is an answer
     ['an HTTP 500', () => new Response('upstream', { status: 500 })],
     ['an HTTP 429', () => new Response('slow down', { status: 429 })],
     ['a JSON-RPC error envelope', () => Response.json({ jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'boom' } })],
+    // An answer that carries an error is never used, whatever else it carries.
+    ['an error envelope that also has a null result', () => Response.json({ jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'boom' }, result: null })],
+    ['an error envelope that also has a result', () => Response.json({ jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'boom' }, result: { status: '0x1' } })],
     ['a body that is not JSON', () => new Response('<html>', { status: 200 })],
     ['a JSON body with no result member', () => Response.json({ jsonrpc: '2.0', id: 1 })],
     ['a JSON array', () => Response.json([1, 2])],

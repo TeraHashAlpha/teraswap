@@ -187,7 +187,7 @@ async function runSeed(seed: number, total: number) {
     const actor = rand()
     // honest: the wallet that made the swap. impersonator: an invented wallet's request naming the honest wallet.
     const named = actor < 0.5 ? claim.wallet : actor < 0.75 ? pick(invented) : pick(all).wallet
-    const namedWallet = chance(0.2) ? named.toUpperCase().replace('0X', '0x') : named
+    const namedWallet = chance(0.2) ? `0x${named.slice(2).toUpperCase()}` : named
     const hash = chance(0.6) ? claim.fixture.hash : chance(0.5) ? pick(all).fixture.hash : inventedHash()
     const chainId = chance(0.85) ? claim.fixture.chainId : pick([1, 8453, 42161])
     const source = chance(0.7) ? claim.source : pick(SOURCES)
