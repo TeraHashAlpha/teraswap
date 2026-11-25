@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase, isSupabaseEnabled } from '@/lib/supabase'
 import { safeCompare } from '@/lib/validation'
+import { publicSwaps } from '@/lib/swap-log/public-filter'
 
 /**
  * GET /api/health?token=<HEALTH_TOKEN>
@@ -79,18 +80,24 @@ export async function GET(request: NextRequest) {
   // to confirm the analytics pipeline is functional.
 
   // Test 4: Count total swaps
-  const { count, error: countErr } = await supabase
-    .from('swaps')
-    .select('*', { count: 'exact', head: true })
+  // [ADR-029] With SWAPS_PUBLIC_VERIFIED_ONLY on, the count and the sample below are of verified swaps only. Test 1
+  // above stays as it is: it asks whether the table can be read, and returns no row.
+  const { count, error: countErr } = await publicSwaps(
+    supabase
+      .from('swaps')
+      .select('*', { count: 'exact', head: true }),
+  )
 
   if (!countErr) {
     checks.totalSwaps = count
   }
 
   // Test 5: Sample raw data (for debugging format issues)
-  const { data: sampleRows } = await supabase
-    .from('swaps')
-    .select('id, wallet, source, token_in_symbol, token_out_symbol, amount_in, amount_out, amount_in_usd, amount_out_usd, status, fee_collected, fee_amount, chain_id, created_at')
+  const { data: sampleRows } = await publicSwaps(
+    supabase
+      .from('swaps')
+      .select('id, wallet, source, token_in_symbol, token_out_symbol, amount_in, amount_out, amount_in_usd, amount_out_usd, status, fee_collected, fee_amount, chain_id, created_at'),
+  )
     .order('created_at', { ascending: false })
     .limit(3)
 

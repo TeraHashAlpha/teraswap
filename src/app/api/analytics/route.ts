@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/supabase'
 import { PUBLIC_ORDER_STATUSES } from '@/lib/order-engine/read-auth'
+import { publicSwaps } from '@/lib/swap-log/public-filter'
 
 /**
  * GET /api/analytics
@@ -32,11 +33,14 @@ export async function GET() {
     // gives automatic backfill of already-executed chunks with no contract or
     // keeper change. The execution fetch is fail-soft: any error returns [] so a
     // problem there never regresses instant-swap analytics.
+    // [ADR-029] With SWAPS_PUBLIC_VERIFIED_ONLY on, only swaps the server verified on-chain are counted and listed.
     const [{ data: swaps, error }, executions] = await Promise.all([
-      supabase
-        .from('swaps')
-        .select('*')
-        .eq('status', 'confirmed')
+      publicSwaps(
+        supabase
+          .from('swaps')
+          .select('*')
+          .eq('status', 'confirmed'),
+      )
         .order('created_at', { ascending: false })
         .limit(5000),
       fetchConfirmedExecutions(supabase),

@@ -15,6 +15,7 @@ import { formatUnits } from 'viem'
 import { getSupabase } from '@/lib/supabase'
 import { isValidAddress } from '@/lib/validation'
 import { checkRateLimit } from '@/lib/kv-rate-limiter'
+import { publicSwaps } from '@/lib/swap-log/public-filter'
 
 export const dynamic = 'force-dynamic'
 
@@ -208,13 +209,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     })
   }
 
-  const { data, error } = await supabase
-    .from('swaps')
-    .select(
-      'created_at, source, token_in_symbol, token_out_symbol, amount_in, amount_out, amount_in_usd, gas_used, gas_savings_usd, is_gasless, tx_hash, status',
-    )
-    .eq('wallet', walletLc)
-    .or('status.eq.confirmed,and(status.eq.pending,tx_hash.not.is.null)')
+  // [ADR-029] With SWAPS_PUBLIC_VERIFIED_ONLY on, the export holds only swaps the server verified on-chain.
+  const { data, error } = await publicSwaps(
+    supabase
+      .from('swaps')
+      .select(
+        'created_at, source, token_in_symbol, token_out_symbol, amount_in, amount_out, amount_in_usd, gas_used, gas_savings_usd, is_gasless, tx_hash, status',
+      )
+      .eq('wallet', walletLc)
+      .or('status.eq.confirmed,and(status.eq.pending,tx_hash.not.is.null)'),
+  )
     .order('created_at', { ascending: false })
     .limit(10_000)
 
