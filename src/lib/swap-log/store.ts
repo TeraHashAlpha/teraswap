@@ -45,27 +45,31 @@ function isMissingVerifiedColumn(error: PgError | null | undefined): boolean {
   return /verified_(at|kind)/.test(String(error.message ?? ''))
 }
 
-let columnsSeen = false
+/** How long a "the columns are there" answer is trusted before it is asked again. */
+export const VERIFIED_COLUMNS_SEEN_TTL_MS = 5 * 60 * 1000
+
+let columnsSeenAt: number | null = null
 
 /** Test-only: forget that the columns were seen. */
 export function _resetVerifiedColumnsCache(): void {
-  columnsSeen = false
+  columnsSeenAt = null
 }
 
 export type ColumnsState = 'present' | 'missing' | 'unknown'
 
 /**
- * Are `verified_at` and `verified_kind` there? Once seen they stay seen for this process (columns are not dropped);
- * `missing` is asked again on every request, so the code starts writing as soon as the migration is applied.
- * `unknown`: the probe failed for another reason (an outage): the caller treats it as "do not write".
+ * Are `verified_at` and `verified_kind` there? `present` is remembered for five minutes per process (one small read
+ * saved per request); `missing` is asked again on every request, so the code starts writing as soon as the migration
+ * is applied. `unknown`: the probe failed for another reason (an outage): the caller does not write.
  */
-export async function verifiedColumnsState(db: SupabaseClient): Promise<ColumnsState> {
-  if (columnsSeen) return 'present'
+export async function verifiedColumnsState(db: SupabaseClient, now: number = Date.now()): Promise<ColumnsState> {
+  if (columnsSeenAt !== null && now - columnsSeenAt < VERIFIED_COLUMNS_SEEN_TTL_MS) return 'present'
   const { error } = await db.from('swaps').select('verified_at, verified_kind').limit(1)
   if (!error) {
-    columnsSeen = true
+    columnsSeenAt = now
     return 'present'
   }
+  columnsSeenAt = null
   return isMissingVerifiedColumn(error) ? 'missing' : 'unknown'
 }
 

@@ -8,6 +8,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { NextRequest } from 'next/server'
 
 const state = vi.hoisted(() => {
+  // A throwaway salt, so the rate limiter's one-time "salt not set" warning is not among the captured log lines.
+  process.env.RATE_LIMIT_SALT = 'test-only-salt-0123456789-abcdefghijklmnop'
   delete process.env.NEXT_PUBLIC_FEE_COLLECTOR
   process.env.NEXT_PUBLIC_BASE_FEE_COLLECTOR = '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130'
   process.env.NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR = '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130'

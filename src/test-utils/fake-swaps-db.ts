@@ -27,15 +27,19 @@ export const SWAPS_COLUMNS_BEFORE = [
 /** After the ADR-029 migration. */
 export const SWAPS_COLUMNS_AFTER = [...SWAPS_COLUMNS_BEFORE, 'verified_at', 'verified_kind'] as const
 
-/** schema.sql:13-29, :34-38: NOT NULL before the migration. */
-export const SWAPS_NOT_NULL_BEFORE = [
-  'id', 'created_at', 'wallet', 'chain_id', 'status', 'source',
-  'token_in', 'token_in_symbol', 'token_out', 'token_out_symbol', 'amount_in', 'amount_out',
-  'slippage', 'mev_protected', 'fee_collected',
+/** The six columns the ADR-029 migration drops NOT NULL on. */
+export const SWAPS_SIDE_COLUMNS = ['token_in', 'token_in_symbol', 'token_out', 'token_out_symbol', 'amount_in', 'amount_out'] as const
+
+/** NOT NULL after the migration: schema.sql:10-38 less the six side columns, plus migration 20260513's two. */
+export const SWAPS_NOT_NULL_AFTER = [
+  'id', 'created_at', 'wallet', 'chain_id', 'status', 'source', 'slippage', 'mev_protected', 'fee_collected', 'is_gasless', 'gas_savings_usd',
 ] as const
 
-/** The migration drops NOT NULL on the six token, symbol and amount columns. */
-export const SWAPS_NOT_NULL_AFTER = ['id', 'created_at', 'wallet', 'chain_id', 'status', 'source', 'slippage', 'mev_protected', 'fee_collected'] as const
+/** NOT NULL before the migration. */
+export const SWAPS_NOT_NULL_BEFORE = [...SWAPS_NOT_NULL_AFTER, ...SWAPS_SIDE_COLUMNS] as const
+
+/** Column defaults of the table (schema.sql, migration 20260513). */
+const SWAPS_DEFAULTS: Row = { chain_id: 1, status: 'pending', slippage: 0.5, mev_protected: false, fee_collected: false, is_gasless: false, gas_savings_usd: 0 }
 
 const VERIFIED_KINDS = new Set(['fee_collector', 'router', 'cow'])
 
@@ -215,7 +219,13 @@ export function createFakeSwapsDb(options: FakeSwapsDbOptions = {}) {
           const columnError = checkColumns(table, Object.keys(input))
           if (columnError) return { data: null, error: columnError, count: null }
           const row: Row = table === 'swaps'
-            ? { id: `00000000-0000-4000-8000-${String(++sequence).padStart(12, '0')}`, created_at: now().toISOString(), chain_id: 1, status: 'pending', slippage: 0.5, mev_protected: false, fee_collected: false, ...Object.fromEntries(columns.filter((c) => !['id', 'created_at', 'chain_id', 'status', 'slippage', 'mev_protected', 'fee_collected'].includes(c)).map((c) => [c, null])), ...input }
+            ? {
+                ...Object.fromEntries(columns.map((c) => [c, null])),
+                id: `00000000-0000-4000-8000-${String(++sequence).padStart(12, '0')}`,
+                created_at: now().toISOString(),
+                ...SWAPS_DEFAULTS,
+                ...input,
+              }
             : { ...input }
           if (table === 'swaps') {
             const error = constraintError(row, all)

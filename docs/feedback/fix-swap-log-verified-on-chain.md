@@ -6,7 +6,7 @@ Tables and long evidence: `fix-swap-log-verified-on-chain.tables.md` beside this
 - [x] Commit 1: verification function (details A), real receipt fixtures, tests
 - [x] Commit 2: POST inserts only a private pending row; symbols from the catalog (details B)
 - [x] Commit 3: PATCH `{ txHash, wallet }` verifies on-chain, one transaction one row, trackers after confirmation (details C)
-- [ ] Commit 4: migration text and schema.sql mirror; code works before it is applied (details E)
+- [x] Commit 4: migration text and schema.sql mirror; code works before it is applied (details E)
 - [ ] Commit 5: readers behind `SWAPS_PUBLIC_VERIFIED_ONLY`, default off (details D)
 - [ ] Commit 6: script for stored rows, report mode by default (details F)
 - [ ] Tests of details G: route replay, property, differential, browser v1 and v2, mutation proof

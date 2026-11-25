@@ -7,7 +7,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { NextRequest } from 'next/server'
 import { createFakeSwapsDb, type FakeSwapsDb } from '@/test-utils/fake-swaps-db'
 
-const state = vi.hoisted(() => ({ db: null as unknown as FakeSwapsDb }))
+const state = vi.hoisted(() => {
+  // A throwaway salt, so the rate limiter's one-time "salt not set" warning is not among the captured log lines.
+  process.env.RATE_LIMIT_SALT = 'test-only-salt-0123456789-abcdefghijklmnop'
+  return { db: null as unknown as FakeSwapsDb }
+})
 
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => state.db.service,
