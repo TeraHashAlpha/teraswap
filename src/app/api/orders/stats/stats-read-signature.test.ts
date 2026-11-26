@@ -18,7 +18,14 @@ import type { Row } from '@/test-utils/fake-postgrest'
 import { DB_ORDER_STATUSES, makeExecutionRow, makeOrderRow, makeOrdersDb, prng } from '@/test-utils/orders-db-fixture'
 
 let db = makeOrdersDb({ orders: [] })
-vi.mock('@supabase/supabase-js', () => ({ createClient: () => db.client }))
+/** [A102 R3-2] When set, createClient throws it (supabase-js does so for a malformed SUPABASE_URL). */
+let clientError: Error | null = null
+vi.mock('@supabase/supabase-js', () => ({
+  createClient: () => {
+    if (clientError) throw clientError
+    return db.client
+  },
+}))
 
 import { GET } from './route'
 
@@ -35,6 +42,7 @@ async function headersFor(signer: typeof owner, forWallet: string, issuedAt = Ma
 }
 
 beforeEach(() => {
+  clientError = null
   vi.stubEnv('SUPABASE_URL', 'https://stub.supabase.co')
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'service-role-stub')
   const rand = prng(20261119)
@@ -96,5 +104,21 @@ describe('GET /api/orders/stats: the wallet\'s 24 h fill count needs its read si
     expect(answers.map((a) => a.recentExecutions24h)).toEqual([14, 14, 14])
     expect(answers[1]).toEqual(answers[0])
     expect(answers[2]).toEqual(answers[0])
+  })
+})
+
+// [A102 R3-2] The database client is created inside the handler's try: a throw there used to leave the handler, and the
+// framework's own 500 carried no cache header.
+describe('GET /api/orders/stats: a database client that cannot be created (A102 R3-2)', () => {
+  it.each([
+    ['no wallet', ''],
+    ['a wallet', `?wallet=${WALLET}`],
+  ])('%s: the route\'s own 500, with the orders read cache header, and nothing is read', async (_label, query) => {
+    clientError = new Error('Invalid supabaseUrl: Must be a valid HTTP or HTTPS URL.')
+    const res = await get(query)
+    expect(res.status).toBe(500)
+    expect(res.headers.get('Cache-Control')).toBe('private, no-store')
+    expect(await res.json()).toEqual({ error: 'Invalid supabaseUrl: Must be a valid HTTP or HTTPS URL.' })
+    expect(db.selects).toEqual([])
   })
 })
