@@ -16,7 +16,7 @@
  *
  * Usage: node scripts/check-v1-css.mjs [static-dir]   (default: .next/static)
  */
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -38,7 +38,7 @@ function stylesheets(dir) {
   if (!existsSync(dir)) return []
   return readdirSync(dir, { recursive: true })
     .map(String)
-    .filter((f) => f.endsWith('.css') && statSync(path.join(dir, f)).isFile())
+    .filter((f) => f.endsWith('.css'))
     .sort()
 }
 

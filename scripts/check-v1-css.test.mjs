@@ -12,6 +12,8 @@ const ROOT = path.join(HERE, '..')
 const SCRIPT = path.join(HERE, 'check-v1-css.mjs')
 const GOOD = readFileSync(path.join(HERE, 'check-v1-css-fixtures/good.css'), 'utf8')
 const CROSSED = readFileSync(path.join(HERE, 'check-v1-css-fixtures/crossed.css'), 'utf8')
+// a class name as a selector writes it: each "/" escaped
+const selector = (name) => name.split('/').join('\\/')
 // the separate stylesheet the v2 pass emits
 const V2_SHEET = '.bg-v2-surface{background-color:#0e1416}\n.font-v2-mono{font-family:var(--font-mono)}\n.text-v2-text{color:#e8ecea}\n'
 
@@ -49,7 +51,7 @@ describe('check-v1-css on the fixtures', () => {
 
   it('either half alone fails: a lost v1 utility, or one v2 utility leaked into an otherwise good sheet', () => {
     for (const m of V1_ONLY) {
-      const lost = GOOD.replace(`.${m.replace('/', '\\/')}{`, '.gone{')
+      const lost = GOOD.replace(`.${selector(m)}{`, '.gone{')
       expect(lost).not.toBe(GOOD)
       const r = run({ 'aaa.css': lost, 'bbb.css': V2_SHEET })
       expect(r.status, m).toBe(1)
@@ -73,7 +75,7 @@ describe('check-v1-css on the fixtures', () => {
 
   it('a marker is matched as a whole class: a variant, a longer name, a comment, a string or a url() is not it', () => {
     const fake = V1_ONLY.map((m) => {
-      const e = m.replace('/', '\\/')
+      const e = selector(m)
       return `.hover\\:${e}:hover{x:y}\n.${e}0{x:y}\n.${e}-x{x:y}\n/* .${e} */\n.a{content:".${e}"}\n.b{background:url(/x.${e})}\n`
     }).join('')
     const r = run({ 'aaa.css': `:root{${ANCHOR}1}\n${fake}`, 'bbb.css': V2_SHEET })
