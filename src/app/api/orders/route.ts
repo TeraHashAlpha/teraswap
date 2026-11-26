@@ -820,10 +820,9 @@ export async function POST(req: NextRequest) {
     // names a row this request did not store: `serverHash` is the hash of the signed order, `outcome` says what
     // happened to it. It never carries the signature or the wallet.
     // [A95 S-1] Nor any text the caller sent: the caller's orderHash appears only as its SHAPE (<hash-shaped> /
-    // <string len N> / <type T>) and, [A98 R2-1] only when it is 0x + 64 hex, the first 16 hex of its keccak256 (null
-    // otherwise: a short text's digest can be reversed), to match two lines about one text. A text that mixes signature hex
-    // with other hex has the shape of a hash, so no rule about which hex "belongs to the signature" can be complete (A89
-    // R2-1 had one); the line carries none of it.
+    // <string len N> / <type T>) and, [A98 R2-1] only for 0x + 64 hex (a short text's digest can be reversed), the first 16 hex
+    // of its keccak256, to match two lines about one text. A text that mixes signature hex with other hex has the shape of a
+    // hash, so no rule about which hex "belongs to the signature" can be complete (A89 R2-1 had one); the line carries none of it.
     // [A86 S-3] The 4 texts of this signature that recover the same signer (v 27/28 or 0/1, s or its twin n − s).
     const signatureTexts = orderSignatureEncodings(body.signature) ?? [body.signature.toLowerCase()]
     // [A95 S-2] What the row stores: the one text of this signature the executors accept (v 27/28, low s, lower case, 0x).
