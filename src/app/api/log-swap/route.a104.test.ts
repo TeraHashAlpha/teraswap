@@ -84,7 +84,7 @@ vi.mock('@/lib/kv-rate-limiter', async () => {
 
 import { EVERY_SWAP_RECEIPT, ROUND3_RECEIPTS as R3, SWAP_RECEIPTS as R, type SwapReceiptFixture } from '@/lib/__fixtures__/swap-receipts'
 import { ROUTER_WHITELIST_BY_CHAIN } from '@/lib/chains/routers'
-import { _internal as limiterInternal } from '@/lib/kv-rate-limiter'
+import { _internal as limiterInternal, checkRateLimitWithin } from '@/lib/kv-rate-limiter'
 import { __resetChainIdentityCache } from '@/lib/rpc-chain-identity'
 import { trackLargeTrade, trackOracleDeviation, trackOracleUnavailable } from '@/lib/security-tracker'
 import { confirmSwap } from '@/lib/swap-log/confirm'
@@ -369,7 +369,8 @@ describe('P.1 and P.2: one claim row per (wallet, chain named or none, hash); th
   it('a repeat is the same row and does not move claimed_at; a third party naming another chain gets a row of its own [fails on cbd51bcf]', async () => {
     stubVictimLag()
     await confirm(VICTIM, V.hash, 1)
-    const first = claimRowsOf(VICTIM)
+    // Copies: the fake database hands back its live rows, which an update changes in place.
+    const first = claimRowsOf(VICTIM).map((r) => ({ ...r }))
     expect(first).toHaveLength(1)
     advance(5 * 60_000)
     await confirm(VICTIM, V.hash, 1)
@@ -400,7 +401,8 @@ describe('P.1 and P.2: one claim row per (wallet, chain named or none, hash); th
 describe('A104 R2-3: a third party\'s claim never lands on the victim\'s POST row', () => {
   it('B4: an invented PATCH lands on a row of its own; the victim\'s POST row gets its verified swap; History shows one item [fails on cbd51bcf]', async () => {
     await postVictim()
-    const postRow = rows()[0]
+    // A copy: the fake database hands back its live rows, which an update changes in place.
+    const postRow = { ...rows()[0] }
     expect((await confirm(VICTIM, invented(300), 1)).status).toBe(202)
     // The POST row is untouched; the invented hash is on a claim row.
     expect(rows().find((r) => r.id === postRow.id)).toEqual(postRow)
@@ -517,6 +519,22 @@ describe('A104 R2-4: a budget for confirmations that name no chain, and for ever
     await confirm('0x0000000000000000000000000000000000000e00', invented(99), 1)
     expect(rpc.calls.length).toBeGreaterThan(READ_BUDGET_PER_MINUTE)
     expect(limiterInternal.isKvFailureAlerted()).toBe(false)
+  })
+
+  it('Q.2: a spent budget ends the search: a request naming no chain asks the budget once and tries no other chain [fails on cbd51bcf]', async () => {
+    state.realLimiter = true
+    stub({ fixtures: [] })
+    // Spend the minute's budget (each confirmation of an unknown hash on its chain: 2 calls, the first also the proof).
+    for (let i = 0; i < 40; i++) await confirm(`0x${(0xa00 + i).toString(16).padStart(40, '0')}`, invented(600 + i), 1)
+    rpc.reset()
+    const budgetAsks = () => vi.mocked(checkRateLimitWithin).mock.calls.filter((c) => String(c[0]).startsWith('log-reads:')).length
+    const before = budgetAsks()
+    const W = '0x00000000000000000000000000000000000b0d03'
+    expect((await confirm(W, invented(700))).status).toBe(202)
+    expect(rpc.calls).toEqual([])
+    expect(budgetAsks() - before).toBe(1)
+    // The claim is still kept, with no chain (none was asked).
+    expect(claimRowsOf(W).map((r) => r.claimed_chain_id)).toEqual([null])
   })
 
   it('Q.2 with P.3: the cap check\'s reads are paid too; spent, it asks nothing and deletes nothing, and the claim is not stored [fails on cbd51bcf]', async () => {
