@@ -52,3 +52,24 @@ codeql PASS head 11, base 11, new 0 (pack 2.5.0, CLI 2.27.5); keeper not request
 - `git diff --stat origin/main...bbe9d40e`: 62 files, +10695 / -266 (43 files, +7088 without the receipt fixtures and the golden); the docs commit adds only the two feedback files.
 - Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/swap-log-verified-on-chain
 - NOT verified: the migration against any database, Linux CI, a real wallet, a FeeCollector or 0x swap in the browser, the script on stored rows, the flag on in a deployment. T6.
+
+## Round 2 (goal 133b: audit A103 at 09ddf974, blocked 0C/4H; ADR-029 section 7)
+Merged origin/main (fe3ab13b, PR #727) first: 64475599. Then `npm ci`. Tables: `.tables.md` sections R1 to R6.
+
+### Checklist
+- [x] Merge origin/main, `npm ci`
+- [ ] 1 Verification rewritten (details H), S-8 fixture, fork fixtures for S-1/S-2/S-5
+- [ ] 2 Migration and schema.sql (details K), the swaps read-columns guard, `/api/history` withholds the claim columns
+- [ ] 3 Confirmation and row model (details I), the client's `chainId` and three quiet retries
+- [ ] 4 Pending rows retired at the cap, never refused (details J)
+- [ ] 5 The script reads claims and lists caller-supplied columns (details L)
+- [ ] 6 Tests (details M), each new one failing on 09ddf974 first; mutation; browser v1/v2
+- [ ] One `agent-verify.sh --codeql` on the last code commit; result here; push
+
+Commit order: K (migration) goes before I and J, because I and J write its new columns; each commit's content is as listed.
+
+### Owner answers (asked once, 2026-11-26; they supersede the details text)
+1. **Cap scope (J)**: the cap may delete only pending, hash-less, unverified rows created in the last hour OR carrying a claim. Oldest unclaimed first; all claimed: the oldest claim older than 24 h; else a sixth row; at 20 such rows the oldest goes whatever it carries. An old row without a claim is never deleted.
+2. **ETH in only (H.3)**: a router transaction whose only in side is the ETH value and that has no out side is rejected (`no_net_swap`).
+3. **Failed rows (I.2)**: a reverted result goes to the pending row whose in token is the one the call shows (ETH value; the FeeCollector call's token), else the newest pending row on that chain with the transaction's source, else a new failed row.
+4. **Small calls**: a PATCH without `chainId` tries the pending rows' chains first, then the app's other chains; slippage and expected_output stay on an updated pending row (round-1 answer 2); the swaps read-columns guard is its own file, the orders guard untouched.

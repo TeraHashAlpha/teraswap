@@ -23,8 +23,23 @@
  *   42161  fee_collector  token -> ETH     0xf14b181b   the transaction docs/DEPLOYMENTS.md names for the Arbitrum fee check
  *   42161  router (0x)    token -> token   0xac6565a1
  *   42161  cow            via a solver     0xcba5a096
+ *   8453   router (uniswapv3) token -> token 0xfb357206  sent straight to Uniswap SwapRouter02 on Base (A103 S-8: the
+ *                                                       only router fixture whose router differs per chain), read
+ *                                                       2026-11-26 from mainnet.base.org
  *
  * The addresses in them are public chain data. No reverted transaction of ours exists on Base or Arbitrum.
+ *
+ * FORK_SWAP_RECEIPTS (goal 133b, A103 S-1, S-2, S-5): transactions sent on 2026-11-26 to a LOCAL anvil fork (127.0.0.1;
+ * the fork read public state through mainnet.base.org, ethereum-rpc.publicnode.com and arb1.arbitrum.io; nothing was sent
+ * to any real chain), saved verbatim as the fork's node answered them. Each file's `note` says what it is. The sender is
+ * anvil's default account 0 (0xf39f…2266), except the smart-wallet one (bundler = anvil account 1).
+ *   8453   SwapRouter02 multicall of N x [pull(WETH, 1e18), sweepToken(WETH, 1e18, wallet)], N = 1, 2, 50 (S-1)
+ *   8453   a real WETH -> USDC exactInputSingle through the same router; a wrap alone; an unwrap alone; 1 ETH refunded
+ *   1, 8453, 42161  the view TIMELOCK_DELAY() called as a transaction on that chain's FeeCollector (S-2)
+ *   8453   WETH.approve(FeeCollector); a FeeCollector swap that reverts; a Multicall3 call whose inner FeeCollector call
+ *          reverts while the transaction succeeds (S-2)
+ *   8453   a Coinbase Smart Wallet (v1.1) swapping 0.05 ETH for USDC through the FeeCollector, the user operation sent
+ *          by a bundler to the EntryPoint v0.6 (S-5)
  */
 import type { ChainRead, ChainReadMethod } from '@/lib/swap-verify/chain-read'
 import mainnetFcTokenToToken from './swap-receipts/1-fee-collector-token-to-token.json'
@@ -45,6 +60,21 @@ import baseCowDirect from './swap-receipts/8453-cow-direct.json'
 import arbitrumFcTokenToEth from './swap-receipts/42161-fee-collector-token-to-eth.json'
 import arbitrumRouterTokenToToken from './swap-receipts/42161-router-0x-token-to-token.json'
 import arbitrumCowViaSolver from './swap-receipts/42161-cow-via-solver-contract.json'
+import baseRouterUniswapTokenToToken from './swap-receipts/8453-router-uniswapv3-token-to-token.json'
+import forkPullSweep1 from './swap-receipts/fork-8453-router-uniswapv3-pull-sweep-x1.json'
+import forkPullSweep2 from './swap-receipts/fork-8453-router-uniswapv3-pull-sweep-x2.json'
+import forkPullSweep50 from './swap-receipts/fork-8453-router-uniswapv3-pull-sweep-x50.json'
+import forkWethToUsdc from './swap-receipts/fork-8453-router-uniswapv3-weth-to-usdc.json'
+import forkWrapAlone from './swap-receipts/fork-8453-router-uniswapv3-wrap-alone.json'
+import forkUnwrapAlone from './swap-receipts/fork-8453-router-uniswapv3-unwrap-alone.json'
+import forkEthRefund from './swap-receipts/fork-8453-router-uniswapv3-eth-refund.json'
+import forkMainnetFcGetter from './swap-receipts/fork-1-fee-collector-getter-call.json'
+import forkBaseFcGetter from './swap-receipts/fork-8453-fee-collector-getter-call.json'
+import forkArbitrumFcGetter from './swap-receipts/fork-42161-fee-collector-getter-call.json'
+import forkApprove from './swap-receipts/fork-8453-weth-approve-fee-collector.json'
+import forkFcReverted from './swap-receipts/fork-8453-fee-collector-reverted.json'
+import forkFcRevertsInside from './swap-receipts/fork-8453-fee-collector-reverts-inside.json'
+import forkSmartWallet from './swap-receipts/fork-8453-fee-collector-smart-wallet-via-entrypoint.json'
 
 export interface SwapReceiptFixture {
   name: string
@@ -77,9 +107,39 @@ export const SWAP_RECEIPTS = {
   arbitrumFcTokenToEth: as(arbitrumFcTokenToEth),
   arbitrumRouterTokenToToken: as(arbitrumRouterTokenToToken),
   arbitrumCowViaSolver: as(arbitrumCowViaSolver),
+  baseRouterUniswapTokenToToken: as(baseRouterUniswapTokenToToken),
 } as const
 
+/** The recorded real transactions (public nodes). */
 export const ALL_SWAP_RECEIPTS: readonly SwapReceiptFixture[] = Object.values(SWAP_RECEIPTS)
+
+/** Transactions sent to a local anvil fork (see the header). Not real chain transactions. */
+export const FORK_RECEIPTS = {
+  pullSweep1: as(forkPullSweep1),
+  pullSweep2: as(forkPullSweep2),
+  pullSweep50: as(forkPullSweep50),
+  wethToUsdc: as(forkWethToUsdc),
+  wrapAlone: as(forkWrapAlone),
+  unwrapAlone: as(forkUnwrapAlone),
+  ethRefund: as(forkEthRefund),
+  mainnetFcGetter: as(forkMainnetFcGetter),
+  baseFcGetter: as(forkBaseFcGetter),
+  arbitrumFcGetter: as(forkArbitrumFcGetter),
+  approve: as(forkApprove),
+  fcReverted: as(forkFcReverted),
+  fcRevertsInside: as(forkFcRevertsInside),
+  smartWallet: as(forkSmartWallet),
+} as const
+
+export const FORK_SWAP_RECEIPTS: readonly SwapReceiptFixture[] = Object.values(FORK_RECEIPTS)
+
+/** Both: what the stub RPC and the recorded chain read serve by default. */
+export const EVERY_SWAP_RECEIPT: readonly SwapReceiptFixture[] = [...ALL_SWAP_RECEIPTS, ...FORK_SWAP_RECEIPTS]
+
+/** The smart wallet of FORK_RECEIPTS.smartWallet (Coinbase Smart Wallet v1.1 on the Base fork). */
+export const FORK_SMART_WALLET = '0x80c4a2bee98d15109e051af1124f2e92d06b7e7b'
+/** anvil's default account 0: the sender of every other fork transaction. */
+export const FORK_WALLET = '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266'
 
 /** The contracts the three chains had when the fixtures were read (docs/DEPLOYMENTS.md, the "Contracts" table). */
 export const FIXTURE_FEE_COLLECTOR = {
@@ -99,7 +159,7 @@ export interface RecordedChainRead {
  * as on the real chains. `overrides` replaces one answer (`null`, a changed copy, or an Error to throw).
  */
 export function recordedChainRead(
-  fixtures: readonly SwapReceiptFixture[] = ALL_SWAP_RECEIPTS,
+  fixtures: readonly SwapReceiptFixture[] = EVERY_SWAP_RECEIPT,
   overrides: Partial<Record<ChainReadMethod, unknown>> = {},
 ): RecordedChainRead {
   const calls: RecordedChainRead['calls'] = []

@@ -195,7 +195,7 @@ export async function confirmSwap(args: ConfirmArgs, deps: ConfirmDeps = {}): Pr
   if (elsewhere !== null) return elsewhere.wallet === args.wallet ? { result: 'verified' } : { result: 'duplicate' }
 
   // The ROW's chain and source decide what is read and what counts.
-  const verified = await verifySwapOnChain({ chainId: row.chain_id, txHash: args.txHash, wallet: args.wallet, source: row.source }, { read: deps.read })
+  const verified = await verifySwapOnChain({ chainId: row.chain_id, txHash: args.txHash, wallet: args.wallet, pending: [{ source: row.source }] }, { read: deps.read })
   if (verified.outcome === 'not_found') return { result: 'not_found', reason: verified.reason ?? 'rpc_error' }
   if (verified.outcome === 'rejected' || !verified.kind || !verified.derived) {
     const reason = verified.reason ?? 'wrong_target'

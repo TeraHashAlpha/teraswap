@@ -1,51 +1,64 @@
 /**
- * [ADR-029, details A] One function decides whether a swap row is real: `verifySwapOnChain`.
+ * [ADR-029 section 7, details H of goal 133b] One function decides whether a transaction is a wallet's swap:
+ * `verifySwapOnChain({ chainId, txHash, wallet })`. The caller no longer names a source: the chain says what it was.
  *
- * Server-only. It reads the transaction and its receipt on the ROW's chain (chain-read.ts) and answers:
+ * Server-only. It reads the transaction and its receipt on ONE chain (chain-read.ts) and answers:
  *
- *   rejected   the input is not ours to check (unknown chain, malformed hash or wallet, unknown source: NO chain
- *              read), or the transaction is not this wallet's swap (wrong sender, wrong target, no CoW trade of the wallet)
+ *   rejected   the input is not ours to check (unknown chain, malformed hash or wallet: NO chain read), or the
+ *              transaction is not this wallet's swap
  *   not_found  the transaction or its receipt is not there (yet), or the chain could not be read, or the answer had a
- *              shape this function does not know. Nothing is confirmed on doubt: the caller leaves the row as it is.
- *   confirmed  receipt status success
- *   failed     receipt status reverted
+ *              shape this function does not know. Nothing is confirmed on doubt.
+ *   confirmed  receipt status success, and one of the three proofs below holds
+ *   failed     receipt status reverted, sent BY the wallet TO our FeeCollector or to a listed router (H.4)
  *
- * kind (A.4), all three decided by the chain the row is on:
- *   fee_collector  tx.to is that chain's FeeCollector (chains/registry.ts; mainnet also the frozen V1), tx.from is the wallet
- *   router         tx.to is ROUTER_WHITELIST_BY_CHAIN[chain][source], tx.from is the wallet
- *   cow            the source is cowswap and the receipt has a Trade event EMITTED BY that chain's CoW settlement contract
- *                  whose owner is the wallet. The solver sends the transaction, so tx.from says nothing; and tx.to says
- *                  nothing either (owner's answer of 2026-11-25, which replaces "tx.to equals the settlement contract"):
- *                  measured that day, 39 of 84 recent settlements on the three chains were sent to a solver's own
- *                  contract, which then calls the settlement contract. No other contract can emit a log under the
- *                  settlement contract's address, so the event is the proof.
+ * The proof is an event or a net flow, never the target alone (ADR-029 7.1). Tried in this order (H.4):
+ *   fee_collector  EXACTLY ONE SwapWithFee log EMITTED BY that chain's FeeCollector (mainnet: also the frozen V1) whose
+ *                  `user` is the wallet. tx.to and tx.from are not checked, so a smart-contract wallet (a bundler sending
+ *                  to the EntryPoint) verifies. More than one for the wallet: rejected `ambiguous`. None, and tx.to is
+ *                  the FeeCollector: rejected `no_swap_event` (a getter call, an admin call).
+ *   cow            a Trade log EMITTED BY that chain's settlement contract whose owner is the wallet; tx.to is not
+ *                  checked (about half of real settlements are sent to a solver's own contract). More than one Trade
+ *                  of the wallet: the one the wallet's pending row agrees with (same sell token, same buy asset), else
+ *                  rejected `ambiguous`.
+ *   router         tx.from is the wallet, tx.to is a router of ANY source on that chain (ROUTER_WHITELIST_BY_CHAIN), and
+ *                  after NETTING every token's Transfer legs for the wallet (in minus out) there is exactly one in
+ *                  side: the one token with a net outflow, or the transaction value when no token has a net outflow;
+ *                  and at most one out side: the one DIFFERENT token with a net inflow. No in side, two candidates on
+ *                  a side, or the same token on both: rejected `no_net_swap`. A token that nets to zero is no side, so
+ *                  a transaction that moves tokens out and back (A103 S-1) proves nothing. ETH as the only in side
+ *                  needs a token that arrives (owner, 2026-11-26): ETH coming back leaves no log, so "1 ETH sent and
+ *                  refunded" would otherwise be a 1 ETH sale.
  *
- * derived (A.6 and the owner's answer of 2026-11-25): nothing here is ever taken from the caller.
- *   fee_collector  the FeeCollector's own SwapWithFee event for that wallet: tokenIn, totalAmount, tokenOut, outputAmount
- *                  (address(0) is native ETH). The frozen V1 emits no output: its sides follow the router rule.
- *   router         in  = the wallet's outgoing ERC-20 Transfer legs, or tx.value
- *                  out = the wallet's incoming ERC-20 Transfer legs
- *   cow            the Trade event: sellToken/sellAmount, buyToken/buyAmount
- *   More than one candidate token on a side, or a native leg that leaves no log: that side is null.
- *   A reverted transaction moved nothing: both sides are null.
- *   source         cow: 'cowswap'. router: the source whose router tx.to is (the input, now proved). fee_collector: the
- *                  source whose router the FeeCollector call names; 'unknown' when no source has that router.
+ * derived: nothing here is ever taken from the caller.
+ *   fee_collector  the event: tokenIn, totalAmount, tokenOut, outputAmount (address(0) is native ETH). The frozen V1's
+ *                  event has no output: its out side is the netted inflow (one different token, else null).
+ *   cow            the Trade: sellToken/sellAmount, buyToken/buyAmount
+ *   router         the netted sides above
+ *   failed         both sides null (a reverted transaction moved nothing). `callTokenIn` says which token the CALL
+ *                  named (the ETH value, or the FeeCollector call's token argument), only so the caller can find the
+ *                  pending row it belongs to; it is never written as a side.
+ *   source         cow: 'cowswap'. router: the source that lists tx.to on that chain. fee_collector: the source that
+ *                  lists the router the event (or, reverted, the call) names. When two sources list one router: the
+ *                  pending row's source if it is one of them, else the first in ROUTER_WHITELIST_BY_CHAIN's own order
+ *                  for that chain. 'unknown' when no source lists it.
+ *
+ * `pending` (the wallet's pending rows on that chain, newest first) is never proof. It only breaks the two ties the
+ * chain leaves open: two sources listing one router, and two CoW trades of one wallet in one settlement.
  */
 import { decodeEventLog, decodeFunctionData, parseAbi } from 'viem'
 import { AGGREGATOR_APIS, COW_SETTLEMENT, FEE_COLLECTOR_ABI, NATIVE_ETH, hasCowApi } from '@/lib/constants'
-import { CHAIN_CONFIGS } from '@/lib/chains/registry'
+import { CHAIN_CONFIGS, getWrappedNative } from '@/lib/chains/registry'
 import { ROUTER_WHITELIST_BY_CHAIN } from '@/lib/chains/routers'
 import { ChainReadError, readChain, type ChainRead } from './chain-read'
 
 export type VerifyOutcome = 'confirmed' | 'failed' | 'not_found' | 'rejected'
 export type VerifiedKind = 'fee_collector' | 'router' | 'cow'
 
-/** Why a row was not confirmed. Fixed words only: safe in a log line and in a report. */
+/** Why a transaction was not confirmed. Fixed words only: safe in a log line and in a report. */
 export type VerifyReason =
   | 'bad_chain'
   | 'bad_tx_hash'
   | 'bad_wallet'
-  | 'bad_source'
   | 'tx_missing'
   | 'receipt_missing'
   | 'rpc_error'
@@ -55,6 +68,9 @@ export type VerifyReason =
   | 'wrong_sender'
   | 'wrong_target'
   | 'cow_no_trade_for_wallet'
+  | 'no_swap_event'
+  | 'no_net_swap'
+  | 'ambiguous'
 
 export interface DerivedSwap {
   /** Lowercase token address; native ETH is the app's placeholder (NATIVE_ETH, lowercase). null: not derivable. */
@@ -63,18 +79,26 @@ export interface DerivedSwap {
   amountIn: string | null
   tokenOut: string | null
   amountOut: string | null
-  /** A source name of the app, or 'unknown'. Never the caller's text unless the chain proved it. */
+  /** A source name of the app, or 'unknown'. Decided by the chain, never by the caller. */
   source: string
   /** From the receipt, decimal digits. */
   gasUsed: string | null
   gasPrice: string | null
 }
 
+/** What one of the wallet's pending rows says. A hint, never proof. */
+export interface PendingHint {
+  source?: string | null
+  tokenIn?: string | null
+  tokenOut?: string | null
+}
+
 export interface VerifySwapInput {
   chainId: number
   txHash: string
   wallet: string
-  source: string
+  /** The wallet's pending rows on this chain, newest first: tie-breaks only (see the header). */
+  pending?: readonly PendingHint[]
 }
 
 export interface VerifySwapResult {
@@ -82,6 +106,8 @@ export interface VerifySwapResult {
   kind?: VerifiedKind
   reason?: VerifyReason
   derived?: DerivedSwap
+  /** failed only: the token the reverted CALL named (never a side of the row). null: the call does not say. */
+  callTokenIn?: string | null
 }
 
 export const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/
@@ -93,7 +119,7 @@ const TOPIC_RE = /^0x[0-9a-fA-F]{64}$/
 /** The app's native placeholder, as a row stores it. */
 export const NATIVE_PLACEHOLDER = NATIVE_ETH.toLowerCase()
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
-/** The source of a FeeCollector swap whose router no source of the app has on that chain. */
+/** The source of a swap whose router no source of the app lists on that chain. */
 export const UNKNOWN_SOURCE = 'unknown'
 
 const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
@@ -133,20 +159,33 @@ export function cowSettlementOf(chainId: number): string | null {
   return isSwapLogChain(chainId) && hasCowApi(chainId) ? COW_SETTLEMENT.toLowerCase() : null
 }
 
+function routersOn(chainId: number): Record<string, `0x${string}`> | null {
+  return Object.prototype.hasOwnProperty.call(ROUTER_WHITELIST_BY_CHAIN, chainId) ? ROUTER_WHITELIST_BY_CHAIN[chainId] : null
+}
+
 /** The router of `source` on `chainId`, lowercase; null when the whitelist has none. */
 export function routerOf(chainId: number, source: string): string | null {
-  const byChain = Object.prototype.hasOwnProperty.call(ROUTER_WHITELIST_BY_CHAIN, chainId) ? ROUTER_WHITELIST_BY_CHAIN[chainId] : null
+  const byChain = routersOn(chainId)
   if (!byChain || !Object.prototype.hasOwnProperty.call(byChain, source)) return null
   return byChain[source].toLowerCase()
 }
 
-/** The source whose router is `router` on `chainId`: `preferred` when it is one of them, else the first, else 'unknown'. */
-export function sourceOfRouter(chainId: number, router: string, preferred?: string): string {
-  const byChain = Object.prototype.hasOwnProperty.call(ROUTER_WHITELIST_BY_CHAIN, chainId) ? ROUTER_WHITELIST_BY_CHAIN[chainId] : null
-  if (!byChain) return UNKNOWN_SOURCE
+/** The sources that list `router` on `chainId`, in ROUTER_WHITELIST_BY_CHAIN's own order for that chain. */
+export function sourcesOfRouter(chainId: number, router: string): string[] {
+  const byChain = routersOn(chainId)
+  if (!byChain) return []
   const lower = router.toLowerCase()
-  const names = Object.keys(byChain).filter((name) => byChain[name].toLowerCase() === lower)
-  if (preferred !== undefined && names.includes(preferred)) return preferred
+  return Object.keys(byChain).filter((name) => byChain[name].toLowerCase() === lower)
+}
+
+/**
+ * The source whose router is `router` on `chainId`: the first of `preferred` (the pending rows' sources, newest first)
+ * that lists it, else the first in the whitelist's order for that chain, else 'unknown'.
+ */
+export function sourceOfRouter(chainId: number, router: string, preferred?: string | readonly (string | null | undefined)[]): string {
+  const names = sourcesOfRouter(chainId, router)
+  const wanted = typeof preferred === 'string' ? [preferred] : (preferred ?? [])
+  for (const p of wanted) if (typeof p === 'string' && names.includes(p)) return p
   return names[0] ?? UNKNOWN_SOURCE
 }
 
@@ -244,35 +283,59 @@ function tokenOrNative(address: string): string {
   return lower === ZERO_ADDRESS ? NATIVE_PLACEHOLDER : lower
 }
 
+/** Same asset for matching a pending row: equal, or native ETH and that chain's wrapped native. */
+function sameAsset(chainId: number, a: string, b: string): boolean {
+  if (a === b) return true
+  const wrapped = getWrappedNative(chainId).toLowerCase()
+  return (a === NATIVE_PLACEHOLDER && b === wrapped) || (a === wrapped && b === NATIVE_PLACEHOLDER)
+}
+
 type Side = { token: string; amount: string } | null
 
 const NO_SIDES: { in: Side; out: Side } = { in: null, out: null }
 
-/** A.6, kind router (and the frozen V1): the wallet's ERC-20 Transfer legs and tx.value. One candidate per side or null. */
-function sidesFromTransferLegs(tx: ChainTx, logs: readonly ChainLog[], wallet: string): { in: Side; out: Side } {
-  const outgoing = new Map<string, bigint>()
-  const incoming = new Map<string, bigint>()
+/** The wallet's ERC-20 Transfer legs, NETTED per token: inflow minus outflow. Zero nets are dropped. */
+export function netTokenFlows(logs: readonly ChainLog[], wallet: string): Map<string, bigint> {
+  const net = new Map<string, bigint>()
   for (const log of logs) {
     // ERC-20 Transfer(address indexed from, address indexed to, uint256 value): three topics, one word of data.
     // (An ERC-721 Transfer has four topics and no data: not a token amount, not a leg.)
     if (log.topics.length !== 3 || log.topics[0] !== TRANSFER_TOPIC || log.data.length !== 66) continue
     const from = `0x${log.topics[1].slice(26)}`
     const to = `0x${log.topics[2].slice(26)}`
-    if (from === to) continue
     const value = BigInt(log.data)
-    if (value === 0n) continue
-    if (from === wallet) outgoing.set(log.address, (outgoing.get(log.address) ?? 0n) + value)
-    if (to === wallet) incoming.set(log.address, (incoming.get(log.address) ?? 0n) + value)
+    if (value === 0n || from === to) continue
+    if (from === wallet) net.set(log.address, (net.get(log.address) ?? 0n) - value)
+    if (to === wallet) net.set(log.address, (net.get(log.address) ?? 0n) + value)
   }
+  for (const [token, amount] of net) if (amount === 0n) net.delete(token)
+  return net
+}
 
-  const inCandidates: { token: string; amount: string }[] = [...outgoing].map(([token, amount]) => ({ token, amount: amount.toString() }))
-  if (tx.value > 0n) inCandidates.push({ token: NATIVE_PLACEHOLDER, amount: tx.value.toString() })
-  const outCandidates: { token: string; amount: string }[] = [...incoming].map(([token, amount]) => ({ token, amount: amount.toString() }))
+/** The one token with a net inflow, different from `notToken`; null when there is none or more than one. */
+function singleNetInflow(net: Map<string, bigint>, notToken: string | null): Side | 'two' {
+  const inflows = [...net].filter(([token, amount]) => amount > 0n && token !== notToken)
+  if (inflows.length > 1) return 'two'
+  return inflows.length === 1 ? { token: inflows[0][0], amount: inflows[0][1].toString() } : null
+}
 
-  return {
-    in: inCandidates.length === 1 ? inCandidates[0] : null,
-    out: outCandidates.length === 1 ? outCandidates[0] : null,
-  }
+/** H.3: the router kind's sides after netting, or null (`no_net_swap`). */
+function routerSides(tx: ChainTx, logs: readonly ChainLog[], wallet: string): { in: Side; out: Side } | null {
+  const net = netTokenFlows(logs, wallet)
+  const outflows = [...net].filter(([, amount]) => amount < 0n)
+  const inflows = [...net].filter(([, amount]) => amount > 0n)
+  if (outflows.length > 1 || inflows.length > 1) return null
+
+  let sideIn: { token: string; amount: string }
+  if (outflows.length === 1) sideIn = { token: outflows[0][0], amount: (-outflows[0][1]).toString() }
+  else if (tx.value > 0n) sideIn = { token: NATIVE_PLACEHOLDER, amount: tx.value.toString() }
+  else return null
+
+  const sideOut: Side = inflows.length === 1 ? { token: inflows[0][0], amount: inflows[0][1].toString() } : null
+  if (sideOut !== null && sideOut.token === sideIn.token) return null
+  // Owner, 2026-11-26: ETH as the only in side needs a token that arrives (ETH coming back leaves no log).
+  if (sideIn.token === NATIVE_PLACEHOLDER && sideOut === null) return null
+  return { in: sideIn, out: sideOut }
 }
 
 interface FeeCollectorEvent {
@@ -283,19 +346,20 @@ interface FeeCollectorEvent {
   outputAmount: bigint | null
 }
 
-/** The SwapWithFee events `collector` emitted for `wallet` in this receipt (current ABI first, then the frozen V1's). */
-function feeCollectorEvents(logs: readonly ChainLog[], collector: string, wallet: string): FeeCollectorEvent[] {
+/** The SwapWithFee events one of `collectors` EMITTED for `wallet` in this receipt (current ABI first, then the V1's). */
+function feeCollectorEvents(logs: readonly ChainLog[], collectors: readonly string[], wallet: string): FeeCollectorEvent[] {
   const found: FeeCollectorEvent[] = []
   for (const log of logs) {
-    if (log.address !== collector) continue
+    if (!collectors.includes(log.address)) continue
+    const topics = log.topics as [`0x${string}`, ...`0x${string}`[]]
     try {
-      const { args } = decodeEventLog({ abi: FEE_COLLECTOR_EVENTS, data: log.data, topics: log.topics as [`0x${string}`, ...`0x${string}`[]] })
+      const { args } = decodeEventLog({ abi: FEE_COLLECTOR_EVENTS, data: log.data, topics })
       if (args.user.toLowerCase() !== wallet) continue
       found.push({
         router: args.router.toLowerCase(),
-        tokenIn: args.tokenIn.toLowerCase(),
+        tokenIn: tokenOrNative(args.tokenIn),
         totalAmount: args.totalAmount,
-        tokenOut: args.tokenOut.toLowerCase(),
+        tokenOut: tokenOrNative(args.tokenOut),
         outputAmount: args.outputAmount,
       })
       continue
@@ -303,9 +367,9 @@ function feeCollectorEvents(logs: readonly ChainLog[], collector: string, wallet
       // Not the current event: try the V1 shape.
     }
     try {
-      const { args } = decodeEventLog({ abi: FEE_COLLECTOR_V1_EVENTS, data: log.data, topics: log.topics as [`0x${string}`, ...`0x${string}`[]] })
+      const { args } = decodeEventLog({ abi: FEE_COLLECTOR_V1_EVENTS, data: log.data, topics })
       if (args.user.toLowerCase() !== wallet) continue
-      found.push({ router: args.router.toLowerCase(), tokenIn: args.tokenIn.toLowerCase(), totalAmount: args.totalAmount, tokenOut: null, outputAmount: null })
+      found.push({ router: args.router.toLowerCase(), tokenIn: tokenOrNative(args.tokenIn), totalAmount: args.totalAmount, tokenOut: null, outputAmount: null })
     } catch {
       // Another event of the FeeCollector (Paused, RouterWhitelisted, ...): not a swap.
     }
@@ -313,12 +377,12 @@ function feeCollectorEvents(logs: readonly ChainLog[], collector: string, wallet
   return found
 }
 
-/** The router the FeeCollector CALL names (works for a reverted transaction too, which has no event). null: not decodable. */
-function feeCollectorCallRouter(input: `0x${string}`): string | null {
+/** What a FeeCollector CALL names (a reverted transaction has no event): its router and its input token. */
+function feeCollectorCall(input: `0x${string}`): { router: string; tokenIn: string } | null {
   try {
     const call = decodeFunctionData({ abi: FEE_COLLECTOR_ABI, data: input })
-    if (call.functionName === 'swapETHWithFee') return call.args[0].toLowerCase()
-    if (call.functionName === 'swapTokenWithFee') return call.args[2].toLowerCase()
+    if (call.functionName === 'swapETHWithFee') return { router: call.args[0].toLowerCase(), tokenIn: NATIVE_PLACEHOLDER }
+    if (call.functionName === 'swapTokenWithFee') return { router: call.args[2].toLowerCase(), tokenIn: tokenOrNative(call.args[0]) }
     return null
   } catch {
     return null
@@ -353,15 +417,33 @@ function cowTradesOf(logs: readonly ChainLog[], settlement: string, wallet: stri
   return trades
 }
 
-/** Several trades of one wallet in one settlement: a side is derivable only when every trade names the same token. */
-function sidesFromCowTrades(trades: readonly CowTrade[]): { in: Side; out: Side } {
-  if (trades.length === 0) return NO_SIDES
-  const sellTokens = new Set(trades.map((t) => t.sellToken))
-  const buyTokens = new Set(trades.map((t) => t.buyToken))
-  return {
-    in: sellTokens.size === 1 ? { token: trades[0].sellToken, amount: trades.reduce((sum, t) => sum + t.sellAmount, 0n).toString() } : null,
-    out: buyTokens.size === 1 ? { token: trades[0].buyToken, amount: trades.reduce((sum, t) => sum + t.buyAmount, 0n).toString() } : null,
+/** H.2: one trade, or the one trade the newest agreeing pending row names; null = ambiguous. */
+function chooseTrade(chainId: number, trades: readonly CowTrade[], hints: readonly PendingHint[]): CowTrade | null {
+  if (trades.length === 1) return trades[0]
+  for (const hint of hints) {
+    if (typeof hint.tokenIn !== 'string') continue
+    const tokenIn = hint.tokenIn
+    const tokenOut = typeof hint.tokenOut === 'string' ? hint.tokenOut : null
+    const agreeing = trades.filter((t) => t.sellToken === tokenIn && (tokenOut === null || sameAsset(chainId, tokenOut, t.buyToken)))
+    if (agreeing.length === 1) return agreeing[0]
+    if (agreeing.length > 1) return null
   }
+  return null
+}
+
+/** Only well-formed hints are looked at: a source of the app's list, lowercase addresses. */
+function cleanHints(pending: unknown): PendingHint[] {
+  if (!Array.isArray(pending)) return []
+  const out: PendingHint[] = []
+  for (const p of pending) {
+    if (!isRecord(p)) continue
+    out.push({
+      source: isSwapLogSource(p.source) ? p.source : null,
+      tokenIn: lowerAddress(p.tokenIn),
+      tokenOut: lowerAddress(p.tokenOut),
+    })
+  }
+  return out
 }
 
 function rejected(reason: VerifyReason): VerifySwapResult {
@@ -372,29 +454,41 @@ function notFound(reason: VerifyReason): VerifySwapResult {
   return { outcome: 'not_found', reason }
 }
 
+function derivedOf(sides: { in: Side; out: Side }, source: string, gas: { gasUsed: string | null; gasPrice: string | null }): DerivedSwap {
+  return {
+    tokenIn: sides.in?.token ?? null,
+    amountIn: sides.in?.amount ?? null,
+    tokenOut: sides.out?.token ?? null,
+    amountOut: sides.out?.amount ?? null,
+    source,
+    ...gas,
+  }
+}
+
 export interface VerifyDeps {
   /** The chain read. Tests pass a recorded one; production uses chain-read.ts. */
   read?: ChainRead
 }
 
 /**
- * Details A. Two chain reads on the success path (the transaction, then its receipt); none when the input is rejected;
- * one when the transaction is missing, or was sent by another wallet or to another contract (cowswap rows excepted:
- * for them only the receipt can tell).
+ * Details H. Two chain reads on that chain whenever the transaction exists (the transaction, then its receipt: an event
+ * can prove a swap whoever sent it, so only the receipt can say no); one when it does not; none when the input is
+ * rejected. Each read is one attempt and one retry at most (chain-read.ts).
  */
 export async function verifySwapOnChain(input: VerifySwapInput, deps: VerifyDeps = {}): Promise<VerifySwapResult> {
-  // A.1: anything that is not one of ours is rejected before any chain read.
+  // Anything that is not one of ours is rejected before any chain read.
   if (!isSwapLogChain(input.chainId)) return rejected('bad_chain')
   if (typeof input.txHash !== 'string' || !TX_HASH_RE.test(input.txHash)) return rejected('bad_tx_hash')
   if (typeof input.wallet !== 'string' || !ADDRESS_RE.test(input.wallet)) return rejected('bad_wallet')
-  if (!isSwapLogSource(input.source)) return rejected('bad_source')
 
   const chainId = input.chainId
   const txHash = input.txHash.toLowerCase()
   const wallet = input.wallet.toLowerCase()
+  const hints = cleanHints(input.pending)
+  const hintSources = hints.map((h) => h.source)
   const read = deps.read ?? readChain
 
-  // A.2: the transaction.
+  // The transaction.
   let rawTx: unknown
   try {
     rawTx = await read(chainId, 'eth_getTransactionByHash', [txHash])
@@ -405,26 +499,7 @@ export async function verifySwapOnChain(input: VerifySwapInput, deps: VerifyDeps
   const tx = parseTx(rawTx)
   if (tx === null || tx.hash !== txHash) return notFound('rpc_malformed')
 
-  // A.4: what the transaction was sent to, decided by the row's chain.
-  if (tx.to === null) return rejected('wrong_target')
-  const collectors = feeCollectorsOf(chainId)
-  const isCurrentCollector = collectors.current !== null && tx.to === collectors.current
-  const isV1Collector = collectors.v1 !== null && tx.to === collectors.v1
-  const router = routerOf(chainId, input.source)
-  const settlement = cowSettlementOf(chainId)
-
-  let kind: VerifiedKind
-  if (isCurrentCollector || isV1Collector) kind = 'fee_collector'
-  else if (router !== null && tx.to === router) kind = 'router'
-  // Not sent to our FeeCollector nor to the source's router: only a cowswap row can still be a swap, and only its
-  // receipt (the settlement contract's Trade event, below) can say so.
-  else if (input.source === 'cowswap' && settlement !== null) kind = 'cow'
-  else return rejected('wrong_target')
-
-  // A.3: the sender is the wallet. For cow the solver sends the transaction: the Trade owner rule below replaces this.
-  if (kind !== 'cow' && tx.from !== wallet) return rejected('wrong_sender')
-
-  // A.2: the receipt.
+  // The receipt.
   let rawReceipt: unknown
   try {
     rawReceipt = await read(chainId, 'eth_getTransactionReceipt', [txHash])
@@ -440,72 +515,64 @@ export async function verifySwapOnChain(input: VerifySwapInput, deps: VerifyDeps
   // A reverted transaction emits nothing. A receipt that says "reverted" and still carries logs is not a shape of the chain.
   if (receipt.status === 'reverted' && receipt.logs.length > 0) return notFound('rpc_malformed')
 
-  // A.5: the receipt's status, and nothing else, decides between confirmed and failed.
-  const outcome: VerifyOutcome = receipt.status === 'success' ? 'confirmed' : 'failed'
   const gas = { gasUsed: receipt.gasUsed, gasPrice: receipt.gasPrice }
+  const collectors = feeCollectorsOf(chainId)
+  const collectorList = [collectors.current, collectors.v1].filter((c): c is string => c !== null)
+  const settlement = cowSettlementOf(chainId)
+  const toCollector = tx.to !== null && collectorList.includes(tx.to)
+  const toRouter = tx.to !== null && sourcesOfRouter(chainId, tx.to).length > 0
 
-  if (kind === 'cow') {
-    // settlement is non-null here: kind is 'cow' only for a chain that has one.
-    const trades = cowTradesOf(receipt.logs, settlement as string, wallet)
-    // A reverted settlement has no Trade either, so it ends here too: a CoW row is confirmed or it is not a CoW row.
-    if (trades.length === 0) return rejected('cow_no_trade_for_wallet')
-    const sides = sidesFromCowTrades(trades)
-    return {
-      outcome,
-      kind,
-      derived: {
-        tokenIn: sides.in?.token ?? null,
-        amountIn: sides.in?.amount ?? null,
-        tokenOut: sides.out?.token ?? null,
-        amountOut: sides.out?.amount ?? null,
-        source: 'cowswap',
-        ...gas,
-      },
-    }
-  }
-
-  if (kind === 'router') {
-    const sides = receipt.status === 'success' ? sidesFromTransferLegs(tx, receipt.logs, wallet) : NO_SIDES
-    return {
-      outcome,
-      kind,
-      derived: {
-        tokenIn: sides.in?.token ?? null,
-        amountIn: sides.in?.amount ?? null,
-        tokenOut: sides.out?.token ?? null,
-        amountOut: sides.out?.amount ?? null,
-        // tx.to is this source's router on this chain: the input is proved.
-        source: input.source,
-        ...gas,
-      },
-    }
-  }
-
-  // kind === 'fee_collector'
-  const events = receipt.status === 'success' ? feeCollectorEvents(receipt.logs, tx.to, wallet) : []
-  const event = events.length === 1 ? events[0] : null
-  let sides: { in: Side; out: Side } = NO_SIDES
-  if (receipt.status === 'success') {
-    if (event !== null && event.tokenOut !== null && event.outputAmount !== null) {
-      sides = {
-        in: { token: tokenOrNative(event.tokenIn), amount: event.totalAmount.toString() },
-        out: { token: tokenOrNative(event.tokenOut), amount: event.outputAmount.toString() },
+  // H.4: a reverted transaction is `failed` only when the wallet sent it to our FeeCollector or to a listed router.
+  if (receipt.status === 'reverted') {
+    if (!toCollector && !toRouter) return rejected(tx.to !== null && tx.to === settlement ? 'cow_no_trade_for_wallet' : 'wrong_target')
+    if (tx.from !== wallet) return rejected('wrong_sender')
+    if (toCollector) {
+      const named = feeCollectorCall(tx.input)
+      return {
+        outcome: 'failed',
+        kind: 'fee_collector',
+        derived: derivedOf(NO_SIDES, named === null ? UNKNOWN_SOURCE : sourceOfRouter(chainId, named.router, hintSources), gas),
+        callTokenIn: named?.tokenIn ?? (tx.value > 0n ? NATIVE_PLACEHOLDER : null),
       }
-    } else if (isV1Collector) {
-      sides = sidesFromTransferLegs(tx, receipt.logs, wallet)
+    }
+    return {
+      outcome: 'failed',
+      kind: 'router',
+      derived: derivedOf(NO_SIDES, sourceOfRouter(chainId, tx.to as string, hintSources), gas),
+      callTokenIn: tx.value > 0n ? NATIVE_PLACEHOLDER : null,
     }
   }
-  const namedRouter = event?.router ?? feeCollectorCallRouter(tx.input)
-  return {
-    outcome,
-    kind,
-    derived: {
-      tokenIn: sides.in?.token ?? null,
-      amountIn: sides.in?.amount ?? null,
-      tokenOut: sides.out?.token ?? null,
-      amountOut: sides.out?.amount ?? null,
-      source: namedRouter === null ? UNKNOWN_SOURCE : sourceOfRouter(chainId, namedRouter, input.source),
-      ...gas,
-    },
+
+  // 1. fee_collector: the FeeCollector's own event for this wallet, whoever sent the transaction.
+  const events = feeCollectorEvents(receipt.logs, collectorList, wallet)
+  if (events.length > 1) return rejected('ambiguous')
+  if (events.length === 1) {
+    const event = events[0]
+    let out: Side
+    if (event.tokenOut !== null && event.outputAmount !== null) out = { token: event.tokenOut, amount: event.outputAmount.toString() }
+    else {
+      // The frozen V1: no output in its event; the one different token that came in, else null.
+      const inflow = singleNetInflow(netTokenFlows(receipt.logs, wallet), event.tokenIn)
+      out = inflow === 'two' ? null : inflow
+    }
+    const sides = { in: { token: event.tokenIn, amount: event.totalAmount.toString() }, out }
+    return { outcome: 'confirmed', kind: 'fee_collector', derived: derivedOf(sides, sourceOfRouter(chainId, event.router, hintSources), gas) }
   }
+  if (toCollector) return rejected('no_swap_event')
+
+  // 2. cow: the settlement contract's Trade event for this wallet, whoever sent the transaction and to whom.
+  const trades = settlement !== null ? cowTradesOf(receipt.logs, settlement, wallet) : []
+  if (trades.length > 0) {
+    const trade = chooseTrade(chainId, trades, hints)
+    if (trade === null) return rejected('ambiguous')
+    const sides = { in: { token: trade.sellToken, amount: trade.sellAmount.toString() }, out: { token: trade.buyToken, amount: trade.buyAmount.toString() } }
+    return { outcome: 'confirmed', kind: 'cow', derived: derivedOf(sides, 'cowswap', gas) }
+  }
+
+  // 3. router: sent by the wallet to a listed router, and a net swap of the wallet's own tokens.
+  if (!toRouter) return rejected(tx.to !== null && tx.to === settlement ? 'cow_no_trade_for_wallet' : 'wrong_target')
+  if (tx.from !== wallet) return rejected('wrong_sender')
+  const sides = routerSides(tx, receipt.logs, wallet)
+  if (sides === null) return rejected('no_net_swap')
+  return { outcome: 'confirmed', kind: 'router', derived: derivedOf(sides, sourceOfRouter(chainId, tx.to as string, hintSources), gas) }
 }

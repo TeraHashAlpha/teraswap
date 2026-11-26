@@ -165,9 +165,8 @@ async function runSeed(seed: number, total: number) {
     const key = `${row.chain_id}|${row.tx_hash}|${row.wallet}`
     const cached = truthCache.get(key)
     if (cached) return cached
-    // The row's own source is the DERIVED one, which verifies by construction for router and cow rows; a FeeCollector
-    // row verifies under any source.
-    const result = await verifySwapOnChain({ chainId: Number(row.chain_id), txHash: String(row.tx_hash), wallet: String(row.wallet), source: row.verified_kind === 'cow' ? 'cowswap' : row.verified_kind === 'router' ? String(row.source) : 'velora' }, { read: recordedChainRead().read })
+    // The row's own source is the DERIVED one; passed as the hint, it is the one the chain gave.
+    const result = await verifySwapOnChain({ chainId: Number(row.chain_id), txHash: String(row.tx_hash), wallet: String(row.wallet), pending: [{ source: String(row.source) }] }, { read: recordedChainRead().read })
     truthCache.set(key, result)
     return result
   }

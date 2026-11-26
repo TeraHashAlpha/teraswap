@@ -1,13 +1,14 @@
 /**
  * [ADR-029] A stub RPC for tests that drive the REAL chain read (src/lib/swap-verify/chain-read.ts): it stands in for
  * `fetch`, answers JSON-RPC as a node does, and serves the recorded real transactions of
- * src/lib/__fixtures__/swap-receipts.ts, each only on the chain it was read from.
+ * src/lib/__fixtures__/swap-receipts.ts (and, by default, the local-fork ones beside them), each only on the chain it
+ * was read from.
  *
  * With no RPC_URL_<id> set, the server reads through the public defaults of rpc-env.ts, so the three hosts below are
  * the three chains. Any other request (an oracle read, another host) is refused loudly: a test must mock what it needs.
  */
 import { vi } from 'vitest'
-import { ALL_SWAP_RECEIPTS, type SwapReceiptFixture } from '@/lib/__fixtures__/swap-receipts'
+import { EVERY_SWAP_RECEIPT, type SwapReceiptFixture } from '@/lib/__fixtures__/swap-receipts'
 
 const HOST_CHAIN: Record<string, number> = {
   'eth.llamarpc.com': 1,
@@ -32,7 +33,7 @@ export interface StubChainRpcOptions {
 }
 
 export function installStubChainRpc(options: StubChainRpcOptions = {}) {
-  const fixtures = options.fixtures ?? ALL_SWAP_RECEIPTS
+  const fixtures = options.fixtures ?? EVERY_SWAP_RECEIPT
   const calls: StubRpcCall[] = []
   // A read that answers null is asked once more after a pause (chain-read.ts): no pause in tests.
   process.env.SWAP_VERIFY_MISSING_RETRY_MS = '0'

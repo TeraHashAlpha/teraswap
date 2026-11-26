@@ -1,8 +1,12 @@
 // @vitest-environment node
 /**
- * [ADR-029, details A and G] verifySwapOnChain on REAL receipts (src/lib/__fixtures__/swap-receipts.ts): per kind and
- * chain, confirmed, reverted, wrong sender, wrong target, unknown source, missing receipt, the CoW trade of another
- * owner, two tokens on one side. Every expected token and amount below was read from the recorded receipt itself.
+ * [ADR-029, details A and G; goal 133b details H] verifySwapOnChain on REAL receipts (src/lib/__fixtures__/swap-receipts.ts):
+ * per kind and chain, confirmed, reverted, wrong sender, wrong target, missing receipt, the CoW trade of another owner,
+ * two tokens on one side. Every expected token and amount below was read from the recorded receipt itself.
+ *
+ * Round 2 (ADR-029 section 7): the caller no longer names a source. Tests that used to pass "the row's source" now pass
+ * it as a pending-row HINT, which may break a tie and never decides the kind. Expectations that changed with section 7
+ * say "CHANGED (133b H.n)" and what they were; the feedback file lists them in capitals.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -16,11 +20,14 @@ vi.hoisted(() => {
 
 import {
   ALL_SWAP_RECEIPTS,
+  EVERY_SWAP_RECEIPT,
   FIXTURE_FEE_COLLECTOR,
+  FORK_SWAP_RECEIPTS,
   SWAP_RECEIPTS as R,
   recordedChainRead,
   type SwapReceiptFixture,
 } from '@/lib/__fixtures__/swap-receipts'
+import { ROUTER_WHITELIST_BY_CHAIN } from '@/lib/chains/routers'
 import { ChainReadError } from './chain-read'
 import {
   NATIVE_PLACEHOLDER,
@@ -28,7 +35,9 @@ import {
   feeCollectorsOf,
   routerOf,
   sourceOfRouter,
+  sourcesOfRouter,
   verifySwapOnChain,
+  type PendingHint,
   type VerifySwapInput,
 } from './verify-swap-on-chain'
 
@@ -44,11 +53,13 @@ const BASE_WETH = '0x4200000000000000000000000000000000000006'
 const ARB_USDC = '0xaf88d065e77c8cc2239327c5edb3a432268e5831'
 const ARB_WETH = '0x82af49447d8a07e3bd95bd0d56f35241523fbab1'
 
-function input(f: SwapReceiptFixture, wallet: string, source: string, chainId = f.chainId): VerifySwapInput {
-  return { chainId, txHash: f.hash, wallet, source }
+/** `source`, when given, is the pending row's source: a hint, never proof (H.3). */
+function input(f: SwapReceiptFixture, wallet: string, source?: string, chainId = f.chainId): VerifySwapInput {
+  const pending: PendingHint[] | undefined = source === undefined ? undefined : [{ source }]
+  return { chainId, txHash: f.hash, wallet, pending }
 }
 
-async function verify(f: SwapReceiptFixture, wallet: string, source: string, chainId = f.chainId) {
+async function verify(f: SwapReceiptFixture, wallet: string, source?: string, chainId = f.chainId) {
   const chain = recordedChainRead()
   const result = await verifySwapOnChain(input(f, wallet, source, chainId), { read: chain.read })
   return { result, calls: chain.calls }
@@ -56,11 +67,19 @@ async function verify(f: SwapReceiptFixture, wallet: string, source: string, cha
 
 describe('the fixtures are what the header says', () => {
   it('each recorded transaction was sent to the contract its kind names, on its own chain', () => {
-    expect(ALL_SWAP_RECEIPTS).toHaveLength(18)
+    // CHANGED (133b, A103 S-8): 19 real transactions, was 18: the Base Uniswap router swap was added.
+    expect(ALL_SWAP_RECEIPTS).toHaveLength(19)
     for (const f of ALL_SWAP_RECEIPTS) {
       expect(String(f.tx.hash).toLowerCase()).toBe(f.hash.toLowerCase())
       expect(String(f.receipt.transactionHash).toLowerCase()).toBe(f.hash.toLowerCase())
       expect(f.endpoint).toMatch(/^https:\/\/[a-z0-9.-]+$/)
+    }
+    // The local-fork transactions say so, and none of their hashes is a real one.
+    expect(FORK_SWAP_RECEIPTS).toHaveLength(14)
+    for (const f of FORK_SWAP_RECEIPTS) {
+      expect(f.endpoint).toBe('http://127.0.0.1 (anvil fork)')
+      expect(String(f.receipt.transactionHash).toLowerCase()).toBe(f.hash.toLowerCase())
+      expect(ALL_SWAP_RECEIPTS.some((r) => r.hash.toLowerCase() === f.hash.toLowerCase())).toBe(false)
     }
     expect(feeCollectorsOf(1)).toEqual({
       current: FIXTURE_FEE_COLLECTOR[1].toLowerCase(),
@@ -75,10 +94,19 @@ describe('the fixtures are what the header says', () => {
     expect(routerOf(10, '0x')).toBeNull()
     expect(routerOf(1, '__proto__')).toBeNull()
   })
+
+  it('H.3 tie-break: no router is listed by two sources on any chain today, and the order is the whitelist\'s own', () => {
+    for (const [chain, list] of Object.entries(ROUTER_WHITELIST_BY_CHAIN)) {
+      for (const address of Object.values(list)) expect(sourcesOfRouter(Number(chain), address), `${chain} ${address}`).toHaveLength(1)
+    }
+    expect(sourcesOfRouter(10, '0x0000000000001fF3684f28c67538d4D072C22734')).toEqual([])
+  })
 })
 
 describe('A.1 input: anything that is not ours is rejected with NO chain read', () => {
-  const good = input(R.mainnetFcTokenToToken, sender(R.mainnetFcTokenToToken), 'velora')
+  const good = input(R.mainnetFcTokenToToken, sender(R.mainnetFcTokenToToken))
+  // CHANGED (133b H): the five "bad_source" cases are gone with the input they checked: the caller no longer names a
+  // source (H: "the caller no longer passes a source; the function returns it"). Their place: junk hints change nothing.
   const cases: Array<[string, Partial<Record<keyof VerifySwapInput, unknown>>, string]> = [
     ['a chain the app does not have', { chainId: 10 }, 'bad_chain'],
     ['a chain id given as text', { chainId: '1' }, 'bad_chain'],
@@ -91,12 +119,6 @@ describe('A.1 input: anything that is not ours is rejected with NO chain read', 
     ['a hash that is not a string', { txHash: 5 }, 'bad_tx_hash'],
     ['a wallet that is too short', { wallet: '0x1234' }, 'bad_wallet'],
     ['a wallet that is not a string', { wallet: null }, 'bad_wallet'],
-    ['a source the app does not have', { source: 'paraswap' }, 'bad_source'],
-    ['an XSS string as source', { source: '<img src=x onerror=alert(1)>' }, 'bad_source'],
-    ['__proto__ as source', { source: '__proto__' }, 'bad_source'],
-    ['constructor as source', { source: 'constructor' }, 'bad_source'],
-    ['toString as source', { source: 'toString' }, 'bad_source'],
-    ['a source that is not a string', { source: 1 }, 'bad_source'],
   ]
   it.each(cases)('%s', async (_name, change, reason) => {
     const chain = recordedChainRead()
@@ -104,9 +126,24 @@ describe('A.1 input: anything that is not ours is rejected with NO chain read', 
     expect(result).toEqual({ outcome: 'rejected', reason })
     expect(chain.calls).toEqual([])
   })
+
+  it('junk in the pending-row hints (an XSS source, __proto__, text where an address goes, not a list) changes nothing', async () => {
+    const plain = await verifySwapOnChain(good, { read: recordedChainRead().read })
+    const junk: unknown[] = [
+      [{ source: '<img src=x onerror=alert(1)>', tokenIn: 'confirmed', tokenOut: 5 }],
+      [{ source: '__proto__' }, { source: 'constructor' }, null, 7, 'velora'],
+      { source: 'velora' },
+      'velora',
+    ]
+    for (const pending of junk) {
+      const result = await verifySwapOnChain({ ...good, pending } as VerifySwapInput, { read: recordedChainRead().read })
+      expect(result).toEqual(plain)
+    }
+    expect(plain.derived?.source).toBe('velora')
+  })
 })
 
-describe('kind fee_collector: tx.to is that chain\'s FeeCollector and tx.from is the wallet', () => {
+describe('kind fee_collector: that chain\'s FeeCollector emitted SwapWithFee for the wallet', () => {
   it('Ethereum, token to token: both sides from the FeeCollector\'s SwapWithFee event', async () => {
     const f = R.mainnetFcTokenToToken
     const { result, calls } = await verify(f, sender(f), 'velora')
@@ -155,18 +192,19 @@ describe('kind fee_collector: tx.to is that chain\'s FeeCollector and tx.from is
     expect(BigInt(String(f.tx.value)).toString()).toBe('50000000000000000')
   })
 
-  it('the source of a FeeCollector row is the source whose router the FeeCollector call names, not the caller\'s', async () => {
+  it('the source of a FeeCollector swap is the source whose router the event names, whatever the pending row says', async () => {
     // This real swap went through Augustus V6 (velora). A row that says 1inch is corrected; one that says velora keeps it.
     const f = R.mainnetFcTokenToToken
     expect((await verify(f, sender(f), '1inch')).result.derived?.source).toBe('velora')
     expect((await verify(f, sender(f), 'cowswap')).result.derived?.source).toBe('velora')
     expect((await verify(f, sender(f), 'velora')).result.derived?.source).toBe('velora')
+    expect((await verify(f, sender(f))).result.derived?.source).toBe('velora')
     expect(sourceOfRouter(1, '0x6131B5fae19EA4f9D964eAc0408E4408b66337b5', '1inch')).toBe('kyberswap')
     expect(sourceOfRouter(1, '0x00000000000000000000000000000000000000ff', '1inch')).toBe('unknown')
     expect(sourceOfRouter(10, '0x6131B5fae19EA4f9D964eAc0408E4408b66337b5')).toBe('unknown')
   })
 
-  it('Ethereum, the frozen V1: kind fee_collector; its event has no output, so the sides follow the Transfer-leg rule', async () => {
+  it('Ethereum, the frozen V1: kind fee_collector; its event has no output, so the out side is the netted inflow', async () => {
     const f = R.mainnetFcV1EthToToken
     const { result } = await verify(f, sender(f), 'uniswapv3')
     expect(result).toMatchObject({
@@ -182,13 +220,15 @@ describe('kind fee_collector: tx.to is that chain\'s FeeCollector and tx.from is
     })
   })
 
-  it('Ethereum, a reverted FeeCollector transaction: failed, nothing moved, both sides null', async () => {
+  it('Ethereum, a reverted FeeCollector transaction: failed, nothing moved, both sides null; the call\'s token is told apart', async () => {
     const f = R.mainnetFcV1Reverted
     const { result, calls } = await verify(f, sender(f), 'uniswapv3')
     expect(result.outcome).toBe('failed')
     expect(result.kind).toBe('fee_collector')
     expect(result.derived).toMatchObject({ tokenIn: null, amountIn: null, tokenOut: null, amountOut: null })
     expect(result.derived?.gasUsed).toBe(BigInt(String(f.receipt.gasUsed)).toString())
+    // The reverted call was swapETHWithFee: the token it named is ETH. Only for finding the pending row, never a side.
+    expect(result.callTokenIn).toBe(NATIVE_PLACEHOLDER)
     expect(calls).toHaveLength(2)
   })
 
@@ -217,11 +257,14 @@ describe('kind fee_collector: tx.to is that chain\'s FeeCollector and tx.from is
     })
   })
 
-  it('A.3 wrong sender: another wallet can not claim a FeeCollector swap (one read, no receipt read)', async () => {
+  it('another wallet can not claim a FeeCollector swap: no event of its own, so no_swap_event after the receipt', async () => {
     for (const f of [R.mainnetFcTokenToToken, R.baseFcEthToToken, R.arbitrumFcTokenToEth]) {
       const { result, calls } = await verify(f, OTHER_WALLET, 'velora')
-      expect(result).toEqual({ outcome: 'rejected', reason: 'wrong_sender' })
-      expect(calls.map((c) => c.method)).toEqual(['eth_getTransactionByHash'])
+      // CHANGED (133b H.1): was `wrong_sender` after ONE read (tx.from decided). The proof is now the event, which only
+      // the receipt carries, so the receipt is read, and with no SwapWithFee for this wallet a call to the FeeCollector
+      // is `no_swap_event`.
+      expect(result).toEqual({ outcome: 'rejected', reason: 'no_swap_event' })
+      expect(calls.map((c) => c.method)).toEqual(['eth_getTransactionByHash', 'eth_getTransactionReceipt'])
     }
   })
 
@@ -231,9 +274,9 @@ describe('kind fee_collector: tx.to is that chain\'s FeeCollector and tx.from is
     expect((await verify(f, sender(f).toLowerCase(), 'velora')).result.outcome).toBe('confirmed')
   })
 
-  it('a SwapWithFee event of ANOTHER user in this wallet\'s transaction is not this wallet\'s swap: nothing is taken from it', async () => {
+  it('a SwapWithFee event of ANOTHER user in this wallet\'s transaction is not this wallet\'s swap', async () => {
     // On-chain the event's user is always the caller, so this receipt can not exist; the function still must not read
-    // a side out of an event that names someone else.
+    // a swap out of an event that names someone else.
     const f = R.mainnetFcTokenToEth
     const collector = FIXTURE_FEE_COLLECTOR[1].toLowerCase()
     const other = structuredClone(f.receipt)
@@ -246,25 +289,27 @@ describe('kind fee_collector: tx.to is that chain\'s FeeCollector and tx.from is
       }
     }
     expect(changed).toBe(1)
-    const chain = recordedChainRead(ALL_SWAP_RECEIPTS, { eth_getTransactionReceipt: other })
+    const chain = recordedChainRead(EVERY_SWAP_RECEIPT, { eth_getTransactionReceipt: other })
     const result = await verifySwapOnChain(input(f, sender(f), 'velora'), { read: chain.read })
-    expect(result).toMatchObject({ outcome: 'confirmed', kind: 'fee_collector', derived: { tokenIn: null, amountIn: null, tokenOut: null, amountOut: null } })
+    // CHANGED (133b H.1): was `confirmed` with all four sides null (the target alone made it a FeeCollector swap).
+    expect(result).toEqual({ outcome: 'rejected', reason: 'no_swap_event' })
   })
 
-  it('a SwapWithFee event counts only when the FeeCollector itself emitted it, for this wallet', async () => {
+  it('a SwapWithFee event counts only when the FeeCollector itself emitted it', async () => {
     const f = R.mainnetFcTokenToEth
     const collector = FIXTURE_FEE_COLLECTOR[1].toLowerCase()
     const moved = structuredClone(f.receipt)
     for (const log of moved.logs) if (String(log.address).toLowerCase() === collector) log.address = '0x00000000000000000000000000000000000000bb'
-    const chain = recordedChainRead(ALL_SWAP_RECEIPTS, { eth_getTransactionReceipt: moved })
+    const chain = recordedChainRead(EVERY_SWAP_RECEIPT, { eth_getTransactionReceipt: moved })
     const result = await verifySwapOnChain(input(f, sender(f), 'velora'), { read: chain.read })
-    // Still this wallet's transaction to our FeeCollector, so still confirmed, but nothing the forged log says is taken.
-    expect(result).toMatchObject({ outcome: 'confirmed', kind: 'fee_collector', derived: { tokenIn: null, amountIn: null, tokenOut: null, amountOut: null } })
+    // CHANGED (133b H.1): was `confirmed` with all four sides null. A forged log proves nothing, and the call to the
+    // FeeCollector alone is not a swap.
+    expect(result).toEqual({ outcome: 'rejected', reason: 'no_swap_event' })
   })
 })
 
-describe('kind router: tx.to is the router of the row\'s source on the row\'s chain', () => {
-  it('Ethereum, 0x, token to token: sides from the wallet\'s ERC-20 Transfer legs', async () => {
+describe('kind router: sent by the wallet to a listed router, sides after netting', () => {
+  it('Ethereum, 0x, token to token: sides from the wallet\'s netted ERC-20 Transfer legs', async () => {
     const f = R.mainnetRouterTokenToToken
     const { result, calls } = await verify(f, sender(f), '0x')
     expect(result).toMatchObject({
@@ -279,15 +324,19 @@ describe('kind router: tx.to is the router of the row\'s source on the row\'s ch
     const f = R.mainnetRouterReverted
     const { result } = await verify(f, sender(f), '0x')
     expect(result).toMatchObject({ outcome: 'failed', kind: 'router', derived: { tokenIn: null, amountIn: null, tokenOut: null, amountOut: null, source: '0x' } })
+    // No ETH value: the call names no token the router kind can read.
+    expect(result.callTokenIn).toBeNull()
   })
 
-  it('A.6 two candidates on one side (ETH paid AND a token sent): that side is null, never a guess', async () => {
+  it('ETH paid AND a token sent: the token with the net outflow is the in side (H.3: the value counts only when no token flows out)', async () => {
     const f = R.mainnetRouterValueAndToken
     expect(BigInt(String(f.tx.value)) > 0n).toBe(true)
     const { result } = await verify(f, sender(f), '0x')
     expect(result.outcome).toBe('confirmed')
     expect(result.kind).toBe('router')
-    expect(result.derived).toMatchObject({ tokenIn: null, amountIn: null, tokenOut: null, amountOut: null })
+    // CHANGED (133b H.3): was all four sides null ("two candidates on one side"). H.3 takes the single token with a net
+    // outflow and the value only when no token flows out; nothing came back as a token log (ETH out: no log).
+    expect(result.derived).toMatchObject({ tokenIn: USDT, amountIn: '3590515387', tokenOut: null, amountOut: null, source: '0x' })
   })
 
   it('Base, 0x, token to ETH: the ETH that came back left no log, so the bought side is null', async () => {
@@ -309,12 +358,14 @@ describe('kind router: tx.to is the router of the row\'s source on the row\'s ch
     })
   })
 
-  it('A.4 wrong target: the same real swap under another source is not that source\'s router', async () => {
+  it('the pending row\'s source never decides the kind: tx.to does (the source is the one that lists that router)', async () => {
     for (const f of [R.mainnetRouterTokenToToken, R.baseRouterTokenToEth, R.arbitrumRouterTokenToToken]) {
-      for (const source of ['1inch', 'velora', 'kyberswap', 'uniswap', 'teraswap_order_engine']) {
+      for (const source of ['1inch', 'velora', 'kyberswap', 'uniswap', 'teraswap_order_engine', undefined]) {
         const { result, calls } = await verify(f, sender(f), source)
-        expect(result).toEqual({ outcome: 'rejected', reason: 'wrong_target' })
-        expect(calls).toHaveLength(1)
+        // CHANGED (133b H.3): was `rejected wrong_target` after one read ("not that source's router"). The caller no
+        // longer names a source; tx.to is 0x's router on that chain, so it is a 0x swap.
+        expect(result).toMatchObject({ outcome: 'confirmed', kind: 'router', derived: { source: '0x' } })
+        expect(calls).toHaveLength(2)
       }
     }
   })
@@ -343,15 +394,16 @@ describe('kind router: tx.to is the router of the row\'s source on the row\'s ch
     ]
     const receipt = structuredClone(f.receipt)
     receipt.logs.push(...extra)
-    const chain = recordedChainRead(ALL_SWAP_RECEIPTS, { eth_getTransactionReceipt: receipt })
+    const chain = recordedChainRead(EVERY_SWAP_RECEIPT, { eth_getTransactionReceipt: receipt })
     const result = await verifySwapOnChain(input(f, sender(f), '0x'), { read: chain.read })
     expect(result.derived).toMatchObject({ tokenIn: USDC, amountIn: '101939506', tokenOut: USDT, amountOut: '102059274' })
 
-    // A real second incoming token does make two candidates: the bought side becomes null.
+    // A real second incoming token makes two candidates for the out side.
     const two = structuredClone(f.receipt)
     two.logs.push({ address: DAI, topics: [transfer, pad(OTHER_WALLET), pad(wallet)], data: word(1n) })
-    const again = await verifySwapOnChain(input(f, sender(f), '0x'), { read: recordedChainRead(ALL_SWAP_RECEIPTS, { eth_getTransactionReceipt: two }).read })
-    expect(again.derived).toMatchObject({ tokenIn: USDC, amountIn: '101939506', tokenOut: null, amountOut: null })
+    const again = await verifySwapOnChain(input(f, sender(f), '0x'), { read: recordedChainRead(EVERY_SWAP_RECEIPT, { eth_getTransactionReceipt: two }).read })
+    // CHANGED (133b H.3): was confirmed with the bought side null. Two candidates on a side are now `no_net_swap`.
+    expect(again).toEqual({ outcome: 'rejected', reason: 'no_net_swap' })
   })
 })
 
@@ -375,7 +427,7 @@ describe('kind cow: a Trade event emitted by that chain\'s settlement contract w
     expect((await verify(f, '0x7249c6f7434dd3D884a2E1eb19b57076D5aF6F67', 'cowswap')).result.outcome).toBe('confirmed')
   })
 
-  it('Ethereum and Arbitrum, sent to a SOLVER\'S contract: the settlement contract\'s Trade event still proves it (owner 2026-11-25)', async () => {
+  it('Ethereum and Arbitrum, sent to a SOLVER\'S contract: the settlement contract\'s Trade event still proves it', async () => {
     const m = R.mainnetCowViaSolver
     expect(String(m.tx.to).toLowerCase()).not.toBe(cowSettlementOf(1))
     expect((await verify(m, '0x2A426b6b4589A3A44a053Da440C45fF41e16f52C', 'cowswap')).result).toMatchObject({
@@ -403,9 +455,12 @@ describe('kind cow: a Trade event emitted by that chain\'s settlement contract w
 
   it('the CoW trade of another owner: a wallet with no Trade in that settlement is rejected', async () => {
     for (const f of [R.mainnetCowDirect, R.mainnetCowViaSolver, R.baseCowDirect, R.arbitrumCowViaSolver]) {
-      expect((await verify(f, OTHER_WALLET, 'cowswap')).result).toEqual({ outcome: 'rejected', reason: 'cow_no_trade_for_wallet' })
+      // CHANGED (133b H.2): sent to a solver's contract, the reason is now `wrong_target` (that contract is neither our
+      // FeeCollector nor a router); sent to the settlement contract it stays `cow_no_trade_for_wallet`.
+      const reason = String(f.tx.to).toLowerCase() === cowSettlementOf(f.chainId) ? 'cow_no_trade_for_wallet' : 'wrong_target'
+      expect((await verify(f, OTHER_WALLET, 'cowswap')).result).toEqual({ outcome: 'rejected', reason })
       // Not the solver either, although it sent the transaction.
-      expect((await verify(f, sender(f), 'cowswap')).result).toEqual({ outcome: 'rejected', reason: 'cow_no_trade_for_wallet' })
+      expect((await verify(f, sender(f), 'cowswap')).result).toEqual({ outcome: 'rejected', reason })
     }
   })
 
@@ -419,12 +474,14 @@ describe('kind cow: a Trade event emitted by that chain\'s settlement contract w
     })
   })
 
-  it('only a cowswap row can be kind cow: the same settlement under another source is the wrong target (one read)', async () => {
+  it('the pending row\'s source never decides the kind: a CoW trade of the wallet is a CoW swap under any hint', async () => {
     const f = R.mainnetCowDirect
-    for (const source of ['1inch', '0x', 'velora', 'uniswapv3']) {
+    for (const source of ['1inch', '0x', 'velora', 'uniswapv3', undefined]) {
       const { result, calls } = await verify(f, '0x7249c6f7434dd3D884a2E1eb19b57076D5aF6F67', source)
-      expect(result).toEqual({ outcome: 'rejected', reason: 'wrong_target' })
-      expect(calls).toHaveLength(1)
+      // CHANGED (133b H.2): was `rejected wrong_target` after one read ("only a cowswap row can be kind cow", owner's
+      // round-1 answer 5). H.2 drops the source: the settlement contract's Trade for this wallet is the proof.
+      expect(result).toMatchObject({ outcome: 'confirmed', kind: 'cow', derived: { source: 'cowswap' } })
+      expect(calls).toHaveLength(2)
     }
   })
 
@@ -433,34 +490,54 @@ describe('kind cow: a Trade event emitted by that chain\'s settlement contract w
     const settlement = cowSettlementOf(1) as string
     const forged = structuredClone(f.receipt)
     for (const log of forged.logs) if (String(log.address).toLowerCase() === settlement) log.address = '0x00000000000000000000000000000000000000bb'
-    const chain = recordedChainRead(ALL_SWAP_RECEIPTS, { eth_getTransactionReceipt: forged })
+    const chain = recordedChainRead(EVERY_SWAP_RECEIPT, { eth_getTransactionReceipt: forged })
     const result = await verifySwapOnChain(input(f, '0x7249c6f7434dd3D884a2E1eb19b57076D5aF6F67', 'cowswap'), { read: chain.read })
     expect(result).toEqual({ outcome: 'rejected', reason: 'cow_no_trade_for_wallet' })
   })
 
-  it('a cowswap row whose transaction is an ordinary transfer or another protocol\'s swap is rejected after its receipt', async () => {
-    // A real 0x swap registered as a CoW swap by its own sender: no Trade event of the settlement contract in it.
+  it('a real 0x swap whose pending row says cowswap is what the chain says: a 0x router swap', async () => {
     const f = R.mainnetRouterTokenToToken
     const { result, calls } = await verify(f, sender(f), 'cowswap')
-    expect(result).toEqual({ outcome: 'rejected', reason: 'cow_no_trade_for_wallet' })
+    // CHANGED (133b H): was `rejected cow_no_trade_for_wallet` (the row's source chose the rule). Now the chain decides.
+    expect(result).toMatchObject({ outcome: 'confirmed', kind: 'router', derived: { source: '0x', tokenIn: USDC, tokenOut: USDT } })
     expect(calls).toHaveLength(2)
   })
 
-  it('two trades of one wallet in one settlement: a side is derived only when both name the same token', async () => {
+  it('two trades of one wallet in one settlement: the one the pending row agrees with, else ambiguous', async () => {
     const f = R.mainnetCowDirect
+    const owner = '0x7249c6f7434dd3D884a2E1eb19b57076D5aF6F67'
     const settlement = cowSettlementOf(1) as string
-    const tradeLog = f.receipt.logs.find((l) => String(l.address).toLowerCase() === settlement && String((l.topics as string[])[0]) === '0xa07a543ab8a018198e99ca0184c93fe9050a79400a0a723441f84de1d972cc17')
+    const tradeTopic = '0xa07a543ab8a018198e99ca0184c93fe9050a79400a0a723441f84de1d972cc17'
+    const tradeLog = f.receipt.logs.find((l) => String(l.address).toLowerCase() === settlement && String((l.topics as string[])[0]) === tradeTopic)
     expect(tradeLog).toBeDefined()
+    const run = (receipt: unknown, pending?: PendingHint[]) =>
+      verifySwapOnChain({ chainId: 1, txHash: f.hash, wallet: owner, pending }, { read: recordedChainRead(EVERY_SWAP_RECEIPT, { eth_getTransactionReceipt: receipt }).read })
+
+    // The same trade twice: no row can tell them apart.
     const same = structuredClone(f.receipt)
     same.logs.push(structuredClone(tradeLog as Record<string, unknown>))
-    const twice = await verifySwapOnChain(input(f, '0x7249c6f7434dd3D884a2E1eb19b57076D5aF6F67', 'cowswap'), {
-      read: recordedChainRead(ALL_SWAP_RECEIPTS, { eth_getTransactionReceipt: same }).read,
-    })
-    expect(twice.derived).toMatchObject({ tokenIn: USDC, amountIn: String(649256721n * 2n), tokenOut: USDT, amountOut: String(650044918n * 2n) })
+    // CHANGED (133b H.2): was confirmed with both amounts doubled (the two trades summed).
+    expect(await run(same)).toEqual({ outcome: 'rejected', reason: 'ambiguous' })
+    expect(await run(same, [{ tokenIn: USDC, tokenOut: USDT }])).toEqual({ outcome: 'rejected', reason: 'ambiguous' })
+
+    // A second trade of another pair (DAI sold for WETH): the pending row's tokens pick one.
+    const other = structuredClone(tradeLog as Record<string, unknown>)
+    const word = (hex: string) => hex.slice(2).padStart(64, '0')
+    const data = String(other.data)
+    other.data = `0x${word(DAI)}${word(WETH)}${data.slice(2 + 128)}`
+    const two = structuredClone(f.receipt)
+    two.logs.push(other)
+    expect(await run(two)).toEqual({ outcome: 'rejected', reason: 'ambiguous' })
+    expect((await run(two, [{ tokenIn: USDC, tokenOut: USDT }])).derived).toMatchObject({ tokenIn: USDC, amountIn: '649256721', tokenOut: USDT })
+    expect((await run(two, [{ tokenIn: DAI, tokenOut: WETH }])).derived).toMatchObject({ tokenIn: DAI, tokenOut: WETH, amountIn: '649256721' })
+    // A row that "buys ETH" agrees with the trade that buys WETH (the app's CoW orders buy WETH for ETH).
+    expect((await run(two, [{ tokenIn: DAI, tokenOut: NATIVE_PLACEHOLDER }])).derived).toMatchObject({ tokenIn: DAI, tokenOut: WETH })
+    // The newest row that agrees decides; a row that agrees with neither is skipped.
+    expect((await run(two, [{ tokenIn: USDT, tokenOut: USDC }, { tokenIn: DAI }])).derived).toMatchObject({ tokenIn: DAI })
   })
 })
 
-describe('chain-aware: the row\'s chain decides the FeeCollector, the routers and the settlement contract', () => {
+describe('chain-aware: the chain decides the FeeCollector, the routers and the settlement contract', () => {
   it('a transaction exists only on its own chain: the right hash on the wrong chain is not found', async () => {
     const f = R.mainnetFcTokenToToken
     for (const chainId of [8453, 42161]) {
@@ -485,7 +562,7 @@ describe('chain-aware: the row\'s chain decides the FeeCollector, the routers an
     expect(b).toEqual({ outcome: 'rejected', reason: 'wrong_target' })
   })
 
-  it('a router is looked up on the row\'s chain: Uniswap\'s Base router is not a router on Ethereum', async () => {
+  it('a router is looked up on the transaction\'s chain: Uniswap\'s Base router is not a router on Ethereum', async () => {
     expect(routerOf(8453, 'uniswapv3')).toBe('0x2626664c2603336e57b271c5c0b26f421741e481')
     expect(routerOf(1, 'uniswapv3')).toBe('0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45')
     expect(sourceOfRouter(1, '0x2626664c2603336E57B271c5C0b26F421741e481')).toBe('unknown')
@@ -524,20 +601,20 @@ describe('A.2 and fail closed: a missing answer, an error or an unknown shape ne
   })
 
   it('missing receipt (the transaction is still pending): not_found', async () => {
-    const chain = recordedChainRead(ALL_SWAP_RECEIPTS, { eth_getTransactionReceipt: null })
+    const chain = recordedChainRead(EVERY_SWAP_RECEIPT, { eth_getTransactionReceipt: null })
     expect(await verifySwapOnChain(good(), { read: chain.read })).toEqual({ outcome: 'not_found', reason: 'receipt_missing' })
     expect(chain.calls).toHaveLength(2)
   })
 
   it.each(['rpc_error', 'rpc_wrong_chain', 'rpc_unverified'] as const)('the chain read fails with %s on either read: not_found with that reason', async (code) => {
     for (const method of ['eth_getTransactionByHash', 'eth_getTransactionReceipt'] as const) {
-      const chain = recordedChainRead(ALL_SWAP_RECEIPTS, { [method]: new ChainReadError(code) })
+      const chain = recordedChainRead(EVERY_SWAP_RECEIPT, { [method]: new ChainReadError(code) })
       expect(await verifySwapOnChain(good(), { read: chain.read })).toEqual({ outcome: 'not_found', reason: code })
     }
   })
 
   it('any other error from the read (a timeout, a bug) is not_found/rpc_error and carries no text of it', async () => {
-    const chain = recordedChainRead(ALL_SWAP_RECEIPTS, { eth_getTransactionByHash: new Error('https://provider.example/v2/SECRET-KEY timed out') })
+    const chain = recordedChainRead(EVERY_SWAP_RECEIPT, { eth_getTransactionByHash: new Error('https://provider.example/v2/SECRET-KEY timed out') })
     const result = await verifySwapOnChain(good(), { read: chain.read })
     expect(result).toEqual({ outcome: 'not_found', reason: 'rpc_error' })
     expect(JSON.stringify(result)).not.toContain('SECRET')
@@ -555,7 +632,7 @@ describe('A.2 and fail closed: a missing answer, an error or an unknown shape ne
     ['the hash of another transaction', (tx) => ({ ...tx, hash: `0x${'ab'.repeat(32)}` })],
   ]
   it.each(txChanges)('a transaction answer with %s: not_found/rpc_malformed', async (_name, change) => {
-    const chain = recordedChainRead(ALL_SWAP_RECEIPTS, { eth_getTransactionByHash: change(structuredClone(f.tx)) })
+    const chain = recordedChainRead(EVERY_SWAP_RECEIPT, { eth_getTransactionByHash: change(structuredClone(f.tx)) })
     expect(await verifySwapOnChain(good(), { read: chain.read })).toEqual({ outcome: 'not_found', reason: 'rpc_malformed' })
   })
 
@@ -575,42 +652,45 @@ describe('A.2 and fail closed: a missing answer, an error or an unknown shape ne
     ['status reverted but logs present', (r) => ({ ...r, status: '0x0' })],
   ]
   it.each(receiptChanges)('a receipt answer with %s: not_found/rpc_malformed', async (_name, change) => {
-    const chain = recordedChainRead(ALL_SWAP_RECEIPTS, { eth_getTransactionReceipt: change(structuredClone(f.receipt)) })
+    const chain = recordedChainRead(EVERY_SWAP_RECEIPT, { eth_getTransactionReceipt: change(structuredClone(f.receipt)) })
     expect(await verifySwapOnChain(good(), { read: chain.read })).toEqual({ outcome: 'not_found', reason: 'rpc_malformed' })
   })
 
-  it('a contract creation (tx.to null) is the wrong target', async () => {
-    const chain = recordedChainRead(ALL_SWAP_RECEIPTS, { eth_getTransactionByHash: { ...structuredClone(f.tx), to: null } })
+  it('a contract creation (tx.to null) with no event of the wallet in it is the wrong target', async () => {
+    // CHANGED (133b H): was decided after ONE read; an event can prove a swap whatever tx.to is, so the receipt is read.
+    const chain = recordedChainRead(EVERY_SWAP_RECEIPT, {
+      eth_getTransactionByHash: { ...structuredClone(f.tx), to: null },
+      eth_getTransactionReceipt: { ...structuredClone(f.receipt), to: null, logs: [] },
+    })
     expect(await verifySwapOnChain(good(), { read: chain.read })).toEqual({ outcome: 'rejected', reason: 'wrong_target' })
+    expect(chain.calls).toHaveLength(2)
   })
 
   it('A.5: the receipt status, and nothing else, decides confirmed or failed', async () => {
     // The same real successful transaction with its status flipped and its logs dropped (what a revert looks like).
     const reverted = { ...structuredClone(f.receipt), status: '0x0', logs: [] }
-    const chain = recordedChainRead(ALL_SWAP_RECEIPTS, { eth_getTransactionReceipt: reverted })
+    const chain = recordedChainRead(EVERY_SWAP_RECEIPT, { eth_getTransactionReceipt: reverted })
     const result = await verifySwapOnChain(good(), { read: chain.read })
     expect(result.outcome).toBe('failed')
     expect(result.derived).toMatchObject({ tokenIn: null, amountIn: null, tokenOut: null, amountOut: null })
   })
 
   it('a receipt with no gas fields still verifies; gas is null, not a guess', async () => {
-    const chain = recordedChainRead(ALL_SWAP_RECEIPTS, { eth_getTransactionReceipt: { ...structuredClone(f.receipt), gasUsed: undefined, effectiveGasPrice: undefined } })
+    const chain = recordedChainRead(EVERY_SWAP_RECEIPT, { eth_getTransactionReceipt: { ...structuredClone(f.receipt), gasUsed: undefined, effectiveGasPrice: undefined } })
     const result = await verifySwapOnChain(good(), { read: chain.read })
     expect(result.outcome).toBe('confirmed')
     expect(result.derived).toMatchObject({ gasUsed: null, gasPrice: null })
   })
 })
 
-describe('every real fixture, checked against every wallet that is not in it', () => {
-  it('no fixture verifies for a stranger under any source', async () => {
-    const sources = ['1inch', '0x', 'velora', 'kyberswap', 'cowswap', 'uniswapv3', 'sushiswap', 'curve', 'openocean', 'odos', 'balancer', 'bebop', 'uniswap', 'teraswap_order_engine']
-    for (const f of ALL_SWAP_RECEIPTS) {
+describe('every fixture, checked against a wallet that is not in it', () => {
+  it('no fixture, real or forked, verifies for a stranger under any hint', async () => {
+    const sources = ['1inch', '0x', 'velora', 'kyberswap', 'cowswap', 'uniswapv3', 'sushiswap', 'curve', 'openocean', 'odos', 'balancer', 'bebop', 'uniswap', 'teraswap_order_engine', undefined]
+    for (const f of EVERY_SWAP_RECEIPT) {
       for (const source of sources) {
         const { result } = await verify(f, OTHER_WALLET, source)
-        expect(result.outcome, `${f.name} as ${source}`).toBe('rejected')
+        expect(result.outcome, `${f.name} as ${String(source)}`).toBe('rejected')
       }
     }
   })
 })
-
-void DAI

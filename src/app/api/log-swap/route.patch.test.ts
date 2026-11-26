@@ -44,7 +44,7 @@ vi.mock('@/lib/kv-rate-limiter', async () => {
   return { ...actual, checkRateLimit: allow, checkRateLimitWithin: allow }
 })
 
-import { SWAP_RECEIPTS as R, type SwapReceiptFixture } from '@/lib/__fixtures__/swap-receipts'
+import { FORK_RECEIPTS, SWAP_RECEIPTS as R, type SwapReceiptFixture } from '@/lib/__fixtures__/swap-receipts'
 import { __resetChainIdentityCache } from '@/lib/rpc-chain-identity'
 import { trackLargeTrade, trackOracleDeviation, trackOracleUnavailable, trackSwapFailed } from '@/lib/security-tracker'
 import { _resetVerifiedColumnsCache } from '@/lib/swap-log/store'
@@ -284,7 +284,9 @@ describe('row choice: that wallet\'s row with that hash, else that wallet\'s lat
     const res = await patch({ txHash: strangersTx.hash, wallet: sender(victimTx) })
     expect([res.status, await res.json()]).toEqual([422, { error: 'Transaction not accepted for this swap' }])
     expect(JSON.stringify(rows())).toBe(before)
-    expect(logged).toEqual(['[log-swap] verification rejected reason=wrong_sender chain=1'])
+    // CHANGED (133b H.1): the reason was `wrong_sender`. A call to the FeeCollector with no SwapWithFee of this wallet is
+    // `no_swap_event`.
+    expect(logged).toEqual(['[log-swap] verification rejected reason=no_swap_event chain=1'])
   })
 
   it('the latest pending row of the wallet is the one confirmed; older ones stay pending', async () => {
@@ -389,13 +391,15 @@ describe('the row is unchanged when the chain does not confirm it', () => {
   })
 
   it('rejected: 422 and ONE log line with the reason, in fixed words', async () => {
-    const f = R.mainnetRouterTokenToToken
-    // A real 0x swap of this wallet, but the row says 1inch: not 1inch's router.
-    state.db = createFakeSwapsDb({ swaps: [pendingRow(sender(f), { source: '1inch', token_in_symbol: XSS })] })
+    // CHANGED (133b H): this test used a real 0x swap under a row that said 1inch ("not 1inch's router", wrong_target).
+    // The source is no longer the caller's to name: that swap now verifies as 0x. A rejection the chain still gives: a
+    // successful call to Base's FeeCollector that is not a swap (a getter), by this wallet.
+    const f = FORK_RECEIPTS.baseFcGetter
+    state.db = createFakeSwapsDb({ swaps: [pendingRow(sender(f), { chain_id: 8453, source: '1inch', token_in_symbol: XSS })] })
     const res = await patch({ txHash: f.hash, wallet: sender(f), status: `confirmed\n${XSS}` })
     expect([res.status, await res.json()]).toEqual([422, { error: 'Transaction not accepted for this swap' }])
     expect(rows()[0].status).toBe('pending')
-    expect(logged).toEqual(['[log-swap] verification rejected reason=wrong_target chain=1'])
+    expect(logged).toEqual(['[log-swap] verification rejected reason=no_swap_event chain=8453'])
   })
 })
 

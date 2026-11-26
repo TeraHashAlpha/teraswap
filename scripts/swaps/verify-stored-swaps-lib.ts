@@ -150,7 +150,8 @@ export async function checkRow(raw: unknown, verify: Verify): Promise<RowReport>
   if (txHash === null || !TX_HASH_RE.test(txHash)) return { ...base, decision: 'rejected', outcome: 'rejected', reason: 'bad_tx_hash' }
   if (wallet === null || source === null) return { ...base, decision: 'bad_row', reason: 'no_wallet_or_source' }
 
-  const result = await verify({ chainId: chain, txHash, wallet, source })
+  // The row's own source and tokens are hints only (a router two sources list; two CoW trades of one wallet).
+  const result = await verify({ chainId: chain, txHash, wallet, pending: [{ source, tokenIn: text(row.token_in), tokenOut: text(row.token_out) }] })
   if (result.outcome === 'not_found') return { ...base, decision: 'not_found', outcome: 'not_found', reason: result.reason }
   if (result.outcome === 'rejected' || !result.kind || !result.derived) return { ...base, decision: 'rejected', outcome: 'rejected', reason: result.reason }
 

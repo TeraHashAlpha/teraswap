@@ -162,10 +162,14 @@ describe('the rows of the incident: none is marked', () => {
       ['a', 'not_found', 'tx_missing'],
       ['b', 'not_found', 'tx_missing'],
       ['c', 'not_found', 'tx_missing'],
-      ['d', 'rejected', 'wrong_sender'],
+      // CHANGED (133b H.1): was 'wrong_sender'. The FeeCollector's event names its user; a call to it with no event of
+      // this wallet is 'no_swap_event' (tx.from is no longer the test).
+      ['d', 'rejected', 'no_swap_event'],
       ['e', 'rejected', 'bad_tx_hash'],
       ['f', 'no_tx_hash', undefined],
-      ['g', 'rejected', 'bad_source'],
+      // CHANGED (133b H): was 'rejected bad_source'. The caller no longer names a source (H): the row's source is a
+      // hint, the row is checked on chain, and its declared WETH and amounts are not the receipt's.
+      ['g', 'stored_differs', undefined],
     ])
     expect(ran.summary.byDecision.mark).toBeUndefined()
   })
