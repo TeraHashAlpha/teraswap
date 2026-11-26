@@ -14,14 +14,18 @@ import {
   PENDING_CAP,
   PENDING_CAP_WINDOW_MS,
   countRecentPending,
-  findWalletRowByTx,
+  findWalletVerifiedByTx,
   insertPending,
   verifiedColumnsState,
 } from '@/lib/swap-log/store'
 import { catalogSymbol } from '@/lib/swap-log/symbols'
 
-// A confirmation reads the chain twice (4 s per attempt, one retry each) and prices up to two tokens.
-export const maxDuration = 30
+// [133b H.5] A confirmation that names its chain (the official client's) reads that chain twice: up to 4 + 9.5 + 9.5 s
+// (chain-id proof, transaction, receipt; each read one attempt and one retry, 4 s each, 1.5 s before a null is asked
+// again), then prices up to two tokens. One that names no chain asks the candidate chains in turn and starts no new one
+// after 20 s (confirm.ts CHAIN_SEARCH_BUDGET_MS): at most 20 + 13.5 + 9.5 s of chain reads before pricing, so the claim
+// is stored well inside this limit.
+export const maxDuration = 60
 
 // [AUDIT-W6 / W6-M-02 + W6-L-01] Shared guards for both handlers: body cap +
 // the per-IP budget shared by all log-* routes, BEFORE any parse/DB work.
@@ -55,8 +59,8 @@ function logColumnsMissing(): void {
  *     body says, and no alert or tracker call carries a USD value;
  *   - at most PENDING_CAP pending rows per wallet per hour: the next one is a 429.
  * A row becomes `confirmed` or `failed` only by the server, after it read the transaction on-chain. A transaction hash
- * sent with the POST (the split-swap client sends one, after its receipt) is handled as a PATCH after the insert.
- * The official client's calls keep their answer: 200 `{ ok: true }`.
+ * sent with the POST (the split-swap client sends one, after its receipt) is handled as a PATCH on the POST's chain
+ * after the insert. The official client's calls keep their answer: 200 `{ ok: true }`.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -90,10 +94,7 @@ export async function POST(req: NextRequest) {
     if (columns === 'unknown') return NextResponse.json({ ok: false, error: 'storage_unavailable' })
 
     // A repeat of a POST whose transaction this wallet already has verified: nothing to add.
-    if (input.txHash !== null) {
-      const existing = await findWalletRowByTx(db, input.wallet, input.txHash)
-      if (existing !== null && existing !== 'error' && existing.verified_at !== null) return NextResponse.json({ ok: true })
-    }
+    if (input.txHash !== null && (await findWalletVerifiedByTx(db, input.wallet, input.txHash)) === true) return NextResponse.json({ ok: true })
 
     const pending = await countRecentPending(db, input.wallet, new Date(Date.now() - PENDING_CAP_WINDOW_MS).toISOString())
     if (pending === null) return NextResponse.json({ ok: false, error: 'storage_unavailable' })
@@ -140,10 +141,10 @@ export async function POST(req: NextRequest) {
       metadata: { status: 'pending', slippage: input.slippage, mevProtected: input.mevProtected, feeCollected: input.feeCollected },
     })
 
-    // The hash was NOT stored with the row: only a verification writes one. Whatever the chain says, the row above
-    // exists and the POST is answered as before.
+    // The hash was NOT stored with the row: only a verification writes one (or keeps it as a claim). Whatever the chain
+    // says, the row above exists and the POST is answered as before.
     if (input.txHash !== null) {
-      const confirmed = await confirmSwap({ db, wallet: input.wallet, txHash: input.txHash, rowId })
+      const confirmed = await confirmSwap({ db, wallet: input.wallet, txHash: input.txHash, chainId: input.chainId })
       if (confirmed.result === 'columns_missing') logColumnsMissing()
     }
 
@@ -158,12 +159,12 @@ export async function POST(req: NextRequest) {
 /** What each outcome of a confirmation answers (details C). */
 function confirmResponse(confirmed: ConfirmResult): NextResponse {
   switch (confirmed.result) {
-    // Verified now, or already verified for this wallet and this transaction; or this wallet has no row to confirm
-    // (its POST was refused or never came): in all three the browser's call is answered as before.
+    // Verified now (a pending row of the wallet updated, or a row made by the transaction), or already verified for
+    // this wallet and this transaction: the browser's call is answered as before.
     case 'verified':
-    case 'no_row':
       return NextResponse.json({ ok: true })
-    // The chain has no such transaction or receipt yet, or could not be read: the row is unchanged; ask again later.
+    // The chain has no such transaction or receipt yet, or could not be read: the hash is kept as a private claim and
+    // the client asks again (analytics.ts: after 2, 8 and 30 s).
     case 'not_found':
       return NextResponse.json({ ok: false, outcome: 'not_found' }, { status: 202 })
     case 'rejected':
@@ -182,14 +183,13 @@ function confirmResponse(confirmed: ConfirmResult): NextResponse {
 /**
  * PATCH /api/log-swap
  *
- * [ADR-029, details C] The browser calls this when it saw the transaction confirm. The body is `{ txHash, wallet }`;
- * a status, gas figures or mev figures in it are not read. The server then:
- *   - picks the row of THAT wallet with that hash, else that wallet's latest pending row of the last two hours
- *     (never a row of another wallet);
- *   - reads the transaction on the ROW's chain (lib/swap-verify) and, only if it is this wallet's swap, writes status,
- *     hash, derived tokens, amounts, symbols, USD and gas in one update;
- *   - 202 when the chain has no such transaction yet, 422 when it is not this row's swap, 409 when it already
- *     verified a row of another wallet: in all three the row is unchanged.
+ * [ADR-029 section 7, details I of goal 133b] The browser calls this when it saw the transaction confirm. The body is
+ * `{ txHash, wallet, chainId? }`; a status, gas figures or mev figures in it are not read. The server then reads the
+ * transaction on that chain (or, with no chain, on the candidate chains: H.5) and THE TRANSACTION MAKES THE ROW
+ * (lib/swap-log/confirm.ts): its derived values go to a pending row of THAT wallet that agrees with it, or to a new row
+ * (never a row of another wallet). 202 when the chain has no such transaction yet (the hash is kept as a private claim
+ * and the client asks again), 422 when it is not this wallet's swap, 409 only when the unique index refuses a write and
+ * no verified row of this wallet carries the hash.
  */
 export async function PATCH(req: NextRequest) {
   try {
@@ -223,7 +223,7 @@ export async function PATCH(req: NextRequest) {
     }
     if (columns === 'unknown') return NextResponse.json({ ok: false, error: 'storage_unavailable' })
 
-    return confirmResponse(await confirmSwap({ db, wallet: parsed.value.wallet, txHash: parsed.value.txHash }))
+    return confirmResponse(await confirmSwap({ db, wallet: parsed.value.wallet, txHash: parsed.value.txHash, chainId: parsed.value.chainId }))
   } catch {
     console.error('[log-swap] PATCH failed')
     return NextResponse.json({ ok: true })

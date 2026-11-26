@@ -120,6 +120,11 @@ interface Observed {
   maxUsd: number | null
   /** Rows carrying a transaction hash the chain never confirmed. */
   rowsWithUnverifiedHash: number
+  /**
+   * CHANGED (133b I.4): the victim row's PUBLIC columns changed. It compared the whole row; an invented hash a caller
+   * names for the victim's wallet is now kept as a PRIVATE claim (claimed_*), which no reader returns (shape 8 asserts
+   * the claims on their own).
+   */
   victimRowChanged: boolean
 }
 
@@ -137,8 +142,13 @@ function observe(victimBefore: string): Observed {
     rowsWithCallerSymbol: mine.filter((r) => !SYMBOL_OK.test(String(r.token_in_symbol)) || !SYMBOL_OK.test(String(r.token_out_symbol))).length,
     maxUsd: usd.length === 0 ? null : Math.max(...usd),
     rowsWithUnverifiedHash: rows.filter((r) => r.tx_hash !== null && r.tx_hash !== undefined && (r.verified_at === null || r.verified_at === undefined)).length,
-    victimRowChanged: JSON.stringify(rows.find((r) => r.id === 'victim-row')) !== victimBefore,
+    victimRowChanged: JSON.stringify(publicColumns(rows.find((r) => r.id === 'victim-row'))) !== victimBefore,
   }
+}
+
+/** A row without the three private claim columns (on main they do not exist, so this is the whole row there). */
+function publicColumns(row: Row | undefined): Row | undefined {
+  return row === undefined ? undefined : Object.fromEntries(Object.entries(row).filter(([key]) => !key.startsWith('claimed_')))
 }
 
 const dump: Record<string, { requests: number; observed: Observed }> = {}
@@ -152,7 +162,7 @@ const fire = async (method: 'POST' | 'PATCH', body: unknown) => {
 beforeEach(async () => {
   state.db = createFakeSwapsDb({ swaps: [victimRow()] })
   state.alerts.length = 0
-  victimBefore = JSON.stringify(state.db.rows()[0])
+  victimBefore = JSON.stringify(publicColumns(state.db.rows()[0]))
   requests = 0
   installStubRpc()
   for (const level of ['log', 'info', 'warn', 'error'] as const) vi.spyOn(console, level).mockImplementation(() => {})
@@ -237,6 +247,11 @@ describe('the incident, replayed', () => {
     await fire('PATCH', { txHash: repeated('bb'), wallet: VICTIM, status: 'failed' })
     await fire('PATCH', { txHash: repeated('00'), wallet: `0x${VICTIM.slice(2).toUpperCase()}`, status: 'confirmed', gasUsed: '1', mevSavingsActual: '999999999999' })
     check('8 PATCH on another wallet\'s pending row')
+    // 133b I.4: each invented hash is kept as a private claim of the victim's wallet (the chain may not have it yet):
+    // the first on the victim's pending row, the others on claim rows of their own. All private, pending, hash-less.
+    const claims = state.db.rows().filter((r) => r.claimed_tx_hash !== null && r.claimed_tx_hash !== undefined)
+    expect(claims.map((r) => r.claimed_tx_hash)).toEqual([repeated('aa'), repeated('bb'), repeated('00')])
+    for (const r of claims) expect([r.wallet, r.status, r.tx_hash, r.verified_at]).toEqual([VICTIM.toLowerCase(), 'pending', null, null])
   })
 
   it('shape 9: all of it at once, as on the two days: about 110 rows from 20 wallets', async () => {

@@ -1,15 +1,16 @@
 /**
  * [ADR-029] The database steps of the swap log, one function per step, so each rule sits in one place:
  *
- *   - a row is looked up, and updated, only together with ITS wallet (never a row of another wallet);
- *   - a pending row never carries a transaction hash: the hash is written by the verification UPDATE and by nothing
- *     else, so "pending with a hash" (which the public counters of main read as a swap) can not be made by a caller;
- *   - a (chain, transaction hash) pair verifies at most one row: checked here, and enforced by the partial unique
- *     index of the migration, whose violation (23505) is reported as `duplicate`;
+ *   - a row is looked up, written and deleted only together with ITS wallet (never a row of another wallet);
+ *   - a pending row never carries a transaction hash: the hash is written by a verification and by nothing else, so
+ *     "pending with a hash" (which the public counters of main read as a swap) can not be made by a caller. A hash the
+ *     chain could not answer yet is kept in the PRIVATE claim columns (ADR-029 7.3), which no reader returns;
+ *   - one transaction counts once per wallet (ADR-029 7.4): checked here, and enforced by the partial unique index
+ *     (chain_id, lower(tx_hash), lower(wallet)) of the migration, whose violation (23505) is reported as `duplicate`;
  *   - before the migration is applied (columns missing) nothing is written.
  *
- * Every function takes the Supabase client it may use: reads and the UPDATE need the service role, the INSERT uses
- * the insert-only logger client (P114/M-03).
+ * Every function takes the Supabase client it may use: reads, updates, deletes and the route's own inserts of a
+ * verified or claim row need the service role; a POST's pending row uses the insert-only logger client (P114/M-03).
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { VerifiedKind } from '@/lib/swap-verify/verify-swap-on-chain'
@@ -17,29 +18,38 @@ import type { VerifiedKind } from '@/lib/swap-verify/verify-swap-on-chain'
 /** At most this many pending rows per wallet created within PENDING_CAP_WINDOW_MS: the next POST gets 429. */
 export const PENDING_CAP = 5
 export const PENDING_CAP_WINDOW_MS = 60 * 60 * 1000
-/** PATCH falls back to the wallet's latest pending row only when it was created within this window. */
+/** A confirmation attaches to a pending row of the wallet created within this window (or one holding its claim). */
 export const PENDING_MATCH_WINDOW_MS = 2 * 60 * 60 * 1000
 
-const ROW_COLUMNS = 'id, wallet, chain_id, source, status, tx_hash, verified_at, created_at'
+/** The five columns of the ADR-029 migration: the two verification columns and the three private claim columns. */
+export const MIGRATION_COLUMNS = 'verified_at, verified_kind, claimed_tx_hash, claimed_chain_id, claimed_at'
 
-export interface SwapRowRef {
+/** What a confirmation needs to know of a pending row, the claim columns included (server-side only). */
+const CANDIDATE_COLUMNS =
+  'id, wallet, chain_id, source, status, tx_hash, token_in, token_out, verified_at, created_at, claimed_tx_hash, claimed_chain_id, claimed_at'
+
+/** A pending row of a wallet as a confirmation sees it. */
+export interface PendingCandidate {
   id: string
   wallet: string
   chain_id: number
   source: string
   status: string
   tx_hash: string | null
+  /** null only on a claim row (written by a confirmation that found no pending row): a POST row always has both tokens. */
+  token_in: string | null
+  token_out: string | null
   verified_at: string | null
   created_at: string
+  claimed_tx_hash: string | null
+  claimed_chain_id: number | null
+  claimed_at: string | null
 }
 
 interface PgError {
   code?: string
   message?: string
 }
-
-/** The five columns of the ADR-029 migration: the two verification columns and the three private claim columns. */
-export const MIGRATION_COLUMNS = 'verified_at, verified_kind, claimed_tx_hash, claimed_chain_id, claimed_at'
 
 /** Postgres "undefined column" (42703) or PostgREST "column not in the schema cache" (PGRST204), for one of the five. */
 function isMissingVerifiedColumn(error: PgError | null | undefined): boolean {
@@ -123,67 +133,48 @@ export async function insertPending(loggerDb: SupabaseClient, row: PendingRow): 
   return { ok: true }
 }
 
-/** The row of THAT wallet that carries this transaction hash (either letter case), newest first. */
-export async function findWalletRowByTx(db: SupabaseClient, wallet: string, txHash: string): Promise<SwapRowRef | null | 'error'> {
+/** Does THAT wallet already have a verified row for this hash (either letter case)? `error`: it could not be read. */
+export async function findWalletVerifiedByTx(db: SupabaseClient, wallet: string, txHash: string): Promise<boolean | 'error'> {
   const { data, error } = await db
     .from('swaps')
-    .select(ROW_COLUMNS)
+    .select('id')
     .eq('wallet', wallet)
     .ilike('tx_hash', txHash)
-    .order('created_at', { ascending: false })
+    .not('verified_at', 'is', null)
     .limit(1)
-  if (error) return isMissingVerifiedColumn(error) ? null : 'error'
-  return ((data ?? [])[0] as SwapRowRef | undefined) ?? null
+  if (error) return isMissingVerifiedColumn(error) ? false : 'error'
+  return (data ?? []).length > 0
 }
 
-/** One row by its id, and only if it belongs to `wallet`. */
-export async function findWalletRowById(db: SupabaseClient, wallet: string, id: string): Promise<SwapRowRef | null | 'error'> {
-  const { data, error } = await db.from('swaps').select(ROW_COLUMNS).eq('wallet', wallet).eq('id', id).limit(1)
-  if (error) return 'error'
-  return ((data ?? [])[0] as SwapRowRef | undefined) ?? null
-}
-
-/** The latest pending row of THAT wallet with no hash, created since `sinceIso`. */
-export async function findLatestPending(db: SupabaseClient, wallet: string, sinceIso: string): Promise<SwapRowRef | null | 'error'> {
-  const { data, error } = await db
+/**
+ * The pending rows of THAT wallet a confirmation may attach to: no hash, unverified, created since `sinceIso`, newest
+ * first; plus the rows that hold a claim of `txHash`, whatever their age. Two plain reads, merged by id.
+ */
+export async function findCandidateRows(db: SupabaseClient, wallet: string, txHash: string, sinceIso: string): Promise<PendingCandidate[] | 'error'> {
+  const recent = await db
     .from('swaps')
-    .select(ROW_COLUMNS)
+    .select(CANDIDATE_COLUMNS)
     .eq('wallet', wallet)
     .eq('status', 'pending')
     .is('tx_hash', null)
     .is('verified_at', null)
     .gte('created_at', sinceIso)
     .order('created_at', { ascending: false })
-    .limit(1)
-  if (error) return 'error'
-  return ((data ?? [])[0] as SwapRowRef | undefined) ?? null
-}
-
-/**
- * The row of `wallet`, other than `exceptId`, that this (chain, hash) already verified: its wallet, or null when there is
- * none. One transaction counts once PER WALLET (ADR-029 7.4: one CoW settlement carries several wallets' trades), so
- * this looks at that wallet's rows only, as the unique index (chain_id, lower(tx_hash), lower(wallet)) does.
- * `error`: it could not be read (the caller does not write).
- */
-export async function findTxVerifiedElsewhere(
-  db: SupabaseClient,
-  chainId: number,
-  txHash: string,
-  exceptId: string,
-  wallet: string,
-): Promise<{ wallet: string } | null | 'error'> {
-  const { data, error } = await db
+    .limit(50)
+  if (recent.error) return 'error'
+  const claimed = await db
     .from('swaps')
-    .select('id, wallet')
+    .select(CANDIDATE_COLUMNS)
     .eq('wallet', wallet)
-    .eq('chain_id', chainId)
-    .ilike('tx_hash', txHash)
-    .not('verified_at', 'is', null)
-    .neq('id', exceptId)
-    .limit(1)
-  if (error) return 'error'
-  const found = (data ?? [])[0] as { wallet?: unknown } | undefined
-  return found ? { wallet: String(found.wallet ?? '').toLowerCase() } : null
+    .eq('status', 'pending')
+    .is('verified_at', null)
+    .ilike('claimed_tx_hash', txHash)
+    .order('created_at', { ascending: false })
+    .limit(5)
+  if (claimed.error) return 'error'
+  const byId = new Map<string, PendingCandidate>()
+  for (const row of [...(recent.data ?? []), ...(claimed.data ?? [])] as PendingCandidate[]) byId.set(String(row.id), row)
+  return [...byId.values()].sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0))
 }
 
 export interface VerifiedUpdate {
@@ -209,21 +200,101 @@ export interface VerifiedUpdate {
   gas_savings_usd: 0
   mev_savings_estimate: null
   mev_savings_actual: null
+  /** A decided claim is cleared with the verification. */
+  claimed_tx_hash: null
+  claimed_chain_id: null
+  claimed_at: null
 }
 
 export type MarkResult = 'updated' | 'not_unverified' | 'duplicate' | 'columns_missing' | 'error'
 
+function writeError(error: PgError): 'duplicate' | 'columns_missing' | 'error' {
+  if (error.code === '23505') return 'duplicate'
+  if (isMissingVerifiedColumn(error)) return 'columns_missing'
+  return 'error'
+}
+
 /**
- * The one UPDATE of a verification. It names the row by id AND wallet and requires it to be still unverified, so two
- * requests for the same row write once, and no request can write a row of another wallet.
+ * The verification of a pending row: one UPDATE naming the row by id AND wallet and requiring it to be still
+ * unverified, so two requests for the same row write once, and no request can write a row of another wallet.
+ * `chainId` is set only on a claim row (it was written before the chain was known).
  */
-export async function markVerified(db: SupabaseClient, rowId: string, wallet: string, update: VerifiedUpdate): Promise<MarkResult> {
-  const { data, error } = await db.from('swaps').update(update).eq('id', rowId).eq('wallet', wallet).is('verified_at', null).select('id')
-  if (error) {
-    const pg = error as PgError
-    if (pg.code === '23505') return 'duplicate'
-    if (isMissingVerifiedColumn(pg)) return 'columns_missing'
-    return 'error'
-  }
+export async function markVerified(db: SupabaseClient, rowId: string, wallet: string, update: VerifiedUpdate, chainId?: number): Promise<MarkResult> {
+  const values = chainId === undefined ? update : { ...update, chain_id: chainId }
+  const { data, error } = await db.from('swaps').update(values).eq('id', rowId).eq('wallet', wallet).is('verified_at', null).select('id')
+  if (error) return writeError(error as PgError)
   return (data ?? []).length === 1 ? 'updated' : 'not_unverified'
+}
+
+/** The verified row a transaction makes when the wallet has no pending row that agrees with it (details I.2). */
+export async function insertVerified(
+  db: SupabaseClient,
+  row: { id: string; wallet: string; chain_id: number } & VerifiedUpdate,
+): Promise<'inserted' | 'duplicate' | 'columns_missing' | 'error'> {
+  const { error } = await db.from('swaps').insert(row)
+  if (error) return writeError(error as PgError)
+  return 'inserted'
+}
+
+export interface Claim {
+  claimed_tx_hash: string
+  claimed_chain_id: number | null
+  claimed_at: string
+}
+
+/** Puts a claim on one pending row of THAT wallet that holds none yet. `taken`: it holds one now (or is verified). */
+export async function storeClaimOn(db: SupabaseClient, rowId: string, wallet: string, claim: Claim): Promise<'stored' | 'taken' | 'columns_missing' | 'error'> {
+  const { data, error } = await db
+    .from('swaps')
+    .update(claim)
+    .eq('id', rowId)
+    .eq('wallet', wallet)
+    .is('claimed_tx_hash', null)
+    .is('verified_at', null)
+    .select('id')
+  if (error) {
+    const kind = writeError(error as PgError)
+    return kind === 'duplicate' ? 'error' : kind
+  }
+  return (data ?? []).length === 1 ? 'stored' : 'taken'
+}
+
+/** A claim stored without a chain learns it from a later confirmation that named one. */
+export async function setClaimChain(db: SupabaseClient, rowId: string, wallet: string, chainId: number): Promise<void> {
+  await db.from('swaps').update({ claimed_chain_id: chainId }).eq('id', rowId).eq('wallet', wallet).is('claimed_chain_id', null).is('verified_at', null)
+}
+
+/** A claim row: a pending row of THAT wallet with no tokens, written when the wallet has no pending row to hold the claim. */
+export async function insertClaimRow(db: SupabaseClient, row: { id: string; wallet: string; chain_id: number; source: string } & Claim): Promise<'inserted' | 'columns_missing' | 'error'> {
+  const { error } = await db.from('swaps').insert({
+    ...row,
+    status: 'pending',
+    tx_hash: null,
+    token_in: null,
+    token_in_symbol: null,
+    token_out: null,
+    token_out_symbol: null,
+    amount_in: null,
+    amount_out: null,
+    amount_in_usd: null,
+    amount_out_usd: null,
+    fee_amount: null,
+    mev_savings_estimate: null,
+    mev_savings_actual: null,
+  })
+  if (error) {
+    const kind = writeError(error as PgError)
+    return kind === 'duplicate' ? 'error' : kind
+  }
+  return 'inserted'
+}
+
+/** A decided claim (verified, or rejected by the chain) is cleared from THAT wallet's unverified rows. */
+export async function clearClaim(db: SupabaseClient, wallet: string, txHash: string): Promise<void> {
+  await db
+    .from('swaps')
+    .update({ claimed_tx_hash: null, claimed_chain_id: null, claimed_at: null })
+    .eq('wallet', wallet)
+    .ilike('claimed_tx_hash', txHash)
+    .is('verified_at', null)
 }

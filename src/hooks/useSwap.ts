@@ -259,6 +259,9 @@ export function useSwap(
   // with txHashState (same three sites below); set once, at the send/sign moment, never recomputed
   // from the live chainId.
   const [sentChainId, setSentChainId] = useState<number | undefined>()
+  // [ADR-029, goal 133b I.1] The chain of the last STANDARD transaction broadcast, for the server-side confirmation
+  // (updateSwapStatus): written where it is sent, read by the receipt effects (a ref: no effect re-runs on it).
+  const broadcastChainIdRef = useRef<number | undefined>(undefined)
   const [priceGuardBlocked, setPriceGuardBlocked] = useState(false)
   const [priceGuardDeviation, setPriceGuardDeviation] = useState<number | null>(null)
   // [feat/swap-price-tiers D3] /api/swap wants the user's consent for an unpriced pair (409). The
@@ -1117,7 +1120,7 @@ export function useSwap(
             setMevSurplusActualWei(null)
           }
         }
-        updateSwapStatus({ txHash: result.txHash, status: 'confirmed', wallet: address, mevSavingsActual: cowSurplusForPatch })
+        updateSwapStatus({ txHash: result.txHash, status: 'confirmed', wallet: address, chainId: p.chainId, mevSavingsActual: cowSurplusForPatch })
         trackWalletActivity(address, {
           category: 'swap', action: 'swap_confirmed', source: 'cowswap',
           token_in: p.tokenIn.symbol, token_out: p.tokenOut.symbol,
@@ -1215,6 +1218,7 @@ export function useSwap(
     })
 
     setSentChainId(chainId) // [fix/tx-links-remaining] the chain this tx is broadcast to, captured now — never the live chainId at render time
+    broadcastChainIdRef.current = chainId
     try {
       sendTransaction({
         to: data.txTo,
@@ -1234,7 +1238,7 @@ export function useSwap(
   useEffect(() => {
     if (swapConfirmed) {
       setStatus('success')
-      if (swapHash) updateSwapStatus({ txHash: swapHash, status: 'confirmed', wallet: address })
+      if (swapHash) updateSwapStatus({ txHash: swapHash, status: 'confirmed', wallet: address, chainId: broadcastChainIdRef.current })
       if (address && swapHash) {
         trackWalletActivity(address, {
           category: 'swap', action: 'swap_confirmed',
@@ -1289,7 +1293,7 @@ export function useSwap(
             // Fallback detected tx confirmation
             if (receipt.status === 'success') {
               setStatus('success')
-              updateSwapStatus({ txHash: swapHash, status: 'confirmed', wallet: address })
+              updateSwapStatus({ txHash: swapHash, status: 'confirmed', wallet: address, chainId: broadcastChainIdRef.current })
               if (address) {
                 trackWalletActivity(address, {
                   category: 'swap', action: 'swap_confirmed',
@@ -1300,7 +1304,7 @@ export function useSwap(
             } else {
               setStatus('error')
               setErrorMessage('Transaction reverted on-chain. Try increasing slippage.')
-              updateSwapStatus({ txHash: swapHash, status: 'failed', wallet: address })
+              updateSwapStatus({ txHash: swapHash, status: 'failed', wallet: address, chainId: broadcastChainIdRef.current })
               if (address) {
                 trackWalletActivity(address, {
                   category: 'swap', action: 'swap_failed',
@@ -1355,7 +1359,7 @@ export function useSwap(
       setStatus('error')
       const parsedErr = parseWagmiError(sendError)
       setErrorMessage(parsedErr)
-      if (swapHash) updateSwapStatus({ txHash: swapHash, status: 'failed', wallet: address })
+      if (swapHash) updateSwapStatus({ txHash: swapHash, status: 'failed', wallet: address, chainId: broadcastChainIdRef.current })
       if (address) {
         const isRejected = sendError.message.toLowerCase().includes('user rejected') ||
           sendError.message.toLowerCase().includes('user denied')

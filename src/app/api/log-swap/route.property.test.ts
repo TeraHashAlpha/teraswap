@@ -11,7 +11,8 @@
  *       (slippage and expected_output apart: the owner's decision of 2026-11-25 keeps those two validated numbers);
  *   P2  a row that is not verified is pending and has no transaction hash and no USD value;
  *   P3  one transaction, one row per wallet;
- *   P4  a request changes and creates rows of the wallet it names, and of no other wallet; a PATCH creates none;
+ *   P4  a request changes and creates rows of the wallet it names, and of no other wallet; a PATCH creates at most one
+ *       (its verified row, or a claim row);
  *   P5  no response and no log line carries a caller marker; the status code is one of the documented ones;
  *   P6  alert trackers are called only for a row verified by that request, with derived values;
  *   P7  no wallet has more than five pending rows created in the last hour.
@@ -224,11 +225,16 @@ async function runSeed(seed: number, total: number) {
     const lowerNamed = typeof body.wallet === 'string' ? body.wallet.toLowerCase() : null
 
     // P4: only rows of the named wallet are created or changed.
+    // CHANGED (133b I.2, I.4): "a PATCH creates none" is now "a request creates at most two rows, a PATCH at most one":
+    // the transaction makes its own verified row when no pending row agrees, and a hash the chain has not got is kept on
+    // a claim row (pending, no hash, no tokens) when no pending row can hold it.
+    const created = rows.filter((row) => !before.has(String(row.id)))
+    expect(created.length, `${where}: created ${created.length} rows`).toBeLessThanOrEqual(isPost ? 2 : 1)
     for (const row of rows) {
       const was = before.get(String(row.id))
       if (was === undefined) {
-        expect(isPost, `${where}: a PATCH created a row`).toBe(true)
         expect(row.wallet, `${where}: created a row of another wallet`).toBe(lowerNamed)
+        if (!isPost) expect(row.verified_at !== null || (row.token_in === null && row.claimed_tx_hash !== null), `${where}: a PATCH created a row that is neither verified nor a claim row`).toBe(true)
       } else if (was !== JSON.stringify(row)) {
         expect(row.wallet, `${where}: changed a row of another wallet (${String(row.id)})`).toBe(lowerNamed)
       }
@@ -245,7 +251,8 @@ async function runSeed(seed: number, total: number) {
         expect(row.tx_hash, `${where}: unverified row carries a hash`).toBeNull()
         expect([row.amount_in_usd, row.amount_out_usd], `${where}: unverified row carries USD`).toEqual([null, null])
         expect(rowText.includes(MARK), `${where}: caller text in a pending row ${rowText}`).toBe(false)
-        pendingPerWallet.set(String(row.wallet), (pendingPerWallet.get(String(row.wallet)) ?? 0) + 1)
+        // CHANGED (133b I.4): P7 counts the rows a POST wrote (claim rows have no tokens; the cap of details J covers them).
+        if (row.token_in !== null) pendingPerWallet.set(String(row.wallet), (pendingPerWallet.get(String(row.wallet)) ?? 0) + 1)
         continue
       }
 

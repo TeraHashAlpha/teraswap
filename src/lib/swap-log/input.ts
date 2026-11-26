@@ -4,7 +4,7 @@
  * POST keeps only what a private pending row needs, each value checked: the wallet, the chain, the source (a name of
  * the app's list), the two token ADDRESSES, the two declared amounts (decimal digits), and four numbers and flags of the
  * row. It never reads the caller's status, USD amounts, fee amount, oracle fields, mev fields or symbol text.
- * PATCH takes the transaction hash and the wallet, and nothing else.
+ * PATCH takes the transaction hash, the wallet and the chain (a hint for where to look), and nothing else.
  */
 import { TX_HASH_RE, isSwapLogChain, isSwapLogSource } from '@/lib/swap-verify/verify-swap-on-chain'
 
@@ -94,6 +94,11 @@ export interface ConfirmSwapInput {
   txHash: string
   /** null: the request named no wallet (the browser sends none when the wallet disconnected before the receipt). */
   wallet: string | null
+  /**
+   * [133b I.1, H.5] The chain the client says the transaction is on, when it is one of the app's chains; null when the
+   * request names none, or one the app does not have (then the server asks the candidate chains itself).
+   */
+  chainId: number | null
 }
 
 export function parseConfirmSwap(body: unknown): Parsed<ConfirmSwapInput> {
@@ -101,7 +106,8 @@ export function parseConfirmSwap(body: unknown): Parsed<ConfirmSwapInput> {
   const b = body as Record<string, unknown>
   if (!isPresent(b.txHash)) return bad('txHash is required')
   if (typeof b.txHash !== 'string' || !TX_HASH_RE.test(b.txHash)) return bad('Invalid txHash')
-  if (!isPresent(b.wallet)) return { ok: true, value: { txHash: b.txHash.toLowerCase(), wallet: null } }
+  const chainId = isSwapLogChain(b.chainId) ? b.chainId : null
+  if (!isPresent(b.wallet)) return { ok: true, value: { txHash: b.txHash.toLowerCase(), wallet: null, chainId } }
   if (typeof b.wallet !== 'string' || !ADDRESS_RE.test(b.wallet)) return bad('Invalid wallet')
-  return { ok: true, value: { txHash: b.txHash.toLowerCase(), wallet: b.wallet.toLowerCase() } }
+  return { ok: true, value: { txHash: b.txHash.toLowerCase(), wallet: b.wallet.toLowerCase(), chainId } }
 }
