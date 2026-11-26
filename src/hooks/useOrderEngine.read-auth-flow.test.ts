@@ -13,6 +13,8 @@
  * R2-3: a wallet whose signature does not recover to it (a smart-contract account: here a third key answers for it) is
  *       asked ONCE: not again on a remount, on the poll or on a fills read; the "Sign to view" state shows, and using it
  *       asks once more. That state follows the connected account (owner decision 2026-11-20).
+ * [A102 R3-1]: "Sign to view" is kept per wallet: a read for one wallet never raises over, or lowers, another's; it comes
+ *       down when a read of ITS wallet is answered, on this surface or after the user signed on another mounted one.
  * R2-2: 'unavailable' (the wallet the read names is not the connected account any more) is not a refusal: the hook ends
  *       that read quietly and never raises "Sign to view" for it (useOrderEngine.ts, `if (outcome === 'unavailable') return []`).
  */
@@ -102,6 +104,9 @@ let seen: Seen[] = []
 let rows: Record<string, OrderRow[]> = {}
 /** [R2-2] The server holds its answer to the NEXT list read of `wallet` until `open` resolves (a request in flight). */
 let gate: { wallet: string; open: Promise<void> } | null = null
+/** [A102 R3-1] While set, a SIGNED poll of `wallet` is not answered with its rows: a 500, a 200 that carries the route's
+ *  `error` (its database failed), no answer at all, or a 200 with no row. `served` counts them. */
+let failing: { wallet: string; how: '500' | 'error body' | 'offline' | 'empty'; served: number } | null = null
 const fetchMock = vi.fn(async (url: string, init?: { headers?: Record<string, string> }) => {
   const u = new URL(url, 'http://localhost')
   const w = (u.searchParams.get('wallet') ?? '').toLowerCase()
@@ -118,6 +123,12 @@ const fetchMock = vi.fn(async (url: string, init?: { headers?: Record<string, st
   }
   seen.push({ route, wallet: w, sig })
   if (sig !== 'own') return new Response(JSON.stringify({ code: 'READ_AUTH_REQUIRED' }), { status: 401 })
+  if (failing && route === 'poll' && w === failing.wallet) {
+    failing.served += 1
+    if (failing.how === 'offline') throw new TypeError('fetch failed')
+    if (failing.how === '500') return new Response(JSON.stringify({ error: 'boom' }), { status: 500 })
+    return new Response(JSON.stringify(failing.how === 'empty' ? { orders: [] } : { orders: [], error: 'database unavailable' }), { status: 200 })
+  }
   if (route === 'fills') return new Response(JSON.stringify({ executions: [{ id: 'f1', execution_number: 1, status: 'confirmed' }], order: null }), { status: 200 })
   return new Response(JSON.stringify({ orders: rows[w] ?? [] }), { status: 200 })
 })
@@ -144,6 +155,7 @@ beforeEach(() => {
   seen = []
   rows = { [A.toLowerCase()]: [liveDca(A, 1)] }
   gate = null
+  failing = null
   outcomes.length = 0
   wallet.connected = A
   wallet.inWallet = undefined
@@ -325,7 +337,7 @@ describe('[A100 R2-3] the "Sign to view" state comes DOWN when the wallet\'s own
     view.unmount()
   })
 
-  it('"Sign to view" was used on ANOTHER Orders surface: this one\'s next poll signs through the shared path and lowers its own state', async () => {
+  it('the refusal is forgotten with nothing cached yet (another surface\'s "Sign to view" has only just started): this one\'s next poll signs through the shared path and lowers its own state', async () => {
     // B (its signature cached) has a live order listed; A connects and refuses: the state is up for A, and the poll goes on as A.
     wallet.connected = B
     rows = { [A.toLowerCase()]: [liveDca(A, 1)], [B.toLowerCase()]: [liveDca(B, 2)] }
@@ -345,6 +357,181 @@ describe('[A100 R2-3] the "Sign to view" state comes DOWN when the wallet\'s own
     await morePolls(A, 2)
     expect(of('poll', A).slice(-2).map((s) => s.sig)).toEqual(['own', 'own'])
     expect(promptsFor(A)).toBe(2)
+    view.unmount()
+  })
+})
+
+// ── [A102 R3-1] "Sign to view" follows the wallet it was raised for ───────────────────────────────────────────────────
+/** How many of the HOOK's own sign-once calls for `w` have ended in `outcome`. */
+const ended = (w: string, outcome: string) => outcomes.filter(([x, o]) => x === w.toLowerCase() && o === outcome).length
+/** Let whatever the last response started (a signature check, a retry, a state update) run to its end. */
+const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 150)) })
+
+/** A gate on the next list read of `w`: the server holds that answer until `open()`. */
+function holdListRead(w: string): () => void {
+  let open!: () => void
+  gate = { wallet: w.toLowerCase(), open: new Promise<void>((resolve) => (open = resolve)) }
+  return open
+}
+
+/** A's orders are in the browser's own cache (it signed earlier), and the session is new: no signature, nothing remembered. */
+async function yesterdaysCacheForA(): Promise<void> {
+  const view = renderHook(() => useOrderEngine())
+  await until(() => expect(view.result.current.orders).toHaveLength(1))
+  await act(async () => { await flushOrderWrites() })
+  view.unmount()
+  sessionStorage.clear()
+  _readAuthInternal.reset()
+  seen = []
+  outcomes.length = 0
+  wagmiSign.mockClear()
+}
+
+/** Two mounted Orders surfaces; A refuses the one prompt they share; both show "Sign to view" and both poll A's cached order. */
+async function twoRefusedSurfaces() {
+  await yesterdaysCacheForA()
+  wallet.answers[A.toLowerCase()] = 'refuse'
+  const one = renderHook(() => useOrderEngine())
+  const two = renderHook(() => useOrderEngine())
+  await until(() => expect([one.result.current.readAuthDenied, two.result.current.readAuthDenied]).toEqual([true, true]))
+  await until(() => expect([one.result.current.orders.length, two.result.current.orders.length]).toEqual([1, 1]))
+  await morePolls(A, 4)
+  expect(promptsFor(A)).toBe(1)
+  expect(getCachedOrdersReadAuth(A)).toBeNull()
+  delete wallet.answers[A.toLowerCase()] // this time A will sign
+  return { one, two }
+}
+
+describe('[A102 R3-1] "Sign to view" follows the wallet it was raised for', () => {
+  it('(a) B\'s late 401 ends "ok" (B\'s signature was cached meanwhile) after A refused: A\'s state stays up', async () => {
+    rows = { [A.toLowerCase()]: [liveDca(A, 1)], [B.toLowerCase()]: [liveDca(B, 2)] }
+    const open = holdListRead(B)
+    wallet.connected = B
+    const view = renderHook(() => useOrderEngine())
+    await until(() => expect(fetchMock).toHaveBeenCalled()) // B's unsigned list read is out
+    await plant(B, KEY_B) // B's own signature gets cached while it is in flight
+    wallet.answers[A.toLowerCase()] = 'refuse'
+    wallet.connected = A
+    view.rerender()
+    await until(() => expect(view.result.current.readAuthDenied).toBe(true)) // A refused
+    open()
+    await until(() => expect(of('list', B).map((s) => s.sig)).toEqual(['none', 'own'])) // B's 401, then its signed retry
+    await flush()
+    expect(ended(B, 'ok')).toBe(1)
+    expect(view.result.current.readAuthDenied).toBe(true) // A has no rows: it keeps the button
+    expect(view.result.current.orders).toEqual([])
+    view.unmount()
+  })
+
+  it('(a) B\'s late 401 ends "denied" (B had refused before) after A refused: it does not take A\'s state, and B keeps its own', async () => {
+    wallet.answers[A.toLowerCase()] = 'refuse'
+    wallet.answers[B.toLowerCase()] = 'refuse'
+    wallet.connected = B
+    const first = renderHook(() => useOrderEngine())
+    await until(() => expect(first.result.current.readAuthDenied).toBe(true)) // B refused once
+    first.unmount()
+    const open = holdListRead(B)
+    const calls = fetchMock.mock.calls.length
+    const view = renderHook(() => useOrderEngine())
+    await until(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(calls)) // B's list read is out again
+    wallet.connected = A
+    view.rerender()
+    await until(() => expect(view.result.current.readAuthDenied).toBe(true)) // A refused
+    open()
+    await until(() => expect(ended(B, 'denied')).toBe(2))
+    await flush()
+    expect(view.result.current.readAuthDenied).toBe(true) // still up for A
+    wallet.connected = B
+    view.rerender()
+    expect(view.result.current.readAuthDenied).toBe(true) // and B's is there at once
+    expect([promptsFor(A), promptsFor(B)]).toEqual([1, 1])
+    view.unmount()
+  })
+
+  it('"Sign to view" used for B, the account switches to A while B\'s prompt is open, and B signs: A\'s state stays up; B\'s is down', async () => {
+    // Neither wallet has an order here, so nothing is polled: a poll would raise A's state again and hide a drop of it.
+    rows = {}
+    wallet.answers[A.toLowerCase()] = 'refuse'
+    wallet.answers[B.toLowerCase()] = 'refuse'
+    wallet.connected = B
+    const view = renderHook(() => useOrderEngine())
+    await until(() => expect(view.result.current.readAuthDenied).toBe(true))
+    let sign!: () => void
+    const signed = new Promise<void>((resolve) => (sign = resolve))
+    wagmiSign.mockImplementationOnce(async (args) => {
+      const { account: _a, ...typed } = args
+      await signed // B's prompt stays open
+      return KEY_B.signTypedData(typed as Parameters<typeof KEY_B.signTypedData>[0])
+    })
+    let used!: Promise<void>
+    act(() => { used = view.result.current.requestOrdersReadAuth() })
+    await until(() => expect(promptsFor(B)).toBe(2))
+    wallet.connected = A
+    view.rerender()
+    await until(() => expect(view.result.current.readAuthDenied).toBe(true)) // A refused
+    await act(async () => { sign(); await used }) // B's signature arrives, with A connected
+    await flush()
+    expect(view.result.current.readAuthDenied).toBe(true)
+    wallet.connected = B
+    view.rerender()
+    expect(view.result.current.readAuthDenied).toBe(false) // B signed: B's own state is down
+    expect(promptsFor(A)).toBe(1)
+    view.unmount()
+  })
+
+  it('(b) two mounted surfaces, A refuses on both and signs through the first: the second comes down at its next successful poll, asking nothing', async () => {
+    const { one, two } = await twoRefusedSurfaces()
+    await act(async () => { await one.result.current.requestOrdersReadAuth() }) // "Sign to view" on the first surface only
+    expect(one.result.current.readAuthDenied).toBe(false)
+    expect(getCachedOrdersReadAuth(A)).not.toBeNull() // a signature IS cached: the second surface's polls never see a 401
+    await until(() => expect(two.result.current.readAuthDenied).toBe(false))
+    await morePolls(A, 4)
+    expect(of('poll', A).slice(-4).map((s) => s.sig)).toEqual(['own', 'own', 'own', 'own'])
+    expect([one.result.current.readAuthDenied, two.result.current.readAuthDenied]).toEqual([false, false])
+    expect(promptsFor(A)).toBe(2) // the refused one, and the one "Sign to view" raised
+    one.unmount()
+    two.unmount()
+  })
+
+  it.each(['500', 'error body', 'offline'] as const)('(b) a poll that fails (%s) lowers nothing; the first answered one does', async (how) => {
+    const { one, two } = await twoRefusedSurfaces()
+    failing = { wallet: A.toLowerCase(), how, served: 0 }
+    await act(async () => { await one.result.current.requestOrdersReadAuth() })
+    await until(() => expect(failing!.served).toBeGreaterThanOrEqual(6))
+    await flush()
+    expect(two.result.current.readAuthDenied).toBe(true)
+    failing = null
+    await until(() => expect(two.result.current.readAuthDenied).toBe(false))
+    expect(promptsFor(A)).toBe(2)
+    one.unmount()
+    two.unmount()
+  })
+
+  it('(b) an answered poll with no row is a successful read too: the second surface comes down', async () => {
+    const { one, two } = await twoRefusedSurfaces()
+    failing = { wallet: A.toLowerCase(), how: 'empty', served: 0 }
+    await act(async () => { await one.result.current.requestOrdersReadAuth() })
+    await until(() => expect(two.result.current.readAuthDenied).toBe(false))
+    one.unmount()
+    two.unmount()
+  })
+
+  it('the LIST read counts too: a surface with nothing to poll comes down when its next list read of that wallet is answered (A with no live order)', async () => {
+    rows = {}
+    await plant(B, KEY_B) // B's reads go out signed, so nothing B does ends "ok": only a read of A's can lower A's state
+    wallet.answers[A.toLowerCase()] = 'refuse'
+    const view = renderHook(() => useOrderEngine())
+    await until(() => expect(view.result.current.readAuthDenied).toBe(true))
+    wallet.connected = B
+    view.rerender()
+    await until(() => expect(of('list', B).map((s) => s.sig)).toEqual(['own']))
+    await plant(A, KEY_A) // A signed on another surface meanwhile
+    retryOrdersReadAuth(A)
+    wallet.connected = A
+    view.rerender()
+    await until(() => expect(view.result.current.readAuthDenied).toBe(false))
+    expect(of('poll')).toEqual([]) // nothing is tracked: only the list read could have told it
+    expect(promptsFor(A)).toBe(1)
     view.unmount()
   })
 })

@@ -313,7 +313,8 @@ describe('what the server builds, key by key [A86 S-4, Step 0]', () => {
 
 // ── [A89 R2-1, superseded by A95 S-1] A caller orderHash cut from the request's own signature leaves no fragment in the log ──
 // R2-1 replaced an exact 64-hex window by `<signature fragment len N>`; A95 S-1 found a text MIXING signature hex with other
-// hex still passed. The line now carries no caller text at all: the same six windows are `<hash-shaped>` + a digest.
+// hex still passed. The line now carries no caller text at all: the same six windows are `<hash-shaped>`, with a digest for
+// the five spelled with 0x [A98 R2-1].
 describe('R2-1 (as of A95 S-1): a caller orderHash cut from the request\'s signature leaves no fragment in the log', () => {
   const METHODS = ['log', 'info', 'warn', 'error', 'debug'] as const
   const windows = (sig: Hex) => {
@@ -329,7 +330,7 @@ describe('R2-1 (as of A95 S-1): a caller orderHash cut from the request\'s signa
     ] as const
   }
 
-  it.each([0, 1, 2, 3, 4, 5])('window %i: callerHash is <hash-shaped> + digest; no 10-hex window of the signature (any of its 4 texts) is printed', async (i) => {
+  it.each([0, 1, 2, 3, 4, 5])('window %i: callerHash is <hash-shaped> (digest only with 0x); no 10-hex window of the signature (any of its 4 texts) is printed', async (i) => {
     const s = await signOrder({ version: 3, chainId: 8453, kind: 'dca', salt: `r21 ${i}` })
     const [label, text] = windows(s.signature)[i]
     const others = METHODS.filter((m) => m !== 'warn').map((m) => vi.spyOn(console, m).mockImplementation(() => {}))
@@ -338,7 +339,9 @@ describe('R2-1 (as of A95 S-1): a caller orderHash cut from the request\'s signa
       expect(res.status, label).toBe(201)
       expect(logged('orders_order_hash_mismatch')).toEqual([{
         event: 'orders_order_hash_mismatch', mode: 'observe', outcome: 'stored', chainId: 8453, version: 3, orderType: 'dca',
-        serverHash: s.hash, callerHash: '<hash-shaped>', callerHashDigest: keccak256(toBytes(text)).slice(2, 18),
+        serverHash: s.hash, callerHash: '<hash-shaped>',
+        // [A98 R2-1] window 4 is spelled without 0x: no digest.
+        callerHashDigest: i === 4 ? null : keccak256(toBytes(text)).slice(2, 18),
       }])
       const printed = [warn, ...others].flatMap((spy) => spy.mock.calls.map((c: unknown[]) => c.map(String).join(' '))).join('\n').toLowerCase()
       const hex = s.signature.slice(2)
@@ -455,7 +458,8 @@ describe('R2-4: the signature lookup is scoped to the lower-cased wallet; the au
 // ── [A95 S-1] The mismatch line never contains caller-supplied text ────────────────────────────────────────────────────
 // A89 R2-1 dropped a caller orderHash only when it was an exact 64-hex window of the request's own signature: a text that
 // MIXES signature hex with other hex was logged as sent (callerHash). The line now carries the caller's value as a shape
-// (<hash-shaped> / <string len N> / <type T>) and the first 16 hex of keccak256(text), never the text.
+// (<hash-shaped> / <string len N> / <type T>) and, only for 0x + 64 hex [A98 R2-1], the first 16 hex of keccak256(text),
+// never the text.
 describe('A95 S-1: no caller text in the order-hash mismatch line', () => {
   const METHODS = ['log', 'info', 'warn', 'error', 'debug'] as const
   const digest16 = (text: string) => keccak256(toBytes(text)).slice(2, 18)
@@ -504,14 +508,14 @@ describe('A95 S-1: no caller text in the order-hash mismatch line', () => {
     }
   })
 
-  it('every kind of caller value: a shape and a digest, the text itself nowhere', async () => {
+  it('every kind of caller value: a shape, a digest only for 0x + 64 hex, the text itself nowhere', async () => {
     const s = await signOrder({ version: 3, chainId: 8453, kind: 'dca', salt: 'a95 s1 kinds' })
     const CASES: [string, unknown, string, string | null][] = [
       ['another hash', `0x${'cd'.repeat(32)}`, '<hash-shaped>', digest16(`0x${'cd'.repeat(32)}`)],
       ['0X + upper case', `0X${'AB'.repeat(32)}`, '<hash-shaped>', digest16(`0X${'AB'.repeat(32)}`)],
-      ['no prefix', 'ab'.repeat(32), '<hash-shaped>', digest16('ab'.repeat(32))],
-      ['a UUID', '3f1c2a4e-9b7d-4c1e-8a2f-5d6e7f8a9b0c', '<string len 36>', digest16('3f1c2a4e-9b7d-4c1e-8a2f-5d6e7f8a9b0c')],
-      ['the whole signature', s.signature, '<string len 132>', digest16(s.signature)],
+      ['no prefix', 'ab'.repeat(32), '<hash-shaped>', null],
+      ['a UUID', '3f1c2a4e-9b7d-4c1e-8a2f-5d6e7f8a9b0c', '<string len 36>', null],
+      ['the whole signature', s.signature, '<string len 132>', null],
       ['a number', 42, '<type number>', null],
       ['an object', { a: 1 }, '<type object>', null],
       ['a boolean', true, '<type boolean>', null],
@@ -598,6 +602,100 @@ describe('A95 S-1: no caller text in the order-hash mismatch line', () => {
     expect(seen.requests).toBe(SIGNED * REQUESTS)
     expect(seen.requests).toBe(1000)
     // The property is not vacuous: every spelling and both shapes occurred.
+    for (const [k, v] of Object.entries(seen)) expect(v, k).toBeGreaterThan(0)
+  }, 120_000)
+})
+
+// ── [A98 R2-1] The digest is logged only for a hash-shaped caller text (0x + 64 hex, any case) ─────────────────────────
+// The digest is unkeyed and the line carries the text's exact length, so the digest of a SHORT text can be reversed by trying
+// every candidate: 6 hex of the signature came back in 74 s on one core. Any other text now gets its shape alone.
+describe('A98 R2-1: no digest of a caller text that is not 0x + 64 hex', () => {
+  const digest16 = (text: string) => keccak256(toBytes(text)).slice(2, 18)
+  const line = () => logged('orders_order_hash_mismatch')
+
+  it.each([6, 8])('%i hex of the signature as orderHash (with and without 0x): the line carries the shape alone', async (n) => {
+    const s = await signOrder({ version: 3, chainId: 8453, kind: 'dca', salt: `a98 r21 ${n}` })
+    const hex = s.signature.slice(2, 2 + n)
+    for (const text of [hex, `0x${hex}`, `0X${hex.toUpperCase()}`]) {
+      db.reset()
+      warn.mockClear()
+      expect((await post({ ...s.body, orderHash: text })).status, text).toBe(201)
+      expect(line()).toEqual([{
+        event: 'orders_order_hash_mismatch', mode: 'observe', outcome: 'stored', chainId: 8453, version: 3, orderType: 'dca',
+        serverHash: s.hash, callerHash: `<string len ${text.length}>`, callerHashDigest: null,
+      }])
+      expect(JSON.stringify(warn.mock.calls)).not.toContain(digest16(text))
+    }
+  })
+
+  it.each([
+    ['0x, lower case', `0x${'cd'.repeat(32)}`],
+    ['0x, upper case', `0x${'CD'.repeat(32)}`],
+    ['0X, mixed case', `0X${'cD'.repeat(32)}`],
+  ])('a hash-shaped text (%s) keeps its digest', async (label, text) => {
+    const s = await signOrder({ version: 3, chainId: 8453, kind: 'dca', salt: `a98 r21 keeps ${label}` })
+    expect((await post({ ...s.body, orderHash: text })).status).toBe(201)
+    expect(line()).toMatchObject([{ callerHash: '<hash-shaped>', callerHashDigest: digest16(text) }])
+  })
+
+  it.each([
+    ['0x + 63 hex', `0x${'a'.repeat(63)}`, '<string len 65>'],
+    ['0x + 65 hex', `0x${'a'.repeat(65)}`, '<string len 67>'],
+    ['0x + 64 characters, one not hex', `0x${'a'.repeat(63)}g`, '<string len 66>'],
+    ['a space before 0x + 64 hex', ` 0x${'a'.repeat(64)}`, '<string len 67>'],
+    ['a line feed after 0x + 64 hex', `0x${'a'.repeat(64)}\n`, '<string len 67>'],
+    ['64 hex without 0x (owner, 2026-11-26: same label, no digest)', 'ab'.repeat(32), '<hash-shaped>'],
+  ])('%s: no digest', async (label, text, shape) => {
+    const s = await signOrder({ version: 3, chainId: 8453, kind: 'dca', salt: `a98 r21 edge ${label}` })
+    expect((await post({ ...s.body, orderHash: text })).status).toBe(201)
+    expect(line()).toMatchObject([{ callerHash: shape, callerHashDigest: null }])
+  })
+
+  it('property, seeded: 1,000 texts shorter than 0x + 64 hex never get a digest', async () => {
+    let state = 98_021
+    const rand = () => { // mulberry32
+      state = (state + 0x6d2b79f5) >>> 0
+      let t = state
+      t = Math.imul(t ^ (t >>> 15), t | 1)
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    }
+    const int = (lo: number, hi: number) => lo + Math.floor(rand() * (hi - lo + 1))
+    const SIGNED = 25
+    const REQUESTS = 40
+    const signed = await Promise.all(Array.from({ length: SIGNED }, (_, i) =>
+      signOrder({ version: i % 2 ? 3 : 2, chainId: i % 2 ? 8453 : 1, kind: 'dca', salt: `a98 property ${i}` })))
+    const seen = { requests: 0, six: 0, eight: 0, bare: 0, prefix0x: 0, prefix0X: 0, bare64: 0, longest: 0 }
+    for (const s of signed) {
+      db.reset()
+      const hex = s.signature.slice(2)
+      for (let k = 0; k < REQUESTS; k++) {
+        const prefix = ['', '0x', '0X'][int(0, 2)]
+        // At most 65 characters in all: with a prefix that is 63 hex, one short of hash-shaped; bare it may be 64.
+        const max = prefix ? 63 : 64
+        const len = k === 0 ? 6 : k === 1 ? 8 : k === 2 && !prefix ? 64 : int(1, max)
+        const at = int(0, hex.length - len)
+        let text = prefix + hex.slice(at, at + len)
+        if (rand() < 0.3) text = text.toUpperCase()
+        expect(text.length).toBeLessThan(66)
+        warn.mockClear()
+        expect([201, 409]).toContain((await post({ ...s.body, orderHash: text })).status)
+        const lines = line()
+        expect(lines, `request ${seen.requests}: ${text.length} chars`).toHaveLength(1)
+        expect(lines[0].callerHashDigest, `request ${seen.requests}: ${text.length} chars`).toBeNull()
+        expect(JSON.stringify(warn.mock.calls)).not.toContain(digest16(text))
+        seen.requests += 1
+        if (len === 6) seen.six += 1
+        if (len === 8) seen.eight += 1
+        if (!prefix) seen.bare += 1
+        if (!prefix && len === 64) seen.bare64 += 1
+        if (prefix === '0x') seen.prefix0x += 1
+        if (prefix === '0X') seen.prefix0X += 1
+        seen.longest = Math.max(seen.longest, text.length)
+      }
+    }
+    expect(seen.requests).toBe(1000)
+    expect(seen.longest).toBe(65)
     for (const [k, v] of Object.entries(seen)) expect(v, k).toBeGreaterThan(0)
   }, 120_000)
 })
@@ -691,7 +789,9 @@ describe('A95 S-2: the stored signature is the one the executors accept', () => 
     }
   }, 60_000)
 
-  it('a canonical input is stored byte-identical (the text the wallet signed); upper case / no 0x is stored as the canonical lower-case text', async () => {
+  // [A98 R2-2] A signature without 0x, or with 0X, never reaches the canonical step: the format check refuses it with 400
+  // (orders-create.validation.test.ts). Only upper-case hex after a lower-case 0x is accepted and stored lower case.
+  it('a canonical input is stored byte-identical (the text the wallet signed); upper-case hex after 0x is stored as the canonical lower-case text', async () => {
     for (const set of SETS) {
       const s = await signOrder({ version: set.version, chainId: set.chainId, kind: 'dca', salt: `a95 s2 canonical ${set.key}` })
       db.reset()

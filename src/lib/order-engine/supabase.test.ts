@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { fetchActiveOrders } from './supabase'
+import { fetchActiveOrders, fetchUserOrders } from './supabase'
 import { ReadAuthRequiredError, ORDER_POLL_MAX_HASHES } from './read-auth'
 
 const fetchMock = vi.fn()
@@ -69,5 +69,44 @@ describe('fetchActiveOrders — poll query by order hash [A76 S-6]', () => {
   it('a 401 still asks the caller to sign (ReadAuthRequiredError), as before', async () => {
     fetchMock.mockImplementationOnce(async () => new Response('{}', { status: 401 }))
     await expect(fetchActiveOrders(WALLET, [hash(1)])).rejects.toBeInstanceOf(ReadAuthRequiredError)
+  })
+})
+
+// [A102 R3-1] Both fetchers end in [] on a 500 or a network error as well, so a returned list does not say the read
+// succeeded. `onRead` does: it is called only when the server ANSWERED (2xx, and a body without the route's `error`).
+describe('onRead: only an answered read is reported', () => {
+  const readers = [
+    ['fetchUserOrders', (onRead: () => void) => fetchUserOrders(WALLET, onRead)],
+    ['fetchActiveOrders', (onRead: () => void) => fetchActiveOrders(WALLET, [hash(1)], onRead)],
+  ] as const
+
+  it.each(readers)('%s: a 200 is reported once, an empty list included', async (_name, read) => {
+    const onRead = vi.fn()
+    await expect(read(onRead)).resolves.toEqual([])
+    expect(onRead).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(readers)('%s: a 500, a 200 carrying the route\'s error, a body that is not JSON and a network error are not reported', async (_name, read) => {
+    const onRead = vi.fn()
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const answers: (() => Promise<Response>)[] = [
+      async () => new Response(JSON.stringify({ error: 'boom' }), { status: 500 }),
+      async () => new Response(JSON.stringify({ orders: [], error: 'database unavailable' }), { status: 200 }),
+      async () => new Response('<html>', { status: 200 }),
+      async () => { throw new TypeError('fetch failed') },
+    ]
+    for (const answer of answers) {
+      fetchMock.mockImplementationOnce(answer)
+      await expect(read(onRead)).resolves.toEqual([])
+    }
+    expect(onRead).not.toHaveBeenCalled()
+    quiet.mockRestore()
+  })
+
+  it.each(readers)('%s: a 401 is not reported (it throws ReadAuthRequiredError)', async (_name, read) => {
+    const onRead = vi.fn()
+    fetchMock.mockImplementationOnce(async () => new Response('{}', { status: 401 }))
+    await expect(read(onRead)).rejects.toBeInstanceOf(ReadAuthRequiredError)
+    expect(onRead).not.toHaveBeenCalled()
   })
 })

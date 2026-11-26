@@ -180,6 +180,27 @@ describe('POST /api/orders — signature validation', () => {
     expect(status).toBe(400)
     expect(json.error).toBe('Invalid signature format')
   })
+
+  // [A98 R2-2] 130 hex that canonicalOrderSignature WOULD accept (low s, v 27): run before the format check, it would turn
+  // both spellings below into the 0x text, which passes. SIG above (v 0xcc) cannot show that: the canonical step refuses it.
+  const CANONICALISABLE = `${'cc'.repeat(32)}${'11'.repeat(32)}1b`
+
+  it.each([
+    ['without 0x', CANONICALISABLE],
+    ['with 0X', `0X${CANONICALISABLE}`],
+  ])('130-hex signature %s → 400 "Invalid signature format": nothing recovered, nothing written', async (_label, signature) => {
+    const { status, json } = await post(validBody({ signature }))
+    expect(status).toBe(400)
+    expect(json.error).toBe('Invalid signature format')
+    expect(mockRecover).not.toHaveBeenCalled()
+    expect(mockInsert).not.toHaveBeenCalled()
+  })
+
+  it('the same 130 hex with 0x passes the format check (201): the prefix is all the two cases above differ in', async () => {
+    const { status } = await post(validBody({ signature: `0x${CANONICALISABLE}` }))
+    expect(status).toBe(201)
+    expect(mockInsert).toHaveBeenCalledTimes(1)
+  })
 })
 
 // ── amountIn validation ─────────────────────────────────────

@@ -155,7 +155,10 @@ export async function createOrderInSupabase(params: {
 // 401 READ_AUTH_REQUIRED throws ReadAuthRequiredError so useOrderEngine can
 // sign once per session and retry.
 // [A100 R2-1] ordersReadHeaders verifies the cached entry first: one that is not this wallet's own is dropped, never sent.
-export async function fetchUserOrders(wallet: string): Promise<OrderRow[]> {
+// [A102 R3-1] `onRead` (both fetchers): called when the server ANSWERED a read of `wallet`'s orders, a 2xx whose body does
+// not carry the route's `error` (a 200 with `error` is its database failing). The returned list cannot say so: a 500 or a
+// network error ends in [] too. The Orders tab lowers `wallet`'s "Sign to view" on it.
+export async function fetchUserOrders(wallet: string, onRead?: () => void): Promise<OrderRow[]> {
   try {
     const res = await fetch(`/api/orders?wallet=${wallet}`, {
       headers: (await ordersReadHeaders(wallet)) ?? undefined,
@@ -163,6 +166,7 @@ export async function fetchUserOrders(wallet: string): Promise<OrderRow[]> {
     if (res.status === 401) throw new ReadAuthRequiredError()
     if (!res.ok) return []
     const json = await res.json()
+    if (!json.error) onRead?.()
     return json.orders ?? []
   } catch (err) {
     if (err instanceof ReadAuthRequiredError) throw err
@@ -179,7 +183,7 @@ export async function fetchUserOrders(wallet: string): Promise<OrderRow[]> {
 // seven statuses: an order older than those 50 never got its update, and every tick re-read up to 50 terminal rows.
 // A list longer than ORDER_POLL_MAX_HASHES is split into several requests.
 const ORDER_HASH_RE = /^0x[0-9a-fA-F]{64}$/
-export async function fetchActiveOrders(wallet: string, orderHashes: readonly string[]): Promise<OrderRow[]> {
+export async function fetchActiveOrders(wallet: string, orderHashes: readonly string[], onRead?: () => void): Promise<OrderRow[]> {
   const hashes = [...new Set(orderHashes)].filter((h) => ORDER_HASH_RE.test(h))
   if (hashes.length === 0) return []
   const rows: OrderRow[] = []
@@ -192,6 +196,7 @@ export async function fetchActiveOrders(wallet: string, orderHashes: readonly st
       if (res.status === 401) throw new ReadAuthRequiredError()
       if (!res.ok) continue
       const json = await res.json()
+      if (!json.error) onRead?.()
       rows.push(...(json.orders ?? []))
     }
     return rows

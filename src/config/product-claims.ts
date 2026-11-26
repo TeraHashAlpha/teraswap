@@ -193,9 +193,9 @@ export const PRIVACY_PROVIDERS_NOTE =
 //  - "without the signature that authorised each order" = every orders read selects the order-read-columns.ts allow-list, which
 //    leaves `signature` out with or without a read signature (orders/route.ts:1036, orders/[id]/route.ts:54; owner decision
 //    2026-11-17; pinned by orders-read-no-signature.test.ts).
-//  - "a count of its orders by status" = /api/orders/stats: no auth, wallet filter (orders/stats/route.ts:36, :45), buckets (:53-71).
+//  - "a count of its orders by status" = /api/orders/stats: no auth, wallet filter (orders/stats/route.ts:39, :47), buckets (:55-73).
 //    Its 24 h fill count (`recentExecutions24h`, live orders' fills included) is returned for a wallet only with that wallet's
-//    read signature (:79-87, :109) [A97 S-3; these five line numbers re-checked at A100 round 3, the route moved 7 lines down].
+//    read signature (:81-89, :111) [A97 S-3; these five line numbers re-checked at A102 R3-2, which moved the lines down].
 //  - "open orders ... need a signature from that wallet" = 401 READ_AUTH_REQUIRED (list orders/route.ts:1012-1027, the 401 at
 //    :1018-1026; by id orders/[id]/route.ts:70-85; the fills and progress of an open order, orders/[id]/executions/route.ts:78-93
 //    [A87b R2-1]). The Analytics feed lists no fill of an open order (analytics/route.ts:494) [A97 S-2].
