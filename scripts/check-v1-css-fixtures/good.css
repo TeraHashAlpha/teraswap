@@ -1,0 +1,12 @@
+/* FIXTURE, hand-written: the shape of the v1 stylesheet a correct build emits (globals.css + the v1 Tailwind pass).
+   It is not build output. */
+@font-face{font-family:inter;src:url(../media/InterVariable_latin.woff2)format("woff2");font-display:swap}
+html,html.dark{color-scheme:dark;--bg-primary:#080b10;--particle-color:232, 220, 196}
+html.light .bg-surface-secondary{background-color:#fffdf8}
+html.light .text-cream{color:#1a1814}
+.flex{display:flex}
+.bg-surface-secondary{background-color:#0f1318}
+.bg-surface-secondary\/60{background-color:#0f131899}
+.bg-cream-15{background-color:#f5f0e826}
+.text-cream{color:#f5f0e8}
+.hover\:text-cream:hover{color:#f5f0e8}

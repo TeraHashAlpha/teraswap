@@ -6,7 +6,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'agent-verify.sh')
-const ORDER = ['suite', 'lint-delta', 'tsc', 'build', 'v1v2-parity', 'rpc-budget', 'codeql', 'keeper']
+const ORDER = ['suite', 'lint-delta', 'tsc', 'build', 'v1-css', 'v1v2-parity', 'rpc-budget', 'codeql', 'keeper']
 
 let dir
 beforeAll(() => {
@@ -28,6 +28,7 @@ const PASS = [
   ['lint-delta', 'PASS', 'errors +0, warnings +0 (3 changed files)'],
   ['tsc', 'PASS', '0 errors'],
   ['build', 'PASS', 'next build ok'],
+  ['v1-css', 'PASS', 'check-v1-css OK: chunks/a.css (1 bytes)'],
   ['v1v2-parity', 'PASS', '120 tests passed, 0 failed, 9 files'],
   ['rpc-budget', 'PASS', '14 tests passed, 0 failed, 2 files'],
 ]
@@ -116,10 +117,10 @@ describe('agent-verify with tools missing (fails closed)', () => {
       env: { PATH: bin, HOME: dir, AGENT_VERIFY_OUT: out },
     })
     expect(r.status).toBe(1)
-    for (const n of ['suite', 'tsc', 'build', 'v1v2-parity', 'rpc-budget', 'codeql', 'keeper']) {
+    for (const n of ['suite', 'tsc', 'build', 'v1-css', 'v1v2-parity', 'rpc-budget', 'codeql', 'keeper']) {
       expect(lineOf(r.stdout, n), n).toMatch(/FAIL\s+missing tool: /)
     }
-    expect(r.stdout).toContain('RESULT: FAIL (8 failed)')
+    expect(r.stdout).toContain('RESULT: FAIL (9 failed)')
   })
 })
 
@@ -615,4 +616,53 @@ describe('agent-verify lint-delta', () => {
     expect(x.detail).toMatch(/^missing tool: eslint/)
     expect(x.calls).toHaveLength(0)
   }, 90000)
+})
+
+// ---- v1-css: the built-stylesheet check runs after the build ----------------------------------------------------------
+describe('agent-verify v1-css', () => {
+  // The script's own check_v1_css against a throw-away root holding a stand-in for scripts/check-v1-css.mjs.
+  function v1css(buildRow, { exit = 0, stdout = '', stderr = '' } = {}) {
+    const home = mkdtempSync(path.join(dir, 'vc-'))
+    mkdirSync(path.join(home, 'scripts'))
+    writeFileSync(
+      path.join(home, 'scripts/check-v1-css.mjs'),
+      `import { writeFileSync } from 'node:fs'\nwriteFileSync('ran', '')\nprocess.stdout.write(${JSON.stringify(stdout)})\nprocess.stderr.write(${JSON.stringify(stderr)})\nprocess.exitCode = ${exit}\n`,
+    )
+    const res = path.join(home, 'res.tsv')
+    writeFileSync(res, buildRow ? tsv([buildRow]) : '')
+    const lines = readFileSync(SCRIPT, 'utf8').split('\n')
+    const cut = (from, to) => lines.slice(lines.findIndex((l) => l.startsWith(from)), lines.findIndex((l) => l.startsWith(to))).join('\n')
+    const prog = [
+      'set -u; set -o pipefail',
+      `ROOT=${JSON.stringify(home)}; OUT=${JSON.stringify(home)}; RESULTS=${JSON.stringify(res)}`,
+      cut('record()', '# ---------- checks'),
+      cut('check_v1_css()', '# ---------- lint-delta'),
+      'check_v1_css',
+      'cat "$RESULTS"',
+    ].join('\n')
+    const r = spawnSync('bash', ['-c', prog], { encoding: 'utf8' })
+    const row = r.stdout.split('\n').find((l) => l.startsWith('v1-css\t')) ?? ''
+    return { row, ran: (() => { try { statSync(path.join(home, 'ran')); return true } catch { return false } })() }
+  }
+  const BUILT = ['build', 'PASS', 'next build ok']
+
+  it('build ok + check exit 0 -> PASS with the check\'s own line', () => {
+    const x = v1css(BUILT, { stdout: 'check-v1-css OK: chunks/a.css (65960 bytes) has .x\n' })
+    expect(x.row).toBe('v1-css\tPASS\tcheck-v1-css OK: chunks/a.css (65960 bytes) has .x')
+  })
+
+  it('check exit 1 -> FAIL with its first failure line', () => {
+    const x = v1css(BUILT, { exit: 1, stderr: 'check-v1-css FAIL: chunks/a.css lacks the v1-only class .x\ncheck-v1-css FAIL: second\n' })
+    expect(x.row).toMatch(/^v1-css\tFAIL\texit 1; check-v1-css FAIL: chunks\/a\.css lacks the v1-only class \.x \(log: /)
+  })
+
+  it.each([[['build', 'FAIL', 'exit 1']], [null]])('no passing build (%s) -> FAIL without reading an old .next', (row) => {
+    const x = v1css(row, { stdout: 'check-v1-css OK: stale\n' })
+    expect(x.row).toMatch(/^v1-css\tFAIL\tnot run: the build did not pass/)
+    expect(x.ran).toBe(false)
+  })
+
+  it('the full run calls it straight after the build', () => {
+    expect(readFileSync(SCRIPT, 'utf8')).toMatch(/^ {2}check_build\n {2}check_v1_css\n/m)
+  })
 })

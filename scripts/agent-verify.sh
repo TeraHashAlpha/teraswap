@@ -5,7 +5,7 @@
 #   scripts/agent-verify.sh --format RESULTS.tsv        (formatter only; used by the tests)
 #   scripts/agent-verify.sh --codeql-diff HEAD.sarif BASE.sarif   (alert comparison only; used by the tests)
 #
-# Checks (always): suite, lint-delta, tsc, build, v1v2-parity, rpc-budget.
+# Checks (always): suite, lint-delta, tsc, build, v1-css, v1v2-parity, rpc-budget.
 #   --codeql  FULL javascript-security-extended via scripts/codeql-local.sh, HEAD vs base. Alerts are compared by
 #             rule + file + message (not by line, not by total), so one alert swapped for another is a FAIL.
 #   --keeper  keeper `node --test` on every Node major CI uses: the keeper-suite job of ci.yml and keeper-tests.yml.
@@ -26,7 +26,7 @@ KEEPER_DIR="contracts/order-engine/executor"
 KEEPER_WORKFLOW=".github/workflows/keeper-tests.yml"
 KEEPER_CI_WORKFLOW=".github/workflows/ci.yml"
 KEEPER_CI_JOB="keeper-suite"
-CHECK_ORDER="suite lint-delta tsc build v1v2-parity rpc-budget codeql keeper"
+CHECK_ORDER="suite lint-delta tsc build v1-css v1v2-parity rpc-budget codeql keeper"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -115,6 +115,21 @@ check_build() {
   local rc=$?
   if [ "$rc" -eq 0 ]; then record build PASS "next build ok"
   else record build FAIL "exit $rc (log: $OUT/build.log)"; fi
+}
+
+# A build can succeed with an unstyled v1 stylesheet (PR #719 audit). Same command as the CI build job, run on the build
+# that just passed: after a failed one, .next would hold an earlier build's CSS.
+check_v1_css() {
+  local m
+  if m="$(need node)"; then :; else fail_missing v1-css "$m"; return; fi
+  if [ "$(awk -F'\t' '$1 == "build" { s = $2 } END { print s }' "$RESULTS")" != "PASS" ]; then
+    record v1-css FAIL "not run: the build did not pass"; return
+  fi
+  (cd "$ROOT" && node scripts/check-v1-css.mjs) > "$OUT/v1-css.log" 2>&1
+  local rc=$? line
+  line="$(head -1 "$OUT/v1-css.log" | tr '\t' ' ' | cut -c1-300)"
+  if [ "$rc" -eq 0 ]; then record v1-css PASS "$line"
+  else record v1-css FAIL "exit $rc; $line (log: $OUT/v1-css.log)"; fi
 }
 
 # ---------- lint-delta
@@ -427,6 +442,7 @@ else
   check_lint_delta
   check_tsc
   check_build
+  check_v1_css
   check_parity
   check_rpc_budget
   [ "$DO_CODEQL" -eq 1 ] && check_codeql
