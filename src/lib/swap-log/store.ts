@@ -4,7 +4,8 @@
  *   - a row is looked up, written and deleted only together with ITS wallet (never a row of another wallet);
  *   - a pending row never carries a transaction hash: the hash is written by a verification and by nothing else, so
  *     "pending with a hash" (which the public counters of main read as a swap) can not be made by a caller. A hash the
- *     chain could not answer yet is kept in the PRIVATE claim columns (ADR-029 7.3), which no reader returns;
+ *     chain could not answer yet is kept in the PRIVATE claim columns (ADR-029 7.3), which no reader returns, on a CLAIM
+ *     ROW of its own (ADR-029 8.3): a POST row never holds a claim, and /api/history leaves claim rows out;
  *   - one transaction counts once per wallet (ADR-029 7.4): checked here, and enforced by the partial unique index
  *     (chain_id, lower(tx_hash), lower(wallet)) of the migration, whose violation (23505) is reported as `duplicate`;
  *   - before the migration is applied (columns missing) nothing is written.
@@ -16,21 +17,28 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { VerifiedKind } from '@/lib/swap-verify/verify-swap-on-chain'
 
 /**
- * [details J of goal 133b; owner's answer of 2026-11-26] Pending rows are private SCRATCH, never a reason to refuse:
- * at PENDING_CAP pending rows of a wallet created within PENDING_CAP_WINDOW_MS, a new pending row first retires (deletes)
- * that wallet's oldest scratch row without a claim; if every one carries a claim, the oldest whose claim is older than
- * CLAIM_RETIRE_AFTER_MS; else nothing (a sixth row is written). Whatever happened, the wallet never holds more than
- * SCRATCH_TOTAL_CAP scratch rows: at that many the oldest goes, whatever it carries.
- * A scratch row is pending, hash-less, unverified, and created within PENDING_CAP_WINDOW_MS OR carrying a claim (only
- * this code writes claims). A row older than that window without a claim (a row written before this change among them)
- * is never deleted.
+ * [details J of goal 133b, P.4 of goal 133c] A POST row is private SCRATCH, never a reason to refuse: at PENDING_CAP POST
+ * rows of a wallet created within PENDING_CAP_WINDOW_MS, a new POST row first retires (deletes) that wallet's oldest one.
+ * A scratch POST row is pending, hash-less, unverified, holds no claim, and was created within PENDING_CAP_WINDOW_MS. A
+ * claim row is never touched by this rule, and a row older than that window is never deleted by it.
  */
 export const PENDING_CAP = 5
 export const PENDING_CAP_WINDOW_MS = 60 * 60 * 1000
-export const CLAIM_RETIRE_AFTER_MS = 24 * 60 * 60 * 1000
-export const SCRATCH_TOTAL_CAP = 20
-/** A confirmation attaches to a pending row of the wallet created within this window (or one holding its claim). */
+/** A confirmation attaches to a POST row of the wallet created within this window. */
 export const PENDING_MATCH_WINDOW_MS = 2 * 60 * 60 * 1000
+
+/**
+ * [ADR-029 8.3, details P of goal 133c] A CLAIM is a row of its own: pending, no tokens, `claimed_tx_hash` set; one per
+ * (wallet, claimed chain or none, hash). It is removed only by the chain's answer (the transaction verified and recorded,
+ * or rejected, or found on no chain) or by age (CLAIM_EXPIRES_AFTER_MS), never by anyone's requests:
+ *   - at most CLAIM_CAP live claims per wallet; at the cap, a new claim first asks the chain about at most
+ *     CLAIM_CHECKS_PER_REQUEST of that wallet's claims older than CLAIM_CHECK_AFTER_MS, oldest first (confirm.ts);
+ *   - a claim older than CLAIM_EXPIRES_AFTER_MS may be deleted by any later request of that wallet.
+ */
+export const CLAIM_CAP = 20
+export const CLAIM_CHECK_AFTER_MS = 10 * 60 * 1000
+export const CLAIM_CHECKS_PER_REQUEST = 3
+export const CLAIM_EXPIRES_AFTER_MS = 7 * 24 * 60 * 60 * 1000
 
 /** The five columns of the ADR-029 migration: the two verification columns and the three private claim columns. */
 export const MIGRATION_COLUMNS = 'verified_at, verified_kind, claimed_tx_hash, claimed_chain_id, claimed_at'
@@ -39,7 +47,7 @@ export const MIGRATION_COLUMNS = 'verified_at, verified_kind, claimed_tx_hash, c
 const CANDIDATE_COLUMNS =
   'id, wallet, chain_id, source, status, tx_hash, token_in, token_out, verified_at, created_at, claimed_tx_hash, claimed_chain_id, claimed_at'
 
-/** A pending row of a wallet as a confirmation sees it. */
+/** A pending row of a wallet as a confirmation sees it: a POST row, or a claim row (`claimed_tx_hash` set). */
 export interface PendingCandidate {
   id: string
   wallet: string
@@ -47,7 +55,7 @@ export interface PendingCandidate {
   source: string
   status: string
   tx_hash: string | null
-  /** null only on a claim row (written by a confirmation that found no pending row): a POST row always has both tokens. */
+  /** null only on a claim row: a POST row always has both tokens. */
   token_in: string | null
   token_out: string | null
   verified_at: string | null
@@ -146,8 +154,9 @@ export async function findWalletVerifiedByTx(db: SupabaseClient, wallet: string,
 }
 
 /**
- * The pending rows of THAT wallet a confirmation may attach to: no hash, unverified, created since `sinceIso`, newest
- * first; plus the rows that hold a claim of `txHash`, whatever their age. Two plain reads, merged by id.
+ * The rows of THAT wallet a confirmation of `txHash` may attach to: its POST rows (no hash, unverified, no claim) created
+ * since `sinceIso`, newest first; plus the claim rows of `txHash` (any chain), whatever their age. A claim row of ANOTHER
+ * hash is never a candidate (P.2). Two plain reads, merged by id.
  */
 export async function findCandidateRows(db: SupabaseClient, wallet: string, txHash: string, sinceIso: string): Promise<PendingCandidate[] | 'error'> {
   const recent = await db
@@ -157,6 +166,7 @@ export async function findCandidateRows(db: SupabaseClient, wallet: string, txHa
     .eq('status', 'pending')
     .is('tx_hash', null)
     .is('verified_at', null)
+    .is('claimed_tx_hash', null)
     .gte('created_at', sinceIso)
     .order('created_at', { ascending: false })
     .limit(50)
@@ -166,10 +176,11 @@ export async function findCandidateRows(db: SupabaseClient, wallet: string, txHa
     .select(CANDIDATE_COLUMNS)
     .eq('wallet', wallet)
     .eq('status', 'pending')
+    .is('tx_hash', null)
     .is('verified_at', null)
     .ilike('claimed_tx_hash', txHash)
     .order('created_at', { ascending: false })
-    .limit(5)
+    .limit(10)
   if (claimed.error) return 'error'
   const byId = new Map<string, PendingCandidate>()
   for (const row of [...(recent.data ?? []), ...(claimed.data ?? [])] as PendingCandidate[]) byId.set(String(row.id), row)
@@ -241,29 +252,10 @@ export interface Claim {
   claimed_at: string
 }
 
-/** Puts a claim on one pending row of THAT wallet that holds none yet. `taken`: it holds one now (or is verified). */
-export async function storeClaimOn(db: SupabaseClient, rowId: string, wallet: string, claim: Claim): Promise<'stored' | 'taken' | 'columns_missing' | 'error'> {
-  const { data, error } = await db
-    .from('swaps')
-    .update(claim)
-    .eq('id', rowId)
-    .eq('wallet', wallet)
-    .is('claimed_tx_hash', null)
-    .is('verified_at', null)
-    .select('id')
-  if (error) {
-    const kind = writeError(error as PgError)
-    return kind === 'duplicate' ? 'error' : kind
-  }
-  return (data ?? []).length === 1 ? 'stored' : 'taken'
-}
-
-/** A claim stored without a chain learns it from a later confirmation that named one. */
-export async function setClaimChain(db: SupabaseClient, rowId: string, wallet: string, chainId: number): Promise<void> {
-  await db.from('swaps').update({ claimed_chain_id: chainId }).eq('id', rowId).eq('wallet', wallet).is('claimed_chain_id', null).is('verified_at', null)
-}
-
-/** A claim row: a pending row of THAT wallet with no tokens, written when the wallet has no pending row to hold the claim. */
+/**
+ * A claim row (P.1): a pending row of THAT wallet with no tokens, holding one claim and nothing else. A POST row never
+ * receives a claim.
+ */
 export async function insertClaimRow(db: SupabaseClient, row: { id: string; wallet: string; chain_id: number; source: string } & Claim): Promise<'inserted' | 'columns_missing' | 'error'> {
   const { error } = await db.from('swaps').insert({
     ...row,
@@ -288,71 +280,116 @@ export async function insertClaimRow(db: SupabaseClient, row: { id: string; wall
   return 'inserted'
 }
 
-interface ScratchRow {
-  id: string
-  created_at: string
-  claimed_tx_hash: string | null
-  claimed_at: string | null
-}
-
-const SCRATCH_COLUMNS = 'id, created_at, claimed_tx_hash, claimed_at'
-
-/** THAT wallet's scratch rows (see PENDING_CAP), oldest first. Two plain reads, merged by id. */
-async function findScratchRows(db: SupabaseClient, wallet: string, sinceIso: string): Promise<ScratchRow[] | 'error'> {
-  const base = () => db.from('swaps').select(SCRATCH_COLUMNS).eq('wallet', wallet).eq('status', 'pending').is('tx_hash', null).is('verified_at', null)
-  const recent = await base().gte('created_at', sinceIso).order('created_at', { ascending: true }).limit(100)
-  if (recent.error) return 'error'
-  const claimed = await base().not('claimed_tx_hash', 'is', null).order('created_at', { ascending: true }).limit(100)
-  if (claimed.error) return 'error'
-  const byId = new Map<string, ScratchRow>()
-  for (const row of [...(recent.data ?? []), ...(claimed.data ?? [])] as ScratchRow[]) byId.set(String(row.id), row)
-  return [...byId.values()].sort((a, b) => time(a.created_at) - time(b.created_at))
-}
-
 /** A timestamp as Postgres (`…+00:00`, microseconds) or JavaScript (`…Z`) writes it, in milliseconds; NaN sorts first. */
 function time(value: string | null): number {
   const ms = value === null ? Number.NaN : Date.parse(value)
   return Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms
 }
 
-/** Deletes one scratch row of THAT wallet; the filters repeat what makes it scratch, so nothing else can go. */
-async function deleteScratchRow(db: SupabaseClient, id: string, wallet: string): Promise<boolean> {
-  const { data, error } = await db.from('swaps').delete().eq('id', id).eq('wallet', wallet).eq('status', 'pending').is('tx_hash', null).is('verified_at', null).select('id')
-  return !error && (data ?? []).length === 1
+/**
+ * Details J / P.4: makes room for one more POST row of THAT wallet. Never refuses. At PENDING_CAP POST rows created
+ * within PENDING_CAP_WINDOW_MS, the oldest of them is retired (deleted: private scratch written by this code). A claim
+ * row is never looked at. Returns the ids it retired; `error` when the rows could not be read (the caller inserts anyway).
+ */
+export async function makeRoomForPending(db: SupabaseClient, wallet: string, now: Date): Promise<string[] | 'error'> {
+  const since = new Date(now.getTime() - PENDING_CAP_WINDOW_MS).toISOString()
+  // The filters say what a scratch POST row is; the delete below repeats them, so nothing else can go.
+  const { data, error } = await db
+    .from('swaps')
+    .select('id, created_at')
+    .eq('wallet', wallet)
+    .eq('status', 'pending')
+    .is('tx_hash', null)
+    .is('verified_at', null)
+    .is('claimed_tx_hash', null)
+    .gte('created_at', since)
+    .order('created_at', { ascending: true })
+    .limit(100)
+  if (error) return 'error'
+  const rows = ((data ?? []) as Array<{ id: string; created_at: string }>).sort((a, b) => time(a.created_at) - time(b.created_at))
+  if (rows.length < PENDING_CAP) return []
+  const { data: gone, error: deleteError } = await db
+    .from('swaps')
+    .delete()
+    .eq('id', rows[0].id)
+    .eq('wallet', wallet)
+    .eq('status', 'pending')
+    .is('tx_hash', null)
+    .is('verified_at', null)
+    .is('claimed_tx_hash', null)
+    .gte('created_at', since)
+    .select('id')
+  return !deleteError && (gone ?? []).length === 1 ? [rows[0].id] : []
+}
+
+/** A live claim row of a wallet, as the claim rules see it. */
+export interface ClaimRow {
+  id: string
+  chain_id: number
+  claimed_tx_hash: string
+  claimed_chain_id: number | null
+  claimed_at: string | null
+  created_at: string
+}
+
+const CLAIM_COLUMNS = 'id, chain_id, claimed_tx_hash, claimed_chain_id, claimed_at, created_at'
+
+/** THAT wallet's live claim rows, the oldest claim first. */
+export async function findClaimRows(db: SupabaseClient, wallet: string): Promise<ClaimRow[] | 'error'> {
+  const { data, error } = await db
+    .from('swaps')
+    .select(CLAIM_COLUMNS)
+    .eq('wallet', wallet)
+    .eq('status', 'pending')
+    .is('tx_hash', null)
+    .is('verified_at', null)
+    .not('claimed_tx_hash', 'is', null)
+    .order('claimed_at', { ascending: true })
+    .limit(200)
+  if (error) return 'error'
+  return ((data ?? []) as ClaimRow[]).sort((a, b) => time(a.claimed_at) - time(b.claimed_at))
 }
 
 /**
- * Details J: makes room for one more pending row of THAT wallet (a POST row or a claim row). Never refuses. Returns the
- * ids it retired; `error` when the scratch rows could not be read (the caller writes its row anyway).
+ * The claim rows of `txHash` of THAT wallet (every chain) are deleted: the chain answered for that hash (it is recorded,
+ * or it is not this wallet's swap). The filters repeat what makes a row a claim row, so no other row can go; a claim
+ * row a verification just reused no longer holds its claim.
  */
-export async function makeRoomForPending(db: SupabaseClient, wallet: string, now: Date): Promise<string[] | 'error'> {
-  const windowStart = now.getTime() - PENDING_CAP_WINDOW_MS
-  const claimDeadline = now.getTime() - CLAIM_RETIRE_AFTER_MS
-  const scratch = await findScratchRows(db, wallet, new Date(windowStart).toISOString())
-  if (scratch === 'error') return 'error'
-  const retired: string[] = []
-  const live = [...scratch]
-  const retire = async (row: ScratchRow) => {
-    live.splice(live.indexOf(row), 1)
-    if (await deleteScratchRow(db, row.id, wallet)) retired.push(row.id)
-  }
-
-  if (live.filter((r) => time(r.created_at) >= windowStart).length >= PENDING_CAP) {
-    const unclaimed = live.find((r) => r.claimed_tx_hash === null)
-    const staleClaim = live.find((r) => r.claimed_tx_hash !== null && time(r.claimed_at) < claimDeadline)
-    const victim = unclaimed ?? staleClaim
-    if (victim) await retire(victim)
-  }
-  while (live.length >= SCRATCH_TOTAL_CAP) await retire(live[0])
-  return retired
-}
-
-/** A decided claim (verified, or rejected by the chain) is cleared from THAT wallet's unverified rows. */
-export async function clearClaim(db: SupabaseClient, wallet: string, txHash: string): Promise<void> {
+export async function deleteClaimsOf(db: SupabaseClient, wallet: string, txHash: string): Promise<void> {
   await db
     .from('swaps')
-    .update({ claimed_tx_hash: null, claimed_chain_id: null, claimed_at: null })
+    .delete()
     .eq('wallet', wallet)
-    .ilike('claimed_tx_hash', txHash)
+    .eq('status', 'pending')
+    .is('tx_hash', null)
     .is('verified_at', null)
+    .ilike('claimed_tx_hash', txHash)
+}
+
+/** P.3: one claim row of THAT wallet, whose transaction no chain has. The filters repeat what makes it a claim row. */
+export async function deleteClaimRow(db: SupabaseClient, wallet: string, id: string): Promise<boolean> {
+  const { data, error } = await db
+    .from('swaps')
+    .delete()
+    .eq('id', id)
+    .eq('wallet', wallet)
+    .eq('status', 'pending')
+    .is('tx_hash', null)
+    .is('verified_at', null)
+    .not('claimed_tx_hash', 'is', null)
+    .select('id')
+  return !error && (data ?? []).length === 1
+}
+
+/** P.3: THAT wallet's claims older than CLAIM_EXPIRES_AFTER_MS, which any later request may delete. */
+export async function deleteExpiredClaims(db: SupabaseClient, wallet: string, now: Date): Promise<void> {
+  await db
+    .from('swaps')
+    .delete()
+    .eq('wallet', wallet)
+    .eq('status', 'pending')
+    .is('tx_hash', null)
+    .is('verified_at', null)
+    .not('claimed_tx_hash', 'is', null)
+    .lt('claimed_at', new Date(now.getTime() - CLAIM_EXPIRES_AFTER_MS).toISOString())
 }

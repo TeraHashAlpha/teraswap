@@ -290,16 +290,20 @@ describe('the transaction makes the row: which row it goes to (133b I.2)', () =>
     const f = R.mainnetFcTokenToToken
     state.db = createFakeSwapsDb({ swaps: [await rowFor(f)] })
     const before = publicOf(rows()[0])
+    const postRowBefore = JSON.stringify(rows()[0])
     const invented = [`0x${'11'.repeat(32)}`, `0x${'aa'.repeat(32)}`, `0x${'00'.repeat(32)}`, `0x${'bb'.repeat(32)}`]
     for (const hash of invented) {
       const res = await patch({ txHash: hash, wallet: sender(f), status: 'confirmed', chainId: 1 })
       expect([res.status, await res.json()]).toEqual([202, { ok: false, outcome: 'not_found' }])
     }
     expect(publicOf(rows()[0])).toEqual(before)
-    // CHANGED (133b I.4): was "no write at all". Each hash is kept as a PRIVATE claim: the first on the wallet's pending
-    // row, the next ones on claim rows of their own (a claim is never overwritten). Nothing public is written.
-    expect(rows().map((r) => r.claimed_tx_hash)).toEqual(invented)
-    for (const row of rows()) expect(row).toMatchObject({ status: 'pending', tx_hash: null, verified_at: null, amount_in_usd: null, wallet: sender(f) })
+    // CHANGED EXPECTATION (goal 133c S, back to round 1's meaning; round 2 put the first claim ON this row): invented
+    // hashes for the victim never write on the victim's own POST row, not even a private column. Each hash is kept on a
+    // claim row of its own (ADR-029 8.3); nothing public is written.
+    expect(JSON.stringify(rows()[0])).toBe(postRowBefore)
+    expect(rows()[0].claimed_tx_hash).toBeNull()
+    expect(rows().slice(1).map((r) => r.claimed_tx_hash)).toEqual(invented)
+    for (const row of rows().slice(1)) expect(row).toMatchObject({ status: 'pending', tx_hash: null, verified_at: null, token_in: null, amount_in_usd: null, wallet: sender(f) })
   })
 
   it('a caller that names the victim\'s wallet with ANOTHER wallet\'s real swap: 422, the victim\'s row is unchanged', async () => {
@@ -413,11 +417,15 @@ describe('when the chain does not confirm it, nothing public changes', () => {
     vi.unstubAllGlobals()
     rpc = installStubChainRpc({ fixtures: [] })
     const before = publicOf(rows()[0])
+    const postRowBefore = JSON.stringify(rows()[0])
     const res = await patch({ txHash: f.hash, wallet: sender(f), chainId: 1 })
     expect([res.status, await res.json()]).toEqual([202, { ok: false, outcome: 'not_found' }])
-    // CHANGED (133b I.4): was "the row is byte-identical". Its public columns are; the claim is kept on it.
     expect(publicOf(rows()[0])).toEqual(before)
-    expect(rows()[0]).toMatchObject({ claimed_tx_hash: f.hash.toLowerCase(), claimed_chain_id: 1 })
+    // CHANGED EXPECTATION (goal 133c P.1; round 2 kept the claim ON this row): the POST row is byte-identical again, as
+    // in round 1; the claim is a row of its own, for this wallet, chain and hash.
+    expect(JSON.stringify(rows()[0])).toBe(postRowBefore)
+    expect(rows()).toHaveLength(2)
+    expect(rows()[1]).toMatchObject({ wallet: sender(f), status: 'pending', tx_hash: null, token_in: null, verified_at: null, claimed_tx_hash: f.hash.toLowerCase(), claimed_chain_id: 1 })
     expect(vi.mocked(trackWalletAction)).not.toHaveBeenCalled()
     // Asked twice, never a third time.
     expect(rpc.reads().map((r) => r.method)).toEqual(['eth_getTransactionByHash', 'eth_getTransactionByHash'])
@@ -452,12 +460,15 @@ describe('when the chain does not confirm it, nothing public changes', () => {
     vi.unstubAllGlobals()
     rpc = installStubChainRpc(options as never)
     const before = publicOf(rows()[0])
+    const postRowBefore = JSON.stringify(rows()[0])
     const res = await patch({ txHash: f.hash, wallet: sender(f), chainId: 1 })
     expect(res.status).toBe(202)
-    // CHANGED (133b I.4): was "no update at all". The one write is the claim; every public column is as it was.
     expect(publicOf(rows()[0])).toEqual(before)
-    expect(rows()[0].claimed_tx_hash).toBe(f.hash.toLowerCase())
-    for (const op of state.db.ops.filter((o) => o.kind === 'update')) expect(Object.keys(op.detail as Row).sort()).toEqual(['claimed_at', 'claimed_chain_id', 'claimed_tx_hash'])
+    // CHANGED EXPECTATION (goal 133c P.1; round 2's one write was the claim ON this row): no update at all, as in round
+    // 1; the POST row is byte-identical, and the claim is inserted as a row of its own with no public value.
+    expect(JSON.stringify(rows()[0])).toBe(postRowBefore)
+    expect(state.db.ops.filter((o) => o.kind === 'update')).toEqual([])
+    expect(rows().find((r) => r.claimed_tx_hash === f.hash.toLowerCase())).toMatchObject({ status: 'pending', tx_hash: null, token_in: null, amount_in_usd: null, verified_at: null, claimed_chain_id: 1 })
     expect(verifiedRows()).toEqual([])
     expect(trackLargeTrade).not.toHaveBeenCalled()
   })
@@ -711,10 +722,12 @@ describe('the request itself', () => {
     expect(lookups).toHaveLength(3)
     for (const op of lookups) expect(op.filters[0], JSON.stringify(op)).toBe(`wallet=eq.${sender(f)}`)
     expect(lookups[0].filters).toEqual([`wallet=eq.${sender(f)}`, `tx_hash=ilike.${f.hash.toLowerCase()}`, 'verified_at=not.is.null', 'limit=1'])
+    // CHANGED EXPECTATION (goal 133c P.2): the recent rows are POST rows only (claimed_tx_hash is null: a claim row of
+    // another hash is never a candidate); the claim rows of this hash are hash-less rows, up to 10 (was 5).
     expect(lookups[1].filters).toEqual([
-      `wallet=eq.${sender(f)}`, 'status=eq.pending', 'tx_hash=is.null', 'verified_at=is.null', expect.stringMatching(/^created_at=gte\.\d{4}-/), 'order=created_at.desc', 'limit=50',
+      `wallet=eq.${sender(f)}`, 'status=eq.pending', 'tx_hash=is.null', 'verified_at=is.null', 'claimed_tx_hash=is.null', expect.stringMatching(/^created_at=gte\.\d{4}-/), 'order=created_at.desc', 'limit=50',
     ])
-    expect(lookups[2].filters).toEqual([`wallet=eq.${sender(f)}`, 'status=eq.pending', 'verified_at=is.null', `claimed_tx_hash=ilike.${f.hash.toLowerCase()}`, 'order=created_at.desc', 'limit=5'])
+    expect(lookups[2].filters).toEqual([`wallet=eq.${sender(f)}`, 'status=eq.pending', 'tx_hash=is.null', 'verified_at=is.null', `claimed_tx_hash=ilike.${f.hash.toLowerCase()}`, 'order=created_at.desc', 'limit=10'])
     // And every write too.
     for (const op of state.db.writes()) expect(op.filters).toContain(`wallet=eq.${sender(f)}`)
   })
@@ -752,8 +765,11 @@ describe('a hash sent with POST (the split-swap client) is handled as a PATCH on
     const f = R.mainnetFcTokenToToken
     const res = await post(body(f, { txHash: `0x${'11'.repeat(32)}` }))
     expect([res.status, await res.json()]).toEqual([200, { ok: true }])
-    expect(rows()).toHaveLength(1)
-    expect(rows()[0]).toMatchObject({ status: 'pending', tx_hash: null, verified_at: null, amount_in_usd: null })
+    // CHANGED EXPECTATION (goal 133c P.1; round 2 kept the claim on the POST's own row): two rows, the POST row with no
+    // hash and no claim, and the claim on a row of its own.
+    expect(rows()).toHaveLength(2)
+    expect(rows()[0]).toMatchObject({ status: 'pending', tx_hash: null, verified_at: null, amount_in_usd: null, claimed_tx_hash: null })
+    expect(rows()[1]).toMatchObject({ status: 'pending', tx_hash: null, verified_at: null, amount_in_usd: null, token_in: null, claimed_tx_hash: `0x${'11'.repeat(32)}` })
   })
 
   it('the leg confirms the row IT inserted (the newest that agrees), not an older pending row of the wallet', async () => {

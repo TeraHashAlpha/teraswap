@@ -4,15 +4,18 @@
  * A confirmation carries a wallet, a transaction hash and, when the client knows it, the chain. The server reads the
  * transaction on the candidate chains (verify-swap-on-chain.ts) and takes kind, source, tokens and amounts from the
  * chain. Then:
- *   confirmed / failed  the result goes to the newest pending row of THAT wallet on that chain that agrees with it (same
- *                       in token; for a reverted call that names no token, the same source), the row holding this
- *                       claim first; if none agrees, a new verified row is inserted. Either way the row carries only
- *                       derived values plus the wallet and the hash (slippage and expected_output of an updated pending
- *                       row stay: owner's answer of 2026-11-25, kept on 2026-11-26).
- *   not_found           the hash is never thrown away: it is kept as a PRIVATE claim on a pending row of the wallet (one
- *                       that holds no claim yet), or on a new claim row; the caller answers 202 and the client asks again.
- *   rejected            the chain answered and it is not this wallet's swap: a claim of that hash is cleared.
- * Pending rows are private scratch: they are hints for the chain read (a tie-break) and places to attach, never proof.
+ *   confirmed / failed  the result goes to the newest POST row of THAT wallet on that chain that agrees with it (same in
+ *                       token; for a reverted call that names no token, the same source), which keeps its slippage and
+ *                       expected_output (owner's answer of 2026-11-25); else to a claim row of THIS hash; else a new
+ *                       verified row is inserted. A claim row of another hash is never a candidate (details P.2 of goal
+ *                       133c). Either way the row carries only derived values plus the wallet and the hash, and the
+ *                       claim rows of this hash are gone afterwards (reused, or deleted).
+ *   not_found           the hash is never thrown away: it is kept as a PRIVATE claim on a row of its own, one per
+ *                       (wallet, claimed chain or none, hash) (ADR-029 8.3, P.1); a POST row never holds a claim. The
+ *                       caller answers 202 and the client asks again. At CLAIM_CAP claims the chain is asked about the
+ *                       wallet's oldest claims first (P.3); a claim leaves only by the chain's answer or by age.
+ *   rejected            the chain answered and it is not this wallet's swap: the claims of that hash are deleted.
+ * POST rows are private scratch: hints for the chain read (a tie-break) and places to attach, never proof.
  *
  * Nothing written comes from the caller but the wallet and the hash the chain was asked about (and, in a claim, the
  * chain the caller named). The trackers (large trade, oracle, failed swap) run after the write, from derived values.
@@ -38,16 +41,20 @@ import {
 } from '@/lib/swap-verify/verify-swap-on-chain'
 import { trackWalletAction } from '@/lib/wallet-activity-server'
 import {
+  CLAIM_CAP,
+  CLAIM_CHECK_AFTER_MS,
+  CLAIM_CHECKS_PER_REQUEST,
   PENDING_MATCH_WINDOW_MS,
-  clearClaim,
+  deleteClaimRow,
+  deleteClaimsOf,
+  deleteExpiredClaims,
   findCandidateRows,
+  findClaimRows,
   findWalletVerifiedByTx,
   insertClaimRow,
   insertVerified,
-  makeRoomForPending,
   markVerified,
-  setClaimChain,
-  storeClaimOn,
+  type ClaimRow,
   type PendingCandidate,
   type VerifiedUpdate,
 } from './store'
@@ -212,19 +219,27 @@ export interface ConfirmArgs {
   chainId?: number | null
 }
 
-const sameHash = (a: string | null, b: string) => a !== null && a.toLowerCase() === b
+/** A claim row (P.1): a row of its own holding one claim; a POST row never holds one. */
+const isClaimRow = (row: PendingCandidate) => row.claimed_tx_hash !== null
 
-/** A claim row: written by a confirmation for its claim alone; a POST row always has its two tokens. */
-const isClaimRow = (row: PendingCandidate) => row.token_in === null
+/** A timestamp in milliseconds; a missing or unreadable one is the oldest. */
+function time(value: string | null): number {
+  const ms = value === null ? Number.NaN : Date.parse(value)
+  return Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms
+}
 
 /**
- * H.5: the chains to ask, in order. The chain the client named; else the chains of the wallet's pending rows (newest
- * first), then the app's other chains in the registry's order (owner's answer of 2026-11-26: all chains).
+ * H.5: the chains to ask, in order. The chain the client named; else the chains of the wallet's POST rows (newest
+ * first) and the chains its claims of this hash name, then the app's other chains in the registry's order (owner's
+ * answer of 2026-11-26: all chains).
  */
 function chainsToAsk(chainId: number | null | undefined, candidates: readonly PendingCandidate[]): number[] {
   if (chainId !== undefined && chainId !== null && isSwapLogChain(chainId)) return [chainId]
   const order: number[] = []
-  for (const row of candidates) if (isSwapLogChain(row.chain_id) && !order.includes(row.chain_id)) order.push(row.chain_id)
+  for (const row of candidates) {
+    const chain = isClaimRow(row) ? row.claimed_chain_id : row.chain_id
+    if (chain !== null && isSwapLogChain(chain) && !order.includes(chain)) order.push(chain)
+  }
   for (const chain of getSupportedChainIds()) if (!order.includes(chain)) order.push(chain)
   return order
 }
@@ -234,39 +249,44 @@ interface Found {
   result: VerifySwapResult
 }
 
+interface NotFound {
+  reason: VerifyReason
+  /** The chain that has the transaction but no receipt yet; or the named chain; else null. */
+  chainId: number | null
+  /** Every chain of the list was asked and none has the transaction (each answered "no such transaction"). */
+  absent: boolean
+}
+
 /**
  * Asks the chains in turn; stops at the first that has the transaction (an answer other than "no such transaction").
  * `notFound` carries the chain that has the transaction but not yet its receipt, when there is one.
  */
-async function searchChains(
-  args: ConfirmArgs,
-  candidates: readonly PendingCandidate[],
-  deps: ConfirmDeps,
-): Promise<{ found: Found } | { notFound: { reason: VerifyReason; chainId: number | null } }> {
+async function searchChains(args: ConfirmArgs, candidates: readonly PendingCandidate[], deps: ConfirmDeps): Promise<{ found: Found } | { notFound: NotFound }> {
   const chains = chainsToAsk(args.chainId, candidates)
   const named = chains.length === 1 && args.chainId !== undefined && args.chainId !== null
   const started = Date.now()
   const elapsed = deps.elapsedMs ?? (() => Date.now() - started)
   let reason: VerifyReason = 'tx_missing'
+  let asked = 0
   for (let i = 0; i < chains.length; i++) {
     if (i > 0 && elapsed() >= CHAIN_SEARCH_BUDGET_MS) break
     const chainId = chains[i]
-    // The wallet's pending rows on this chain, newest first: tie-breaks only (H.2, H.3).
+    // The wallet's POST rows on this chain, newest first: tie-breaks only (H.2, H.3).
     const pending = candidates.filter((r) => r.chain_id === chainId && !isClaimRow(r)).map((r) => ({ source: r.source, tokenIn: r.token_in, tokenOut: r.token_out }))
     const result = await verifySwapOnChain({ chainId, txHash: args.txHash, wallet: args.wallet, pending }, { read: deps.read })
+    asked++
     if (result.outcome !== 'not_found') return { found: { chainId, result } }
     // The transaction is there but its receipt is not yet: this is its chain.
-    if (result.reason === 'receipt_missing') return { notFound: { reason: 'receipt_missing', chainId } }
+    if (result.reason === 'receipt_missing') return { notFound: { reason: 'receipt_missing', chainId, absent: false } }
     // An RPC failure is the more useful reason to report than "not on the other chains".
     if (result.reason !== 'tx_missing' || reason === 'tx_missing') reason = result.reason ?? 'rpc_error'
   }
-  return { notFound: { reason, chainId: named ? chains[0] : null } }
+  return { notFound: { reason, chainId: named ? chains[0] : null, absent: asked === chains.length && reason === 'tx_missing' } }
 }
 
-/** I.2: the row the result goes to, or null (a new row is inserted). */
+/** I.2 / P.2: the row the result goes to, or null (a new row is inserted). */
 function chooseRow(
   candidates: readonly PendingCandidate[],
-  txHash: string,
   chainId: number,
   outcome: 'confirmed' | 'failed',
   derived: DerivedSwap,
@@ -279,42 +299,77 @@ function chooseRow(
     // A reverted call that names no token (owner, 2026-11-26): the same source.
     return outcome === 'failed' && row.source === derived.source
   }
-  const holder = candidates.find((r) => sameHash(r.claimed_tx_hash, txHash))
-  // The row that holds this claim: a claim row was written for it alone; a POST row only if it agrees.
-  if (holder && (isClaimRow(holder) || agrees(holder))) return holder
-  // Else the newest that agrees and holds no claim of another transaction.
-  return candidates.find((r) => (r.claimed_tx_hash === null || sameHash(r.claimed_tx_hash, txHash)) && agrees(r)) ?? null
+  // The newest POST row that agrees receives the result (and keeps its slippage and expected_output).
+  const post = candidates.find(agrees)
+  if (post) return post
+  // Else a claim row of THIS hash (the only claim rows among the candidates) becomes the verified row: the one that
+  // named this chain, else one that named none, else any.
+  const claims = candidates.filter(isClaimRow)
+  return claims.find((r) => r.claimed_chain_id === chainId) ?? claims.find((r) => r.claimed_chain_id === null) ?? claims[0] ?? null
 }
 
-/** I.4: keep the hash. Never overwrites another claim. `false`: it could not be stored (the caller still answers 202). */
-async function keepClaim(args: ConfirmArgs, candidates: readonly PendingCandidate[], chainId: number | null, now: Date): Promise<boolean | 'columns_missing'> {
-  const holder = candidates.find((r) => sameHash(r.claimed_tx_hash, args.txHash))
-  if (holder) {
-    if (holder.claimed_chain_id === null && chainId !== null) await setClaimChain(args.db, holder.id, args.wallet, chainId)
-    return true
+/** Where a claim went: `stored` (a new claim row), `exists` (this key has one), `cap` (P.3: not stored), or a failure. */
+type KeepResult = 'stored' | 'exists' | 'cap' | 'columns_missing' | 'error'
+
+/**
+ * P.1 and P.3: keep the hash on a claim row of its own, one per (wallet, claimed chain or none, hash). A repeat does
+ * not move `claimed_at` (owner's answer of 2026-11-26). At CLAIM_CAP live claims, the chain is first asked about at most
+ * CLAIM_CHECKS_PER_REQUEST of the wallet's claims older than CLAIM_CHECK_AFTER_MS (decideClaim); still at the cap: the
+ * new claim is not stored.
+ */
+async function keepClaim(args: ConfirmArgs, candidates: readonly PendingCandidate[], chainId: number | null, now: Date, deps: ConfirmDeps): Promise<KeepResult> {
+  if (candidates.some((r) => isClaimRow(r) && r.claimed_chain_id === chainId)) return 'exists'
+
+  // P.3: a claim older than 7 days may be deleted by any later request of that wallet.
+  await deleteExpiredClaims(args.db, args.wallet, now)
+  const claims = await findClaimRows(args.db, args.wallet)
+  if (claims === 'error') return 'error'
+  let live = claims.length
+  if (live >= CLAIM_CAP) {
+    const due = claims.filter((c) => time(c.claimed_at) < now.getTime() - CLAIM_CHECK_AFTER_MS).slice(0, CLAIM_CHECKS_PER_REQUEST)
+    for (const claim of due) {
+      if ((await decideClaim(args.db, args.wallet, claim, now, deps)) === 'gone') live--
+    }
   }
-  const claim = { claimed_tx_hash: args.txHash, claimed_chain_id: chainId, claimed_at: now.toISOString() }
-  // The newest POST row of that wallet (on that chain when it is known) that holds no claim yet.
-  for (const row of candidates) {
-    if (isClaimRow(row) || row.claimed_tx_hash !== null) continue
-    if (chainId !== null && row.chain_id !== chainId) continue
-    const stored = await storeClaimOn(args.db, row.id, args.wallet, claim)
-    if (stored === 'stored') return true
-    if (stored === 'columns_missing') return 'columns_missing'
-    if (stored === 'error') return false
-  }
-  // None: a claim row of its own, after making room for it (details J). Its chain_id is the named chain, else the
-  // registry's first (claimed_chain_id says null).
-  if ((await makeRoomForPending(args.db, args.wallet, now)) === 'error') console.warn('[log-swap] pending cap not applied')
+  if (live >= CLAIM_CAP) return 'cap'
+
   const inserted = await insertClaimRow(args.db, {
     id: randomUUID(),
     wallet: args.wallet,
+    // A claim that names no chain sits on the registry's first chain; claimed_chain_id says null.
     chain_id: chainId ?? getSupportedChainIds()[0],
     source: UNKNOWN_SOURCE,
-    ...claim,
+    claimed_tx_hash: args.txHash,
+    claimed_chain_id: chainId,
+    claimed_at: now.toISOString(),
   })
-  if (inserted === 'columns_missing') return 'columns_missing'
-  return inserted === 'inserted'
+  return inserted === 'inserted' ? 'stored' : inserted
+}
+
+/**
+ * P.3: the chain decides one of the wallet's claims. The transaction found: verified and recorded now (or, not this
+ * wallet's swap, its claims deleted). Found on no chain (every chain asked said "no such transaction"): that claim row
+ * is deleted. Anything else (no receipt yet, an RPC error, a read refused): the claim stays. `gone`: the claim no longer
+ * takes a place.
+ */
+async function decideClaim(db: SupabaseClient, wallet: string, claim: ClaimRow, now: Date, deps: ConfirmDeps): Promise<'gone' | 'kept'> {
+  const txHash = claim.claimed_tx_hash.toLowerCase()
+  const args: ConfirmArgs = { db, wallet, txHash, chainId: claim.claimed_chain_id }
+  const already = await findWalletVerifiedByTx(db, wallet, txHash)
+  if (already === 'error') return 'kept'
+  if (already) {
+    await deleteClaimsOf(db, wallet, txHash)
+    return 'gone'
+  }
+  const candidates = await findCandidateRows(db, wallet, txHash, new Date(now.getTime() - PENDING_MATCH_WINDOW_MS).toISOString())
+  if (candidates === 'error') return 'kept'
+  const searched = await searchChains(args, candidates, deps)
+  if ('notFound' in searched) {
+    if (!searched.notFound.absent) return 'kept'
+    return (await deleteClaimRow(db, wallet, claim.id)) ? 'gone' : 'kept'
+  }
+  const recorded = await recordFound(args, candidates, searched.found, now, deps)
+  return recorded.result === 'verified' || recorded.result === 'rejected' ? 'gone' : 'kept'
 }
 
 /**
@@ -333,17 +388,24 @@ export async function confirmSwap(args: ConfirmArgs, deps: ConfirmDeps = {}): Pr
 
   const searched = await searchChains(args, candidates, deps)
   if ('notFound' in searched) {
-    const kept = await keepClaim(args, candidates, searched.notFound.chainId, now)
+    const kept = await keepClaim(args, candidates, searched.notFound.chainId, now, deps)
     if (kept === 'columns_missing') return { result: 'columns_missing' }
-    if (!kept) console.warn('[log-swap] claim not stored')
-    return { result: 'not_found', reason: searched.notFound.reason, claimed: kept }
+    // One line each, fixed words only. `swap_claim_cap`: the wallet holds CLAIM_CAP claims the chain could not retire.
+    if (kept === 'cap') console.warn('[log-swap] swap_claim_cap')
+    if (kept === 'error') console.warn('[log-swap] claim not stored')
+    return { result: 'not_found', reason: searched.notFound.reason, claimed: kept === 'stored' || kept === 'exists' }
   }
+  return recordFound(args, candidates, searched.found, now, deps)
+}
 
-  const { chainId, result: verified } = searched.found
+/** The chain answered for `args.txHash`: rejected (its claims deleted), or the result written (I.2, P.2). */
+async function recordFound(args: ConfirmArgs, candidates: readonly PendingCandidate[], found: Found, now: Date, deps: ConfirmDeps): Promise<ConfirmResult> {
+  const { chainId, result: verified } = found
+  const claimRows = candidates.filter(isClaimRow)
   if (verified.outcome === 'rejected' || !verified.kind || !verified.derived) {
     const reason = verified.reason ?? 'wrong_target'
-    // The chain answered: a claim of this hash is decided.
-    if (candidates.some((r) => sameHash(r.claimed_tx_hash, args.txHash))) await clearClaim(args.db, args.wallet, args.txHash)
+    // The chain answered: the claims of this hash are decided.
+    if (claimRows.length > 0) await deleteClaimsOf(args.db, args.wallet, args.txHash)
     // One line, fixed words only: the reason is one of verify-swap-on-chain.ts's codes, the chain is one of the app's.
     console.warn(`[log-swap] verification rejected reason=${forLog(reason)} chain=${forLog(chainId)}`)
     return { result: 'rejected', reason }
@@ -359,7 +421,7 @@ export async function confirmSwap(args: ConfirmArgs, deps: ConfirmDeps = {}): Pr
   const usdWithheld = ethIn && usd.in === null
   const update = buildUpdate(args.txHash, outcome, verified.kind, chainId, derived, usd, now)
 
-  const row = chooseRow(candidates, args.txHash, chainId, outcome, derived, verified.callTokenIn)
+  const row = chooseRow(candidates, chainId, outcome, derived, verified.callTokenIn)
   let written: 'updated' | 'inserted' | 'not_unverified' | 'duplicate' | 'columns_missing' | 'error'
   if (row !== null) written = await markVerified(args.db, row.id, args.wallet, update, isClaimRow(row) ? chainId : undefined)
   else written = await insertVerified(args.db, { id: randomUUID(), wallet: args.wallet, chain_id: chainId, ...update })
@@ -368,17 +430,18 @@ export async function confirmSwap(args: ConfirmArgs, deps: ConfirmDeps = {}): Pr
 
   if (written === 'columns_missing') return { result: 'columns_missing' }
   if (written === 'error') return { result: 'storage_error' }
-  const heldElsewhere = candidates.some((r) => sameHash(r.claimed_tx_hash, args.txHash) && (written !== 'updated' || r.id !== row?.id))
+  // The claim rows of this hash that were not just written (a claim row the update reused no longer holds its claim).
+  const leftClaims = claimRows.some((r) => written !== 'updated' || r.id !== row?.id)
   if (written === 'duplicate') {
     // The index refused it: another request of this wallet recorded this transaction a moment ago, or it did not.
     const again = await findWalletVerifiedByTx(args.db, args.wallet, args.txHash)
     if (again !== true) return { result: 'duplicate' }
-    if (heldElsewhere) await clearClaim(args.db, args.wallet, args.txHash)
+    if (leftClaims) await deleteClaimsOf(args.db, args.wallet, args.txHash)
     return { result: 'verified' }
   }
 
-  // The claim is decided: cleared on the row just written (the update did it) and on any other row that held it.
-  if (heldElsewhere) await clearClaim(args.db, args.wallet, args.txHash)
+  // The claim is decided: the claim rows of this hash are deleted (a claim row holds nothing else).
+  if (leftClaims) await deleteClaimsOf(args.db, args.wallet, args.txHash)
   if (deps.trackers !== false) runTrackers(args.wallet, args.txHash, update, usdWithheld)
   return { result: 'verified' }
 }

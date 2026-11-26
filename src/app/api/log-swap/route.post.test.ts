@@ -135,8 +135,11 @@ describe('the official client\'s three calls keep their answer: 200 { ok: true }
   it('a split-swap leg after its receipt (useSplitSwap.ts:611: status confirmed and a hash in the POST): still a pending row with no hash', async () => {
     const res = await post(clientBody({ source: 'velora', status: 'confirmed', txHash: `0x${'ab'.repeat(32)}` }))
     expect([res.status, await res.json()]).toEqual([200, { ok: true }])
-    expect(rows()).toHaveLength(1)
-    expect(lastRow()).toMatchObject({ source: 'velora', status: 'pending', tx_hash: null, verified_at: null })
+    // CHANGED EXPECTATION (goal 133c P.1; round 2 kept the claim on this row): the leg's row, pending with no hash and
+    // no claim, and the hash the chain does not have kept on a claim row of its own.
+    expect(rows()).toHaveLength(2)
+    expect(rows()[0]).toMatchObject({ source: 'velora', status: 'pending', tx_hash: null, verified_at: null, claimed_tx_hash: null })
+    expect(lastRow()).toMatchObject({ status: 'pending', tx_hash: null, verified_at: null, token_in: null, claimed_tx_hash: `0x${'ab'.repeat(32)}` })
   })
 
   it('native ETH as a token (the app\'s placeholder) is an address like any other; chain 8453 and 42161 are accepted', async () => {
@@ -309,7 +312,11 @@ describe('pending rows are scratch: at 5 in the last hour the oldest is retired,
     expect((await post(clientBody({ wallet: '0x00000000000000000000000000000000000000c1' }))).status).toBe(200)
     expect(rows()).toHaveLength(6)
     // A delete names the row, the wallet and what makes it scratch.
-    expect(deletes()[0].filters).toEqual([`id=eq.${first}`, `wallet=eq.${lower}`, 'status=eq.pending', 'tx_hash=is.null', 'verified_at=is.null'])
+    // CHANGED EXPECTATION (goal 133c P.4): what makes it scratch now also says it holds no claim and is of the last
+    // hour, so a claim row (or an older row) can never be the one deleted.
+    expect(deletes()[0].filters).toEqual([
+      `id=eq.${first}`, `wallet=eq.${lower}`, 'status=eq.pending', 'tx_hash=is.null', 'verified_at=is.null', 'claimed_tx_hash=is.null', expect.stringMatching(/^created_at=gte\.\d{4}-/),
+    ])
   })
 
   it('a planted wallet does not block its owner: 50 POSTs by "someone" for it, then the owner\'s own POST is written', async () => {
@@ -349,27 +356,32 @@ describe('pending rows are scratch: at 5 in the last hour the oldest is retired,
   it('all five carry a claim and one claim is older than 24 h: that row is retired', async () => {
     state.db = createFakeSwapsDb({
       swaps: [
-        // An old claim row (created two days ago, claimed then): scratch because it carries a claim.
+        // An old claim row (created two days ago, claimed then).
         seed('stale-claim', 48 * 60, { token_in: null, token_in_symbol: null, token_out: null, token_out_symbol: null, amount_in: null, amount_out: null }, 48 * 60),
         ...Array.from({ length: 5 }, (_, i) => seed(`claimed-${i}`, 50 - i, {}, 40 - i)),
       ],
     })
     expect((await post(clientBody())).status).toBe(200)
-    expect(deletes().map((o) => o.detail)).toEqual([['stale-claim']])
-    expect(rows()).toHaveLength(6)
+    // CHANGED EXPECTATION (goal 133c P.3 / P.4; round 2 retired the claim older than 24 h, A104 R2-2 B3b): a POST never
+    // touches a claim row; a claim leaves only by the chain's answer or after 7 days.
+    expect(deletes()).toEqual([])
+    expect(ids()).toContain('stale-claim')
+    expect(rows()).toHaveLength(7)
   })
 
   it('at 20 scratch rows the oldest goes, whatever it carries', async () => {
-    // 19 claimed rows of the last hour (young claims) and one older claimed row: 20 scratch rows.
+    // 19 claimed rows of the last hour (young claims) and one older claimed row.
     state.db = createFakeSwapsDb({
       swaps: [seed('oldest-claim', 120, {}, 110), ...Array.from({ length: 19 }, (_, i) => seed(`claimed-${i}`, 59 - i, {}, 58 - i))],
     })
     expect((await post(clientBody())).status).toBe(200)
-    expect(deletes().map((o) => o.detail)).toEqual([['oldest-claim']])
-    expect(rows()).toHaveLength(20)
-    // And it holds: the next POST again retires the oldest, the wallet stays at 20.
-    expect((await post(clientBody())).status).toBe(200)
-    expect(rows()).toHaveLength(20)
+    // CHANGED EXPECTATION (goal 133c P.4; round 2 deleted the oldest at 20 "whatever it carries", the vector of A104
+    // R2-2): no claim row is ever retired by a POST; the POST rows of the hour follow the cap of 5 on their own.
+    expect(deletes()).toEqual([])
+    expect(rows()).toHaveLength(21)
+    for (let i = 0; i < 6; i++) expect((await post(clientBody())).status).toBe(200)
+    expect(rows().filter((r) => r.claimed_tx_hash !== null && r.claimed_tx_hash !== undefined)).toHaveLength(20)
+    expect(rows().filter((r) => r.claimed_tx_hash === null || r.claimed_tx_hash === undefined)).toHaveLength(5)
     expect(deletes()).toHaveLength(2)
   })
 
@@ -386,12 +398,13 @@ describe('which database client does what, and what a failure says', () => {
   it('the insert goes through the insert-only logger client; the reads through the service client', async () => {
     await post(clientBody())
     const swapsOps = state.db.ops.filter((o) => o.table === 'swaps')
-    // CHANGED (133b J): the cap read its one count; it now reads the wallet's scratch rows (two reads: the last hour's,
-    // and those carrying a claim), and deletes, with the service client, only when it retires one.
-    expect(swapsOps.map((o) => `${o.role}:${o.kind}`)).toEqual(['service:select', 'service:select', 'service:select', 'logger:insert'])
-    const scratch = [`wallet=eq.${WALLET.toLowerCase()}`, 'status=eq.pending', 'tx_hash=is.null', 'verified_at=is.null']
+    // CHANGED (133b J): the cap read its one count; it now reads the wallet's scratch rows, and deletes, with the
+    // service client, only when it retires one.
+    // CHANGED EXPECTATION (goal 133c P.4; round 2 read twice, the second read for rows carrying a claim): one read, the
+    // wallet's POST rows of the last hour that hold no claim.
+    expect(swapsOps.map((o) => `${o.role}:${o.kind}`)).toEqual(['service:select', 'service:select', 'logger:insert'])
+    const scratch = [`wallet=eq.${WALLET.toLowerCase()}`, 'status=eq.pending', 'tx_hash=is.null', 'verified_at=is.null', 'claimed_tx_hash=is.null']
     expect(swapsOps[1].filters).toEqual([...scratch, expect.stringMatching(/^created_at=gte\.\d{4}-/), 'order=created_at.asc', 'limit=100'])
-    expect(swapsOps[2].filters).toEqual([...scratch, 'claimed_tx_hash=not.is.null', 'order=created_at.asc', 'limit=100'])
   })
 
   it('an insert the database refuses: 200 { ok: false, error: "insert_failed" }, and the log has the code only', async () => {

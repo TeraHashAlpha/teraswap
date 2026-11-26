@@ -15,8 +15,9 @@
  *       (its verified row, or a claim row);
  *   P5  no response and no log line carries a caller marker; the status code is one of the documented ones;
  *   P6  alert trackers are called only for a row verified by that request, with derived values;
- *   P7  (133b J) no wallet holds more than 20 scratch rows (pending, hash-less, unverified, created in the last hour or
- *       carrying a claim), and a row disappears only as a scratch row of the wallet the request names.
+ *   P7  (133b J, 133c P) no wallet holds more than 5 scratch POST rows (pending, hash-less, unverified, no claim,
+ *       created in the last hour) or more than 20 claim rows; a row disappears only as a scratch POST row of the wallet
+ *       the request names, or as that wallet's claim row of the very hash the request asked the chain about.
  * A failure prints the seed and the request number: the run can be replayed exactly.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -174,10 +175,12 @@ async function runSeed(seed: number, total: number) {
   }
 
   state.db = createFakeSwapsDb()
-  const stats = { post: 0, patch: 0, verified: 0, retired: 0, claims: 0, statuses: new Map<number, number>() }
-  /** Details J's scratch row, as of `now`. */
+  const stats = { post: 0, patch: 0, verified: 0, retired: 0, claims: 0, claimsDecided: 0, statuses: new Map<number, number>() }
+  /** Details J's scratch row, as of `now`: since goal 133c P.4, a POST row of the last hour that holds no claim. */
   const isScratch = (r: Row, now: number) =>
-    r.status === 'pending' && r.tx_hash === null && r.verified_at === null && (Date.parse(String(r.created_at)) >= now - 3_600_000 || r.claimed_tx_hash !== null)
+    r.status === 'pending' && r.tx_hash === null && r.verified_at === null && r.claimed_tx_hash === null && Date.parse(String(r.created_at)) >= now - 3_600_000
+  /** A claim row (goal 133c P.1): pending, no hash, unverified, holding a claimed hash. */
+  const isClaim = (r: Row) => r.status === 'pending' && r.tx_hash === null && r.verified_at === null && r.claimed_tx_hash !== null
   const allowed = new Set([200, 202, 400, 409, 422, 429])
 
   for (let n = 1; n <= total; n++) {
@@ -244,18 +247,27 @@ async function runSeed(seed: number, total: number) {
       }
     }
     // CHANGED (133b J): "no row ever disappears" is now "a row disappears only as a scratch row of the named wallet".
+    // CHANGED EXPECTATION (goal 133c P.3): ... or as a claim row of the named wallet whose OWN hash this request asked
+    // the chain about (verified onto another row, or rejected). No claim here is old enough for the cap check (10
+    // minutes) or to expire (7 days), so no request may delete a claim of another hash.
     const now = Date.now()
     const remaining = new Set(rows.map((r) => String(r.id)))
     for (const [id, text] of before) {
       if (remaining.has(id)) continue
       const gone = JSON.parse(text) as Row
       expect(String(gone.wallet), `${where}: a row of another wallet disappeared`).toBe(lowerNamed)
+      if (isClaim(gone)) {
+        expect(String(gone.claimed_tx_hash).toLowerCase(), `${where}: a claim of another hash disappeared ${text}`).toBe(String(body.txHash).toLowerCase())
+        stats.claimsDecided++
+        continue
+      }
       expect(isScratch(gone, now), `${where}: a row that is not scratch disappeared ${text}`).toBe(true)
       stats.retired++
     }
 
     const seenTx = new Set<string>()
     const pendingPerWallet = new Map<string, number>()
+    const claimsPerWallet = new Map<string, number>()
     for (const row of rows) {
       const rowText = JSON.stringify(row)
       if (row.verified_at === null) {
@@ -265,8 +277,13 @@ async function runSeed(seed: number, total: number) {
         expect([row.amount_in_usd, row.amount_out_usd], `${where}: unverified row carries USD`).toEqual([null, null])
         expect(rowText.includes(MARK), `${where}: caller text in a pending row ${rowText}`).toBe(false)
         // CHANGED (133b J): P7 counts a wallet's scratch rows (at most 20); it counted its pending rows of the last hour (5).
+        // CHANGED EXPECTATION (goal 133c P.3, P.4): two counts again, POST rows of the hour (at most 5) and claim rows
+        // (at most CLAIM_CAP, 20), as the two rules are now apart.
         if (isScratch(row, now)) pendingPerWallet.set(String(row.wallet), (pendingPerWallet.get(String(row.wallet)) ?? 0) + 1)
-        if (row.claimed_tx_hash !== null) stats.claims++
+        if (isClaim(row)) {
+          claimsPerWallet.set(String(row.wallet), (claimsPerWallet.get(String(row.wallet)) ?? 0) + 1)
+          stats.claims++
+        }
         continue
       }
 
@@ -303,7 +320,8 @@ async function runSeed(seed: number, total: number) {
     }
 
     // P7
-    for (const [wallet, count] of pendingPerWallet) expect(count, `${where}: ${wallet} has ${count} scratch rows`).toBeLessThanOrEqual(20)
+    for (const [wallet, count] of pendingPerWallet) expect(count, `${where}: ${wallet} has ${count} scratch rows`).toBeLessThanOrEqual(5)
+    for (const [wallet, count] of claimsPerWallet) expect(count, `${where}: ${wallet} has ${count} claim rows`).toBeLessThanOrEqual(20)
 
     // P6: an alert only for a row this request verified, and from that row's values.
     const newlyVerified = rows.filter((r) => r.verified_at !== null && !verifiedBefore.has(String(r.id)))

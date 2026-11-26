@@ -7,7 +7,7 @@ import {
   ORDERS_READ_HEADER_SIGNATURE,
 } from '@/lib/order-engine/read-auth'
 import { checkRateLimit } from '@/lib/kv-rate-limiter'
-import { withoutPrivateSwapColumns } from '@/lib/swap-log/private-columns'
+import { isSwapClaimRow, withoutPrivateSwapColumns } from '@/lib/swap-log/private-columns'
 
 // [CHORE-API-HARDENING-2 / P3d] Per-wallet rate limit — this route had NONE,
 // unlike its /api/orders and /api/analytics/export siblings. Generous enough for
@@ -96,7 +96,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ swaps: [], total: 0 })
     }
 
-    const swapItems = (swapRows ?? []).map(mapSwapRow)
+    // [ADR-029 8.3, details P of goal 133c] A claim row (a hash the chain could not answer yet, on a row of its own) is
+    // not a swap of the History tab: left out here, in code, so the query is main's and works before the migration.
+    const swapItems = (swapRows ?? []).filter((row) => !isSwapClaimRow(row)).map(mapSwapRow)
 
     // [CHORE-DCA-VISIBILITY-AND-STATS #2] W6 read-auth gate for the DCA fills.
     // Same trust anchor as /api/orders (recoverTypedDataAddress over the signed

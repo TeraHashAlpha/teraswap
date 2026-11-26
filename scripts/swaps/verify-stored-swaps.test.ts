@@ -505,7 +505,8 @@ describe('133b L: rows holding a claim (a hash the chain could not answer when i
     gas_savings_usd: 0, verified_at: null, verified_kind: null, claimed_tx_hash: claimed, claimed_chain_id: claimedChain, claimed_at: minutesAgo(5),
   })
   const rowsWithClaims = () => [
-    // A POST row that took its own claim: the transaction is on the claimed chain.
+    // A POST row that took its own claim (round 2's shape; since goal 133c P.1 a claim is always a row of its own): the
+    // transaction is on the claimed chain.
     claimRow('post-row', sender(fc), fc.hash, 1, { tokenIn: '0x5086bf358635b81d8c47c66d1c8b9e567db70c72', chainId: 1 }),
     // A claim row with no chain named: the transaction is on Base.
     claimRow('claim-row', sender(base), base.hash, null, false),
@@ -544,17 +545,19 @@ describe('133b L: rows holding a claim (a hash the chain could not answer when i
     expect(row('post-row')).toMatchObject({ status: 'confirmed', verified_kind: 'fee_collector', tx_hash: fc.hash.toLowerCase(), amount_in: '46080134130180921522', claimed_tx_hash: null })
     expect(row('claim-row')).toMatchObject({ status: 'confirmed', chain_id: 8453, verified_kind: 'fee_collector', tx_hash: base.hash.toLowerCase(), token_in: NATIVE, claimed_tx_hash: null, claimed_at: null })
     expect(row('invented')).toMatchObject({ status: 'pending', claimed_tx_hash: `0x${'5a'.repeat(32)}` })
-    expect(row('not-mine')).toMatchObject({ status: 'pending', verified_at: null, claimed_tx_hash: null, claimed_chain_id: null, claimed_at: null })
-    expect(db.rows()).toHaveLength(4)
+    // CHANGED EXPECTATION (goal 133c P; round 2 cleared the claim columns and left an empty pending row): the chain
+    // answered that the claimed transaction is not this wallet's swap, so the claim row, which held nothing else, is gone.
+    expect(row('not-mine')).toBeUndefined()
+    expect(db.rows()).toHaveLength(3)
     for (const tracker of [trackWalletAction, trackLargeTrade, trackSwapFailed, trackOracleUnavailable]) expect(tracker).not.toHaveBeenCalled()
     expect(ran.summary.applied).toEqual({ claim_verified: 2, claim_kept: 1, claim_cleared: 1 })
     // Run again: the decided claims are gone, the undecided one is asked again and stays.
     const again = await runScript(['--from-db', '--apply'], { db: db.service as unknown as SwapsDb })
+    // CHANGED EXPECTATION (goal 133c P): 'not-mine' is no longer a row to report (was 'no_tx_hash').
     expect(again.rows.map((r) => [r.id, r.decision, r.applied ?? null])).toEqual([
       ['post-row', 'already_verified', null],
       ['claim-row', 'already_verified', null],
       ['invented', 'claim_not_found', 'claim_kept'],
-      ['not-mine', 'no_tx_hash', null],
     ])
   })
 })

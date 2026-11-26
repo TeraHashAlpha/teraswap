@@ -272,8 +272,17 @@ describe('the incident, replayed', () => {
     expect(n).toBe(117)
     check('9 the whole incident (117 POST and 117 PATCH)')
     // The cap: no invented wallet got more than five pending rows.
-    const perWallet = new Map<string, number>()
-    for (const r of state.db.rows()) perWallet.set(String(r.wallet), (perWallet.get(String(r.wallet)) ?? 0) + 1)
-    expect(Math.max(...perWallet.values())).toBeLessThanOrEqual(5)
+    // CHANGED EXPECTATION (goal 133c P.1, P.3; round 2 kept each invented hash's claim ON a POST row): the five are POST
+    // rows; the invented hashes the PATCHes named are claim rows of their own, at most 20 per wallet, none public.
+    const posts = new Map<string, number>()
+    const claims = new Map<string, number>()
+    for (const r of state.db.rows()) {
+      const isClaim = r.claimed_tx_hash !== null && r.claimed_tx_hash !== undefined
+      const counts = isClaim ? claims : posts
+      counts.set(String(r.wallet), (counts.get(String(r.wallet)) ?? 0) + 1)
+      if (isClaim) expect(r).toMatchObject({ status: 'pending', tx_hash: null, verified_at: null, token_in: null, amount_in_usd: null })
+    }
+    expect(Math.max(...posts.values())).toBeLessThanOrEqual(5)
+    expect(Math.max(...claims.values())).toBeLessThanOrEqual(20)
   })
 })

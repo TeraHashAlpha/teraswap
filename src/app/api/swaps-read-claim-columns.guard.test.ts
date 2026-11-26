@@ -147,8 +147,16 @@ function answerProblems(name: string, body: string, ops: readonly Pick<RecordedO
   return problems
 }
 
-async function run(name: string): Promise<{ body: string; ops: RecordedOp[]; status: number }> {
-  state.db = createFakeSwapsDb({ swaps: swapRows(), tables: otherTables(), now: () => new Date(NOW) })
+/**
+ * [goal 133c P.1] The same rows as round 3 writes them outside a claim: the three columns present, and null (a POST
+ * row, a verified row). A reader that stopped stripping the columns would still answer with their NAMES.
+ */
+function swapRowsWithEmptyClaims(): Row[] {
+  return swapRows().map((r) => ({ ...r, claimed_tx_hash: null, claimed_chain_id: null, claimed_at: null }))
+}
+
+async function run(name: string, swaps: Row[] = swapRows()): Promise<{ body: string; ops: RecordedOp[]; status: number }> {
+  state.db = createFakeSwapsDb({ swaps, tables: otherTables(), now: () => new Date(NOW) })
   fakeUpstash.reset()
   const answer = await READERS[name]()
   const ops = [...state.db.ops]
@@ -191,13 +199,22 @@ describe('guard, layer 1: no reader answers with a claim column, flag off or on'
   }
 
   it('the history answers are not vacuous: the swaps are listed (and, signed, the fills too)', async () => {
-    const plain = JSON.parse((await run('GET /api/history?wallet')).body) as { swaps: Row[]; fillsIncluded: boolean }
+    // CHANGED EXPECTATION (goal 133c P.1, B4): a row that holds a claim is a claim row, and the History tab leaves claim
+    // rows out: over rows that ALL carry a claim, history lists none of them (round 2 listed the 12, columns stripped).
+    const allClaims = JSON.parse((await run('GET /api/history?wallet')).body) as { swaps: Row[]; fillsIncluded: boolean }
+    expect(allClaims.swaps.filter((s) => s.kind === 'swap')).toHaveLength(0)
+    // Not vacuous: over the same rows with the columns present and empty (as round 3 writes every other row), the 12 are
+    // listed, and the column NAMES are stripped (answerProblems looks for them too).
+    const plainRun = await run('GET /api/history?wallet', swapRowsWithEmptyClaims())
+    expect(answerProblems('history, empty claims', plainRun.body, plainRun.ops)).toEqual([])
+    const plain = JSON.parse(plainRun.body) as { swaps: Row[]; fillsIncluded: boolean }
     expect(plain.swaps.filter((s) => s.kind === 'swap')).toHaveLength(12)
     expect(plain.swaps.every((s) => !Object.keys(s).some((k) => k.startsWith('claimed_')))).toBe(true)
     // Every other column of the row is still there.
     expect(Object.keys(plain.swaps.find((s) => s.kind === 'swap') ?? {})).toEqual(expect.arrayContaining(['verified_at', 'verified_kind', 'tx_hash', 'expected_output']))
-    const signed = JSON.parse((await run('GET /api/history?wallet (read signature: swaps + fills)')).body) as { swaps: Row[]; fillsIncluded: boolean }
+    const signed = JSON.parse((await run('GET /api/history?wallet (read signature: swaps + fills)', swapRowsWithEmptyClaims())).body) as { swaps: Row[]; fillsIncluded: boolean }
     expect(signed.fillsIncluded).toBe(true)
+    expect(signed.swaps.filter((s) => s.kind === 'swap')).toHaveLength(12)
   })
 
   it('the fake database and the module name the same three columns', () => {

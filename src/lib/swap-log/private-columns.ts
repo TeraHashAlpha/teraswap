@@ -7,6 +7,15 @@
  */
 export const SWAP_PRIVATE_COLUMNS = ['claimed_tx_hash', 'claimed_chain_id', 'claimed_at'] as const
 
+/**
+ * [ADR-029 8.3] A claim row: a row of its own that holds a claimed hash and nothing else (no tokens, no transaction).
+ * A row without the column (before the migration, or a row main wrote) is never one.
+ */
+export function isSwapClaimRow(row: Record<string, unknown>): boolean {
+  const claimed = row.claimed_tx_hash
+  return claimed !== null && claimed !== undefined
+}
+
 /** A copy of `row` without the private columns. Every other key, and the key order, is kept. */
 export function withoutPrivateSwapColumns<T extends Record<string, unknown>>(row: T): T {
   const copy: Record<string, unknown> = {}
