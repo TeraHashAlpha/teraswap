@@ -40,81 +40,87 @@ try {
   raw = err.stdout || "{}";
 }
 
-let data;
-try {
-  data = JSON.parse(raw);
-} catch {
-  console.error("audit-gate: could not parse `npm audit --json` output — failing closed.");
-  process.exit(1);
-}
+// [fix/script-stdout-truncated-on-exit] The gate returns its exit code instead of calling process.exit: a failing run prints one
+// block per blocking advisory on stderr, and process.exit drops what a slow pipe has not taken yet.
+function run() {
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    console.error("audit-gate: could not parse `npm audit --json` output — failing closed.");
+    return 1;
+  }
 
-const BLOCKING = new Set(["high", "critical"]);
-const found = new Map(); // GHSA id -> { pkg, severity, url, title }
-for (const vuln of Object.values(data.vulnerabilities || {})) {
-  for (const via of vuln.via || []) {
-    if (typeof via === "object" && BLOCKING.has(via.severity)) {
-      const id = (via.url || "").split("/").pop() || String(via.source);
-      if (!found.has(id)) {
-        found.set(id, { pkg: via.name, severity: via.severity, url: via.url, title: via.title });
+  const BLOCKING = new Set(["high", "critical"]);
+  const found = new Map(); // GHSA id -> { pkg, severity, url, title }
+  for (const vuln of Object.values(data.vulnerabilities || {})) {
+    for (const via of vuln.via || []) {
+      if (typeof via === "object" && BLOCKING.has(via.severity)) {
+        const id = (via.url || "").split("/").pop() || String(via.source);
+        if (!found.has(id)) {
+          found.set(id, { pkg: via.name, severity: via.severity, url: via.url, title: via.title });
+        }
       }
     }
   }
-}
 
-// [fix/flaky-tests-allowlist-expiry] `today` decides expiry, so AUDIT_GATE_TODAY (a test/debug
-// override) is honoured only outside CI — otherwise setting it to a past date would un-expire entries.
-const override = process.env.AUDIT_GATE_TODAY;
-const useOverride = isIsoDate(override) && !process.env.CI;
-if (override && !useOverride) console.log("audit-gate: ignoring AUDIT_GATE_TODAY (CI, or not an ISO date).");
-const today = useOverride ? override : new Date().toISOString().slice(0, 10);
+  // [fix/flaky-tests-allowlist-expiry] `today` decides expiry, so AUDIT_GATE_TODAY (a test/debug
+  // override) is honoured only outside CI — otherwise setting it to a past date would un-expire entries.
+  const override = process.env.AUDIT_GATE_TODAY;
+  const useOverride = isIsoDate(override) && !process.env.CI;
+  if (override && !useOverride) console.log("audit-gate: ignoring AUDIT_GATE_TODAY (CI, or not an ISO date).");
+  const today = useOverride ? override : new Date().toISOString().slice(0, 10);
 
-const { allowlisted: usedAllow, blocking, invalidEntries } = evaluateAllowlist(allow, found, today);
+  const { allowlisted: usedAllow, blocking, invalidEntries } = evaluateAllowlist(allow, found, today);
 
-console.log(
-  `audit-gate: ${found.size} high/critical advisor${found.size === 1 ? "y" : "ies"} present, ` +
-    `${usedAllow.length} allowlisted, ${blocking.length} blocking.`
-);
-for (const { id, info, entry, label } of usedAllow) {
   console.log(
-    `  ALLOWLISTED  ${info.severity.toUpperCase().padEnd(8)} ${info.pkg} (${id}) — fix ${entry.fixedIn}, ${label}`
+    `audit-gate: ${found.size} high/critical advisor${found.size === 1 ? "y" : "ies"} present, ` +
+      `${usedAllow.length} allowlisted, ${blocking.length} blocking.`
   );
-}
-
-// Staleness / cleanup nudges (warn-only — must never re-red the gate on a future date).
-for (const a of allow) {
-  if (a.ageInOn && a.ageInOn <= today && found.has(a.id)) {
+  for (const { id, info, entry, label } of usedAllow) {
     console.log(
-      `  ⚠ STALE     ${a.package} (${a.id}) aged in on ${a.ageInOn} — replace this allowlist entry with an \`overrides\` pin "${a.package}": "${a.fixedIn}".`
+      `  ALLOWLISTED  ${info.severity.toUpperCase().padEnd(8)} ${info.pkg} (${id}) — fix ${entry.fixedIn}, ${label}`
     );
   }
-  if (!found.has(a.id)) {
-    console.log(`  ⓘ RESOLVED  ${a.package} (${a.id}) no longer appears in npm audit — delete this allowlist entry.`);
-  }
-}
 
-// Fail closed on a malformed allowlist even when the bad entry is currently unused.
-const invalidUnused = invalidEntries.filter((e) => !blocking.some((b) => b.id === e.id));
-
-if (blocking.length || invalidUnused.length) {
-  const total = blocking.length + invalidUnused.length;
-  console.error(`\naudit-gate FAILED — ${total} problem${total === 1 ? "" : "s"}:`);
-  for (const b of blocking) {
-    if (b.reason === "expired") {
-      console.error(`  ${expiredLine(b.id, b.date)}`);
-    } else if (b.reason === "invalid") {
-      console.error(`  ${invalidLine(b.id, b.detail)}`);
-    } else {
-      console.error(`  NOT allowlisted:`);
+  // Staleness / cleanup nudges (warn-only — must never re-red the gate on a future date).
+  for (const a of allow) {
+    if (a.ageInOn && a.ageInOn <= today && found.has(a.id)) {
+      console.log(
+        `  ⚠ STALE     ${a.package} (${a.id}) aged in on ${a.ageInOn} — replace this allowlist entry with an \`overrides\` pin "${a.package}": "${a.fixedIn}".`
+      );
     }
-    console.error(`  ${b.info.severity.toUpperCase()}  ${b.info.pkg} (${b.id}) — ${b.info.title}`);
-    console.error(`      ${b.info.url}`);
+    if (!found.has(a.id)) {
+      console.log(`  ⓘ RESOLVED  ${a.package} (${a.id}) no longer appears in npm audit — delete this allowlist entry.`);
+    }
   }
-  for (const e of invalidUnused) console.error(`  ${invalidLine(e.id, e.detail)}`);
-  console.error(
-    "\nResolve via an npm `overrides` pin to a patched version. ONLY if the patch is blocked by\n" +
-      ".npmrc min-release-age, add a justified, dated entry to audit-allowlist.json (Architect review)."
-  );
-  process.exit(1);
-}
 
-console.log("audit-gate PASSED — no un-allowlisted high/critical advisories.");
+  // Fail closed on a malformed allowlist even when the bad entry is currently unused.
+  const invalidUnused = invalidEntries.filter((e) => !blocking.some((b) => b.id === e.id));
+
+  if (blocking.length || invalidUnused.length) {
+    const total = blocking.length + invalidUnused.length;
+    console.error(`\naudit-gate FAILED — ${total} problem${total === 1 ? "" : "s"}:`);
+    for (const b of blocking) {
+      if (b.reason === "expired") {
+        console.error(`  ${expiredLine(b.id, b.date)}`);
+      } else if (b.reason === "invalid") {
+        console.error(`  ${invalidLine(b.id, b.detail)}`);
+      } else {
+        console.error(`  NOT allowlisted:`);
+      }
+      console.error(`  ${b.info.severity.toUpperCase()}  ${b.info.pkg} (${b.id}) — ${b.info.title}`);
+      console.error(`      ${b.info.url}`);
+    }
+    for (const e of invalidUnused) console.error(`  ${invalidLine(e.id, e.detail)}`);
+    console.error(
+      "\nResolve via an npm `overrides` pin to a patched version. ONLY if the patch is blocked by\n" +
+        ".npmrc min-release-age, add a justified, dated entry to audit-allowlist.json (Architect review)."
+    );
+    return 1;
+  }
+
+  console.log("audit-gate PASSED — no un-allowlisted high/critical advisories.");
+  return 0;
+}
+process.exitCode = run();

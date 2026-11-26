@@ -427,5 +427,6 @@ const invokedDirectly = (() => {
 })()
 
 if (invokedDirectly) {
-  process.exit(main())
+  // [fix/script-stdout-truncated-on-exit] set, don't exit: a pipe's pending writes are dropped by process.exit
+  process.exitCode = main()
 }
