@@ -532,7 +532,10 @@ describe('one transaction, one row per wallet', () => {
     // An old row verified by the stored-rows script keeps the wallet as main stored it (checksummed); the lookups use the
     // lowercase wallet, the index lower(wallet). The index is what holds.
     const f = R.mainnetFcTokenToToken
-    const checksummed = String(f.tx.from).replace(/^0x/, '0x').toUpperCase().replace(/^0X/, '0x')
+    // Mixed case, as a stored row written before this change can hold it: "0x" and the hex digits upper-cased.
+    const checksummed = `0x${String(f.tx.from).slice(2).toUpperCase()}`
+    expect(checksummed).not.toBe(sender(f))
+    expect(checksummed.toLowerCase()).toBe(sender(f))
     state.db = createFakeSwapsDb({
       swaps: [
         pendingRow(checksummed, { id: 'old-verified', wallet: checksummed, status: 'confirmed', tx_hash: f.hash, verified_at: '2026-11-20T00:00:00.000Z', verified_kind: 'fee_collector' }),
