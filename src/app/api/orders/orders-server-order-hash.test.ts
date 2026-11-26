@@ -246,9 +246,9 @@ describe('POST /api/orders stores the server hash [S-5]', () => {
   })
 
   it.each([
-    ['another order\'s hash', WRONG_A, '<hash-shaped>'],
-    ['not a hash at all', 'not-a-hash', '<string len 10>'],
-  ])('wrong hash text (%s) is stored as the server hash and logged once, without the signature', async (_label, text, callerHash) => {
+    ['another order\'s hash', WRONG_A, '<hash-shaped>', keccak256(toBytes(String(WRONG_A))).slice(2, 18)],
+    ['not a hash at all', 'not-a-hash', '<string len 10>', null], // [A98 R2-1] not 0x + 64 hex: no digest
+  ])('wrong hash text (%s) is stored as the server hash and logged once, without the signature', async (_label, text, callerHash, callerHashDigest) => {
     const { body, hash } = await signedDca(3)
     const res = await post({ ...body, orderHash: text })
     expect(res.status).toBe(201)
@@ -256,7 +256,7 @@ describe('POST /api/orders stores the server hash [S-5]', () => {
     expect(fake.rows.map((r) => r.order_hash)).toEqual([hash])
     expect(mismatchLines()).toEqual([{
       event: 'orders_order_hash_mismatch', mode: 'observe', outcome: 'stored', chainId: 8453, version: 3, orderType: 'dca',
-      serverHash: hash, callerHash, callerHashDigest: keccak256(toBytes(String(text))).slice(2, 18),
+      serverHash: hash, callerHash, callerHashDigest,
     }])
     const logged = warn.mock.calls.map((c: unknown[]) => String(c[0])).join('\n')
     expect(logged).not.toContain(String(body.signature).slice(2, 42))
@@ -474,7 +474,7 @@ describe('one signed order is stored once, rows written before the fix included 
 })
 
 // [A86 S-7] The observe line is written once the outcome is known, says what that outcome was, and carries the caller's
-// text only as a shape and a digest [A95 S-1: no text of the caller's, whatever its shape].
+// text only as a shape [A95 S-1: no text of the caller's, whatever its shape], with a digest only for 0x + 64 hex [A98 R2-1].
 describe('the orders_order_hash_mismatch line [A86 S-7]', () => {
   const METHODS = ['log', 'info', 'warn', 'error', 'debug'] as const
 
@@ -490,7 +490,7 @@ describe('the orders_order_hash_mismatch line [A86 S-7]', () => {
       expect(res.status).toBe(201)
       expect(mismatchLines()).toEqual([{
         event: 'orders_order_hash_mismatch', mode: 'observe', outcome: 'stored', chainId: 8453, version: 3, orderType: 'dca',
-        serverHash: hash, callerHash: `<string len ${len}>`, callerHashDigest: keccak256(toBytes(spell(String(body.signature)))).slice(2, 18),
+        serverHash: hash, callerHash: `<string len ${len}>`, callerHashDigest: null, // [A98 R2-1] not 0x + 64 hex
       }])
       const printed = [warn, ...others]
         .flatMap((spy) => spy.mock.calls.map((c: unknown[]) => c.map(String).join(' ')))

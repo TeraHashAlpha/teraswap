@@ -236,15 +236,17 @@ describe('the row\'s own signature is never printed [A89 R2-2, R2-5]', () => {
     ['the s of the high-s twin', `0x${TWIN_S}`],
   ]
 
-  it.each(WINDOWS)('a stored order_hash that is %s of the row\'s signature: <hash-shaped> + digest, on stdout and stderr', (_label, window) => {
+  it.each(WINDOWS)('a stored order_hash that is %s of the row\'s signature: <hash-shaped> (digest only with 0x), on stdout and stderr', (_label, window) => {
+    // [A98 R2-1] The one window spelled without 0x gets no digest.
+    const digest = window.startsWith('0x') ? keccak256(toBytes(window)).slice(2, 18) : null
     const r = run(JSON.stringify([
       { ...base, id: 'window-differs', order_hash: window, signature: SIG },
       { ...base, id: 'window-uncomputable', order_hash: window, order_data: null, signature: SIG },
     ]))
     expect(lines(r.stdout).find((o) => o.id === 'window-differs')).toMatchObject({
-      verdict: 'differs', stored: '<hash-shaped>', storedDigest: keccak256(toBytes(window)).slice(2, 18),
+      verdict: 'differs', stored: '<hash-shaped>', storedDigest: digest,
     })
-    expect(r.stderr).toContain(`uncomputable {"id":"window-uncomputable","chain_id":8453,"stored":"<hash-shaped>","storedDigest":"${keccak256(toBytes(window)).slice(2, 18)}"`)
+    expect(r.stderr).toContain(`uncomputable {"id":"window-uncomputable","chain_id":8453,"stored":"<hash-shaped>","storedDigest":${JSON.stringify(digest)}`)
     expect(leaked(r.stdout + r.stderr)).toEqual([])
   })
 
@@ -284,14 +286,16 @@ describe('a stored order_hash is never printed, only its shape and digest [A95 S
     ['32 hex of r + 32 other hex', `0x${R.slice(0, 32)}${'f0e1d2c3b4a59687'.repeat(2)}`],
     ['a stored hash of another order', `0x${'cd'.repeat(32)}`],
     ['a UUID', '3f1c2a4e-9b7d-4c1e-8a2f-5d6e7f8a9b0c'],
-  ])('differs, stored = %s: shape + digest on stdout, uncomputable the same on stderr, no 8-hex run of the signature', (_label, text) => {
+  ])('differs, stored = %s: shape (digest only for 0x + 64 hex) on stdout, uncomputable the same on stderr, no 8-hex run of the signature', (_label, text) => {
     const r = run(JSON.stringify([
       { ...base, id: 'differs-row', order_hash: text, signature: SIG },
       { ...base, id: 'uncomputable-row', order_hash: text, order_data: null, signature: SIG },
     ]))
     const shape = /^(?:0[xX])?[0-9a-fA-F]{64}$/.test(text) ? '<hash-shaped>' : `<string len ${text.length}>`
-    expect(lines(r.stdout).find((o) => o.id === 'differs-row')).toMatchObject({ verdict: 'differs', stored: shape, storedDigest: digest16(text) })
-    expect(r.stderr).toContain(`uncomputable {"id":"uncomputable-row","chain_id":8453,"stored":"${shape}","storedDigest":"${digest16(text)}"`)
+    // [A98 R2-1] The UUID is not 0x + 64 hex: no digest.
+    const digest = /^0x[0-9a-f]{64}$/.test(text) ? digest16(text) : null
+    expect(lines(r.stdout).find((o) => o.id === 'differs-row')).toMatchObject({ verdict: 'differs', stored: shape, storedDigest: digest })
+    expect(r.stderr).toContain(`uncomputable {"id":"uncomputable-row","chain_id":8453,"stored":"${shape}","storedDigest":${JSON.stringify(digest)}`)
     expect(leakedRuns(r.stdout + r.stderr)).toEqual([])
     expect(r.stdout + r.stderr).not.toContain(text.slice(2, 22))
   })
@@ -304,7 +308,7 @@ describe('a stored order_hash is never printed, only its shape and digest [A95 S
     expect(r.stdout).not.toContain(upper)
   })
 
-  it('safeText: a shape, never the text; digest = first 16 hex of keccak256', () => {
+  it('safeText: a shape, never the text', () => {
     const h = `0x${'ab'.repeat(32)}`
     expect(safeText(h)).toBe('<hash-shaped>')
     expect(safeText(h.slice(2).toUpperCase())).toBe('<hash-shaped>')
@@ -312,6 +316,37 @@ describe('a stored order_hash is never printed, only its shape and digest [A95 S
     expect(safeText(`0x${'ab'.repeat(65)}`)).toBe('<string len 132>')
     expect(safeText(42)).toBe('<type number>')
     expect(safeText(null)).toBeNull()
+  })
+
+  // [A98 R2-1] The same rule as the route's log line: a digest only for a stored text that is 0x + 64 hex (any case).
+  it.each([
+    ['6 hex of the signature', HEX.slice(0, 6)],
+    ['8 hex of the signature', HEX.slice(0, 8)],
+    ['0x + 8 hex of the signature', `0x${HEX.slice(0, 8)}`],
+  ])('A98 R2-1: stored = %s: the shape alone (storedDigest null) on both streams', (_label, text) => {
+    const r = run(JSON.stringify([
+      { ...base, id: 'differs-row', order_hash: text, signature: SIG },
+      { ...base, id: 'uncomputable-row', order_hash: text, order_data: null, signature: SIG },
+    ]))
+    expect(lines(r.stdout).find((o) => o.id === 'differs-row')).toMatchObject({ stored: `<string len ${text.length}>`, storedDigest: null })
+    expect(r.stderr).toContain(`uncomputable {"id":"uncomputable-row","chain_id":8453,"stored":"<string len ${text.length}>","storedDigest":null`)
+    expect(r.stdout + r.stderr).not.toContain(digest16(text))
+  })
+
+  it('A98 R2-1: 1,000 stored texts shorter than 0x + 64 hex: no digest on either stream; the hash-shaped control keeps its own', () => {
+    const short = Array.from({ length: 1000 }, (_, i) => {
+      const prefix = ['', '0x', '0X'][i % 3]
+      const len = 1 + (i % (prefix ? 63 : 64))
+      return prefix + HEX.slice(i % (HEX.length - len + 1)).slice(0, len)
+    })
+    expect(Math.max(...short.map((t) => t.length))).toBe(65)
+    const control = `0X${'Cd'.repeat(32)}`
+    const r = run(JSON.stringify([...short, control].map((order_hash, i) =>
+      // every third row cannot be computed, so its stored text goes through the stderr path
+      ({ ...base, id: `row-${i}`, order_hash, order_data: i % 3 === 0 ? null : base.order_data, signature: SIG }))))
+    const digests = [...(r.stdout + r.stderr).matchAll(/"storedDigest":(null|"[0-9a-f]+")/g)].map((m) => m[1])
+    expect(digests).toHaveLength(1001)
+    expect(digests.filter((d) => d !== 'null')).toEqual([`"${digest16(control)}"`])
   })
 
   it('property, seeded: 1,000 rows whose stored order_hash is cut from the row\'s own signature leave no 8-hex run of it on either stream', () => {

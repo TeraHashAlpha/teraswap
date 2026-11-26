@@ -17,7 +17,8 @@
  * array [A86 S-8] · 2 unreadable input.
  *
  * [A95 S-1] A stored order_hash is never printed: only its shape (`<hash-shaped>`, `<string len N>`, `<type T>`) and
- * `storedDigest`, the first 16 hex of keccak256 of the text, to match two reports about one text. (A text that mixes hex of
+ * `storedDigest`. [A98 R2-1] That is the first 16 hex of keccak256 of the text, to match two reports about one text, ONLY
+ * for a text that is 0x + 64 hex; null for any other (the digest of a short text can be reversed). (A text that mixes hex of
  * the row's own signature with other hex has the shape of a hash, so no rule about "a fragment of the signature" is
  * complete.) As a last guard every printed line has any run of 130+ hex characters replaced.
  *

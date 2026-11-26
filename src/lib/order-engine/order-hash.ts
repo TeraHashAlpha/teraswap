@@ -85,12 +85,17 @@ export function describeCallerText(value: unknown): string {
   return HASH_SHAPE_RE.test(value) ? '<hash-shaped>' : `<string len ${value.length}>`
 }
 
+/** [A98 R2-1] The only texts that get a digest: 0x + 64 hex, any case. Narrower than HASH_SHAPE_RE: the 0x is required. */
+const DIGESTIBLE_RE = /^0[xX][0-9a-fA-F]{64}$/
+
 /**
  * [A95 S-1] The first 16 hex of keccak256(utf-8 text): lets two log lines about the same text be matched without the text.
- * null when the value is not a string.
+ * [A98 R2-1] Only for a text that is 0x + 64 hex (any case); null for everything else. The digest is unkeyed and the log
+ * line carries the text's exact length, so the digest of a SHORT text can be reversed by trying every candidate (6 hex of
+ * a signature came back in 74 s on one core). Such a text is reported by its shape alone (describeCallerText).
  */
 export function callerTextDigest(value: unknown): string | null {
-  return typeof value === 'string' ? keccak256(toBytes(value)).slice(2, 18) : null
+  return typeof value === 'string' && DIGESTIBLE_RE.test(value) ? keccak256(toBytes(value)).slice(2, 18) : null
 }
 
 /** The order of the secp256k1 group. */
