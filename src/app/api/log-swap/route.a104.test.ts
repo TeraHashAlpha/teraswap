@@ -230,9 +230,10 @@ describe('A104 R2-1: 20 ETH paid and refunded for a dust return is never 20 ETH 
     expect((await publicCounts()).volume).toBe(0)
   })
 
-  // ETH's price in the days these were read, measured on the receipts themselves (1,619 to 1,645 USDC per ETH).
+  // ETH's price in the days these were read, measured on the receipts themselves (1,619 to 1,693 USDC per ETH).
   const REAL: Array<[number, SwapReceiptFixture]> = [
     [1, R3.mainnetRouterEthToToken],
+    [8453, R3.baseRouterEthToToken],
     [42161, R3.arbitrumRouterEthToToken],
   ]
   it.each(REAL)('chain %i control: a REAL swap of ETH for USDC through 0x is confirmed with both USD values', async (chainId, f) => {

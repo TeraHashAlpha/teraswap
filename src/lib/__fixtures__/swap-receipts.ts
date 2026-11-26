@@ -44,6 +44,8 @@
  * ROUND3_RECEIPTS (goal 133c, audit A104), NOT in EVERY_SWAP_RECEIPT (the tests that ask for them name them):
  *   1, 42161  REAL 0x swaps paying ETH for USDC (0x AllowanceHolder, the USDC sent to the payer), from round 1's sample
  *             of public-node answers read on 2026-11-25 (0x1ed2add5 on Ethereum, 0xa667ad70 on Arbitrum)
+ *   8453      the same on Base (0x0a438d67, 0.0061 ETH for 10.33 USDC), read on 2026-11-26 from mainnet.base.org: round
+ *             1's sample had no ETH-in 0x swap on Base; found by reading the latest 2,320 blocks
  *   1, 8453, 42161  the A104 auditor's "dust wrap" (a local anvil fork, 2026-11-26, sender 0xa104…a104): SwapRouter02
  *             multicall{value 20 ETH}[wrapETH(1e12 wei), sweepToken(WETH, 0, wallet), refundETH()]: 20 ETH paid, 19.999…
  *             refunded with no log, 1e12 wei of WETH received
@@ -52,6 +54,7 @@
  */
 import type { ChainRead, ChainReadMethod } from '@/lib/swap-verify/chain-read'
 import mainnetRouterEthToToken from './swap-receipts/1-router-0x-eth-to-token.json'
+import baseRouterEthToToken from './swap-receipts/8453-router-0x-eth-to-token.json'
 import arbitrumRouterEthToToken from './swap-receipts/42161-router-0x-eth-to-token.json'
 import a104MainnetDustWrap from './swap-receipts/fork-1-a104-eth-refund-dust-wrap.json'
 import a104BaseDustWrap from './swap-receipts/fork-8453-a104-eth-refund-dust-wrap.json'
@@ -157,6 +160,7 @@ const named = (f: unknown, name: string): SwapReceiptFixture => ({ ...(f as Swap
 /** Goal 133c (see the header): served only by the tests that pass them. */
 export const ROUND3_RECEIPTS = {
   mainnetRouterEthToToken: named(mainnetRouterEthToToken, '1-router-0x-eth-to-token'),
+  baseRouterEthToToken: as(baseRouterEthToToken),
   arbitrumRouterEthToToken: named(arbitrumRouterEthToToken, '42161-router-0x-eth-to-token'),
   a104MainnetDustWrap: as(a104MainnetDustWrap),
   a104BaseDustWrap: as(a104BaseDustWrap),
