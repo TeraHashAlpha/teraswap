@@ -789,7 +789,9 @@ describe('A95 S-2: the stored signature is the one the executors accept', () => 
     }
   }, 60_000)
 
-  it('a canonical input is stored byte-identical (the text the wallet signed); upper case / no 0x is stored as the canonical lower-case text', async () => {
+  // [A98 R2-2] A signature without 0x, or with 0X, never reaches the canonical step: the format check refuses it with 400
+  // (orders-create.validation.test.ts). Only upper-case hex after a lower-case 0x is accepted and stored lower case.
+  it('a canonical input is stored byte-identical (the text the wallet signed); upper-case hex after 0x is stored as the canonical lower-case text', async () => {
     for (const set of SETS) {
       const s = await signOrder({ version: set.version, chainId: set.chainId, kind: 'dca', salt: `a95 s2 canonical ${set.key}` })
       db.reset()
