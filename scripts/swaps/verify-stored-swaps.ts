@@ -10,19 +10,22 @@
  * stdout: JSON lines. First how the run is set up (mode; per chain, the NAME of the environment variable the RPC URL
  * comes from and whether a FeeCollector is configured), then one line per row
  *   { id, chain, decision, outcome, kind | reason, derived: { tokenIn, amountIn, tokenOut, amountOut, source }, ... }
- * and last a summary. `decision` is what --apply would do: "mark", or why not (verify-stored-swaps-lib.ts).
- * --apply sets verified_at and verified_kind on "mark" rows only, each only while it is still unverified.
+ * and last a summary. `decision` is what --apply would do: "mark", or why not (verify-stored-swaps-lib.ts). A "mark" row
+ * lists `callerColumns`: what the caller stored that becomes public once verified with the flag on.
+ * --apply sets verified_at and verified_kind on "mark" rows only, each only while it is still unverified, and nothing
+ * else on an old row. A row holding a claim (ADR-029 7.3) is decided as the route decides it (claim_* decisions).
  *
  * It never prints a key or an RPC URL: the database is named by SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY and read
  * from the environment, the chain endpoints by RPC_URL_<chain id>, and failures are printed as fixed words.
  * It ends by setting process.exitCode, never by calling process.exit, so a long report is not cut short when stdout is
  * a pipe. Run it only from the owner's terminal: this repository's agents never call a production database.
  */
-import { createClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { getSupportedChainIds } from '@/lib/chains/registry'
 import { serverOnlyRpcSource } from '@/lib/rpc-env'
+import { confirmSwap } from '@/lib/swap-log/confirm'
 import { feeCollectorsOf, verifySwapOnChain } from '@/lib/swap-verify/verify-swap-on-chain'
-import { main, type SwapsDb } from './verify-stored-swaps-lib'
+import { main, type ConfirmClaim, type SwapsDb } from './verify-stored-swaps-lib'
 
 async function readStdin(): Promise<string> {
   let text = ''
@@ -57,6 +60,16 @@ function describe(): Array<Record<string, unknown>> {
   })
 }
 
+/**
+ * [goal 133b details L] --apply decides a claim exactly as PATCH /api/log-swap does (src/lib/swap-log/confirm.ts): the
+ * transaction makes its row and the claim is cleared, or the claim stays. The alert trackers are off: the owner reads the
+ * report instead.
+ */
+function confirmClaim(db: SwapsDb): ConfirmClaim {
+  return async (claim) =>
+    (await confirmSwap({ db: db as unknown as SupabaseClient, wallet: claim.wallet.toLowerCase(), txHash: claim.txHash.toLowerCase(), chainId: claim.chainId }, { trackers: false })).result
+}
+
 // The stored rows are old: a transaction the node does not have is not "not there yet". A null answer is still asked
 // once more (chain-read.ts), with no pause between the two reads.
 process.env.SWAP_VERIFY_MISSING_RETRY_MS = '0'
@@ -68,6 +81,7 @@ void main({
   err: (line) => console.error(line),
   verify: (input) => verifySwapOnChain(input),
   db: database,
+  confirmClaim,
   describe,
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }).then(

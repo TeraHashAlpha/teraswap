@@ -62,7 +62,7 @@ Merged origin/main (fe3ab13b, PR #727) first: 64475599. Then `npm ci`. Tables: `
 - [x] 2 Migration and schema.sql (details K), the swaps read-columns guard, `/api/history` withholds the claim columns; the one-transaction check per wallet in code too (I.3)
 - [x] 3 Confirmation and row model (details I), the client's `chainId` and three quiet retries
 - [x] 4 Pending rows retired at the cap, never refused (details J)
-- [ ] 5 The script reads claims and lists caller-supplied columns (details L)
+- [x] 5 The script reads claims and lists caller-supplied columns (details L)
 - [ ] 6 Tests (details M), each new one failing on 09ddf974 first; mutation; browser v1/v2
 - [ ] One `agent-verify.sh --codeql` on the last code commit; result here; push
 

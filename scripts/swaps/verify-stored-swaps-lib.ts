@@ -14,7 +14,16 @@
  *   - the receipt's amount-out is between 50% and 200% of the stored one (old rows stored the QUOTE, so it is never equal).
  * A side the receipt cannot give counts as differing. Rows that verify but differ are reported with both values and left
  * for the owner to decide (`stored_differs`, `status_differs`).
+ * A row it would mark is printed with `callerColumns`: the stored columns that came from the caller and become public
+ * with the flag on (goal 133b details L), so the owner decides before the flag goes on (S-7 of A103 stays open).
+ *
+ * Claims (ADR-029 7.3, details L). A pending row with a `claimed_tx_hash` holds a hash a confirmation named while the
+ * chain could not answer yet. Report mode asks the chain (the claimed chain, else every chain of the app) and prints
+ * what a confirmation would do: `claim_verifiable`, `claim_not_found` or `claim_rejected`. Apply mode runs THE SAME
+ * confirmation the route runs (src/lib/swap-log/confirm.ts, without the alert trackers): the transaction makes its row
+ * and the claim is cleared, or the claim stays (`claim_kept`), or a rejected one is cleared (`claim_cleared`).
  */
+import { getSupportedChainIds } from '@/lib/chains/registry'
 import type { DerivedSwap, VerifiedKind, VerifySwapInput, VerifySwapResult } from '@/lib/swap-verify/verify-swap-on-chain'
 
 /** The receipt's amount-out must be at least half and at most twice the stored (quoted) one. */
@@ -23,9 +32,23 @@ export const OUT_RATIO_MIN_DEN = 2n
 export const OUT_RATIO_MAX_NUM = 2n
 export const OUT_RATIO_MAX_DEN = 1n
 
+/**
+ * The stored columns that came from the caller (on main) and that a public reader returns once the row is verified and
+ * the flag is on: listed per row the script would mark. Details L names symbols, source, fee and gasless flags and
+ * gas_savings_usd; the others are the remaining caller-supplied columns the public readers select (monitor, health,
+ * export, analytics, stats, surplus report).
+ */
+export const CALLER_COLUMNS = [
+  'token_in_symbol', 'token_out_symbol', 'source', 'fee_collected', 'is_gasless', 'gas_savings_usd',
+  'mev_protected', 'fee_amount', 'amount_out', 'amount_in_usd', 'amount_out_usd', 'gas_used', 'gas_price', 'mev_savings_estimate', 'mev_savings_actual',
+] as const
+
+const BASE_COLUMNS = 'id, wallet, chain_id, source, tx_hash, status, token_in, token_out, amount_in, amount_out, created_at'
+const CALLER_EXTRA = CALLER_COLUMNS.filter((c) => !BASE_COLUMNS.split(', ').includes(c)).join(', ')
+
 /** The columns the script reads. */
-export const STORED_COLUMNS = 'id, wallet, chain_id, source, tx_hash, status, token_in, token_out, amount_in, amount_out, verified_at, created_at'
-export const STORED_COLUMNS_BEFORE_MIGRATION = 'id, wallet, chain_id, source, tx_hash, status, token_in, token_out, amount_in, amount_out, created_at'
+export const STORED_COLUMNS = `${BASE_COLUMNS}, ${CALLER_EXTRA}, verified_at, claimed_tx_hash, claimed_chain_id, claimed_at`
+export const STORED_COLUMNS_BEFORE_MIGRATION = `${BASE_COLUMNS}, ${CALLER_EXTRA}`
 
 export type Decision =
   /** Verified and consistent with what the row stores: apply mode marks it. */
@@ -43,8 +66,24 @@ export type Decision =
   | 'status_differs'
   /** The transaction is this wallet's swap, but the stored tokens or amounts are not the receipt's. */
   | 'stored_differs'
+  /** A claim the chain confirms (or reports reverted): a confirmation would make its row and clear the claim. */
+  | 'claim_verifiable'
+  /** A claim the chain still has no answer for: it stays. */
+  | 'claim_not_found'
+  /** A claim of a transaction that is not this wallet's swap: a confirmation would clear it. */
+  | 'claim_rejected'
 
-export type Applied = 'marked' | 'already_verified' | 'duplicate_tx' | 'error'
+export type Applied =
+  | 'marked'
+  | 'already_verified'
+  | 'duplicate_tx'
+  | 'error'
+  /** Apply mode, a claim: its row made (or updated) and the claim cleared. */
+  | 'claim_verified'
+  /** Apply mode, a claim: the chain had no answer; it stays. */
+  | 'claim_kept'
+  /** Apply mode, a claim: rejected by the chain and cleared. */
+  | 'claim_cleared'
 
 export interface RowReport {
   id: string | null
@@ -60,6 +99,10 @@ export interface RowReport {
   differs?: string[]
   /** Receipt amount-out divided by stored amount-out, four decimals; absent when either is unknown. */
   outRatio?: string
+  /** A row it would mark: the stored caller-supplied columns that become public (CALLER_COLUMNS), as stored. */
+  callerColumns?: Record<string, unknown>
+  /** A claim row: the claimed chain (null: none named) and the chain the claim was found on. */
+  claim?: { claimedChain: number | null; foundOn: number | null }
   /** Apply mode only: what the write did. */
   applied?: Applied
 }
@@ -132,16 +175,59 @@ export function compareStored(
 
 export type Verify = (input: VerifySwapInput) => Promise<VerifySwapResult>
 
+function chainOf(v: unknown): number | null {
+  return typeof v === 'number' && Number.isInteger(v) ? v : typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : null
+}
+
+/** A row that holds a claim (a pending row of this code, written while the chain could not answer yet). */
+export function claimOf(raw: unknown): { txHash: string; chainId: number | null; wallet: string } | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
+  const row = raw as Record<string, unknown>
+  if (row.verified_at !== null && row.verified_at !== undefined) return null
+  const txHash = text(row.claimed_tx_hash)
+  const wallet = text(row.wallet)
+  if (txHash === null || wallet === null) return null
+  return { txHash, chainId: chainOf(row.claimed_chain_id), wallet }
+}
+
+/** A claim, checked as the route would: the claimed chain, else every chain of the app until one has the transaction. */
+async function checkClaim(row: Record<string, unknown>, base: { id: string | null; chain: number | null }, verify: Verify): Promise<RowReport> {
+  const claim = claimOf(row)
+  if (claim === null) return { ...base, decision: 'bad_row', reason: 'no_wallet' }
+  if (!TX_HASH_RE.test(claim.txHash)) return { ...base, decision: 'claim_rejected', outcome: 'rejected', reason: 'bad_tx_hash', claim: { claimedChain: claim.chainId, foundOn: null } }
+  const pending = text(row.token_in) === null ? [] : [{ source: text(row.source), tokenIn: text(row.token_in), tokenOut: text(row.token_out) }]
+  const chains = claim.chainId !== null ? [claim.chainId] : getSupportedChainIds()
+  let last: VerifySwapResult = { outcome: 'not_found', reason: 'tx_missing' }
+  let foundOn: number | null = null
+  for (const chainId of chains) {
+    last = await verify({ chainId, txHash: claim.txHash, wallet: claim.wallet, pending })
+    if (last.outcome !== 'not_found' || last.reason === 'receipt_missing') {
+      foundOn = chainId
+      break
+    }
+  }
+  const report: RowReport = { ...base, decision: 'claim_not_found', outcome: last.outcome, claim: { claimedChain: claim.chainId, foundOn } }
+  if (last.reason) report.reason = last.reason
+  if (last.outcome === 'rejected') report.decision = 'claim_rejected'
+  if ((last.outcome === 'confirmed' || last.outcome === 'failed') && last.kind && last.derived) {
+    report.decision = 'claim_verifiable'
+    report.kind = last.kind
+    report.derived = { tokenIn: last.derived.tokenIn, amountIn: last.derived.amountIn, tokenOut: last.derived.tokenOut, amountOut: last.derived.amountOut, source: last.derived.source }
+  }
+  return report
+}
+
 /** Checks ONE stored row. Never writes. */
 export async function checkRow(raw: unknown, verify: Verify): Promise<RowReport> {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return { id: null, chain: null, decision: 'bad_row', reason: 'not_an_object' }
   const row = raw as Record<string, unknown>
   const id = text(row.id)
-  const chain = typeof row.chain_id === 'number' ? row.chain_id : typeof row.chain_id === 'string' && /^\d+$/.test(row.chain_id) ? Number(row.chain_id) : null
+  const chain = chainOf(row.chain_id)
   const base = { id, chain }
 
   if (row.verified_at !== null && row.verified_at !== undefined) return { ...base, decision: 'already_verified' }
   if (id === null) return { ...base, decision: 'bad_row', reason: 'no_id' }
+  if (row.claimed_tx_hash !== null && row.claimed_tx_hash !== undefined) return checkClaim(row, base, verify)
   if (row.tx_hash === null || row.tx_hash === undefined || row.tx_hash === '') return { ...base, decision: 'no_tx_hash' }
   const txHash = text(row.tx_hash)
   const wallet = text(row.wallet)
@@ -165,7 +251,10 @@ export async function checkRow(raw: unknown, verify: Verify): Promise<RowReport>
   const compared = compareStored(row, result.outcome, result.derived)
   const report: RowReport = { ...base, decision: 'mark', outcome: result.outcome, kind: result.kind, derived }
   if (compared.outRatio !== null) report.outRatio = compared.outRatio
-  if (!compared.statusAgrees || compared.differs.length > 0) {
+  if (compared.statusAgrees && compared.differs.length === 0) {
+    // What --apply would make public as it is stored (details L): the owner decides before the flag goes on.
+    report.callerColumns = Object.fromEntries(CALLER_COLUMNS.map((c) => [c, Object.prototype.hasOwnProperty.call(row, c) ? row[c] : null]))
+  } else {
     report.decision = compared.statusAgrees ? 'stored_differs' : 'status_differs'
     report.differs = [...(compared.statusAgrees ? [] : ['status']), ...compared.differs]
     report.stored = {
@@ -182,12 +271,32 @@ export async function checkRow(raw: unknown, verify: Verify): Promise<RowReport>
 /** Apply mode's one write per passing row: the two columns, on that row, only while it is unverified. */
 export type Mark = (id: string, kind: VerifiedKind, verifiedAt: string) => Promise<Applied>
 
+/** Apply mode, a claim: the route's own confirmation (src/lib/swap-log/confirm.ts), without the alert trackers. */
+export type ConfirmClaim = (claim: { wallet: string; txHash: string; chainId: number | null }) => Promise<
+  'verified' | 'not_found' | 'rejected' | 'duplicate' | 'columns_missing' | 'storage_error'
+>
+
+/** Apply mode, a claim row: one confirmation, and what it did. */
+async function applyClaim(raw: Record<string, unknown>, claim: NonNullable<ReturnType<typeof claimOf>>, confirm: ConfirmClaim): Promise<RowReport> {
+  const base = { id: text(raw.id), chain: chainOf(raw.chain_id), claim: { claimedChain: claim.chainId, foundOn: null } }
+  if (!TX_HASH_RE.test(claim.txHash)) return { ...base, decision: 'claim_rejected', outcome: 'rejected', reason: 'bad_tx_hash' }
+  const result = await confirm(claim)
+  if (result === 'columns_missing') throw new ScriptError('migration_not_applied')
+  if (result === 'verified') return { ...base, decision: 'claim_verifiable', applied: 'claim_verified' }
+  if (result === 'duplicate') return { ...base, decision: 'claim_verifiable', applied: 'duplicate_tx' }
+  if (result === 'not_found') return { ...base, decision: 'claim_not_found', outcome: 'not_found', applied: 'claim_kept' }
+  if (result === 'rejected') return { ...base, decision: 'claim_rejected', outcome: 'rejected', applied: 'claim_cleared' }
+  return { ...base, decision: 'claim_not_found', applied: 'error' }
+}
+
 export interface RunOptions {
   rows: readonly unknown[]
   verify: Verify
   emit: (line: RowReport | Summary) => Promise<void> | void
   /** Present only in apply mode. */
   mark?: Mark
+  /** Present only in apply mode: how a claim row is decided. */
+  confirmClaim?: ConfirmClaim
   /** Pause between rows that read the chain, so a public endpoint is not flooded. */
   pause?: () => Promise<void>
   now?: () => Date
@@ -200,7 +309,11 @@ export async function run(options: RunOptions): Promise<Summary> {
   }
 
   for (const raw of options.rows) {
-    const report = await checkRow(raw, options.verify)
+    const claim = options.confirmClaim ? claimOf(raw) : null
+    const report = claim !== null && options.confirmClaim
+      ? await applyClaim(raw as Record<string, unknown>, claim, options.confirmClaim)
+      : await checkRow(raw, options.verify)
+    if (report.applied !== undefined) bump(summary.applied, report.applied)
     if (report.decision === 'mark' && options.mark && report.id !== null && report.kind) {
       report.applied = await options.mark(report.id, report.kind, (options.now ?? (() => new Date()))().toISOString())
       bump(summary.applied, report.applied)
@@ -211,8 +324,8 @@ export async function run(options: RunOptions): Promise<Summary> {
     if (report.reason) bump(summary.byReason, report.reason)
     bump((summary.byChain[String(report.chain)] ??= {}), report.decision)
     await options.emit(report)
-    // Only a row that was looked up on-chain costs a read.
-    if (report.outcome !== undefined && options.pause) await options.pause()
+    // Only a row that was looked up on-chain costs a read (an applied claim always was).
+    if ((report.outcome !== undefined || report.applied?.startsWith('claim_') || report.applied === 'duplicate_tx') && options.pause) await options.pause()
   }
   await options.emit(summary)
   return summary
@@ -255,10 +368,14 @@ export const USAGE = [
   '  npx --yes tsx --tsconfig tsconfig.json scripts/swaps/verify-stored-swaps.ts --from-db --apply',
   '',
   'Report mode (default) writes nothing. stdin: a JSON array of swaps rows (id, wallet, chain_id, source, tx_hash,',
-  'status, token_in, token_out, amount_in, amount_out, verified_at), { "rows": [...] }, or one object per line.',
+  'status, token_in, token_out, amount_in, amount_out, verified_at, claimed_tx_hash, claimed_chain_id, and the caller',
+  'columns listed per "mark" row), { "rows": [...] }, or one object per line.',
+  'A row it would mark lists `callerColumns`: what the caller stored that becomes public with the flag on.',
+  'A row holding a claim (a hash the chain could not answer yet) is checked on the claimed chain, else every chain.',
   '',
   '  --from-db       read the rows from the database (env SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)',
-  '  --apply         set verified_at and verified_kind on the rows whose decision is "mark" (needs the database)',
+  '  --apply         set verified_at and verified_kind on the rows whose decision is "mark" (needs the database), and',
+  '                  decide each claim as the route does: its verified row is made and the claim cleared',
   '  --delay-ms <n>  pause between rows that read the chain (default 200)',
   '  --limit <n>     check at most n rows',
   '  --help',
@@ -307,7 +424,7 @@ export interface SwapsDb {
 const PAGE = 1000
 
 function missingVerifiedColumn(error: DbError | null): boolean {
-  return !!error && (error.code === '42703' || error.code === 'PGRST204') && /verified_(at|kind)/.test(String(error.message ?? ''))
+  return !!error && (error.code === '42703' || error.code === 'PGRST204') && /verified_(at|kind)|claimed_(tx_hash|chain_id|at)/.test(String(error.message ?? ''))
 }
 
 /** A failure whose message is fixed words written in this file: safe to print. */
@@ -365,6 +482,8 @@ export interface MainDeps {
   describe: () => Array<Record<string, unknown>>
   sleep: (ms: number) => Promise<void>
   now?: () => Date
+  /** Apply mode: how a claim row is decided with that database (the route's own confirmation). */
+  confirmClaim?: (db: SwapsDb) => ConfirmClaim
 }
 
 /** Returns the exit code. Never calls process.exit: the caller sets process.exitCode, so stdout is not cut short. */
@@ -400,6 +519,7 @@ export async function main(deps: MainDeps): Promise<number> {
       verify: deps.verify,
       emit: (line) => deps.out(JSON.stringify(line)),
       mark: args.apply ? markWith(db as SwapsDb) : undefined,
+      confirmClaim: args.apply && deps.confirmClaim ? deps.confirmClaim(db as SwapsDb) : undefined,
       pause: args.delayMs > 0 ? () => deps.sleep(args.delayMs) : undefined,
       now: deps.now,
     })

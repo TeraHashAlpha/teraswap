@@ -13,8 +13,16 @@ vi.hoisted(() => {
   process.env.NEXT_PUBLIC_BASE_FEE_COLLECTOR = '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130'
   process.env.NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR = '0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130'
 })
+// [133b L] --apply decides a claim with the route's confirmation, which prices the derived sides: no oracle here, and the
+// alert trackers must never be called by the script.
+vi.mock('@/lib/chainlink', () => ({ computeTokenAmountUsd: vi.fn(async () => null) }))
+vi.mock('@/lib/wallet-activity-server', () => ({ trackWalletAction: vi.fn() }))
+vi.mock('@/lib/security-tracker', () => ({ trackLargeTrade: vi.fn(), trackSwapFailed: vi.fn(), trackOracleDeviation: vi.fn(), trackOracleUnavailable: vi.fn() }))
 
 import { SWAP_RECEIPTS as R, recordedChainRead, type SwapReceiptFixture } from '@/lib/__fixtures__/swap-receipts'
+import { trackLargeTrade, trackOracleUnavailable, trackSwapFailed } from '@/lib/security-tracker'
+import { confirmSwap } from '@/lib/swap-log/confirm'
+import { trackWalletAction } from '@/lib/wallet-activity-server'
 import { verifySwapOnChain } from '@/lib/swap-verify/verify-swap-on-chain'
 import { createFakeSwapsDb, type Row } from '@/test-utils/fake-swaps-db'
 import { checkRow, compareStored, main, parseArgs, parseRows, USAGE, type MainDeps, type RowReport, type Summary, type SwapsDb } from './verify-stored-swaps-lib'
@@ -69,6 +77,9 @@ async function runScript(argv: string[], options: { stdin?: unknown; db?: SwapsD
       options.delay?.push(ms)
     },
     now: () => new Date('2026-11-25T12:00:00.000Z'),
+    // What the CLI wires (verify-stored-swaps.ts): the route's own confirmation, trackers off; here on the recorded chain.
+    confirmClaim: (db) => async (claim) =>
+      (await confirmSwap({ db: db as never, wallet: claim.wallet.toLowerCase(), txHash: claim.txHash.toLowerCase(), chainId: claim.chainId }, { trackers: false, read: chain.read })).result,
   }
   const code = await main(deps)
   const lines = stdout.flatMap((l) => {
@@ -101,17 +112,25 @@ describe('report mode is the default and writes nothing', () => {
     expect(ran.code).toBe(0)
     expect(ran.stderr).toEqual([])
     expect(ran.lines[0]).toEqual({ info: 'mode', mode: 'report', rows: 3, input: 'stdin' })
+    // CHANGED (133b L): a row it would mark also lists the caller-supplied columns that become public, as stored.
+    const caller = (source: string, amountOut: string) => ({
+      token_in_symbol: 'WETH', token_out_symbol: 'USDC', source, fee_collected: true, is_gasless: false, gas_savings_usd: 0, mev_protected: false,
+      fee_amount: null, amount_out: amountOut, amount_in_usd: 10, amount_out_usd: null, gas_used: null, gas_price: null, mev_savings_estimate: null, mev_savings_actual: null,
+    })
     expect(ran.rows).toEqual([
       {
         id: 'row-1-fee-collector-token-to-token', chain: 1, decision: 'mark', outcome: 'confirmed', kind: 'fee_collector',
         derived: { tokenIn: '0x5086bf358635b81d8c47c66d1c8b9e567db70c72', amountIn: '46080134130180921522', tokenOut: USDC, amountOut: '51012637', source: 'velora' },
         outRatio: '1.0002',
+        callerColumns: caller('velora', '51000000'),
       },
       { id: 'invented', chain: 1, decision: 'not_found', outcome: 'not_found', reason: 'tx_missing' },
       {
         id: 'cow', chain: 1, decision: 'mark', outcome: 'confirmed', kind: 'cow',
         derived: { tokenIn: USDC, amountIn: '649256721', tokenOut: USDT, amountOut: '650044918', source: 'cowswap' },
         outRatio: '1.0000',
+        // What the caller stored beside the real tokens: the symbols say WETH and USDC, the flags say "fee collected".
+        callerColumns: caller('cowswap', '650000000'),
       },
     ])
     expect(ran.summary).toEqual({
@@ -448,5 +467,94 @@ describe('compareStored and checkRow, directly', () => {
     expect((await checkRow({ id: 'x', chain_id: 1, tx_hash: '' }, verify)).decision).toBe('no_tx_hash')
     expect((await checkRow({ chain_id: 1, tx_hash: 'h' }, verify)).decision).toBe('bad_row')
     expect(verify).not.toHaveBeenCalled()
+  })
+})
+
+describe('133b L: a row it would mark lists the caller-supplied columns that become public', () => {
+  it('a made-up source and a symbol that is not the token\'s are printed as they are stored, for the owner to decide', async () => {
+    const ran = await runScript([], { stdin: [honest({ source: 'made-up-source', token_in_symbol: '<b>WETH</b>', gas_savings_usd: 499, is_gasless: true })] })
+    expect(ran.rows[0]).toMatchObject({
+      decision: 'mark', kind: 'fee_collector', derived: { source: 'velora' },
+      callerColumns: { source: 'made-up-source', token_in_symbol: '<b>WETH</b>', token_out_symbol: 'USDC', fee_collected: true, is_gasless: true, gas_savings_usd: 499 },
+    })
+    // A row it would not mark lists none.
+    const differs = await runScript([], { stdin: [honest({ amount_in: '1' })] })
+    expect(differs.rows[0].decision).toBe('stored_differs')
+    expect(differs.rows[0].callerColumns).toBeUndefined()
+  })
+
+  it('--from-db reads the caller columns and the claim columns, and --apply still writes only the two columns on an old row', async () => {
+    const db = createFakeSwapsDb({ swaps: [honest()] })
+    const ran = await runScript(['--from-db', '--apply'], { db: db.service as unknown as SwapsDb })
+    const read = db.ops.find((o) => o.kind === 'select')
+    for (const column of ['token_in_symbol', 'fee_collected', 'gas_savings_usd', 'claimed_tx_hash', 'claimed_chain_id', 'claimed_at']) expect(String(read?.detail)).toContain(column)
+    expect(ran.rows[0]).toMatchObject({ decision: 'mark', applied: 'marked' })
+    expect(db.writes().map((o) => Object.keys(o.detail as Row).sort())).toEqual([['verified_at', 'verified_kind']])
+  })
+})
+
+describe('133b L: rows holding a claim (a hash the chain could not answer when it was named)', () => {
+  const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString()
+  const fc = R.mainnetFcTokenToToken
+  const base = R.baseFcEthToToken
+  /** A pending row as the route writes it, holding a claim. `tokens: false` is a claim row (no POST came before it). */
+  const claimRow = (id: string, wallet: string, claimed: string, claimedChain: number | null, tokens: { tokenIn: string; chainId: number } | false): Row => ({
+    id, created_at: minutesAgo(5), wallet, chain_id: tokens ? tokens.chainId : 1, status: 'pending', tx_hash: null, source: tokens ? 'velora' : 'unknown',
+    token_in: tokens ? tokens.tokenIn : null, token_in_symbol: tokens ? 'X' : null, token_out: tokens ? USDC : null, token_out_symbol: tokens ? 'USDC' : null,
+    amount_in: tokens ? '1' : null, amount_out: tokens ? '1' : null, amount_in_usd: null, slippage: 0.5, mev_protected: false, fee_collected: false, is_gasless: false,
+    gas_savings_usd: 0, verified_at: null, verified_kind: null, claimed_tx_hash: claimed, claimed_chain_id: claimedChain, claimed_at: minutesAgo(5),
+  })
+  const rowsWithClaims = () => [
+    // A POST row that took its own claim: the transaction is on the claimed chain.
+    claimRow('post-row', sender(fc), fc.hash, 1, { tokenIn: '0x5086bf358635b81d8c47c66d1c8b9e567db70c72', chainId: 1 }),
+    // A claim row with no chain named: the transaction is on Base.
+    claimRow('claim-row', sender(base), base.hash, null, false),
+    // A hash no chain has.
+    claimRow('invented', sender(fc), `0x${'5a'.repeat(32)}`, 1, false),
+    // Another wallet's real swap, claimed by this one.
+    claimRow('not-mine', sender(fc), R.mainnetFcEthToToken.hash, 1, false),
+  ]
+
+  it('report mode: what a confirmation would do with each claim; nothing is written', async () => {
+    const db = createFakeSwapsDb({ swaps: rowsWithClaims() })
+    const ran = await runScript(['--from-db'], { db: db.service as unknown as SwapsDb })
+    expect(ran.code).toBe(0)
+    expect(ran.rows.map((r) => [r.id, r.decision, r.reason ?? null, r.claim])).toEqual([
+      ['post-row', 'claim_verifiable', null, { claimedChain: 1, foundOn: 1 }],
+      ['claim-row', 'claim_verifiable', null, { claimedChain: null, foundOn: 8453 }],
+      ['invented', 'claim_not_found', 'tx_missing', { claimedChain: 1, foundOn: null }],
+      ['not-mine', 'claim_rejected', 'no_swap_event', { claimedChain: 1, foundOn: 1 }],
+    ])
+    expect(ran.rows[1]).toMatchObject({ kind: 'fee_collector', derived: { tokenIn: NATIVE, amountIn: '115800000000000000', source: 'velora' } })
+    expect(db.writes()).toEqual([])
+  })
+
+  it('--apply: the route\'s confirmation decides each claim; the claim is cleared when decided; no alert tracker runs', async () => {
+    const db = createFakeSwapsDb({ swaps: rowsWithClaims() })
+    const ran = await runScript(['--from-db', '--apply'], { db: db.service as unknown as SwapsDb })
+    expect(ran.code).toBe(0)
+    expect(ran.rows.map((r) => [r.id, r.decision, r.applied])).toEqual([
+      ['post-row', 'claim_verifiable', 'claim_verified'],
+      ['claim-row', 'claim_verifiable', 'claim_verified'],
+      ['invented', 'claim_not_found', 'claim_kept'],
+      ['not-mine', 'claim_rejected', 'claim_cleared'],
+    ])
+    const row = (id: string) => db.rows().find((r) => r.id === id)
+    // The POST row that agreed took the verification; the claim row became the Base swap's row (its chain set).
+    expect(row('post-row')).toMatchObject({ status: 'confirmed', verified_kind: 'fee_collector', tx_hash: fc.hash.toLowerCase(), amount_in: '46080134130180921522', claimed_tx_hash: null })
+    expect(row('claim-row')).toMatchObject({ status: 'confirmed', chain_id: 8453, verified_kind: 'fee_collector', tx_hash: base.hash.toLowerCase(), token_in: NATIVE, claimed_tx_hash: null, claimed_at: null })
+    expect(row('invented')).toMatchObject({ status: 'pending', claimed_tx_hash: `0x${'5a'.repeat(32)}` })
+    expect(row('not-mine')).toMatchObject({ status: 'pending', verified_at: null, claimed_tx_hash: null, claimed_chain_id: null, claimed_at: null })
+    expect(db.rows()).toHaveLength(4)
+    for (const tracker of [trackWalletAction, trackLargeTrade, trackSwapFailed, trackOracleUnavailable]) expect(tracker).not.toHaveBeenCalled()
+    expect(ran.summary.applied).toEqual({ claim_verified: 2, claim_kept: 1, claim_cleared: 1 })
+    // Run again: the decided claims are gone, the undecided one is asked again and stays.
+    const again = await runScript(['--from-db', '--apply'], { db: db.service as unknown as SwapsDb })
+    expect(again.rows.map((r) => [r.id, r.decision, r.applied ?? null])).toEqual([
+      ['post-row', 'already_verified', null],
+      ['claim-row', 'already_verified', null],
+      ['invented', 'claim_not_found', 'claim_kept'],
+      ['not-mine', 'no_tx_hash', null],
+    ])
   })
 })
