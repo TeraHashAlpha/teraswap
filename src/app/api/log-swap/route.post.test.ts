@@ -280,46 +280,118 @@ describe('validation: anything else is a 400 and nothing is written', () => {
   })
 })
 
-describe('pending cap: at most 5 pending rows per wallet created in the last hour', () => {
-  it('the 6th gets 429 and is not written; another wallet is not affected', async () => {
+describe('pending rows are scratch: at 5 in the last hour the oldest is retired, never a 429 (133b J, owner 2026-11-26)', () => {
+  const lower = WALLET.toLowerCase()
+  const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString()
+  /** A row of the wallet; `claim` (minutes ago) gives it a claim of a hash. */
+  const seed = (id: string, createdMinutesAgo: number, extra: Record<string, unknown> = {}, claimMinutesAgo?: number) => ({
+    id, wallet: lower, created_at: minutesAgo(createdMinutesAgo), status: 'pending', tx_hash: null, chain_id: 1, source: '1inch',
+    token_in: WETH.toLowerCase(), token_in_symbol: 'WETH', token_out: USDC.toLowerCase(), token_out_symbol: 'USDC', amount_in: '1', amount_out: '1',
+    slippage: 0.5, mev_protected: false, fee_collected: false, verified_at: null,
+    ...(claimMinutesAgo === undefined ? {} : { claimed_tx_hash: `0x${id.padStart(64, 'c').slice(-64).replace(/[^0-9a-f]/g, 'c')}`, claimed_chain_id: 1, claimed_at: minutesAgo(claimMinutesAgo) }),
+    ...extra,
+  })
+  const ids = () => rows().map((r) => String(r.id))
+  const deletes = () => state.db.ops.filter((o) => o.kind === 'delete')
+
+  it('the 6th POST is written and the oldest unclaimed scratch row retired; it never answers 429', async () => {
     expect(PENDING_CAP).toBe(5)
     for (let i = 1; i <= 5; i++) expect((await post(clientBody())).status, `POST ${i}`).toBe(200)
+    const first = ids()[0]
     const sixth = await post(clientBody())
-    expect(sixth.status).toBe(429)
-    expect(await sixth.json()).toEqual({ error: 'Too many pending swaps for this wallet. Try again later.' })
+    // CHANGED (133b J): was 429 'Too many pending swaps for this wallet. Try again later.' and 5 rows.
+    expect([sixth.status, await sixth.json()]).toEqual([200, { ok: true }])
     expect(rows()).toHaveLength(5)
-    // Same wallet in another letter case is the same wallet.
-    expect((await post(clientBody({ wallet: WALLET.toLowerCase() }))).status).toBe(429)
+    expect(ids()).not.toContain(first)
+    // Same wallet in another letter case is the same wallet; another wallet is not affected.
+    expect((await post(clientBody({ wallet: lower }))).status).toBe(200)
+    expect(rows()).toHaveLength(5)
     expect((await post(clientBody({ wallet: '0x00000000000000000000000000000000000000c1' }))).status).toBe(200)
+    expect(rows()).toHaveLength(6)
+    // A delete names the row, the wallet and what makes it scratch.
+    expect(deletes()[0].filters).toEqual([`id=eq.${first}`, `wallet=eq.${lower}`, 'status=eq.pending', 'tx_hash=is.null', 'verified_at=is.null'])
+  })
+
+  it('a planted wallet does not block its owner: 50 POSTs by "someone" for it, then the owner\'s own POST is written', async () => {
+    for (let i = 0; i < 50; i++) expect((await post(clientBody({ amountIn: String(i + 1) }))).status).toBe(200)
+    const own = await post(clientBody({ amountIn: '777' }))
+    expect(own.status).toBe(200)
+    expect(rows().some((r) => r.amount_in === '777')).toBe(true)
+    expect(rows().length).toBeLessThanOrEqual(5)
+  })
+
+  it('rows older than an hour without a claim are never retired (rows written before this change among them); nor rows that are not scratch', async () => {
+    state.db = createFakeSwapsDb({
+      swaps: [
+        ...Array.from({ length: 9 }, (_, i) => seed(`old-${i}`, 61 + i)),
+        seed('confirmed', 30, { status: 'confirmed', tx_hash: `0x${'aa'.repeat(32)}` }),
+        seed('verified', 30, { status: 'confirmed', tx_hash: `0x${'bb'.repeat(32)}`, verified_at: minutesAgo(29), verified_kind: 'router' }),
+        seed('with-hash', 30, { tx_hash: `0x${'cc'.repeat(32)}` }),
+        ...Array.from({ length: 4 }, (_, i) => seed(`recent-${i}`, 50 - i)),
+      ],
+    })
+    // 4 recent pending: the 5th is simply written.
+    expect((await post(clientBody())).status).toBe(200)
+    expect(deletes()).toEqual([])
+    // At 5, the oldest RECENT scratch row goes; the old and the non-scratch rows stay.
+    expect((await post(clientBody())).status).toBe(200)
+    expect(deletes().map((o) => o.detail)).toEqual([['recent-0']])
+    for (const id of ['old-0', 'old-8', 'confirmed', 'verified', 'with-hash']) expect(ids()).toContain(id)
+  })
+
+  it('all five carry a claim younger than 24 h: a sixth row is written, none retired', async () => {
+    state.db = createFakeSwapsDb({ swaps: Array.from({ length: 5 }, (_, i) => seed(`claimed-${i}`, 50 - i, {}, 40 - i)) })
+    expect((await post(clientBody())).status).toBe(200)
+    expect(deletes()).toEqual([])
     expect(rows()).toHaveLength(6)
   })
 
-  it('rows older than an hour, and rows that are no longer pending, do not count', async () => {
-    const old = new Date(Date.now() - 61 * 60 * 1000).toISOString()
-    const recent = new Date(Date.now() - 59 * 60 * 1000).toISOString()
-    const seed = (created_at: string, status: string) => ({
-      wallet: WALLET.toLowerCase(), created_at, status, chain_id: 1, source: '1inch', token_in: WETH.toLowerCase(), token_in_symbol: 'WETH',
-      token_out: USDC.toLowerCase(), token_out_symbol: 'USDC', amount_in: '1', amount_out: '1', slippage: 0.5, mev_protected: false, fee_collected: false,
-      id: `seed-${created_at}-${status}-${Math.random()}`,
-    })
+  it('all five carry a claim and one claim is older than 24 h: that row is retired', async () => {
     state.db = createFakeSwapsDb({
       swaps: [
-        ...Array.from({ length: 9 }, () => seed(old, 'pending')),
-        ...Array.from({ length: 9 }, () => seed(recent, 'confirmed')),
-        ...Array.from({ length: 4 }, () => seed(recent, 'pending')),
+        // An old claim row (created two days ago, claimed then): scratch because it carries a claim.
+        seed('stale-claim', 48 * 60, { token_in: null, token_in_symbol: null, token_out: null, token_out_symbol: null, amount_in: null, amount_out: null }, 48 * 60),
+        ...Array.from({ length: 5 }, (_, i) => seed(`claimed-${i}`, 50 - i, {}, 40 - i)),
       ],
     })
     expect((await post(clientBody())).status).toBe(200)
-    expect((await post(clientBody())).status).toBe(429)
+    expect(deletes().map((o) => o.detail)).toEqual([['stale-claim']])
+    expect(rows()).toHaveLength(6)
+  })
+
+  it('at 20 scratch rows the oldest goes, whatever it carries', async () => {
+    // 19 claimed rows of the last hour (young claims) and one older claimed row: 20 scratch rows.
+    state.db = createFakeSwapsDb({
+      swaps: [seed('oldest-claim', 120, {}, 110), ...Array.from({ length: 19 }, (_, i) => seed(`claimed-${i}`, 59 - i, {}, 58 - i))],
+    })
+    expect((await post(clientBody())).status).toBe(200)
+    expect(deletes().map((o) => o.detail)).toEqual([['oldest-claim']])
+    expect(rows()).toHaveLength(20)
+    // And it holds: the next POST again retires the oldest, the wallet stays at 20.
+    expect((await post(clientBody())).status).toBe(200)
+    expect(rows()).toHaveLength(20)
+    expect(deletes()).toHaveLength(2)
+  })
+
+  it('another wallet\'s rows are never retired', async () => {
+    const other = '0x00000000000000000000000000000000000000c1'
+    state.db = createFakeSwapsDb({ swaps: Array.from({ length: 6 }, (_, i) => ({ ...seed(`other-${i}`, 50 - i), wallet: other })) })
+    for (let i = 0; i < 7; i++) expect((await post(clientBody())).status).toBe(200)
+    expect(rows().filter((r) => r.wallet === other)).toHaveLength(6)
+    for (const op of deletes()) expect(op.filters).toContain(`wallet=eq.${lower}`)
   })
 })
 
 describe('which database client does what, and what a failure says', () => {
-  it('the insert goes through the insert-only logger client; the two reads through the service client', async () => {
+  it('the insert goes through the insert-only logger client; the reads through the service client', async () => {
     await post(clientBody())
     const swapsOps = state.db.ops.filter((o) => o.table === 'swaps')
-    expect(swapsOps.map((o) => `${o.role}:${o.kind}`)).toEqual(['service:select', 'service:select', 'logger:insert'])
-    expect(swapsOps[1].filters).toEqual([`wallet=eq.${WALLET.toLowerCase()}`, 'status=eq.pending', expect.stringMatching(/^created_at=gte\.\d{4}-/)])
+    // CHANGED (133b J): the cap read its one count; it now reads the wallet's scratch rows (two reads: the last hour's,
+    // and those carrying a claim), and deletes, with the service client, only when it retires one.
+    expect(swapsOps.map((o) => `${o.role}:${o.kind}`)).toEqual(['service:select', 'service:select', 'service:select', 'logger:insert'])
+    const scratch = [`wallet=eq.${WALLET.toLowerCase()}`, 'status=eq.pending', 'tx_hash=is.null', 'verified_at=is.null']
+    expect(swapsOps[1].filters).toEqual([...scratch, expect.stringMatching(/^created_at=gte\.\d{4}-/), 'order=created_at.asc', 'limit=100'])
+    expect(swapsOps[2].filters).toEqual([...scratch, 'claimed_tx_hash=not.is.null', 'order=created_at.asc', 'limit=100'])
   })
 
   it('an insert the database refuses: 200 { ok: false, error: "insert_failed" }, and the log has the code only', async () => {

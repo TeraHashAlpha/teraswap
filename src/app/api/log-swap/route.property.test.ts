@@ -15,7 +15,8 @@
  *       (its verified row, or a claim row);
  *   P5  no response and no log line carries a caller marker; the status code is one of the documented ones;
  *   P6  alert trackers are called only for a row verified by that request, with derived values;
- *   P7  no wallet has more than five pending rows created in the last hour.
+ *   P7  (133b J) no wallet holds more than 20 scratch rows (pending, hash-less, unverified, created in the last hour or
+ *       carrying a claim), and a row disappears only as a scratch row of the wallet the request names.
  * A failure prints the seed and the request number: the run can be replayed exactly.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -173,7 +174,10 @@ async function runSeed(seed: number, total: number) {
   }
 
   state.db = createFakeSwapsDb()
-  const stats = { post: 0, patch: 0, verified: 0, statuses: new Map<number, number>() }
+  const stats = { post: 0, patch: 0, verified: 0, retired: 0, claims: 0, statuses: new Map<number, number>() }
+  /** Details J's scratch row, as of `now`. */
+  const isScratch = (r: Row, now: number) =>
+    r.status === 'pending' && r.tx_hash === null && r.verified_at === null && (Date.parse(String(r.created_at)) >= now - 3_600_000 || r.claimed_tx_hash !== null)
   const allowed = new Set([200, 202, 400, 409, 422, 429])
 
   for (let n = 1; n <= total; n++) {
@@ -239,7 +243,16 @@ async function runSeed(seed: number, total: number) {
         expect(row.wallet, `${where}: changed a row of another wallet (${String(row.id)})`).toBe(lowerNamed)
       }
     }
-    expect(rows.length, `${where}: a row disappeared`).toBeGreaterThanOrEqual(before.size)
+    // CHANGED (133b J): "no row ever disappears" is now "a row disappears only as a scratch row of the named wallet".
+    const now = Date.now()
+    const remaining = new Set(rows.map((r) => String(r.id)))
+    for (const [id, text] of before) {
+      if (remaining.has(id)) continue
+      const gone = JSON.parse(text) as Row
+      expect(String(gone.wallet), `${where}: a row of another wallet disappeared`).toBe(lowerNamed)
+      expect(isScratch(gone, now), `${where}: a row that is not scratch disappeared ${text}`).toBe(true)
+      stats.retired++
+    }
 
     const seenTx = new Set<string>()
     const pendingPerWallet = new Map<string, number>()
@@ -251,8 +264,9 @@ async function runSeed(seed: number, total: number) {
         expect(row.tx_hash, `${where}: unverified row carries a hash`).toBeNull()
         expect([row.amount_in_usd, row.amount_out_usd], `${where}: unverified row carries USD`).toEqual([null, null])
         expect(rowText.includes(MARK), `${where}: caller text in a pending row ${rowText}`).toBe(false)
-        // CHANGED (133b I.4): P7 counts the rows a POST wrote (claim rows have no tokens; the cap of details J covers them).
-        if (row.token_in !== null) pendingPerWallet.set(String(row.wallet), (pendingPerWallet.get(String(row.wallet)) ?? 0) + 1)
+        // CHANGED (133b J): P7 counts a wallet's scratch rows (at most 20); it counted its pending rows of the last hour (5).
+        if (isScratch(row, now)) pendingPerWallet.set(String(row.wallet), (pendingPerWallet.get(String(row.wallet)) ?? 0) + 1)
+        if (row.claimed_tx_hash !== null) stats.claims++
         continue
       }
 
@@ -289,7 +303,7 @@ async function runSeed(seed: number, total: number) {
     }
 
     // P7
-    for (const [wallet, count] of pendingPerWallet) expect(count, `${where}: ${wallet} has ${count} pending rows`).toBeLessThanOrEqual(5)
+    for (const [wallet, count] of pendingPerWallet) expect(count, `${where}: ${wallet} has ${count} scratch rows`).toBeLessThanOrEqual(20)
 
     // P6: an alert only for a row this request verified, and from that row's values.
     const newlyVerified = rows.filter((r) => r.verified_at !== null && !verifiedBefore.has(String(r.id)))
@@ -322,7 +336,12 @@ describe('property: 1,000 seeded requests per seed', () => {
     expect(stats.verified).toBeGreaterThanOrEqual(10)
     // CHANGED (133b I.3, K): 409 left this list. One transaction now counts once per wallet, and a wallet's own repeat
     // answers 200, so 409 is left only for a write the unique index refuses while no verified row of this wallet is found.
-    for (const status of [200, 202, 422, 429]) expect(stats.statuses.get(status) ?? 0, `status ${status} was answered`).toBeGreaterThan(0)
+    // CHANGED (133b J): 429 left this list too. The cap no longer refuses; only the per-IP limit answers 429, and it is
+    // allowed here. In its place, the cap is shown to have worked: rows were retired, and claims were kept.
+    for (const status of [200, 202, 422]) expect(stats.statuses.get(status) ?? 0, `status ${status} was answered`).toBeGreaterThan(0)
+    expect(stats.statuses.get(429) ?? 0).toBe(0)
+    expect(stats.retired).toBeGreaterThan(0)
+    expect(stats.claims).toBeGreaterThan(0)
     // SWAP_PROPERTY_DUMP=/abs/dir writes what the run did (for the feedback tables).
     if (process.env.SWAP_PROPERTY_DUMP) {
       writeFileSync(join(process.env.SWAP_PROPERTY_DUMP, `property-seed-${seed}.json`), `${JSON.stringify({ seed, ...stats, statuses: Object.fromEntries(stats.statuses) })}\n`)

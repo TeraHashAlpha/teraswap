@@ -42,6 +42,7 @@ import {
   findWalletVerifiedByTx,
   insertClaimRow,
   insertVerified,
+  makeRoomForPending,
   markVerified,
   setClaimChain,
   storeClaimOn,
@@ -277,7 +278,9 @@ async function keepClaim(args: ConfirmArgs, candidates: readonly PendingCandidat
     if (stored === 'columns_missing') return 'columns_missing'
     if (stored === 'error') return false
   }
-  // None: a claim row of its own. Its chain_id is the named chain, else the registry's first (claimed_chain_id says null).
+  // None: a claim row of its own, after making room for it (details J). Its chain_id is the named chain, else the
+  // registry's first (claimed_chain_id says null).
+  if ((await makeRoomForPending(args.db, args.wallet, now)) === 'error') console.warn('[log-swap] pending cap not applied')
   const inserted = await insertClaimRow(args.db, {
     id: randomUUID(),
     wallet: args.wallet,

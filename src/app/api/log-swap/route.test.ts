@@ -14,10 +14,11 @@ import { NextRequest } from 'next/server'
 
 const insertedRows: Array<Record<string, unknown>> = []
 
-// [ADR-029] POST now makes two reads before its insert (are the verification columns there; how many pending rows
-// has this wallet): both answer "nothing in the way" here. The insert capture and every assertion are as before.
+// [ADR-029] POST now reads before its insert (are the migration's columns there; the wallet's scratch rows, for the
+// pending cap of goal 133b details J): every read answers "nothing in the way" here. The insert capture and every
+// assertion are as before.
 const readChain: Record<string, unknown> = {}
-for (const method of ['eq', 'gte', 'limit']) readChain[method] = () => readChain
+for (const method of ['eq', 'gte', 'limit', 'is', 'not', 'order']) readChain[method] = () => readChain
 readChain.then = (resolve: (v: unknown) => unknown) => resolve({ data: [], error: null, count: 0 })
 
 const supabaseChain = {

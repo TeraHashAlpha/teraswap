@@ -10,14 +10,7 @@ import { bodySizeGuard, clientIp } from '@/lib/body-limit'
 import { forLog } from '@/lib/log-sanitize'
 import { confirmSwap, type ConfirmResult } from '@/lib/swap-log/confirm'
 import { parseConfirmSwap, parsePendingSwap } from '@/lib/swap-log/input'
-import {
-  PENDING_CAP,
-  PENDING_CAP_WINDOW_MS,
-  countRecentPending,
-  findWalletVerifiedByTx,
-  insertPending,
-  verifiedColumnsState,
-} from '@/lib/swap-log/store'
+import { findWalletVerifiedByTx, insertPending, makeRoomForPending, verifiedColumnsState } from '@/lib/swap-log/store'
 import { catalogSymbol } from '@/lib/swap-log/symbols'
 
 // [133b H.5] A confirmation that names its chain (the official client's) reads that chain twice: up to 4 + 9.5 + 9.5 s
@@ -57,7 +50,8 @@ function logColumnsMissing(): void {
  *   - the symbols are the token catalog's for those addresses on that chain, never the caller's text;
  *   - status is `pending`, there is no transaction hash, no USD value, no fee amount, no mev figure, whatever the
  *     body says, and no alert or tracker call carries a USD value;
- *   - at most PENDING_CAP pending rows per wallet per hour: the next one is a 429.
+ *   - [133b J] pending rows are scratch, and the cap never refuses: at 5 pending rows of the wallet in the last hour
+ *     the wallet's oldest scratch row is retired first (store.ts makeRoomForPending); only the per-IP limit answers 429.
  * A row becomes `confirmed` or `failed` only by the server, after it read the transaction on-chain. A transaction hash
  * sent with the POST (the split-swap client sends one, after its receipt) is handled as a PATCH on the POST's chain
  * after the insert. The official client's calls keep their answer: 200 `{ ok: true }`.
@@ -96,11 +90,8 @@ export async function POST(req: NextRequest) {
     // A repeat of a POST whose transaction this wallet already has verified: nothing to add.
     if (input.txHash !== null && (await findWalletVerifiedByTx(db, input.wallet, input.txHash)) === true) return NextResponse.json({ ok: true })
 
-    const pending = await countRecentPending(db, input.wallet, new Date(Date.now() - PENDING_CAP_WINDOW_MS).toISOString())
-    if (pending === null) return NextResponse.json({ ok: false, error: 'storage_unavailable' })
-    if (pending >= PENDING_CAP) {
-      return NextResponse.json({ error: 'Too many pending swaps for this wallet. Try again later.' }, { status: 429 })
-    }
+    // Details J: make room (never refuse). A failed read of the scratch rows does not stop the insert.
+    if ((await makeRoomForPending(db, input.wallet, new Date())) === 'error') console.warn('[log-swap] pending cap not applied')
 
     const tokenInSymbol = catalogSymbol(input.tokenIn, input.chainId)
     const tokenOutSymbol = catalogSymbol(input.tokenOut, input.chainId)

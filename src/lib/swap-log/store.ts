@@ -15,9 +15,20 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { VerifiedKind } from '@/lib/swap-verify/verify-swap-on-chain'
 
-/** At most this many pending rows per wallet created within PENDING_CAP_WINDOW_MS: the next POST gets 429. */
+/**
+ * [details J of goal 133b; owner's answer of 2026-11-26] Pending rows are private SCRATCH, never a reason to refuse:
+ * at PENDING_CAP pending rows of a wallet created within PENDING_CAP_WINDOW_MS, a new pending row first retires (deletes)
+ * that wallet's oldest scratch row without a claim; if every one carries a claim, the oldest whose claim is older than
+ * CLAIM_RETIRE_AFTER_MS; else nothing (a sixth row is written). Whatever happened, the wallet never holds more than
+ * SCRATCH_TOTAL_CAP scratch rows: at that many the oldest goes, whatever it carries.
+ * A scratch row is pending, hash-less, unverified, and created within PENDING_CAP_WINDOW_MS OR carrying a claim (only
+ * this code writes claims). A row older than that window without a claim (a row written before this change among them)
+ * is never deleted.
+ */
 export const PENDING_CAP = 5
 export const PENDING_CAP_WINDOW_MS = 60 * 60 * 1000
+export const CLAIM_RETIRE_AFTER_MS = 24 * 60 * 60 * 1000
+export const SCRATCH_TOTAL_CAP = 20
 /** A confirmation attaches to a pending row of the wallet created within this window (or one holding its claim). */
 export const PENDING_MATCH_WINDOW_MS = 2 * 60 * 60 * 1000
 
@@ -84,18 +95,6 @@ export async function verifiedColumnsState(db: SupabaseClient, now: number = Dat
   }
   columnsSeenAt = null
   return isMissingVerifiedColumn(error) ? 'missing' : 'unknown'
-}
-
-/** How many pending rows this wallet created since `sinceIso`. null: the count could not be read. */
-export async function countRecentPending(db: SupabaseClient, wallet: string, sinceIso: string): Promise<number | null> {
-  const { count, error } = await db
-    .from('swaps')
-    .select('id', { count: 'exact', head: true })
-    .eq('wallet', wallet)
-    .eq('status', 'pending')
-    .gte('created_at', sinceIso)
-  if (error || typeof count !== 'number') return null
-  return count
 }
 
 export interface PendingRow {
@@ -174,7 +173,7 @@ export async function findCandidateRows(db: SupabaseClient, wallet: string, txHa
   if (claimed.error) return 'error'
   const byId = new Map<string, PendingCandidate>()
   for (const row of [...(recent.data ?? []), ...(claimed.data ?? [])] as PendingCandidate[]) byId.set(String(row.id), row)
-  return [...byId.values()].sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0))
+  return [...byId.values()].sort((a, b) => time(b.created_at) - time(a.created_at))
 }
 
 export interface VerifiedUpdate {
@@ -287,6 +286,65 @@ export async function insertClaimRow(db: SupabaseClient, row: { id: string; wall
     return kind === 'duplicate' ? 'error' : kind
   }
   return 'inserted'
+}
+
+interface ScratchRow {
+  id: string
+  created_at: string
+  claimed_tx_hash: string | null
+  claimed_at: string | null
+}
+
+const SCRATCH_COLUMNS = 'id, created_at, claimed_tx_hash, claimed_at'
+
+/** THAT wallet's scratch rows (see PENDING_CAP), oldest first. Two plain reads, merged by id. */
+async function findScratchRows(db: SupabaseClient, wallet: string, sinceIso: string): Promise<ScratchRow[] | 'error'> {
+  const base = () => db.from('swaps').select(SCRATCH_COLUMNS).eq('wallet', wallet).eq('status', 'pending').is('tx_hash', null).is('verified_at', null)
+  const recent = await base().gte('created_at', sinceIso).order('created_at', { ascending: true }).limit(100)
+  if (recent.error) return 'error'
+  const claimed = await base().not('claimed_tx_hash', 'is', null).order('created_at', { ascending: true }).limit(100)
+  if (claimed.error) return 'error'
+  const byId = new Map<string, ScratchRow>()
+  for (const row of [...(recent.data ?? []), ...(claimed.data ?? [])] as ScratchRow[]) byId.set(String(row.id), row)
+  return [...byId.values()].sort((a, b) => time(a.created_at) - time(b.created_at))
+}
+
+/** A timestamp as Postgres (`…+00:00`, microseconds) or JavaScript (`…Z`) writes it, in milliseconds; NaN sorts first. */
+function time(value: string | null): number {
+  const ms = value === null ? Number.NaN : Date.parse(value)
+  return Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms
+}
+
+/** Deletes one scratch row of THAT wallet; the filters repeat what makes it scratch, so nothing else can go. */
+async function deleteScratchRow(db: SupabaseClient, id: string, wallet: string): Promise<boolean> {
+  const { data, error } = await db.from('swaps').delete().eq('id', id).eq('wallet', wallet).eq('status', 'pending').is('tx_hash', null).is('verified_at', null).select('id')
+  return !error && (data ?? []).length === 1
+}
+
+/**
+ * Details J: makes room for one more pending row of THAT wallet (a POST row or a claim row). Never refuses. Returns the
+ * ids it retired; `error` when the scratch rows could not be read (the caller writes its row anyway).
+ */
+export async function makeRoomForPending(db: SupabaseClient, wallet: string, now: Date): Promise<string[] | 'error'> {
+  const windowStart = now.getTime() - PENDING_CAP_WINDOW_MS
+  const claimDeadline = now.getTime() - CLAIM_RETIRE_AFTER_MS
+  const scratch = await findScratchRows(db, wallet, new Date(windowStart).toISOString())
+  if (scratch === 'error') return 'error'
+  const retired: string[] = []
+  const live = [...scratch]
+  const retire = async (row: ScratchRow) => {
+    live.splice(live.indexOf(row), 1)
+    if (await deleteScratchRow(db, row.id, wallet)) retired.push(row.id)
+  }
+
+  if (live.filter((r) => time(r.created_at) >= windowStart).length >= PENDING_CAP) {
+    const unclaimed = live.find((r) => r.claimed_tx_hash === null)
+    const staleClaim = live.find((r) => r.claimed_tx_hash !== null && time(r.claimed_at) < claimDeadline)
+    const victim = unclaimed ?? staleClaim
+    if (victim) await retire(victim)
+  }
+  while (live.length >= SCRATCH_TOTAL_CAP) await retire(live[0])
+  return retired
 }
 
 /** A decided claim (verified, or rejected by the chain) is cleared from THAT wallet's unverified rows. */
