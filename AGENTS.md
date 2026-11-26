@@ -1,4 +1,4 @@
-<!-- claude-md-sha256: 8dcf4ada13b415ea8907cfddf8ad7c721088856d196b6d017ccb5851004689c5 -->
+<!-- claude-md-sha256: 4efc2119ddc4561053cc55af6d6691c6f9714a6af59bcd64622e812c5bbdce5b -->
 # AGENTS.md — TeraSwap for Grok Build and other non-Claude coding agents
 
 Grok Build reads this file, not `CLAUDE.md`. This file exists so a second coding agent gets the same
@@ -49,6 +49,8 @@ substitute for this rule.
 **Bash compatibility.** Every `.sh` in this repo must run on macOS stock bash 3.2.57 — no `${var,,}` /
 `${var^^}`, no `declare -A`, no `mapfile` / `readarray`, no `globstar`. Lowercase via
 `tr '[:upper:]' '[:lower:]'`. `scripts/check-bash3-compat.mjs` enforces this on every tracked `.sh` file.
+
+**agent-verify checks.** `scripts/agent-verify.sh` always runs `suite`, `lint-delta` (CI's `npm run lint` on HEAD and on the merge-base; a crashed eslint is a FAIL), `tsc`, `build`, `v1-css` (`scripts/check-v1-css.mjs` on that build, also a step of the CI `build` job), `v1v2-parity` and `rpc-budget`; `--codeql` and `--keeper` add theirs.
 
 **agent-verify `--codeql`.** `scripts/agent-verify.sh --codeql` pins the CodeQL query pack (`CODEQL_JS_PACK_VERSION` in `scripts/codeql-local.sh`). A `codeql FAIL tool failure: …` (pack not readable by the installed CLI) is not a finding and not a reason to rerun, repair or install anything; report it and stop.
 

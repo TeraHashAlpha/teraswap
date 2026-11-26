@@ -1,0 +1,12 @@
+/* FIXTURE, hand-written: the crossed shape seen in the PR #719 audit — the v1 Tailwind pass compiled v2's content.
+   globals.css's hand-written rules survive (so `.bg-surface-secondary` and `.text-cream` are still "there"), the v1
+   utilities are gone, and v2 utilities are in the v1 stylesheet. It is not build output. */
+@font-face{font-family:inter;src:url(../media/InterVariable_latin.woff2)format("woff2");font-display:swap}
+html,html.dark{color-scheme:dark;--bg-primary:#080b10;--particle-color:232, 220, 196}
+html.light .bg-surface-secondary{background-color:#fffdf8}
+html.light .text-cream{color:#1a1814}
+.flex{display:flex}
+.min-h-\[var\(--photo-footer-band\)\]{min-height:var(--photo-footer-band)}
+.bg-v2-surface{background-color:#0e1416}
+.font-v2-mono{font-family:var(--font-mono)}
+.text-v2-text{color:#e8ecea}
