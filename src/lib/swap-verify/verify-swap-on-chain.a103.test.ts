@@ -60,6 +60,15 @@ describe('S-1: sides are NET flows', () => {
     expect(F.ethRefund.receipt.logs).toHaveLength(0)
     expect(await verify(F.ethRefund, sender(F.ethRefund), 'uniswapv3')).toEqual({ outcome: 'rejected', reason: 'no_net_swap' })
   })
+
+  it('H.3: the same asset on both sides is no swap (a built receipt: a "token" logged at the native placeholder, sent to the wallet)', async () => {
+    // Not a receipt the chain can produce (no contract lives at 0xEeee…); the rule still holds against it.
+    const f = F.wrapAlone
+    const receipt = structuredClone(f.receipt)
+    for (const log of receipt.logs) log.address = NATIVE
+    const result = await verify(f, sender(f), 'uniswapv3', { eth_getTransactionReceipt: receipt })
+    expect(result).toEqual({ outcome: 'rejected', reason: 'no_net_swap' })
+  })
 })
 
 describe('S-2: proof is the FeeCollector\'s own event, never the target alone', () => {
@@ -79,6 +88,17 @@ describe('S-2: proof is the FeeCollector\'s own event, never the target alone', 
 
   it('a FeeCollector swap that reverted: failed, never confirmed', async () => {
     expect(await verify(F.fcReverted, sender(F.fcReverted), 'uniswapv3')).toMatchObject({ outcome: 'failed', kind: 'fee_collector', derived: { tokenIn: null, amountIn: null } })
+  })
+
+  it('H.4: a reverted transaction of the wallet to a contract that is neither our FeeCollector nor a router is not a failed swap', async () => {
+    const f = R.mainnetRouterReverted
+    const elsewhere = (to: string) => ({ eth_getTransactionByHash: { ...structuredClone(f.tx), to }, eth_getTransactionReceipt: { ...structuredClone(f.receipt), to } })
+    // WETH, an ordinary contract: rejected.
+    expect(await verify(f, sender(f), '0x', elsewhere('0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'))).toEqual({ outcome: 'rejected', reason: 'wrong_target' })
+    // The CoW settlement contract (only solvers call it): rejected too.
+    expect(await verify(f, sender(f), 'cowswap', elsewhere('0x9008d19f58aabd9ed0d60971565aa8510560ab41'))).toEqual({ outcome: 'rejected', reason: 'cow_no_trade_for_wallet' })
+    // The same reverted call to 0x's router stays this wallet's failed swap.
+    expect((await verify(f, sender(f), '0x')).outcome).toBe('failed')
   })
 
   it('two SwapWithFee events for one wallet in one transaction: ambiguous, rejected', async () => {

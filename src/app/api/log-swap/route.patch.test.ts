@@ -350,6 +350,26 @@ describe('the transaction makes the row: which row it goes to (133b I.2)', () =>
     expect(state.db.ops.filter((o) => o.kind === 'insert').map((o) => o.role)).toEqual(['service'])
   })
 
+  it('a reverted call that names no token goes to the newest pending row with the transaction\'s source, not the newest row (owner, 2026-11-26)', async () => {
+    const f = R.mainnetRouterReverted
+    const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString()
+    state.db = createFakeSwapsDb({
+      swaps: [pendingRow(sender(f), { id: 'zero-x', source: '0x', created_at: at(10) }), pendingRow(sender(f), { id: 'newer-velora', source: 'velora', created_at: at(1) })],
+    })
+    expect((await patch({ txHash: f.hash, wallet: sender(f), chainId: 1 })).status).toBe(200)
+    expect(Object.fromEntries(rows().map((r) => [r.id, r.status]))).toEqual({ 'zero-x': 'failed', 'newer-velora': 'pending' })
+  })
+
+  it('a pending row that holds ANOTHER transaction\'s claim is not attached to: that claim is kept', async () => {
+    const f = R.mainnetFcTokenToToken
+    const otherClaim = `0x${'c1'.repeat(32)}`
+    const agree = await rowFor(f)
+    state.db = createFakeSwapsDb({ swaps: [{ ...agree, id: 'holds-other-claim', claimed_tx_hash: otherClaim, claimed_chain_id: 1, claimed_at: new Date().toISOString() }] })
+    expect((await patch({ txHash: f.hash, wallet: sender(f), chainId: 1 })).status).toBe(200)
+    expect(rows().find((r) => r.id === 'holds-other-claim')).toMatchObject({ status: 'pending', verified_at: null, claimed_tx_hash: otherClaim })
+    expect(verifiedRows()).toEqual([expect.objectContaining({ tx_hash: f.hash.toLowerCase(), verified_kind: 'fee_collector' })])
+  })
+
   it('a pending row older than two hours is not attached to: the transaction makes its own row', async () => {
     const f = R.mainnetFcTokenToToken
     state.db = createFakeSwapsDb({ swaps: [await rowFor(f, sender(f), { id: 'stale', created_at: new Date(Date.now() - 121 * 60_000).toISOString() })] })
