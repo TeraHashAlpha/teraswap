@@ -4,12 +4,13 @@
  *
  *   - a column the table does not have is error 42703 (so "migration not applied" is a schema without the two columns);
  *   - NOT NULL columns refuse null (23502); the migration's dropped NOT NULLs are a different schema;
- *   - the migration's partial unique index on (chain_id, lower(tx_hash)) where verified_at is not null refuses a
- *     second verified row for one transaction (23505), and its CHECK refuses an unknown verified_kind (23514);
- *   - the `logger` client may INSERT only (P114/M-03): a select or an update with it is 42501;
+ *   - the migration's partial unique index on (chain_id, lower(tx_hash), lower(wallet)) where verified_at is not null
+ *     refuses a second verified row of one wallet for one transaction (23505), and its CHECK refuses an unknown
+ *     verified_kind (23514);
+ *   - the `logger` client may INSERT only (P114/M-03): a select, an update or a delete with it is 42501;
  *   - filters: eq, neq, in, is, not(.., 'is', null), gt, gte, lt, lte, ilike and PostgREST's `or(...)` text;
- *     order, limit, range; `{ count, head }`; `update(...).select()`; `rpc('gasless_stats')` as the SQL function
- *     of migration 20260514 computes it.
+ *     order, limit, range; `{ count, head }`; `update(...).select()`; `delete().select()`; `rpc('gasless_stats')` as
+ *     the SQL function of migration 20260514 computes it.
  *
  * Every call is recorded in `ops`, so a test can say what a route asked the database for and what it wrote.
  */
@@ -24,8 +25,11 @@ export const SWAPS_COLUMNS_BEFORE = [
   'mev_savings_estimate', 'mev_savings_actual', 'is_gasless', 'gas_savings_usd', 'expected_output',
 ] as const
 
+/** The three PRIVATE claim columns of the ADR-029 migration (section 7): no reader returns them. */
+export const SWAPS_CLAIM_COLUMNS = ['claimed_tx_hash', 'claimed_chain_id', 'claimed_at'] as const
+
 /** After the ADR-029 migration. */
-export const SWAPS_COLUMNS_AFTER = [...SWAPS_COLUMNS_BEFORE, 'verified_at', 'verified_kind'] as const
+export const SWAPS_COLUMNS_AFTER = [...SWAPS_COLUMNS_BEFORE, 'verified_at', 'verified_kind', ...SWAPS_CLAIM_COLUMNS] as const
 
 /** The six columns the ADR-029 migration drops NOT NULL on. */
 export const SWAPS_SIDE_COLUMNS = ['token_in', 'token_in_symbol', 'token_out', 'token_out_symbol', 'amount_in', 'amount_out'] as const
@@ -54,9 +58,9 @@ export interface FakeSwapsDbOptions {
 
 export interface RecordedOp {
   role: 'service' | 'logger'
-  kind: 'select' | 'insert' | 'update' | 'rpc'
+  kind: 'select' | 'insert' | 'update' | 'delete' | 'rpc'
   table: string
-  /** select: the column text. insert / update: the written object. */
+  /** select: the column text. insert / update: the written object. delete: the ids it removed. */
   detail: unknown
   filters: string[]
 }
@@ -169,8 +173,10 @@ export function createFakeSwapsDb(options: FakeSwapsDbOptions = {}) {
       return { code: '23514', message: 'new row for relation "swaps" violates check constraint "swaps_verified_kind_check"' }
     }
     if (row.verified_at !== null && row.verified_at !== undefined && row.tx_hash !== null && row.tx_hash !== undefined) {
-      const key = `${row.chain_id}|${String(row.tx_hash).toLowerCase()}`
-      const clash = others.some((o) => o !== row && o.verified_at !== null && o.verified_at !== undefined && o.tx_hash !== null && o.tx_hash !== undefined && `${o.chain_id}|${String(o.tx_hash).toLowerCase()}` === key)
+      // (chain_id, lower(tx_hash), lower(wallet)): NULLs are distinct in a Postgres unique index, as here.
+      const keyOf = (r: Row) => `${r.chain_id}|${String(r.tx_hash).toLowerCase()}|${String(r.wallet).toLowerCase()}`
+      const key = keyOf(row)
+      const clash = others.some((o) => o !== row && o.verified_at !== null && o.verified_at !== undefined && o.tx_hash !== null && o.tx_hash !== undefined && keyOf(o) === key)
       if (clash) return { code: '23505', message: 'duplicate key value violates unique constraint "idx_swaps_verified_tx"' }
     }
     return null
@@ -199,7 +205,7 @@ export function createFakeSwapsDb(options: FakeSwapsDbOptions = {}) {
     const predicates: Predicate[] = []
     const filterText: string[] = []
     const used = new Set<string>()
-    let mode: 'select' | 'insert' | 'update' = 'select'
+    let mode: 'select' | 'insert' | 'update' | 'delete' = 'select'
     let selectText = '*'
     let returning = false
     let head = false
@@ -254,7 +260,9 @@ export function createFakeSwapsDb(options: FakeSwapsDbOptions = {}) {
       }
 
       const columnError = checkColumns(table, [...used, ...selectColumns(selectText), ...(mode === 'update' ? Object.keys(payload as Row) : [])])
+      let deleteOp: RecordedOp | null = null
       if (mode === 'update') ops.push({ role, kind: 'update', table, detail: { ...(payload as Row) }, filters: [...filterText] })
+      else if (mode === 'delete') ops.push((deleteOp = { role, kind: 'delete', table, detail: [], filters: [...filterText] }))
       else ops.push({ role, kind: 'select', table, detail: selectText, filters: [...filterText] })
       if (columnError) return { data: null, error: columnError, count: null }
 
@@ -262,6 +270,13 @@ export function createFakeSwapsDb(options: FakeSwapsDbOptions = {}) {
       if (orderBy) {
         const { column, ascending } = orderBy
         matched = [...matched].sort((a, b) => (ascending ? 1 : -1) * compare(a[column], b[column]))
+      }
+
+      if (mode === 'delete') {
+        if (limitTo !== null) matched = matched.slice(0, limitTo)
+        for (const row of matched) all.splice(all.indexOf(row), 1)
+        if (deleteOp) deleteOp.detail = matched.map((r) => r.id)
+        return { data: returning ? matched.map((r) => project(table, r, selectText)) : null, error: null, count: null }
       }
 
       if (mode === 'update') {
@@ -299,6 +314,10 @@ export function createFakeSwapsDb(options: FakeSwapsDbOptions = {}) {
       update(value: Row) {
         mode = 'update'
         payload = value
+        return api
+      },
+      delete() {
+        mode = 'delete'
         return api
       },
       eq: (column: string, value: unknown) => filter(`${column}=eq.${String(value)}`, column, (row) => test('eq', row[column], value)),
@@ -364,8 +383,8 @@ export function createFakeSwapsDb(options: FakeSwapsDbOptions = {}) {
     /** The live rows of a table. */
     rows: (table = 'swaps') => rowsOf(table),
     ops,
-    /** What was written to `swaps` (inserts and updates), in order. */
-    writes: () => ops.filter((o) => o.table === 'swaps' && (o.kind === 'insert' || o.kind === 'update')),
+    /** What was written to `swaps` (inserts, updates and deletes), in order. */
+    writes: () => ops.filter((o) => o.table === 'swaps' && (o.kind === 'insert' || o.kind === 'update' || o.kind === 'delete')),
     migrated,
   }
 }

@@ -38,11 +38,14 @@ interface PgError {
   message?: string
 }
 
-/** Postgres "undefined column" (42703) or PostgREST "column not in the schema cache" (PGRST204), for one of the two columns. */
+/** The five columns of the ADR-029 migration: the two verification columns and the three private claim columns. */
+export const MIGRATION_COLUMNS = 'verified_at, verified_kind, claimed_tx_hash, claimed_chain_id, claimed_at'
+
+/** Postgres "undefined column" (42703) or PostgREST "column not in the schema cache" (PGRST204), for one of the five. */
 function isMissingVerifiedColumn(error: PgError | null | undefined): boolean {
   if (!error) return false
   if (error.code !== '42703' && error.code !== 'PGRST204') return false
-  return /verified_(at|kind)/.test(String(error.message ?? ''))
+  return /verified_(at|kind)|claimed_(tx_hash|chain_id|at)/.test(String(error.message ?? ''))
 }
 
 /** How long a "the columns are there" answer is trusted before it is asked again. */
@@ -58,13 +61,13 @@ export function _resetVerifiedColumnsCache(): void {
 export type ColumnsState = 'present' | 'missing' | 'unknown'
 
 /**
- * Are `verified_at` and `verified_kind` there? `present` is remembered for five minutes per process (one small read
+ * Are the five columns of the migration there? `present` is remembered for five minutes per process (one small read
  * saved per request); `missing` is asked again on every request, so the code starts writing as soon as the migration
  * is applied. `unknown`: the probe failed for another reason (an outage): the caller does not write.
  */
 export async function verifiedColumnsState(db: SupabaseClient, now: number = Date.now()): Promise<ColumnsState> {
   if (columnsSeenAt !== null && now - columnsSeenAt < VERIFIED_COLUMNS_SEEN_TTL_MS) return 'present'
-  const { error } = await db.from('swaps').select('verified_at, verified_kind').limit(1)
+  const { error } = await db.from('swaps').select(MIGRATION_COLUMNS).limit(1)
   if (!error) {
     columnsSeenAt = now
     return 'present'
@@ -157,7 +160,9 @@ export async function findLatestPending(db: SupabaseClient, wallet: string, sinc
 }
 
 /**
- * The row, other than `exceptId`, that this (chain, hash) already verified: its wallet, or null when there is none.
+ * The row of `wallet`, other than `exceptId`, that this (chain, hash) already verified: its wallet, or null when there is
+ * none. One transaction counts once PER WALLET (ADR-029 7.4: one CoW settlement carries several wallets' trades), so
+ * this looks at that wallet's rows only, as the unique index (chain_id, lower(tx_hash), lower(wallet)) does.
  * `error`: it could not be read (the caller does not write).
  */
 export async function findTxVerifiedElsewhere(
@@ -165,10 +170,12 @@ export async function findTxVerifiedElsewhere(
   chainId: number,
   txHash: string,
   exceptId: string,
+  wallet: string,
 ): Promise<{ wallet: string } | null | 'error'> {
   const { data, error } = await db
     .from('swaps')
     .select('id, wallet')
+    .eq('wallet', wallet)
     .eq('chain_id', chainId)
     .ilike('tx_hash', txHash)
     .not('verified_at', 'is', null)

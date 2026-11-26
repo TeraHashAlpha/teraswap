@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { SWAPS_COLUMNS_AFTER, SWAPS_COLUMNS_BEFORE, SWAPS_NOT_NULL_AFTER, SWAPS_NOT_NULL_BEFORE, SWAPS_SIDE_COLUMNS } from './fake-swaps-db'
+import { SWAPS_CLAIM_COLUMNS, SWAPS_COLUMNS_AFTER, SWAPS_COLUMNS_BEFORE, SWAPS_NOT_NULL_AFTER, SWAPS_NOT_NULL_BEFORE, SWAPS_SIDE_COLUMNS } from './fake-swaps-db'
 
 const ROOT = process.cwd()
 const MIGRATION = 'supabase/migrations/20261125120000_swaps_verified.sql'
@@ -46,9 +46,16 @@ describe('the migration is mirrored in schema.sql', () => {
 })
 
 describe('the migration is what details E asks for', () => {
-  it('two nullable columns, added only if absent', () => {
+  it('nullable columns, added only if absent: the two of details E and the three claim columns of 133b K', () => {
     expect(migrationCode).toContain('ALTER TABLE swaps ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;')
     expect(migrationCode).toContain('ALTER TABLE swaps ADD COLUMN IF NOT EXISTS verified_kind TEXT;')
+    expect(migrationCode).toContain('ALTER TABLE swaps ADD COLUMN IF NOT EXISTS claimed_tx_hash TEXT;')
+    expect(migrationCode).toContain('ALTER TABLE swaps ADD COLUMN IF NOT EXISTS claimed_chain_id INTEGER;')
+    expect(migrationCode).toContain('ALTER TABLE swaps ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;')
+    // CHANGED (133b K): exactly five ADD COLUMN, was two.
+    expect([...migrationCode.matchAll(/ADD COLUMN IF NOT EXISTS ([a-z_]+)/g)].map((m) => m[1])).toEqual([
+      'verified_at', 'verified_kind', ...SWAPS_CLAIM_COLUMNS,
+    ])
     expect(migrationCode).not.toMatch(/ADD COLUMN[^;]*NOT NULL/)
     expect(migrationCode).not.toMatch(/ADD COLUMN[^;]*DEFAULT/)
   })
@@ -58,8 +65,10 @@ describe('the migration is what details E asks for', () => {
     expect(migrationCode).toContain('ALTER TABLE swaps VALIDATE CONSTRAINT swaps_verified_kind_check;')
   })
 
-  it('a partial unique index on (chain_id, lower(tx_hash)) where verified_at is not null', () => {
-    expect(migrationCode).toContain('CREATE UNIQUE INDEX IF NOT EXISTS idx_swaps_verified_tx ON swaps (chain_id, lower(tx_hash)) WHERE verified_at IS NOT NULL;')
+  it('a partial unique index on (chain_id, lower(tx_hash), lower(wallet)) where verified_at is not null', () => {
+    // CHANGED (133b K, ADR-029 7.4): the key now includes lower(wallet); it was (chain_id, lower(tx_hash)).
+    expect(migrationCode).toContain('CREATE UNIQUE INDEX IF NOT EXISTS idx_swaps_verified_tx ON swaps (chain_id, lower(tx_hash), lower(wallet)) WHERE verified_at IS NOT NULL;')
+    expect([...migrationCode.matchAll(/CREATE (UNIQUE )?INDEX/g)]).toHaveLength(1)
   })
 
   it('NOT NULL dropped on the six side columns and on nothing else', () => {
@@ -119,8 +128,10 @@ describe('the fake database is the `swaps` table of the SQL files', () => {
     expect([...SWAPS_COLUMNS_AFTER].sort()).toEqual([...real].sort())
   })
 
-  it('columns before the migration: the same without the two new ones', () => {
-    expect([...SWAPS_COLUMNS_BEFORE].sort()).toEqual(SWAPS_COLUMNS_AFTER.filter((c) => c !== 'verified_at' && c !== 'verified_kind').sort())
+  it('columns before the migration: the same without the five new ones', () => {
+    // CHANGED (133b K): five new columns, was two.
+    const added = new Set<string>(['verified_at', 'verified_kind', ...SWAPS_CLAIM_COLUMNS])
+    expect([...SWAPS_COLUMNS_BEFORE].sort()).toEqual(SWAPS_COLUMNS_AFTER.filter((c) => !added.has(c)).sort())
   })
 
   it('NOT NULL before and after', () => {

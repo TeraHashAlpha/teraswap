@@ -7,6 +7,7 @@ import {
   ORDERS_READ_HEADER_SIGNATURE,
 } from '@/lib/order-engine/read-auth'
 import { checkRateLimit } from '@/lib/kv-rate-limiter'
+import { withoutPrivateSwapColumns } from '@/lib/swap-log/private-columns'
 
 // [CHORE-API-HARDENING-2 / P3d] Per-wallet rate limit — this route had NONE,
 // unlike its /api/orders and /api/analytics/export siblings. Generous enough for
@@ -159,7 +160,9 @@ export interface HistoryItem {
 /** A `swaps` row, tagged with the `kind` discriminator. All original columns are
  *  preserved so WalletHistory keeps rendering instant swaps byte-identically. */
 export function mapSwapRow(row: Record<string, unknown>): HistoryItem {
-  return { ...(row as object), kind: 'swap' } as HistoryItem
+  // [ADR-029 section 7.3] The swaps read is `select *`: the private claim columns are dropped here, so no answer of this
+  // route carries them (src/app/api/swaps-read-claim-columns.guard.test.ts). Every other column is passed on as before.
+  return { ...withoutPrivateSwapColumns(row), kind: 'swap' } as HistoryItem
 }
 
 /**

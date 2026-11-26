@@ -47,7 +47,7 @@ vi.mock('@/lib/kv-rate-limiter', async () => {
 import { FORK_RECEIPTS, SWAP_RECEIPTS as R, type SwapReceiptFixture } from '@/lib/__fixtures__/swap-receipts'
 import { __resetChainIdentityCache } from '@/lib/rpc-chain-identity'
 import { trackLargeTrade, trackOracleDeviation, trackOracleUnavailable, trackSwapFailed } from '@/lib/security-tracker'
-import { _resetVerifiedColumnsCache } from '@/lib/swap-log/store'
+import { MIGRATION_COLUMNS, _resetVerifiedColumnsCache } from '@/lib/swap-log/store'
 import { trackWalletAction } from '@/lib/wallet-activity-server'
 import { createFakeSwapsDb, type Row } from '@/test-utils/fake-swaps-db'
 import { installStubChainRpc } from '@/test-utils/stub-chain-rpc'
@@ -426,31 +426,32 @@ describe('one transaction, one row', () => {
     expect(Object.fromEntries(rows().map((r) => [r.id, r.status]))).toEqual({ 'this-swap': 'confirmed', older: 'pending' })
   })
 
-  it('a transaction that already verified ANOTHER wallet\'s row: 409, nothing changes', async () => {
-    // One CoW settlement with two wallets' trades: the pair (chain, hash) verifies one row only (ADR-029 decision 4).
+  it('a transaction that already verified ANOTHER wallet\'s row: the second wallet\'s trade in it is verified too', async () => {
+    // One CoW settlement with two wallets' trades: one transaction counts once PER WALLET (ADR-029 7.4, A103 S-6).
     const f = R.mainnetCowTwoOwners
     const first = '0x0e269d0c3941077dee8e7be50899e3b10eae35b6'
     const second = '0xb5378cf59f35e6e8bf5679ec6c22d1c5ff912433'
     state.db = createFakeSwapsDb({ swaps: [pendingRow(first, { source: 'cowswap' }), pendingRow(second, { source: 'cowswap' })] })
     expect((await patch({ txHash: f.hash, wallet: first })).status).toBe(200)
-    const before = JSON.stringify(rows())
     rpc.reset()
     const res = await patch({ txHash: f.hash, wallet: second })
-    expect([res.status, await res.json()]).toEqual([409, { error: 'Transaction already recorded' }])
-    expect(JSON.stringify(rows())).toBe(before)
-    expect(rpc.reads()).toEqual([])
-    expect(rowOf(second)[0].status).toBe('pending')
+    // CHANGED (133b I.3, K): was 409 "Transaction already recorded", no chain read, the second wallet's row still pending.
+    expect([res.status, await res.json()]).toEqual([200, { ok: true }])
+    expect(rpc.reads().map((c) => c.method)).toEqual(['eth_getTransactionByHash', 'eth_getTransactionReceipt'])
+    expect(rowOf(first)[0]).toMatchObject({ status: 'confirmed', verified_kind: 'cow', token_in: WETH })
+    expect(rowOf(second)[0]).toMatchObject({ status: 'confirmed', verified_kind: 'cow', token_in: USDT })
   })
 
-  it('the same race for two wallets: the database\'s unique index refuses the second, which answers 409', async () => {
+  it('the same two wallets at once: both verified, one row each (the unique key includes the wallet)', async () => {
     const f = R.mainnetCowTwoOwners
     const first = '0x0e269d0c3941077dee8e7be50899e3b10eae35b6'
     const second = '0xb5378cf59f35e6e8bf5679ec6c22d1c5ff912433'
     state.db = createFakeSwapsDb({ swaps: [pendingRow(first, { source: 'cowswap' }), pendingRow(second, { source: 'cowswap' })] })
     const [a, b] = await Promise.all([patch({ txHash: f.hash, wallet: first }), patch({ txHash: f.hash, wallet: second })])
-    expect([a.status, b.status].sort()).toEqual([200, 409])
-    expect(rows().filter((r) => r.verified_at !== null)).toHaveLength(1)
-    expect(rows().filter((r) => r.status === 'pending')).toHaveLength(1)
+    // CHANGED (133b I.3, K): was [200, 409] with one verified row: the database index refused the second wallet.
+    expect([a.status, b.status]).toEqual([200, 200])
+    expect(rows().filter((r) => r.verified_at !== null)).toHaveLength(2)
+    expect(rows().filter((r) => r.status === 'pending')).toHaveLength(0)
   })
 
   it('the hash is matched without regard to letter case, on the row\'s chain only', async () => {
@@ -586,17 +587,18 @@ describe('the request itself', () => {
     expect(rows()[0].status).toBe('pending')
   })
 
-  it('every row lookup of a PATCH is scoped to the wallet it names; only the one-transaction-one-row check looks across wallets', async () => {
+  it('every row lookup of a PATCH is scoped to the wallet it names, the one-transaction check included', async () => {
     const f = R.mainnetFcTokenToToken
     state.db = createFakeSwapsDb({ swaps: [pendingRow(sender(f)), pendingRow(ATTACKER)] })
     await patch({ txHash: f.hash, wallet: sender(f) })
-    const lookups = state.db.ops.filter((o) => o.kind === 'select' && o.table === 'swaps' && o.detail !== 'verified_at, verified_kind')
+    const lookups = state.db.ops.filter((o) => o.kind === 'select' && o.table === 'swaps' && o.detail !== MIGRATION_COLUMNS)
     expect(lookups.length).toBeGreaterThanOrEqual(3)
     const acrossWallets = lookups.filter((o) => !o.filters.includes(`wallet=eq.${sender(f)}`))
-    // The duplicate check: by chain and hash, verified rows only, and it returns an id and a wallet, never a row to write.
-    expect(acrossWallets.map((o) => [o.detail, o.filters])).toEqual([
-      ['id, wallet', ['chain_id=eq.1', `tx_hash=ilike.${f.hash.toLowerCase()}`, 'verified_at=not.is.null', expect.stringMatching(/^id=neq\./), 'limit=1']],
-    ])
+    // CHANGED (133b I.3, K): the duplicate check was the one lookup across wallets (by chain and hash); one transaction
+    // now counts once PER WALLET, so it is scoped to the wallet like every other lookup.
+    expect(acrossWallets).toEqual([])
+    const duplicate = lookups.find((o) => o.detail === 'id, wallet')
+    expect(duplicate?.filters).toEqual([`wallet=eq.${sender(f)}`, 'chain_id=eq.1', `tx_hash=ilike.${f.hash.toLowerCase()}`, 'verified_at=not.is.null', expect.stringMatching(/^id=neq\./), 'limit=1'])
     // The fallback lookup: that wallet, pending, no hash, unverified, inside the two-hour window, newest first, one row.
     const fallback = lookups.find((o) => o.filters.includes('status=eq.pending'))
     expect(fallback?.filters).toEqual([

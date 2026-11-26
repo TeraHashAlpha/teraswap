@@ -31,7 +31,7 @@ vi.mock('@/lib/kv-rate-limiter', async () => {
 import { SWAP_RECEIPTS as R } from '@/lib/__fixtures__/swap-receipts'
 import { __resetChainIdentityCache } from '@/lib/rpc-chain-identity'
 import { trackLargeTrade, trackSwapFailed } from '@/lib/security-tracker'
-import { VERIFIED_COLUMNS_SEEN_TTL_MS, _resetVerifiedColumnsCache, verifiedColumnsState } from '@/lib/swap-log/store'
+import { MIGRATION_COLUMNS, VERIFIED_COLUMNS_SEEN_TTL_MS, _resetVerifiedColumnsCache, verifiedColumnsState } from '@/lib/swap-log/store'
 import { trackWalletAction } from '@/lib/wallet-activity-server'
 import { createFakeSwapsDb, type Row } from '@/test-utils/fake-swaps-db'
 import { installStubChainRpc } from '@/test-utils/stub-chain-rpc'
@@ -149,7 +149,9 @@ describe('the moment the migration is applied, the same process starts writing',
     expect(state.db.rows()[0]).toMatchObject({ status: 'pending', verified_at: null })
     expect(logged).toEqual([])
 
-    const probes = () => state.db.ops.filter((o) => o.kind === 'select' && o.detail === 'verified_at, verified_kind').length
+    // CHANGED (133b K): the probe asks for the five columns of the migration, it asked for the two of round 1.
+    expect(MIGRATION_COLUMNS).toBe('verified_at, verified_kind, claimed_tx_hash, claimed_chain_id, claimed_at')
+    const probes = () => state.db.ops.filter((o) => o.kind === 'select' && o.detail === MIGRATION_COLUMNS).length
     expect(probes()).toBe(1)
     await post(clientPost({ wallet: '0x00000000000000000000000000000000000000c2' }))
     await patch({ txHash: f.hash, wallet })

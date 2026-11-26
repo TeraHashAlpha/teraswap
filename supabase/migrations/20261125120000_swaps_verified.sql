@@ -11,28 +11,38 @@
 --                     a pending row, or a row written before this change. With the server flag
 --                     SWAPS_PUBLIC_VERIFIED_ONLY on, public pages and totals read only rows where
 --                     it is NOT NULL.
---    - verified_kind  how the transaction was recognised: 'fee_collector' (sent to that chain's
---                     FeeCollector), 'router' (sent to the router of the row's source on that
---                     chain) or 'cow' (a Trade event of that chain's CoW settlement contract whose
---                     owner is the wallet). CHECKed.
---    - idx_swaps_verified_tx  UNIQUE on (chain_id, lower(tx_hash)) WHERE verified_at IS NOT NULL:
---                     one transaction verifies at most one row. The route checks first; this index
+--    - verified_kind  how the transaction was recognised (ADR-029 section 7): 'fee_collector' (that
+--                     chain's FeeCollector emitted SwapWithFee for the wallet), 'router' (the wallet
+--                     sent it to a listed router and its tokens moved as a net swap) or 'cow' (a
+--                     Trade event of that chain's CoW settlement contract whose owner is the
+--                     wallet). CHECKed.
+--    - idx_swaps_verified_tx  UNIQUE on (chain_id, lower(tx_hash), lower(wallet)) WHERE verified_at
+--                     IS NOT NULL: one transaction counts once PER WALLET (one CoW settlement
+--                     carries several wallets' trades; A103 S-6). The route checks first; this index
 --                     is what holds when two requests race.
+--    - claimed_tx_hash, claimed_chain_id, claimed_at (ADR-029 7.3)  a transaction hash a wallet's
+--                     confirmation named while the chain could not answer yet (no receipt, an RPC
+--                     error), the chain it named if any, and when. PRIVATE: no reader of the app
+--                     returns them (src/app/api/swaps-read-claim-columns.guard.test.ts); the route
+--                     asks the chain again on the next confirmation and scripts/swaps/
+--                     verify-stored-swaps.ts reads them. Cleared when the claim is decided.
 --    - token_in, token_in_symbol, token_out, token_out_symbol, amount_in, amount_out lose NOT NULL
 --                     (owner's decision, 2026-11-25). A side of a verified row comes from the
 --                     receipt only; a side the receipt cannot give (ETH bought through a router
 --                     leaves no log; two candidate tokens) is stored NULL, never as the caller's
 --                     value, and is not counted in any USD total.
 --
---  No visitor data: both columns are derived from public chain data and the clock.
+--  No new kind of visitor data: verified_at / verified_kind are derived from public chain data and
+--  the clock; a claimed hash is the transaction hash the browser already sent on main (where it
+--  was written to tx_hash at once), now kept aside until the chain confirms it.
 --
---  Additive and forward-only. No existing row is rewritten: the two columns are NULL on every
+--  Additive and forward-only. No existing row is rewritten: the five columns are NULL on every
 --  existing row, DROP NOT NULL changes the catalog only, the CHECK accepts NULL, and the partial
 --  index covers no row at the time it is built (no row is verified yet), so it cannot fail on
 --  existing data. Existing rows are verified later by scripts/swaps/verify-stored-swaps.ts, in
 --  report mode first; nothing is deleted.
 --
---  The code works BEFORE this file is applied: while the two columns are missing, POST and PATCH
+--  The code works BEFORE this file is applied: while these columns are missing, POST and PATCH
 --  /api/log-swap write nothing, answer as before and log `swaps_verified_columns_missing` once per
 --  request; every reader behaves as on main while the flag is off. Apply this file before turning
 --  the flag on (a reader that filters on a missing column gets an error).
@@ -52,7 +62,7 @@
 --  this one statement on its own instead (CONCURRENTLY cannot run inside a transaction block, and
 --  the Supabase SQL editor wraps a multi-statement run in one):
 --      CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_swaps_verified_tx
---        ON swaps (chain_id, lower(tx_hash)) WHERE verified_at IS NOT NULL;
+--        ON swaps (chain_id, lower(tx_hash), lower(wallet)) WHERE verified_at IS NOT NULL;
 --  Mirrored at the end of supabase/schema.sql.
 -- ══════════════════════════════════════════════════════════
 
@@ -60,6 +70,9 @@ SET lock_timeout = '5s';
 
 ALTER TABLE swaps ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
 ALTER TABLE swaps ADD COLUMN IF NOT EXISTS verified_kind TEXT;
+ALTER TABLE swaps ADD COLUMN IF NOT EXISTS claimed_tx_hash TEXT;
+ALTER TABLE swaps ADD COLUMN IF NOT EXISTS claimed_chain_id INTEGER;
+ALTER TABLE swaps ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;
 
 DO $$
 BEGIN
@@ -85,7 +98,7 @@ ALTER TABLE swaps
 RESET lock_timeout;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_swaps_verified_tx
-  ON swaps (chain_id, lower(tx_hash))
+  ON swaps (chain_id, lower(tx_hash), lower(wallet))
   WHERE verified_at IS NOT NULL;
 
 COMMENT ON COLUMN swaps.verified_at IS
@@ -94,10 +107,22 @@ COMMENT ON COLUMN swaps.verified_at IS
 COMMENT ON COLUMN swaps.verified_kind IS
   'How the verified transaction was recognised: fee_collector | router | cow. NULL exactly when verified_at is NULL. ADR-029.';
 
+COMMENT ON COLUMN swaps.claimed_tx_hash IS
+  'PRIVATE. A transaction hash this wallet''s confirmation named while the chain could not answer yet; asked again later, cleared when decided. No reader returns it. ADR-029 section 7.';
+
+COMMENT ON COLUMN swaps.claimed_chain_id IS
+  'PRIVATE. The chain the claim named, NULL when it named none (then every chain of the app is asked). ADR-029 section 7.';
+
+COMMENT ON COLUMN swaps.claimed_at IS
+  'PRIVATE. When the claim was first stored. ADR-029 section 7.';
+
 -- ROLLBACK (only while no row is verified; afterwards the two columns are the record of what the
 -- server saw, and a verified row may hold a NULL side that NOT NULL would refuse):
 --   DROP INDEX IF EXISTS idx_swaps_verified_tx;
 --   ALTER TABLE swaps DROP CONSTRAINT IF EXISTS swaps_verified_kind_check;
+--   ALTER TABLE swaps DROP COLUMN IF EXISTS claimed_at;
+--   ALTER TABLE swaps DROP COLUMN IF EXISTS claimed_chain_id;
+--   ALTER TABLE swaps DROP COLUMN IF EXISTS claimed_tx_hash;
 --   ALTER TABLE swaps DROP COLUMN IF EXISTS verified_kind;
 --   ALTER TABLE swaps DROP COLUMN IF EXISTS verified_at;
 --   ALTER TABLE swaps

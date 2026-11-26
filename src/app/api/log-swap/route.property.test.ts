@@ -10,7 +10,7 @@
  *       symbols, its USD is the oracle's price of the DERIVED amount, and no caller marker is anywhere in it
  *       (slippage and expected_output apart: the owner's decision of 2026-11-25 keeps those two validated numbers);
  *   P2  a row that is not verified is pending and has no transaction hash and no USD value;
- *   P3  one transaction, one row;
+ *   P3  one transaction, one row per wallet;
  *   P4  a request changes and creates rows of the wallet it names, and of no other wallet; a PATCH creates none;
  *   P5  no response and no log line carries a caller marker; the status code is one of the documented ones;
  *   P6  alert trackers are called only for a row verified by that request, with derived values;
@@ -249,8 +249,8 @@ async function runSeed(seed: number, total: number) {
         continue
       }
 
-      // P3
-      const key = `${row.chain_id}|${String(row.tx_hash).toLowerCase()}`
+      // P3. CHANGED (133b I.3, K): one transaction, one row PER WALLET (the key was chain and hash only).
+      const key = `${row.chain_id}|${String(row.tx_hash).toLowerCase()}|${String(row.wallet).toLowerCase()}`
       expect(seenTx.has(key), `${where}: two verified rows for ${key}`).toBe(false)
       seenTx.add(key)
 
@@ -313,7 +313,9 @@ describe('property: 1,000 seeded requests per seed', () => {
     expect(stats.post).toBeGreaterThan(400)
     expect(stats.patch).toBeGreaterThan(400)
     expect(stats.verified).toBeGreaterThanOrEqual(10)
-    for (const status of [200, 202, 409, 422, 429]) expect(stats.statuses.get(status) ?? 0, `status ${status} was answered`).toBeGreaterThan(0)
+    // CHANGED (133b I.3, K): 409 left this list. One transaction now counts once per wallet, and a wallet's own repeat
+    // answers 200, so 409 is left only for a write the unique index refuses while no verified row of this wallet is found.
+    for (const status of [200, 202, 422, 429]) expect(stats.statuses.get(status) ?? 0, `status ${status} was answered`).toBeGreaterThan(0)
     // SWAP_PROPERTY_DUMP=/abs/dir writes what the run did (for the feedback tables).
     if (process.env.SWAP_PROPERTY_DUMP) {
       writeFileSync(join(process.env.SWAP_PROPERTY_DUMP, `property-seed-${seed}.json`), `${JSON.stringify({ seed, ...stats, statuses: Object.fromEntries(stats.statuses) })}\n`)

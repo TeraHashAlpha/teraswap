@@ -190,7 +190,7 @@ export async function confirmSwap(args: ConfirmArgs, deps: ConfirmDeps = {}): Pr
   // One transaction, one row: asked before any chain read, and enforced again by the database on the update.
   // When the row it already verified is this wallet's own (two confirmations of one swap arriving together, the second
   // of which found an older pending row), the swap is recorded and nothing changes; another wallet's is a duplicate.
-  const elsewhere = await findTxVerifiedElsewhere(args.db, row.chain_id, args.txHash, row.id)
+  const elsewhere = await findTxVerifiedElsewhere(args.db, row.chain_id, args.txHash, row.id, args.wallet)
   if (elsewhere === 'error') return { result: 'storage_error' }
   if (elsewhere !== null) return elsewhere.wallet === args.wallet ? { result: 'verified' } : { result: 'duplicate' }
 
