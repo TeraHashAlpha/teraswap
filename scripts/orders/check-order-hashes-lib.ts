@@ -18,7 +18,7 @@
  * checksum is wrong, so the hash must not refuse it.
  *
  * Nothing this module returns carries a signature: field errors name the field, never its value, and a stored text is
- * reported as a shape and a digest (safeText, storedDigest), never as the text [A95 S-1].
+ * reported as a shape (safeText), with a digest only when it is 0x + 64 hex (storedDigest), never as the text [A95 S-1].
  *
  * Read-only: no network, no database, no environment.
  */
@@ -52,14 +52,14 @@ export interface Groups {
  * [A95 S-1] A stored order_hash as it may be printed: its SHAPE, never the text. A pre-#708 row holds whatever the caller
  * sent, and a hash-shaped text can mix hex of the row's own signature with other hex, so no stored text that is not the
  * computed hash is printed at all: `<hash-shaped>`, `<string len N>` or `<type T>` (describeCallerText), null as null.
- * The first 16 hex of its keccak256 (storedDigest) lets two reports about one text be matched.
+ * For a text that is 0x + 64 hex, the first 16 hex of its keccak256 (storedDigest) lets two reports about one text be matched.
  */
 export function safeText(value: unknown): unknown {
   if (value === null || value === undefined) return null
   return describeCallerText(value)
 }
 
-/** [A95 S-1] The digest printed beside a stored text's shape; null for null / not a string. */
+/** [A95 S-1] The digest printed beside a stored text's shape; [A98 R2-1] null unless the text is 0x + 64 hex (callerTextDigest). */
 export function storedDigest(value: unknown): string | null {
   return callerTextDigest(value)
 }

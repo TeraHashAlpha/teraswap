@@ -28,14 +28,16 @@ export async function GET(req: NextRequest) {
 }
 
 async function readStats(req: NextRequest) {
-  const supabase = getSupabase()
-  if (!supabase) {
-    return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
-  }
-
-  const wallet = req.nextUrl.searchParams.get('wallet')
-
   try {
+    // [A102 R3-2] Created inside the try: createClient throws on a malformed SUPABASE_URL, and a throw that leaves this
+    // handler gets the framework's 500, without the orders read cache header GET sets on every answer.
+    const supabase = getSupabase()
+    if (!supabase) {
+      return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
+    }
+
+    const wallet = req.nextUrl.searchParams.get('wallet')
+
     // [BUGFIX] Helper to build query with optional wallet filter — was previously
     // constructed via baseFilter but never actually applied to the parallel queries
     function ordersQuery() {
