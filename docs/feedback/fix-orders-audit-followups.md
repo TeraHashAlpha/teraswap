@@ -2,7 +2,7 @@
 
 - [x] C1 R2-1 caller-text digest only for 0x + 64 hex
 - [x] C2 R2-2 tests: no-0x / 0X signature gets 400
-- [ ] C3 R3-1 "Sign to view" follows its wallet
+- [x] C3 R3-1 "Sign to view" follows its wallet
 - [ ] C4 R3-2 stats: database client inside the try
 - [ ] mutants · browser counts v1/v2 · verify
 

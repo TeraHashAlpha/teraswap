@@ -500,8 +500,25 @@ export function useOrderEngine() {
   // every read. The state remembers WHICH wallet it is for and shows only while that wallet is the connected account
   // (owner decision 2026-11-20): it used to be one flag per mount, which stayed up after a switch to a wallet whose
   // orders load fine.
-  const [readAuthDeniedFor, setReadAuthDeniedFor] = useState<string | null>(null)
-  const readAuthDenied = !!address && readAuthDeniedFor === address.toLowerCase()
+  // [A102 R3-1] One entry PER WALLET (owner decision 2026-11-26), and every change names the wallet of the read that
+  // caused it: a late answer to another wallet's read neither lowers this one's state nor takes its place (there was one
+  // slot, which B's late 401 could overwrite or clear, leaving A with no rows and no button). A wallet's entry comes down
+  // when it signs here, or when a read of ITS orders is answered (the user may have signed on another mounted surface).
+  const [readAuthDeniedFor, setReadAuthDeniedFor] = useState<ReadonlySet<string>>(() => new Set<string>())
+  const readAuthDenied = !!address && readAuthDeniedFor.has(address.toLowerCase())
+  const raiseReadAuthDenied = useCallback((wallet: string) => {
+    const key = wallet.toLowerCase()
+    setReadAuthDeniedFor((prev) => (prev.has(key) ? prev : new Set(prev).add(key)))
+  }, [])
+  const lowerReadAuthDenied = useCallback((wallet: string) => {
+    const key = wallet.toLowerCase()
+    setReadAuthDeniedFor((prev) => {
+      if (!prev.has(key)) return prev // unchanged: no re-render on each answered poll
+      const next = new Set(prev)
+      next.delete(key)
+      return next
+    })
+  }, [])
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   // [P200] Guard: don't persist the initial empty array before the async load
   // resolves — otherwise the save effect would clobber the encrypted store.
@@ -525,10 +542,10 @@ export function useOrderEngine() {
       // 'denied' (refused) or [A100 R2-3] 'mismatch' (asked, the signature does not recover to this wallet): "Sign to view"
       // for THIS wallet; read-auth.ts remembers both, so the next read or poll comes back here without a prompt.
       if (outcome !== 'ok') {
-        setReadAuthDeniedFor(address.toLowerCase())
+        raiseReadAuthDenied(address)
         return []
       }
-      setReadAuthDeniedFor(null)
+      lowerReadAuthDenied(address)
       return fetchFn()
     }
   }
@@ -616,7 +633,7 @@ export function useOrderEngine() {
       // 2. Refresh from Supabase (authoritative source).
       try {
         // [W6-M-01] May prompt for the one-per-session read signature.
-        const rows = await withReadAuthRef.current(() => fetchUserOrders(address))
+        const rows = await withReadAuthRef.current(() => fetchUserOrders(address, () => lowerReadAuthDenied(address)))
         if (cancelled) return
         if (rows.length > 0) {
           const dismissed = getDismissedOrderIds()
@@ -631,7 +648,7 @@ export function useOrderEngine() {
     })()
 
     return () => { cancelled = true }
-  }, [address])
+  }, [address, lowerReadAuthDenied])
 
   // ── Save on change (including clearing when empty) ─────
   useEffect(() => {
@@ -684,7 +701,7 @@ export function useOrderEngine() {
       if (!address) return
       try {
         // [W6-M-01] Uses the cached session signature; signs once if missing.
-        const rows = await withReadAuthRef.current(() => fetchActiveOrders(address!, activeHashes))
+        const rows = await withReadAuthRef.current(() => fetchActiveOrders(address!, activeHashes, () => lowerReadAuthDenied(address!)))
         if (rows.length === 0) return
 
         setOrders(prev => {
@@ -725,7 +742,7 @@ export function useOrderEngine() {
     pollStatus()
     pollRef.current = setInterval(pollStatus, ORDER_POLL_INTERVAL_MS)
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [address, activeHashesKey])
+  }, [address, activeHashesKey, lowerReadAuthDenied])
 
   // ── [SPRINT-9U U2] Create order = Phase A: build + FREEZE for review (NO signature here) ────────
   const createOrder = useCallback(async (config: CreateOrderConfig) => {
@@ -1431,7 +1448,7 @@ export function useOrderEngine() {
     retryOrdersReadAuth(address)
     const outcome = await ensureOrdersReadAuth(address, readSignerFor(address))
     if (outcome !== 'ok') return
-    setReadAuthDeniedFor(null)
+    lowerReadAuthDenied(address)
     try {
       const rows = await fetchUserOrders(address)
       if (rows.length > 0) {
@@ -1441,7 +1458,7 @@ export function useOrderEngine() {
     } catch {
       /* the poll will pick the list up on its next tick */
     }
-  }, [address, readSignerFor])
+  }, [address, readSignerFor, lowerReadAuthDenied])
 
   return {
     orders,

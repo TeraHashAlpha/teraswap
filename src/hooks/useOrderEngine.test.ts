@@ -170,7 +170,8 @@ describe('useOrderEngine: initial state', () => {
     expect(result.current.orders).toEqual([])
     await act(async () => { await Promise.resolve() })
     expect(result.current.isLoading).toBe(false)
-    expect(mockFetchUserOrders).toHaveBeenCalledWith(ADDRESS)
+    // [A102 R3-1] The second argument is the read-answered report that lowers this wallet's "Sign to view".
+    expect(mockFetchUserOrders).toHaveBeenCalledWith(ADDRESS, expect.any(Function))
   })
 
   it('hydrates from Supabase when fetchUserOrders returns rows', async () => {
