@@ -54,17 +54,17 @@ codeql PASS head 11, base 11, new 0 (pack 2.5.0, CLI 2.27.5); keeper not request
 - NOT verified: the migration against any database, Linux CI, a real wallet, a FeeCollector or 0x swap in the browser, the script on stored rows, the flag on in a deployment. T6.
 
 ## Round 2 (goal 133b: audit A103 at 09ddf974, blocked 0C/4H; ADR-029 section 7)
-Merged origin/main (fe3ab13b, PR #727) first: 64475599. Then `npm ci`. Tables: `.tables.md` sections R1 to R6.
+Merged origin/main (fe3ab13b, PR #727) first: 64475599. Then `npm ci`. Tables: `.tables.md` sections R1 to R7.
 
 ### Checklist
 - [x] Merge origin/main, `npm ci`
 - [x] 1 Verification rewritten (details H), S-8 fixture, fork fixtures for S-1/S-2/S-5 (15dcbc37)
 - [x] 2 Migration and schema.sql (details K), the swaps read-columns guard, `/api/history` withholds the claim columns; the one-transaction check per wallet in code too (I.3)
-- [x] 3 Confirmation and row model (details I), the client's `chainId` and three quiet retries
-- [x] 4 Pending rows retired at the cap, never refused (details J)
-- [x] 5 The script reads claims and lists caller-supplied columns (details L)
-- [ ] 6 Tests (details M), each new one failing on 09ddf974 first; mutation; browser v1/v2
-- [ ] One `agent-verify.sh --codeql` on the last code commit; result here; push
+- [x] 3 Confirmation and row model (details I), the client's `chainId` and three quiet retries (fbfb89d2)
+- [x] 4 Pending rows retired at the cap, never refused (details J) (a11c2faa)
+- [x] 5 The script reads claims and lists caller-supplied columns (details L) (34f84217)
+- [x] 6 Tests (details M), failing first on 09ddf974; mutation; browser v1/v2 (fb0ff58b, 2684ff30; merge of PR #730: c4ce9030)
+- [x] `agent-verify.sh --codeql` on the last code commit: run 1 red on one CodeQL alert in a new test, fixed (cbd51bcf), run 2 PASS; result here; push
 
 Commit order: K (migration) goes before I and J, because I and J write its new columns; each commit's content is as listed.
 
@@ -73,3 +73,14 @@ Commit order: K (migration) goes before I and J, because I and J write its new c
 2. **ETH in only (H.3)**: a router transaction whose only in side is the ETH value and that has no out side is rejected (`no_net_swap`).
 3. **Failed rows (I.2)**: a reverted result goes to the pending row whose in token is the one the call shows (ETH value; the FeeCollector call's token), else the newest pending row on that chain with the transaction's source, else a new failed row.
 4. **Small calls**: a PATCH without `chainId` tries the pending rows' chains first, then the app's other chains; slippage and expected_output stay on an updated pending row (round-1 answer 2); the swaps read-columns guard is its own file, the orders guard untouched.
+
+### Evidence (round 2)
+1. **Per finding** (R1): S-1 `src/lib/swap-verify/verify-swap-on-chain.ts:298`, `:323-339`; S-2 `:526-561`; S-5 `:547-559`; S-8 `:162`; S-3 `src/lib/swap-log/confirm.ts:242`, `store.ts:328`; S-4 `confirm.ts:265`, `src/lib/analytics.ts:115`, `:134`, `scripts/swaps/verify-stored-swaps-lib.ts:194`, `:280`; S-6 migration `:101`, `supabase/schema.sql:244`, `store.ts:136`. Tests `route.a103.test.ts`, `verify-swap-on-chain.a103.test.ts`, `analytics.update-swap-status.test.ts`, `swaps-read-claim-columns.guard.test.ts`. On 09ddf974: **34 of 43 new tests FAIL**; the 9 that pass are controls it already got right (a real swap, approve, a reverted call, S-8, a client naming no chain); the guard's 6 history cases fail.
+2. **Reads per request** (R2): a PATCH naming its chain (every official call) at most 5 (chain-id proof, transaction 2, receipt 2); naming none at most 11 over the 3 chains, no new chain after 20 s; maxDuration 60. J: 9 edge cases pinned (R2); not atomic; a third party sending more than 20 invented hashes for a wallet after its client stopped asking can push its real claim out.
+3. **Wrap / unwrap** (R3, fork): a wrap alone is ETH -> WETH, an unwrap alone WETH -> (none), each counted at its real outflow (ADR 7.6); ETH sent and refunded: rejected. Round 1's 432 real transactions: 390 confirmed, 4 failed, 41 rejected (0x calls whose bought token went to ANOTHER address; round 1 counted them at the ETH value), 0 ambiguous.
+4. **Differential** flag off byte-identical to main's golden, nine readers (unchanged file); **property** seeds 133 / 20261125 (route, 1,000 each) and 133 / 20261126 (netting, 2,000 random receipts each); **mutation** 53 of 53 killed by assertions (4 survivors and 1 not applied at fb0ff58b, pinned by 2684ff30, re-run killed); **browser** v1 and v2, normal and lag mode: run 1 7 of 8 (v1 lag: Playwright's own line in another place), rig fixed with the assertion unchanged, run 2 **8 of 8**; lag: 202, then 200 two seconds later, History row, prompts and console as main (R4).
+5. **Verify** (R5), each run at 1-minute load under 10 with nothing else verifying: run 1 on 2684ff30 **FAIL**, CodeQL 1 new alert (`js/identity-replacement`, a no-op replace in a test this round added; every other check PASS); fixed in cbd51bcf; run 2 on cbd51bcf **RESULT: PASS**: suite 12054 tests / 571 files, lint-delta +0/+0, tsc, build, v1v2-parity 123, rpc-budget 36, CodeQL head 11 = base 11, 0 new (pack 2.5.0, CLI 2.27.5); base origin/main 623f58fd. Last code commit (verified): `cbd51bcff74fc85eef4ea67d957e1d1b47a2809a`; docs head: the commit adding this text (hand-off message).
+   Diff since 09ddf974 at cbd51bcf: this round's own code 49 files +5644 / -691 (34 files +2878 / -691 without fixtures); with main's PRs #727 and #730: 73 files +6753 / -813. Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/swap-log-verified-on-chain
+   NOT verified: the migration on a real Postgres; Linux CI; a real wallet, WalletConnect, a real bundler (the smart-wallet swap is a local fork's); FeeCollector and 0x swaps and Base / Arbitrum in the browser; the script against the stored table; the flag on in a deployment.
+
+43 CHANGED EXPECTATIONS, ALL IN TESTS THIS BRANCH ADDED IN ROUND 1 (LISTED IN CAPITALS IN R6); NO EXPECTATION OF A TEST ON MAIN CHANGED. Concern for the owner (R7): a FeeCollector swap counts the event's `totalAmount`, so a call that sweeps its input back is counted in full for 0.1% fee.
