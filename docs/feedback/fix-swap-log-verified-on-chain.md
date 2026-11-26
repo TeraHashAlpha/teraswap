@@ -84,3 +84,39 @@ Commit order: K (migration) goes before I and J, because I and J write its new c
    NOT verified: the migration on a real Postgres; Linux CI; a real wallet, WalletConnect, a real bundler (the smart-wallet swap is a local fork's); FeeCollector and 0x swaps and Base / Arbitrum in the browser; the script against the stored table; the flag on in a deployment.
 
 43 CHANGED EXPECTATIONS, ALL IN TESTS THIS BRANCH ADDED IN ROUND 1 (LISTED IN CAPITALS IN R6); NO EXPECTATION OF A TEST ON MAIN CHANGED. Concern for the owner (R7): a FeeCollector swap counts the event's `totalAmount`, so a call that sweeps its input back is counted in full for 0.1% fee.
+
+## Round 3 (goal 133c: audit A104 at 2b8a9cd6, blocked 0C/2H; ADR-029 section 8)
+Merged origin/main (cdae3ef5, PR #732) first: ca85d041. Then `npm ci`. Tables: `.tables.md` sections Q1 to Q6.
+
+### Checklist
+- [x] Merge origin/main, `npm ci`
+- [ ] 1 Router kind only for direct sources (details N)
+- [ ] 2 ETH in side and its USD band (details O)
+- [ ] 3 Claims on rows of their own; retired only by the chain's answer or by age (details P)
+- [ ] 4 Budgets for chainless confirmations and chain reads (details Q)
+- [ ] 5 A row main stored is verified in place (details R)
+- [ ] 6 Tests (details S), each new one failing on cbd51bcf first or proven by a named mutant; mutation; browser v1/v2
+- [ ] `agent-verify.sh --codeql` once on the last code commit; result here; push
+
+### Premise of N, checked before building it (no question needed)
+The official client sends a transaction straight to a source's contract only when `usesFeeCollector(source, chainId)` is
+false (`src/hooks/useSwap.ts:375`, `src/hooks/useSplitSwap.ts:301`, `src/lib/api.ts:676-677`): on 1, 8453 and 42161 that
+is `0x`, `cowswap`, `bebop` (`src/lib/chains/activation.ts:39-57`). The targets are fixed per source and chain in
+`ROUTER_WHITELIST_BY_CHAIN` (`src/lib/chains/routers.ts`): 0x's allowance-holder endpoint returns the AllowanceHolder as
+`transaction.to` (`src/lib/adapters/zerox.ts:48-66`, `:150`; pinned by `zerox.v2-execution-path.test.ts:106-116`); Bebop's
+`tx.to` must equal its settlement address (`src/lib/adapters/bebop.ts:147-167`). The client's own gate
+(`useSwap.ts:425` -> `api.ts:780-805`) accepts any whitelisted router, so the per-source entry is the known set used.
+
+### Owner answers (asked once, 2026-11-26; they supersede the details text)
+1. **R (a row main stored)**: verified in place (verified_at, verified_kind, status) only when it agrees with the receipt
+   by the stored-rows script's rule (status agrees, both tokens and amount-in equal, amount-out 50% to 200% of the stored
+   one); no trackers. A row that disagrees is left exactly as main stored it, nothing is inserted, the answer is 200.
+2. **Q.2 (read budget)**: every upstream JSON-RPC call the verification sends (each attempt, the null re-ask, an uncached
+   chain-id proof, the cap check's reads) costs 1 of the 60, charged before it is sent. The Chainlink price reads after
+   a verified result are not charged (once per wallet and transaction; a repeat is answered from the stored row).
+3. **P.1 (claim rows)**: key (wallet, named chain or none, hash); a repeat does NOT move `claimed_at` (a claim's age
+   counts from its first PATCH). When a POST row receives the verified result, that hash's claim rows are deleted; with
+   no matching POST row one of them becomes the verified row. Claims older than 7 days are deleted by that wallet's later
+   requests; the script is unchanged.
+4. **O.2 ("no tracker call")**: no large-trade, oracle-unavailable or oracle-deviation event for that row; the
+   wallet_activity line is still written, without USD.

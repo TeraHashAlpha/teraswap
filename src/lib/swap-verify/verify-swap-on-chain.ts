@@ -9,7 +9,7 @@
  *   not_found  the transaction or its receipt is not there (yet), or the chain could not be read, or the answer had a
  *              shape this function does not know. Nothing is confirmed on doubt.
  *   confirmed  receipt status success, and one of the three proofs below holds
- *   failed     receipt status reverted, sent BY the wallet TO our FeeCollector or to a listed router (H.4)
+ *   failed     receipt status reverted, sent BY the wallet TO our FeeCollector or to a direct source's contract (H.4, N)
  *
  * The proof is an event or a net flow, never the target alone (ADR-029 7.1). Tried in this order (H.4):
  *   fee_collector  EXACTLY ONE SwapWithFee log EMITTED BY that chain's FeeCollector (mainnet: also the frozen V1) whose
@@ -20,14 +20,20 @@
  *                  checked (about half of real settlements are sent to a solver's own contract). More than one Trade
  *                  of the wallet: the one the wallet's pending row agrees with (same sell token, same buy asset), else
  *                  rejected `ambiguous`.
- *   router         tx.from is the wallet, tx.to is a router of ANY source on that chain (ROUTER_WHITELIST_BY_CHAIN), and
- *                  after NETTING every token's Transfer legs for the wallet (in minus out) there is exactly one in
- *                  side: the one token with a net outflow, or the transaction value when no token has a net outflow;
- *                  and at most one out side: the one DIFFERENT token with a net inflow. No in side, two candidates on
- *                  a side, or the same token on both: rejected `no_net_swap`. A token that nets to zero is no side, so
- *                  a transaction that moves tokens out and back (A103 S-1) proves nothing. ETH as the only in side
- *                  needs a token that arrives (owner, 2026-11-26): ETH coming back leaves no log, so "1 ETH sent and
- *                  refunded" would otherwise be a 1 ETH sale.
+ *   router         ONLY for a DIRECT source (ADR-029 8.1, details N of goal 133c): a source the official client cannot
+ *                  send through the FeeCollector on that chain (`getFeeIncompatibleSources`, minus `cowswap`, which is
+ *                  its own kind; today `0x` and `bebop` on 1, 8453 and 42161). tx.from is the wallet, tx.to is THAT
+ *                  source's own contract on that chain (ROUTER_WHITELIST_BY_CHAIN[chain][source], the address the
+ *                  adapters' swap target is pinned to), and after NETTING every token's Transfer legs for the wallet
+ *                  (in minus out) there is exactly one in side: the one token with a net outflow, or the transaction
+ *                  value when no token has a net outflow; and at most one out side: the one DIFFERENT token with a net
+ *                  inflow. No in side, two candidates on a side, or the same token on both: rejected `no_net_swap`. A
+ *                  token that nets to zero is no side, so a transaction that moves tokens out and back (A103 S-1)
+ *                  proves nothing. ETH as the only in side needs a token that arrives (owner, 2026-11-26): ETH coming
+ *                  back leaves no log, so "1 ETH sent and refunded" would otherwise be a 1 ETH sale.
+ *                  A transaction to a router another source lists (Uniswap's SwapRouter02, KyberSwap, Velora, ...):
+ *                  rejected `not_direct_source`. On TeraSwap those sources go through the FeeCollector, whose own
+ *                  event is the proof; the official client never sends a transaction straight to them.
  *
  * derived: nothing here is ever taken from the caller.
  *   fee_collector  the event: tokenIn, totalAmount, tokenOut, outputAmount (address(0) is native ETH). The frozen V1's
@@ -37,16 +43,18 @@
  *   failed         both sides null (a reverted transaction moved nothing). `callTokenIn` says which token the CALL
  *                  named (the ETH value, or the FeeCollector call's token argument), only so the caller can find the
  *                  pending row it belongs to; it is never written as a side.
- *   source         cow: 'cowswap'. router: the source that lists tx.to on that chain. fee_collector: the source that
+ *   source         cow: 'cowswap'. router: the direct source whose contract tx.to is. fee_collector: the source that
  *                  lists the router the event (or, reverted, the call) names. When two sources list one router: the
  *                  pending row's source if it is one of them, else the first in ROUTER_WHITELIST_BY_CHAIN's own order
  *                  for that chain. 'unknown' when no source lists it.
  *
  * `pending` (the wallet's pending rows on that chain, newest first) is never proof. It only breaks the two ties the
- * chain leaves open: two sources listing one router, and two CoW trades of one wallet in one settlement.
+ * chain leaves open: two sources listing one router a FeeCollector event names, and two CoW trades of one wallet in
+ * one settlement.
  */
 import { decodeEventLog, decodeFunctionData, parseAbi } from 'viem'
 import { AGGREGATOR_APIS, COW_SETTLEMENT, FEE_COLLECTOR_ABI, NATIVE_ETH, hasCowApi } from '@/lib/constants'
+import { getFeeIncompatibleSources } from '@/lib/chains/activation'
 import { CHAIN_CONFIGS, getWrappedNative } from '@/lib/chains/registry'
 import { ROUTER_WHITELIST_BY_CHAIN } from '@/lib/chains/routers'
 import { ChainReadError, readChain, type ChainRead } from './chain-read'
@@ -71,6 +79,8 @@ export type VerifyReason =
   | 'no_swap_event'
   | 'no_net_swap'
   | 'ambiguous'
+  /** Sent to a router another source lists: on TeraSwap that source goes through the FeeCollector (ADR-029 8.1). */
+  | 'not_direct_source'
 
 export interface DerivedSwap {
   /** Lowercase token address; native ETH is the app's placeholder (NATIVE_ETH, lowercase). null: not derivable. */
@@ -176,6 +186,28 @@ export function sourcesOfRouter(chainId: number, router: string): string[] {
   if (!byChain) return []
   const lower = router.toLowerCase()
   return Object.keys(byChain).filter((name) => byChain[name].toLowerCase() === lower)
+}
+
+/**
+ * [ADR-029 8.1, details N.1 of goal 133c] The DIRECT sources of a chain: the ones the official client sends straight to
+ * the source's own contract because they cannot go through the FeeCollector there (src/lib/api.ts `usesFeeCollector`),
+ * minus `cowswap`, which has its own kind (its order is settled by a solver, never sent by the wallet). Read from
+ * `getFeeIncompatibleSources`, never copied, so a change of that list changes this one.
+ */
+export function directSourcesOf(chainId: number): string[] {
+  return getFeeIncompatibleSources(chainId).filter((source) => source !== 'cowswap')
+}
+
+/**
+ * [details N.2] The direct source whose contract `target` is on `chainId`, or null. The contract is the one the adapters'
+ * swap target is held to: ROUTER_WHITELIST_BY_CHAIN[chain][source] (0x: the AllowanceHolder its allowance-holder
+ * endpoint returns as `transaction.to`, pinned by zerox.v2-execution-path.test.ts; Bebop: its JamSettlement, which
+ * bebop.ts requires `tx.to` to equal).
+ */
+export function directSourceOfTarget(chainId: number, target: string): string | null {
+  const lower = target.toLowerCase()
+  for (const source of directSourcesOf(chainId)) if (routerOf(chainId, source) === lower) return source
+  return null
 }
 
 /**
@@ -520,11 +552,15 @@ export async function verifySwapOnChain(input: VerifySwapInput, deps: VerifyDeps
   const collectorList = [collectors.current, collectors.v1].filter((c): c is string => c !== null)
   const settlement = cowSettlementOf(chainId)
   const toCollector = tx.to !== null && collectorList.includes(tx.to)
-  const toRouter = tx.to !== null && sourcesOfRouter(chainId, tx.to).length > 0
+  // N.2: the direct source whose own contract tx.to is; N.3: a router only another source lists is not a target.
+  const directSource = tx.to !== null ? directSourceOfTarget(chainId, tx.to) : null
+  const toOtherRouter = directSource === null && tx.to !== null && sourcesOfRouter(chainId, tx.to).length > 0
+  const notRouter = (): VerifySwapResult =>
+    rejected(toOtherRouter ? 'not_direct_source' : tx.to !== null && tx.to === settlement ? 'cow_no_trade_for_wallet' : 'wrong_target')
 
-  // H.4: a reverted transaction is `failed` only when the wallet sent it to our FeeCollector or to a listed router.
+  // H.4: a reverted transaction is `failed` only when the wallet sent it to our FeeCollector or to a direct source.
   if (receipt.status === 'reverted') {
-    if (!toCollector && !toRouter) return rejected(tx.to !== null && tx.to === settlement ? 'cow_no_trade_for_wallet' : 'wrong_target')
+    if (!toCollector && directSource === null) return notRouter()
     if (tx.from !== wallet) return rejected('wrong_sender')
     if (toCollector) {
       const named = feeCollectorCall(tx.input)
@@ -538,7 +574,7 @@ export async function verifySwapOnChain(input: VerifySwapInput, deps: VerifyDeps
     return {
       outcome: 'failed',
       kind: 'router',
-      derived: derivedOf(NO_SIDES, sourceOfRouter(chainId, tx.to as string, hintSources), gas),
+      derived: derivedOf(NO_SIDES, directSource as string, gas),
       callTokenIn: tx.value > 0n ? NATIVE_PLACEHOLDER : null,
     }
   }
@@ -569,10 +605,10 @@ export async function verifySwapOnChain(input: VerifySwapInput, deps: VerifyDeps
     return { outcome: 'confirmed', kind: 'cow', derived: derivedOf(sides, 'cowswap', gas) }
   }
 
-  // 3. router: sent by the wallet to a listed router, and a net swap of the wallet's own tokens.
-  if (!toRouter) return rejected(tx.to !== null && tx.to === settlement ? 'cow_no_trade_for_wallet' : 'wrong_target')
+  // 3. router: sent by the wallet to a DIRECT source's own contract (N), and a net swap of the wallet's own tokens.
+  if (directSource === null) return notRouter()
   if (tx.from !== wallet) return rejected('wrong_sender')
   const sides = routerSides(tx, receipt.logs, wallet)
   if (sides === null) return rejected('no_net_swap')
-  return { outcome: 'confirmed', kind: 'router', derived: derivedOf(sides, sourceOfRouter(chainId, tx.to as string, hintSources), gas) }
+  return { outcome: 'confirmed', kind: 'router', derived: derivedOf(sides, directSource, gas) }
 }

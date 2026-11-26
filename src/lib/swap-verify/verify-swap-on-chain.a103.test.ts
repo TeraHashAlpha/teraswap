@@ -16,6 +16,7 @@ vi.hoisted(() => {
 })
 
 import { FORK_RECEIPTS as F, SWAP_RECEIPTS as R, recordedChainRead, type SwapReceiptFixture } from '@/lib/__fixtures__/swap-receipts'
+import { ROUTER_WHITELIST_BY_CHAIN } from '@/lib/chains/routers'
 import { verifySwapOnChain, type VerifySwapInput, type VerifySwapResult } from './verify-swap-on-chain'
 
 const BASE_WETH = '0x4200000000000000000000000000000000000006'
@@ -32,6 +33,18 @@ async function verify(f: SwapReceiptFixture, wallet: string, source: string, ove
   return verifySwapOnChain(input(f, wallet, source), { read: recordedChainRead(undefined, overrides).read })
 }
 
+/**
+ * [goal 133c N] The fork receipts below were sent to Uniswap's SwapRouter02, which the official client never calls
+ * directly: as sent they are `not_direct_source`. The netting rules they were written for still have to hold for a
+ * DIRECT source, so each is also asked with its target moved to Base's 0x AllowanceHolder (tx.to and receipt.to; the
+ * logs unchanged): a built variant, not a chain receipt.
+ */
+const BASE_ZEROX = ROUTER_WHITELIST_BY_CHAIN[8453]['0x'].toLowerCase()
+function sentToZeroX(f: SwapReceiptFixture, receipt: SwapReceiptFixture['receipt'] = f.receipt): Parameters<typeof recordedChainRead>[1] {
+  return { eth_getTransactionByHash: { ...structuredClone(f.tx), to: BASE_ZEROX }, eth_getTransactionReceipt: { ...structuredClone(receipt), to: BASE_ZEROX } }
+}
+const NOT_DIRECT = { outcome: 'rejected', reason: 'not_direct_source' } as const
+
 describe('S-1: sides are NET flows', () => {
   it.each([
     ['1', F.pullSweep1],
@@ -40,25 +53,32 @@ describe('S-1: sides are NET flows', () => {
   ])('%s x [pull(WETH, 1e18), sweepToken(WETH, 1e18, wallet)]: the WETH nets to zero, no in side: rejected', async (_n, f) => {
     // The receipt really holds the round trips: 2 Transfer logs per loop, out of and back into the wallet.
     expect(f.receipt.logs).toHaveLength(2 * Number(_n))
-    expect(await verify(f, sender(f), 'uniswapv3')).toEqual({ outcome: 'rejected', reason: 'no_net_swap' })
+    // CHANGED EXPECTATION (goal 133c N): as sent, to SwapRouter02, it is not a direct source's transaction.
+    expect(await verify(f, sender(f), 'uniswapv3')).toEqual(NOT_DIRECT)
+    // The round-2 expectation, on the same logs sent to a direct source.
+    expect(await verify(f, sender(f), '0x', sentToZeroX(f))).toEqual({ outcome: 'rejected', reason: 'no_net_swap' })
   })
 
   it('a real swap through the same router: confirmed, WETH 0.1 for USDC', async () => {
     const f = F.wethToUsdc
-    expect(await verify(f, sender(f), 'uniswapv3')).toMatchObject({
-      outcome: 'confirmed', kind: 'router', derived: { tokenIn: BASE_WETH, amountIn: '100000000000000000', tokenOut: BASE_USDC, amountOut: '169061391', source: 'uniswapv3' },
+    // CHANGED EXPECTATION (goal 133c N): sent to SwapRouter02, rejected; the same logs sent to 0x: the round-2 sides.
+    expect(await verify(f, sender(f), 'uniswapv3')).toEqual(NOT_DIRECT)
+    expect(await verify(f, sender(f), '0x', sentToZeroX(f))).toMatchObject({
+      outcome: 'confirmed', kind: 'router', derived: { tokenIn: BASE_WETH, amountIn: '100000000000000000', tokenOut: BASE_USDC, amountOut: '169061391', source: '0x' },
     })
   })
 
   it('a wrap alone and an unwrap alone are what they are (ADR-029 7.6); ETH sent and refunded is rejected (owner, 2026-11-26)', async () => {
-    expect(await verify(F.wrapAlone, sender(F.wrapAlone), 'uniswapv3')).toMatchObject({
+    // CHANGED EXPECTATION (goal 133c N): the three, as sent to SwapRouter02, are rejected; to 0x, the round-2 answers.
+    for (const f of [F.wrapAlone, F.unwrapAlone, F.ethRefund]) expect(await verify(f, sender(f), 'uniswapv3')).toEqual(NOT_DIRECT)
+    expect(await verify(F.wrapAlone, sender(F.wrapAlone), '0x', sentToZeroX(F.wrapAlone))).toMatchObject({
       outcome: 'confirmed', derived: { tokenIn: NATIVE, amountIn: '500000000000000000', tokenOut: BASE_WETH, amountOut: '500000000000000000' },
     })
-    expect(await verify(F.unwrapAlone, sender(F.unwrapAlone), 'uniswapv3')).toMatchObject({
+    expect(await verify(F.unwrapAlone, sender(F.unwrapAlone), '0x', sentToZeroX(F.unwrapAlone))).toMatchObject({
       outcome: 'confirmed', derived: { tokenIn: BASE_WETH, amountIn: '500000000000000000', tokenOut: null, amountOut: null },
     })
     expect(F.ethRefund.receipt.logs).toHaveLength(0)
-    expect(await verify(F.ethRefund, sender(F.ethRefund), 'uniswapv3')).toEqual({ outcome: 'rejected', reason: 'no_net_swap' })
+    expect(await verify(F.ethRefund, sender(F.ethRefund), '0x', sentToZeroX(F.ethRefund))).toEqual({ outcome: 'rejected', reason: 'no_net_swap' })
   })
 
   it('H.3: the same asset on both sides is no swap (a built receipt: a "token" logged at the native placeholder, sent to the wallet)', async () => {
@@ -66,7 +86,8 @@ describe('S-1: sides are NET flows', () => {
     const f = F.wrapAlone
     const receipt = structuredClone(f.receipt)
     for (const log of receipt.logs) log.address = NATIVE
-    const result = await verify(f, sender(f), 'uniswapv3', { eth_getTransactionReceipt: receipt })
+    // Sent to a direct source (goal 133c N), so the netting rule is what decides.
+    const result = await verify(f, sender(f), '0x', sentToZeroX(f, receipt))
     expect(result).toEqual({ outcome: 'rejected', reason: 'no_net_swap' })
   })
 })
@@ -125,9 +146,13 @@ describe('S-5: a smart-contract wallet is proved by the event, whoever sent the 
 describe('S-8: a router is looked up among THAT chain\'s routers', () => {
   it('Base, USDC sold straight to Uniswap SwapRouter02 (whose address differs from Ethereum\'s): confirmed as uniswapv3', async () => {
     const f = R.baseRouterUniswapTokenToToken
-    expect(await verify(f, sender(f), 'uniswapv3')).toMatchObject({
+    // CHANGED EXPECTATION (goal 133c N): was confirmed as uniswapv3. Base's SwapRouter02 is a router of Base only, so
+    // `not_direct_source` (not `wrong_target`) still proves the lookup is Base's, and the netted sides are unchanged
+    // when the same logs are sent to a direct source.
+    expect(await verify(f, sender(f), 'uniswapv3')).toEqual(NOT_DIRECT)
+    expect(await verify(f, sender(f), '0x', sentToZeroX(f))).toMatchObject({
       outcome: 'confirmed', kind: 'router',
-      derived: { tokenIn: BASE_USDC, amountIn: '50000000', tokenOut: '0x8185eaf46136a3f095c60facd97eca1bfc2f38f6', amountOut: '15886448751948291128299', source: 'uniswapv3' },
+      derived: { tokenIn: BASE_USDC, amountIn: '50000000', tokenOut: '0x8185eaf46136a3f095c60facd97eca1bfc2f38f6', amountOut: '15886448751948291128299', source: '0x' },
     })
   })
 })
@@ -169,8 +194,9 @@ describe('property, seeded: a confirmed router swap never claims more than the w
         legs.push({ token: pick(TOKENS), from, to, value: BigInt(1 + Math.floor(rand() * 1_000_000)) })
       }
       const value = rand() < 0.3 ? BigInt(1 + Math.floor(rand() * 1_000_000)) : 0n
-      const tx = { ...structuredClone(base.tx), value: `0x${value.toString(16)}` }
-      const receipt = { ...structuredClone(base.receipt), logs: legs.map((l, i) => ({ ...structuredClone(base.receipt.logs[0]), address: l.token, topics: [TRANSFER, pad(l.from), pad(l.to)], data: word(l.value), logIndex: `0x${i.toString(16)}` })) }
+      // Sent to a DIRECT source's contract (goal 133c N: only those are kind router); the legs are what is random.
+      const tx = { ...structuredClone(base.tx), to: BASE_ZEROX, value: `0x${value.toString(16)}` }
+      const receipt = { ...structuredClone(base.receipt), to: BASE_ZEROX, logs: legs.map((l, i) => ({ ...structuredClone(base.receipt.logs[0]), address: l.token, topics: [TRANSFER, pad(l.from), pad(l.to)], data: word(l.value), logIndex: `0x${i.toString(16)}` })) }
 
       const net = new Map<string, bigint>()
       const gross = new Map<string, bigint>()

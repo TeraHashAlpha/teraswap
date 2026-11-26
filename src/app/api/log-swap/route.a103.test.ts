@@ -56,6 +56,7 @@ vi.mock('@/lib/kv-rate-limiter', async () => {
 })
 
 import { FORK_RECEIPTS as F, SWAP_RECEIPTS as R, type SwapReceiptFixture } from '@/lib/__fixtures__/swap-receipts'
+import { ROUTER_WHITELIST_BY_CHAIN } from '@/lib/chains/routers'
 import { __resetChainIdentityCache } from '@/lib/rpc-chain-identity'
 import { trackLargeTrade, trackOracleDeviation } from '@/lib/security-tracker'
 import { _resetVerifiedColumnsCache } from '@/lib/swap-log/store'
@@ -107,6 +108,24 @@ function stub(options: StubChainRpcOptions = {}) {
   rpc = installStubChainRpc(options)
 }
 
+/**
+ * [goal 133c N] The fork receipts were sent to Uniswap's SwapRouter02, which the official client never calls directly.
+ * This serves the same transactions with their target moved to Base's 0x AllowanceHolder (tx.to and receipt.to; logs
+ * unchanged): a built variant, so the netting rules they were written for are still asked of a DIRECT source.
+ */
+function stubSentToZeroX(moved: readonly SwapReceiptFixture[]) {
+  const to = ROUTER_WHITELIST_BY_CHAIN[8453]['0x'].toLowerCase()
+  stub({
+    override: (c) => {
+      const f = moved.find((m) => m.chainId === c.chainId && m.hash.toLowerCase() === c.hash)
+      if (!f) return undefined
+      if (c.method === 'eth_getTransactionByHash') return { ...f.tx, to }
+      if (c.method === 'eth_getTransactionReceipt') return { ...f.receipt, to }
+      return undefined
+    },
+  })
+}
+
 beforeEach(() => {
   for (const name of ['RPC_URL_1', 'RPC_URL_8453', 'RPC_URL_42161', 'RPC_URL']) delete process.env[name]
   state.db = createFakeSwapsDb()
@@ -131,6 +150,12 @@ describe('S-1: tokens that only go out and come back are not a swap', () => {
     expect((await submit(wallet, 8453, 'uniswapv3', BASE_WETH, BASE_WETH)).status).toBe(200)
     const res = await confirm(wallet, f.hash, 8453)
     expect([res.status, await res.json()]).toEqual([422, { error: 'Transaction not accepted for this swap' }])
+    // [goal 133c N] As sent (to SwapRouter02) N rejects it first; the same logs sent to a direct source are rejected
+    // by the netting rule this test was written for.
+    stubSentToZeroX([f])
+    expect((await submit(wallet, 8453, '0x', BASE_WETH, BASE_WETH)).status).toBe(200)
+    const moved = await confirm(wallet, f.hash, 8453)
+    expect([moved.status, await moved.json()]).toEqual([422, { error: 'Transaction not accepted for this swap' }])
     expect(verified()).toEqual([])
     expect(state.priced).toEqual([])
     expect(trackLargeTrade).not.toHaveBeenCalled()
@@ -141,18 +166,30 @@ describe('S-1: tokens that only go out and come back are not a swap', () => {
     const f = F.wethToUsdc
     const wallet = sender(f)
     await submit(wallet, 8453, 'uniswapv3', BASE_WETH, BASE_USDC, '100000000000000000')
+    // CHANGED EXPECTATION (goal 133c N): sent straight to SwapRouter02 it is not a direct source's swap: 422, nothing public.
+    expect((await confirm(wallet, f.hash, 8453)).status).toBe(422)
+    expect(verified()).toEqual([])
+    expect(await publicCounts()).toEqual({ totalSwaps: 0, volume: 0, trades: 0 })
+    // The round-2 expectation, on the same logs sent to Base's 0x AllowanceHolder (a built variant).
+    stubSentToZeroX([f])
+    await submit(wallet, 8453, '0x', BASE_WETH, BASE_USDC, '100000000000000000')
     expect((await confirm(wallet, f.hash, 8453)).status).toBe(200)
-    expect(verified()).toEqual([expect.objectContaining({ verified_kind: 'router', source: 'uniswapv3', token_in: BASE_WETH, amount_in: '100000000000000000', token_out: BASE_USDC, amount_out: '169061391', amount_in_usd: 340, amount_out_usd: 169.06 })])
+    expect(verified()).toEqual([expect.objectContaining({ verified_kind: 'router', source: '0x', token_in: BASE_WETH, amount_in: '100000000000000000', token_out: BASE_USDC, amount_out: '169061391', amount_in_usd: 340, amount_out_usd: 169.06 })])
     expect(await publicCounts()).toMatchObject({ totalSwaps: 1, trades: 1 })
   })
 
   it('a wrap alone and an unwrap alone are counted at their real outflow (ADR-029 7.6 residue); ETH sent and refunded is not', async () => {
     const wallet = sender(F.wrapAlone)
-    await submit(wallet, 8453, 'uniswapv3', NATIVE, BASE_WETH)
+    // CHANGED EXPECTATION (goal 133c N): the three, as sent to SwapRouter02: 422, nothing verified.
+    for (const f of [F.wrapAlone, F.unwrapAlone, F.ethRefund]) expect((await confirm(wallet, f.hash, 8453)).status).toBe(422)
+    expect(verified()).toEqual([])
+    // The round-2 expectations, on the same logs sent to Base's 0x AllowanceHolder.
+    stubSentToZeroX([F.wrapAlone, F.unwrapAlone, F.ethRefund])
+    await submit(wallet, 8453, '0x', NATIVE, BASE_WETH)
     expect((await confirm(wallet, F.wrapAlone.hash, 8453)).status).toBe(200)
-    await submit(wallet, 8453, 'uniswapv3', BASE_WETH, NATIVE)
+    await submit(wallet, 8453, '0x', BASE_WETH, NATIVE)
     expect((await confirm(wallet, F.unwrapAlone.hash, 8453)).status).toBe(200)
-    await submit(wallet, 8453, 'uniswapv3', NATIVE, BASE_USDC)
+    await submit(wallet, 8453, '0x', NATIVE, BASE_USDC)
     expect((await confirm(wallet, F.ethRefund.hash, 8453)).status).toBe(422)
     expect(verified().map((r) => [r.tx_hash, r.token_in, r.amount_in, r.token_out, r.amount_out])).toEqual([
       [F.wrapAlone.hash, NATIVE, '500000000000000000', BASE_WETH, '500000000000000000'],
@@ -325,8 +362,16 @@ describe('S-8: a router swap on Base is looked up among Base\'s routers', () => 
     const f = R.baseRouterUniswapTokenToToken
     const wallet = sender(f)
     await submit(wallet, 8453, 'uniswapv3', BASE_USDC, '0x8185eaf46136a3f095c60facd97eca1bfc2f38f6', '50000000')
+    // CHANGED EXPECTATION (goal 133c N): was 200, confirmed as uniswapv3. The official client never sends a uniswapv3
+    // swap straight to the router: 422, read on Base only.
+    expect((await confirm(wallet, f.hash, 8453)).status).toBe(422)
+    expect(verified()).toEqual([])
+    expect(rpc.reads().every((c) => c.chainId === 8453)).toBe(true)
+    // The same logs sent to Base's 0x AllowanceHolder: the round-2 sides, now as 0x.
+    stubSentToZeroX([f])
+    await submit(wallet, 8453, '0x', BASE_USDC, '0x8185eaf46136a3f095c60facd97eca1bfc2f38f6', '50000000')
     expect((await confirm(wallet, f.hash, 8453)).status).toBe(200)
-    expect(verified()).toEqual([expect.objectContaining({ verified_kind: 'router', source: 'uniswapv3', chain_id: 8453, token_in: BASE_USDC, amount_in: '50000000', token_out: '0x8185eaf46136a3f095c60facd97eca1bfc2f38f6', amount_out: '15886448751948291128299' })])
+    expect(verified()).toEqual([expect.objectContaining({ verified_kind: 'router', source: '0x', chain_id: 8453, token_in: BASE_USDC, amount_in: '50000000', token_out: '0x8185eaf46136a3f095c60facd97eca1bfc2f38f6', amount_out: '15886448751948291128299' })])
     expect(rpc.reads().every((c) => c.chainId === 8453)).toBe(true)
   })
 })
@@ -334,6 +379,10 @@ describe('S-8: a router swap on Base is looked up among Base\'s routers', () => 
 describe('the large-trade alert needs a real priced outflow', () => {
   it('50 loops of 1 WETH would have been 170,000 USD per side: no alert, no deviation alert', async () => {
     await submit(sender(F.pullSweep50), 8453, 'uniswapv3', BASE_WETH, BASE_WETH)
+    await confirm(sender(F.pullSweep50), F.pullSweep50.hash, 8453)
+    // [goal 133c N] and the same logs sent to a direct source.
+    stubSentToZeroX([F.pullSweep50])
+    await submit(sender(F.pullSweep50), 8453, '0x', BASE_WETH, BASE_WETH)
     await confirm(sender(F.pullSweep50), F.pullSweep50.hash, 8453)
     expect(trackLargeTrade).not.toHaveBeenCalled()
     expect(trackOracleDeviation).not.toHaveBeenCalled()
