@@ -16,6 +16,8 @@
  *
  * Nothing written comes from the caller but the wallet and the hash the chain was asked about (and, in a claim, the
  * chain the caller named). The trackers (large trade, oracle, failed swap) run after the write, from derived values.
+ * USD is the server's price of the DERIVED amounts; for a router row that paid ETH in, only when the out side is worth
+ * at least half as much and at most twice as much (ADR-029 8.2, details O): else no USD and no security event.
  */
 import { randomUUID } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -74,6 +76,23 @@ export type ConfirmResult =
   | { result: 'columns_missing' }
   | { result: 'storage_error' }
 
+/**
+ * [ADR-029 8.2, details O of goal 133c] The smallest ratio of the two USD values of a router row whose in side is the
+ * ETH the transaction paid. That ETH leaves no log, and ETH coming back (a refund) leaves none either, so the chain does
+ * not show how much of it was spent; what came back for it is the only measure. Both sides priced and within a factor
+ * of two: both USD values are stored. Otherwise the row is confirmed with no USD at all.
+ */
+export const ETH_IN_USD_MIN_RATIO = 0.5
+
+/** O.2: the two USD values of an ETH-in router row, or null for both. */
+export function ethInUsd(usdIn: number | null, usdOut: number | null): { in: number | null; out: number | null } {
+  if (usdIn === null || usdOut === null) return { in: null, out: null }
+  const high = Math.max(usdIn, usdOut)
+  const low = Math.min(usdIn, usdOut)
+  if (!(high > 0) || !(low / high >= ETH_IN_USD_MIN_RATIO)) return { in: null, out: null }
+  return { in: usdIn, out: usdOut }
+}
+
 /** USD of a derived side, by the server's own price read. null when the side is null or has no price. */
 async function usdOfSide(chainId: number, token: string | null, amount: string | null): Promise<number | null> {
   if (token === null || amount === null) return null
@@ -124,8 +143,13 @@ function buildUpdate(
   }
 }
 
-/** After a verified write: the trackers, from derived values only. Fire-and-forget, as the trackers are. */
-function runTrackers(wallet: string, txHash: string, update: VerifiedUpdate): void {
+/**
+ * After a verified write: the trackers, from derived values only. Fire-and-forget, as the trackers are.
+ * `usdWithheld` (O.2, owner's answer of 2026-11-26): an ETH-in router row whose USD was not stored raises no security
+ * event (no large trade, no oracle unavailable, no oracle deviation); its wallet-activity line is still written, with
+ * no USD, as for any confirmed swap whose token has no price.
+ */
+function runTrackers(wallet: string, txHash: string, update: VerifiedUpdate, usdWithheld = false): void {
   const tokenIn = update.token_in_symbol ?? ''
   const tokenOut = update.token_out_symbol ?? ''
   const tradeUsd = update.amount_in_usd ?? update.amount_out_usd ?? 0
@@ -147,6 +171,7 @@ function runTrackers(wallet: string, txHash: string, update: VerifiedUpdate): vo
     txHash,
     metadata: { status: 'confirmed', kind: update.verified_kind },
   })
+  if (usdWithheld) return
 
   if (tradeUsd >= LARGE_TRADE_USD) {
     trackLargeTrade({ wallet, tokenIn, tokenOut, amountUsd: tradeUsd, source: update.source })
@@ -327,7 +352,12 @@ export async function confirmSwap(args: ConfirmArgs, deps: ConfirmDeps = {}): Pr
   const outcome = verified.outcome as 'confirmed' | 'failed'
   const derived = verified.derived
   const [usdIn, usdOut] = await Promise.all([usdOfSide(chainId, derived.tokenIn, derived.amountIn), usdOfSide(chainId, derived.tokenOut, derived.amountOut)])
-  const update = buildUpdate(args.txHash, outcome, verified.kind, chainId, derived, { in: usdIn, out: usdOut }, now)
+  // O.2: a router row's ETH in side is the transaction value (verify-swap-on-chain.ts: only with a derived out side).
+  // Its USD counts only when what came back for it is worth about as much; otherwise neither side carries USD.
+  const ethIn = verified.kind === 'router' && derived.tokenIn === NATIVE_PLACEHOLDER
+  const usd = ethIn ? ethInUsd(usdIn, usdOut) : { in: usdIn, out: usdOut }
+  const usdWithheld = ethIn && usd.in === null
+  const update = buildUpdate(args.txHash, outcome, verified.kind, chainId, derived, usd, now)
 
   const row = chooseRow(candidates, args.txHash, chainId, outcome, derived, verified.callTokenIn)
   let written: 'updated' | 'inserted' | 'not_unverified' | 'duplicate' | 'columns_missing' | 'error'
@@ -349,6 +379,6 @@ export async function confirmSwap(args: ConfirmArgs, deps: ConfirmDeps = {}): Pr
 
   // The claim is decided: cleared on the row just written (the update did it) and on any other row that held it.
   if (heldElsewhere) await clearClaim(args.db, args.wallet, args.txHash)
-  if (deps.trackers !== false) runTrackers(args.wallet, args.txHash, update)
+  if (deps.trackers !== false) runTrackers(args.wallet, args.txHash, update, usdWithheld)
   return { result: 'verified' }
 }
