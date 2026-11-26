@@ -50,14 +50,17 @@ import {
   deleteExpiredClaims,
   findCandidateRows,
   findClaimRows,
+  findMainRows,
   findWalletVerifiedByTx,
   insertClaimRow,
   insertVerified,
+  markMainRowVerified,
   markVerified,
   type ClaimRow,
   type PendingCandidate,
   type VerifiedUpdate,
 } from './store'
+import { storedAgrees } from './stored-agreement'
 import { catalogSymbolOrNull } from './symbols'
 
 /** A trade at or above this many USD is recorded as a large trade (monitoring only). */
@@ -420,6 +423,25 @@ async function recordFound(args: ConfirmArgs, candidates: readonly PendingCandid
 
   const outcome = verified.outcome as 'confirmed' | 'failed'
   const derived = verified.derived
+
+  // R (ADR-029 8.5, owner's answer of 2026-11-26): a row main stored for this transaction stands for it; nothing is
+  // inserted beside it. It is verified in place (the two verification columns and the status) only when what it stores
+  // agrees with the receipt by the stored-rows script's rule; else it stays exactly as main stored it. No tracker runs:
+  // main ran them when it was written.
+  const mainRows = await findMainRows(args.db, args.wallet, chainId, args.txHash)
+  if (mainRows === 'error') return { result: 'storage_error' }
+  if (mainRows.length > 0) {
+    const agreeing = mainRows.find((row) => storedAgrees(row, outcome, derived))
+    if (agreeing) {
+      const marked = await markMainRowVerified(args.db, String(agreeing.id), args.wallet, { verified_at: now.toISOString(), verified_kind: verified.kind, status: outcome })
+      if (marked === 'columns_missing') return { result: 'columns_missing' }
+      if (marked === 'error') return { result: 'storage_error' }
+      if (marked === 'duplicate' && (await findWalletVerifiedByTx(args.db, args.wallet, args.txHash)) !== true) return { result: 'duplicate' }
+    }
+    if (claimRows.length > 0) await deleteClaimsOf(args.db, args.wallet, args.txHash)
+    return { result: 'verified' }
+  }
+
   const [usdIn, usdOut] = await Promise.all([usdOfSide(chainId, derived.tokenIn, derived.amountIn), usdOfSide(chainId, derived.tokenOut, derived.amountOut)])
   // O.2: a router row's ETH in side is the transaction value (verify-swap-on-chain.ts: only with a derived out side).
   // Its USD counts only when what came back for it is worth about as much; otherwise neither side carries USD.

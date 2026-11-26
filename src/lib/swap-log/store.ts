@@ -236,6 +236,39 @@ export async function markVerified(db: SupabaseClient, rowId: string, wallet: st
   return (data ?? []).length === 1 ? 'updated' : 'not_unverified'
 }
 
+/**
+ * [ADR-029 8.5, details R of goal 133c] A row main stored for a transaction: THAT wallet's, on that chain, with that hash
+ * (either letter case), never verified. Oldest first. Only the columns the agreement rule reads (stored-agreement.ts).
+ */
+export async function findMainRows(db: SupabaseClient, wallet: string, chainId: number, txHash: string): Promise<Record<string, unknown>[] | 'error'> {
+  const { data, error } = await db
+    .from('swaps')
+    .select('id, status, token_in, token_out, amount_in, amount_out, created_at')
+    .eq('wallet', wallet)
+    .eq('chain_id', chainId)
+    .ilike('tx_hash', txHash)
+    .is('verified_at', null)
+    .order('created_at', { ascending: true })
+    .limit(10)
+  if (error) return 'error'
+  return (data ?? []) as Record<string, unknown>[]
+}
+
+/**
+ * R: a row main stored, verified IN PLACE: the two verification columns and the status, and nothing else (the goal's
+ * "rewrite old rows beyond the two verification columns": no). Named by id AND wallet, only while still unverified.
+ */
+export async function markMainRowVerified(
+  db: SupabaseClient,
+  rowId: string,
+  wallet: string,
+  values: { verified_at: string; verified_kind: VerifiedKind; status: 'confirmed' | 'failed' },
+): Promise<MarkResult> {
+  const { data, error } = await db.from('swaps').update(values).eq('id', rowId).eq('wallet', wallet).is('verified_at', null).select('id')
+  if (error) return writeError(error as PgError)
+  return (data ?? []).length === 1 ? 'updated' : 'not_unverified'
+}
+
 /** The verified row a transaction makes when the wallet has no pending row that agrees with it (details I.2). */
 export async function insertVerified(
   db: SupabaseClient,

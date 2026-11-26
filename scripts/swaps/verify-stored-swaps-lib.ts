@@ -24,13 +24,11 @@
  * and the claim is cleared, or the claim stays (`claim_kept`), or a rejected one is cleared (`claim_cleared`).
  */
 import { getSupportedChainIds } from '@/lib/chains/registry'
+import { compareStored } from '@/lib/swap-log/stored-agreement'
 import type { DerivedSwap, VerifiedKind, VerifySwapInput, VerifySwapResult } from '@/lib/swap-verify/verify-swap-on-chain'
 
-/** The receipt's amount-out must be at least half and at most twice the stored (quoted) one. */
-export const OUT_RATIO_MIN_NUM = 1n
-export const OUT_RATIO_MIN_DEN = 2n
-export const OUT_RATIO_MAX_NUM = 2n
-export const OUT_RATIO_MAX_DEN = 1n
+// [goal 133c R] The agreement rule is the route's too (a confirmation that finds a row main stored): one module.
+export { compareStored, OUT_RATIO_MAX_DEN, OUT_RATIO_MAX_NUM, OUT_RATIO_MIN_DEN, OUT_RATIO_MIN_NUM } from '@/lib/swap-log/stored-agreement'
 
 /**
  * The stored columns that came from the caller (on main) and that a public reader returns once the row is verified and
@@ -126,52 +124,7 @@ function text(v: unknown): string | null {
   return null
 }
 
-/** A stored amount as digits: an integer string, or a numeric with a zero fraction ("1000.00"). null: not an integer. */
-function digits(v: unknown): string | null {
-  const t = text(v)
-  if (t === null) return null
-  const whole = /^(\d{1,78})(?:\.0*)?$/.exec(t.trim())
-  return whole ? BigInt(whole[1]).toString() : null
-}
-
-function ratio4(numerator: bigint, denominator: bigint): string {
-  const scaled = (numerator * 10_000n) / denominator
-  const whole = scaled / 10_000n
-  return `${whole}.${(scaled % 10_000n).toString().padStart(4, '0')}`
-}
-
-/** The comparison of one verified row with its receipt. */
-export function compareStored(
-  row: Record<string, unknown>,
-  outcome: 'confirmed' | 'failed',
-  derived: DerivedSwap,
-): { statusAgrees: boolean; differs: string[]; outRatio: string | null } {
-  const status = text(row.status)
-  const statusAgrees = outcome === 'confirmed' ? status === 'confirmed' || status === 'pending' : status === 'failed'
-
-  const differs: string[] = []
-  const storedIn = text(row.token_in)?.toLowerCase() ?? null
-  const storedOut = text(row.token_out)?.toLowerCase() ?? null
-  if (derived.tokenIn === null || storedIn !== derived.tokenIn) differs.push('token_in')
-  if (derived.tokenOut === null || storedOut !== derived.tokenOut) differs.push('token_out')
-
-  const storedAmountIn = digits(row.amount_in)
-  if (derived.amountIn === null || storedAmountIn === null || BigInt(storedAmountIn) !== BigInt(derived.amountIn)) differs.push('amount_in')
-
-  const storedAmountOut = digits(row.amount_out)
-  let outRatio: string | null = null
-  if (derived.amountOut === null || storedAmountOut === null || BigInt(storedAmountOut) === 0n) {
-    differs.push('amount_out')
-  } else {
-    const got = BigInt(derived.amountOut)
-    const quoted = BigInt(storedAmountOut)
-    outRatio = ratio4(got, quoted)
-    const atLeastHalf = got * OUT_RATIO_MIN_DEN >= quoted * OUT_RATIO_MIN_NUM
-    const atMostTwice = got * OUT_RATIO_MAX_DEN <= quoted * OUT_RATIO_MAX_NUM
-    if (!atLeastHalf || !atMostTwice) differs.push('amount_out')
-  }
-  return { statusAgrees, differs, outRatio }
-}
+// compareStored (and its 50% to 200% band) lives in src/lib/swap-log/stored-agreement.ts, re-exported above.
 
 export type Verify = (input: VerifySwapInput) => Promise<VerifySwapResult>
 

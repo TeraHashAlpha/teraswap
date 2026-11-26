@@ -404,9 +404,11 @@ describe('the transaction makes the row: which row it goes to (133b I.2)', () =>
     // CHANGED (133b I.2, and "do not rewrite old rows"): round 1 verified this old row in place and replaced its values.
     // An old row is left to the stored-rows script (two columns only); the transaction makes its own verified row.
     expect(rows().find((r) => r.id === 'old')).toEqual({ ...old })
-    expect(verifiedRows()).toHaveLength(1)
-    expect(verifiedRows()[0]).toMatchObject({ verified_kind: 'fee_collector', tx_hash: f.hash.toLowerCase(), amount_in: '46080134130180921522', amount_in_usd: null })
-    expect(JSON.stringify(verifiedRows()[0])).not.toContain('onerror')
+    // CHANGED EXPECTATION (goal 133c R, A104 R2-5; round 2 inserted a SECOND verified row here, so the flag-off stats
+    // counted the swap twice): the row main stored stands for the transaction. Its declared values (500 WETH, the
+    // caller's USD and symbol) disagree with the receipt, so it is left exactly as main stored it, and nothing is inserted.
+    expect(verifiedRows()).toHaveLength(0)
+    expect(rows()).toHaveLength(1)
   })
 })
 
@@ -719,7 +721,10 @@ describe('the request itself', () => {
     const lookups = state.db.ops.filter((o) => o.kind === 'select' && o.table === 'swaps' && o.detail !== MIGRATION_COLUMNS)
     // CHANGED (133b I): the lookups are now three: this wallet's verified row with that hash; its recent pending rows;
     // its rows holding a claim of that hash. Round 1 had a by-hash row, a fallback row and a duplicate check.
-    expect(lookups).toHaveLength(3)
+    // CHANGED EXPECTATION (goal 133c R): four, the fourth (after the chain answered) a row main stored with this
+    // wallet, chain and hash.
+    expect(lookups).toHaveLength(4)
+    expect(lookups[3].filters).toEqual([`wallet=eq.${sender(f)}`, 'chain_id=eq.1', `tx_hash=ilike.${f.hash.toLowerCase()}`, 'verified_at=is.null', 'order=created_at.asc', 'limit=10'])
     for (const op of lookups) expect(op.filters[0], JSON.stringify(op)).toBe(`wallet=eq.${sender(f)}`)
     expect(lookups[0].filters).toEqual([`wallet=eq.${sender(f)}`, `tx_hash=ilike.${f.hash.toLowerCase()}`, 'verified_at=not.is.null', 'limit=1'])
     // CHANGED EXPECTATION (goal 133c P.2): the recent rows are POST rows only (claimed_tx_hash is null: a claim row of
