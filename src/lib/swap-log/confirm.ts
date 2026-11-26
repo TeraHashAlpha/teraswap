@@ -273,11 +273,14 @@ async function searchChains(args: ConfirmArgs, candidates: readonly PendingCandi
     const chainId = chains[i]
     // The wallet's POST rows on this chain, newest first: tie-breaks only (H.2, H.3).
     const pending = candidates.filter((r) => r.chain_id === chainId && !isClaimRow(r)).map((r) => ({ source: r.source, tokenIn: r.token_in, tokenOut: r.token_out }))
-    const result = await verifySwapOnChain({ chainId, txHash: args.txHash, wallet: args.wallet, pending }, { read: deps.read })
+    const result = await verifySwapOnChain({ chainId, txHash: args.txHash, wallet: args.wallet, pending }, { read: deps.read, beforeUpstream: deps.beforeUpstream })
     asked++
     if (result.outcome !== 'not_found') return { found: { chainId, result } }
-    // The transaction is there but its receipt is not yet: this is its chain.
-    if (result.reason === 'receipt_missing') return { notFound: { reason: 'receipt_missing', chainId, absent: false } }
+    // Q.3: this chain returned the transaction, and its receipt is missing, errored or unreadable: this is its chain, and
+    // no other chain is asked.
+    if (result.txFound) return { notFound: { reason: result.reason ?? 'rpc_error', chainId, absent: false } }
+    // Q.2: the read budget is spent: nothing more is asked.
+    if (result.reason === 'read_budget') return { notFound: { reason: 'read_budget', chainId: named ? chains[0] : null, absent: false } }
     // An RPC failure is the more useful reason to report than "not on the other chains".
     if (result.reason !== 'tx_missing' || reason === 'tx_missing') reason = result.reason ?? 'rpc_error'
   }
@@ -328,7 +331,10 @@ async function keepClaim(args: ConfirmArgs, candidates: readonly PendingCandidat
   if (live >= CLAIM_CAP) {
     const due = claims.filter((c) => time(c.claimed_at) < now.getTime() - CLAIM_CHECK_AFTER_MS).slice(0, CLAIM_CHECKS_PER_REQUEST)
     for (const claim of due) {
-      if ((await decideClaim(args.db, args.wallet, claim, now, deps)) === 'gone') live--
+      const decided = await decideClaim(args.db, args.wallet, claim, now, deps)
+      if (decided === 'gone') live--
+      // Q.2: the cap check's reads are charged to the same budget; spent, no further claim is asked about.
+      if (decided === 'budget') break
     }
   }
   if (live >= CLAIM_CAP) return 'cap'
@@ -352,7 +358,7 @@ async function keepClaim(args: ConfirmArgs, candidates: readonly PendingCandidat
  * is deleted. Anything else (no receipt yet, an RPC error, a read refused): the claim stays. `gone`: the claim no longer
  * takes a place.
  */
-async function decideClaim(db: SupabaseClient, wallet: string, claim: ClaimRow, now: Date, deps: ConfirmDeps): Promise<'gone' | 'kept'> {
+async function decideClaim(db: SupabaseClient, wallet: string, claim: ClaimRow, now: Date, deps: ConfirmDeps): Promise<'gone' | 'kept' | 'budget'> {
   const txHash = claim.claimed_tx_hash.toLowerCase()
   const args: ConfirmArgs = { db, wallet, txHash, chainId: claim.claimed_chain_id }
   const already = await findWalletVerifiedByTx(db, wallet, txHash)
@@ -365,6 +371,7 @@ async function decideClaim(db: SupabaseClient, wallet: string, claim: ClaimRow, 
   if (candidates === 'error') return 'kept'
   const searched = await searchChains(args, candidates, deps)
   if ('notFound' in searched) {
+    if (searched.notFound.reason === 'read_budget') return 'budget'
     if (!searched.notFound.absent) return 'kept'
     return (await deleteClaimRow(db, wallet, claim.id)) ? 'gone' : 'kept'
   }

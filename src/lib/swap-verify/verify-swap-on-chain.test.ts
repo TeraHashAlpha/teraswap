@@ -602,14 +602,17 @@ describe('A.2 and fail closed: a missing answer, an error or an unknown shape ne
 
   it('missing receipt (the transaction is still pending): not_found', async () => {
     const chain = recordedChainRead(EVERY_SWAP_RECEIPT, { eth_getTransactionReceipt: null })
-    expect(await verifySwapOnChain(good(), { read: chain.read })).toEqual({ outcome: 'not_found', reason: 'receipt_missing' })
+    // CHANGED EXPECTATION (goal 133c Q.3): the answer also says the transaction was found on this chain (txFound).
+    expect(await verifySwapOnChain(good(), { read: chain.read })).toEqual({ outcome: 'not_found', reason: 'receipt_missing', txFound: true })
     expect(chain.calls).toHaveLength(2)
   })
 
   it.each(['rpc_error', 'rpc_wrong_chain', 'rpc_unverified'] as const)('the chain read fails with %s on either read: not_found with that reason', async (code) => {
     for (const method of ['eth_getTransactionByHash', 'eth_getTransactionReceipt'] as const) {
       const chain = recordedChainRead(EVERY_SWAP_RECEIPT, { [method]: new ChainReadError(code) })
-      expect(await verifySwapOnChain(good(), { read: chain.read })).toEqual({ outcome: 'not_found', reason: code })
+      // CHANGED EXPECTATION (goal 133c Q.3): a failed RECEIPT read also says the transaction was found on this chain.
+      const found = method === 'eth_getTransactionReceipt' ? { txFound: true } : {}
+      expect(await verifySwapOnChain(good(), { read: chain.read })).toEqual({ outcome: 'not_found', reason: code, ...found })
     }
   })
 
@@ -653,7 +656,8 @@ describe('A.2 and fail closed: a missing answer, an error or an unknown shape ne
   ]
   it.each(receiptChanges)('a receipt answer with %s: not_found/rpc_malformed', async (_name, change) => {
     const chain = recordedChainRead(EVERY_SWAP_RECEIPT, { eth_getTransactionReceipt: change(structuredClone(f.receipt)) })
-    expect(await verifySwapOnChain(good(), { read: chain.read })).toEqual({ outcome: 'not_found', reason: 'rpc_malformed' })
+    // CHANGED EXPECTATION (goal 133c Q.3): the answer also says the transaction was found on this chain (txFound).
+    expect(await verifySwapOnChain(good(), { read: chain.read })).toEqual({ outcome: 'not_found', reason: 'rpc_malformed', txFound: true })
   })
 
   it('a contract creation (tx.to null) with no event of the wallet in it is the wrong target', async () => {

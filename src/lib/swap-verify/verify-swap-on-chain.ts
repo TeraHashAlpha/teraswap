@@ -72,6 +72,8 @@ export type VerifyReason =
   | 'rpc_error'
   | 'rpc_wrong_chain'
   | 'rpc_unverified'
+  /** The caller's budget of upstream calls refused the next one (details Q.2 of goal 133c): not sent, not an answer. */
+  | 'read_budget'
   | 'rpc_malformed'
   | 'wrong_sender'
   | 'wrong_target'
@@ -118,6 +120,11 @@ export interface VerifySwapResult {
   derived?: DerivedSwap
   /** failed only: the token the reverted CALL named (never a side of the row). null: the call does not say. */
   callTokenIn?: string | null
+  /**
+   * not_found only: this chain returned the transaction, and only its receipt is missing, errored or unreadable. The
+   * transaction is this chain's: a search over chains stops here (details Q.3 of goal 133c).
+   */
+  txFound?: true
 }
 
 export const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/
@@ -500,6 +507,8 @@ function derivedOf(sides: { in: Side; out: Side }, source: string, gas: { gasUse
 export interface VerifyDeps {
   /** The chain read. Tests pass a recorded one; production uses chain-read.ts. */
   read?: ChainRead
+  /** Asked before every upstream call of the two reads (chain-read.ts ChainReadHooks); `false` stops the read. */
+  beforeUpstream?: () => Promise<boolean>
 }
 
 /**
@@ -519,11 +528,14 @@ export async function verifySwapOnChain(input: VerifySwapInput, deps: VerifyDeps
   const hints = cleanHints(input.pending)
   const hintSources = hints.map((h) => h.source)
   const read = deps.read ?? readChain
+  const budget = deps.beforeUpstream
+  const ask = (method: 'eth_getTransactionByHash' | 'eth_getTransactionReceipt') =>
+    budget ? read(chainId, method, [txHash], { beforeUpstream: budget }) : read(chainId, method, [txHash])
 
   // The transaction.
   let rawTx: unknown
   try {
-    rawTx = await read(chainId, 'eth_getTransactionByHash', [txHash])
+    rawTx = await ask('eth_getTransactionByHash')
   } catch (err) {
     return notFound(err instanceof ChainReadError ? err.code : 'rpc_error')
   }
@@ -531,21 +543,22 @@ export async function verifySwapOnChain(input: VerifySwapInput, deps: VerifyDeps
   const tx = parseTx(rawTx)
   if (tx === null || tx.hash !== txHash) return notFound('rpc_malformed')
 
-  // The receipt.
+  // The receipt. From here on, a not_found says the transaction is this chain's (Q.3).
+  const receiptNotFound = (reason: VerifyReason): VerifySwapResult => ({ ...notFound(reason), txFound: true })
   let rawReceipt: unknown
   try {
-    rawReceipt = await read(chainId, 'eth_getTransactionReceipt', [txHash])
+    rawReceipt = await ask('eth_getTransactionReceipt')
   } catch (err) {
-    return notFound(err instanceof ChainReadError ? err.code : 'rpc_error')
+    return receiptNotFound(err instanceof ChainReadError ? err.code : 'rpc_error')
   }
-  if (rawReceipt === null || rawReceipt === undefined) return notFound('receipt_missing')
+  if (rawReceipt === null || rawReceipt === undefined) return receiptNotFound('receipt_missing')
   const receipt = parseReceipt(rawReceipt)
-  if (receipt === null || receipt.transactionHash !== txHash) return notFound('rpc_malformed')
+  if (receipt === null || receipt.transactionHash !== txHash) return receiptNotFound('rpc_malformed')
   // The two answers must describe the same transaction.
-  if (receipt.from !== null && receipt.from !== tx.from) return notFound('rpc_malformed')
-  if (receipt.to !== null && receipt.to !== tx.to) return notFound('rpc_malformed')
+  if (receipt.from !== null && receipt.from !== tx.from) return receiptNotFound('rpc_malformed')
+  if (receipt.to !== null && receipt.to !== tx.to) return receiptNotFound('rpc_malformed')
   // A reverted transaction emits nothing. A receipt that says "reverted" and still carries logs is not a shape of the chain.
-  if (receipt.status === 'reverted' && receipt.logs.length > 0) return notFound('rpc_malformed')
+  if (receipt.status === 'reverted' && receipt.logs.length > 0) return receiptNotFound('rpc_malformed')
 
   const gas = { gasUsed: receipt.gasUsed, gasPrice: receipt.gasPrice }
   const collectors = feeCollectorsOf(chainId)

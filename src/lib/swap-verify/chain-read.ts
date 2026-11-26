@@ -12,7 +12,7 @@
  *   the answer.
  * - An error never carries the URL (provider keys live in URL paths): callers get a short code.
  */
-import { assertChainIdentity, createJsonRpcChainIdProbe } from '@/lib/rpc-chain-identity'
+import { assertChainIdentity, chainIdentityIsCached, createJsonRpcChainIdProbe } from '@/lib/rpc-chain-identity'
 import { serverOnlyRpcUrl } from '@/lib/rpc-env'
 
 /** Timeout of one attempt. */
@@ -34,9 +34,22 @@ function missingRetryDelayMs(): number {
 
 export type ChainReadMethod = 'eth_getTransactionByHash' | 'eth_getTransactionReceipt'
 
-export type ChainReadFailure = 'rpc_error' | 'rpc_wrong_chain' | 'rpc_unverified'
+/**
+ * `read_budget`: the caller's budget of upstream calls refused the next one (ADR-029 8.4, details Q.2 of goal 133c),
+ * so it was not sent. Not an outage, and nothing is cached for it.
+ */
+export type ChainReadFailure = 'rpc_error' | 'rpc_wrong_chain' | 'rpc_unverified' | 'read_budget'
 
-/** A read that produced no usable answer. `code` is one of three fixed words; there is no URL in it. */
+/**
+ * What a caller may hand a read. `beforeUpstream` is asked before EVERY upstream call the read would send (each attempt,
+ * the re-ask of a null, and the chain-id proof when no fresh verdict is cached); `false` stops the read there with
+ * `read_budget`, without sending that call.
+ */
+export interface ChainReadHooks {
+  beforeUpstream?: () => Promise<boolean>
+}
+
+/** A read that produced no usable answer. `code` is one of four fixed words; there is no URL in it. */
 export class ChainReadError extends Error {
   readonly code: ChainReadFailure
   constructor(code: ChainReadFailure) {
@@ -47,7 +60,7 @@ export class ChainReadError extends Error {
 }
 
 /** Resolves with the JSON-RPC `result` (which may be `null`), or rejects with a ChainReadError. */
-export type ChainRead = (chainId: number, method: ChainReadMethod, params: readonly unknown[]) => Promise<unknown>
+export type ChainRead = (chainId: number, method: ChainReadMethod, params: readonly unknown[], hooks?: ChainReadHooks) => Promise<unknown>
 
 async function postJsonRpc(url: string, method: ChainReadMethod, params: readonly unknown[]): Promise<unknown> {
   const res = await fetch(url, {
@@ -66,14 +79,21 @@ async function postJsonRpc(url: string, method: ChainReadMethod, params: readonl
   return body.result
 }
 
-export const readChain: ChainRead = async (chainId, method, params) => {
+export const readChain: ChainRead = async (chainId, method, params, hooks = {}) => {
   let url: string
   try {
     url = serverOnlyRpcUrl(chainId)
   } catch {
     throw new ChainReadError('rpc_error')
   }
+  // Every upstream call is paid for before it is sent; a refused one is not sent (details Q.2).
+  const pay = async () => {
+    if (hooks.beforeUpstream && !(await hooks.beforeUpstream())) throw new ChainReadError('read_budget')
+  }
 
+  // The chain-id proof is an upstream call only when no fresh verdict is cached. It is paid BEFORE it is asked: a
+  // probe made to fail by a budget would be cached as an outage for every other caller of this process.
+  if (!chainIdentityIsCached(chainId, url)) await pay()
   const verdict = await assertChainIdentity({
     expectedChainId: chainId,
     endpoint: url,
@@ -85,6 +105,7 @@ export const readChain: ChainRead = async (chainId, method, params) => {
 
   for (let attempt = 1; attempt <= SWAP_VERIFY_RPC_ATTEMPTS; attempt++) {
     const last = attempt === SWAP_VERIFY_RPC_ATTEMPTS
+    await pay()
     let result: unknown
     try {
       result = await postJsonRpc(url, method, params)

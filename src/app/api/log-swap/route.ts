@@ -5,7 +5,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 // SELECT nor UPDATE.
 import { getSupabase, getSupabaseLogger } from '@/lib/supabase'
 import { trackWalletAction } from '@/lib/wallet-activity-server'
-import { checkRateLimitWithin, LOG_RATE_LIMIT } from '@/lib/kv-rate-limiter'
+import { checkRateLimitWithin, LOG_CHAINLESS_RATE_LIMIT, LOG_RATE_LIMIT, LOG_READ_BUDGET } from '@/lib/kv-rate-limiter'
 import { bodySizeGuard, clientIp } from '@/lib/body-limit'
 import { forLog } from '@/lib/log-sanitize'
 import { confirmSwap, type ConfirmResult } from '@/lib/swap-log/confirm'
@@ -17,7 +17,9 @@ import { catalogSymbol } from '@/lib/swap-log/symbols'
 // (chain-id proof, transaction, receipt; each read one attempt and one retry, 4 s each, 1.5 s before a null is asked
 // again), then prices up to two tokens. One that names no chain asks the candidate chains in turn and starts no new one
 // after 20 s (confirm.ts CHAIN_SEARCH_BUDGET_MS): at most 20 + 13.5 + 9.5 s of chain reads before pricing, so the claim
-// is stored well inside this limit.
+// is stored well inside this limit. [133c Q] A chain that returned the transaction ends the search (a failed receipt
+// read included), every upstream call is paid from the per-IP read budget (LOG_READ_BUDGET), and a confirmation naming
+// no chain has its own per-IP limit (LOG_CHAINLESS_RATE_LIMIT).
 export const maxDuration = 60
 
 // [AUDIT-W6 / W6-M-02 + W6-L-01] Shared guards for both handlers: body cap +
@@ -33,6 +35,16 @@ async function ingestionGuards(req: NextRequest): Promise<NextResponse | null> {
     )
   }
   return null
+}
+
+/**
+ * [ADR-029 8.4, details Q.2 of goal 133c] The per-IP read budget: asked before every upstream chain call this request
+ * triggers (chain-read.ts). `false`: that call is not sent, and the confirmation answers 202 (the claim stored if the
+ * claim rules allow). The key is the one-way hash of the client IP, as for every limiter.
+ */
+function readBudgetOf(req: NextRequest): () => Promise<boolean> {
+  const key = `log-reads:${clientIp(req)}`
+  return async () => (await checkRateLimitWithin(key, LOG_READ_BUDGET.limit, LOG_READ_BUDGET.windowMs)).allowed
 }
 
 /** [ADR-029, details E] The one line logged while the migration is not applied: nothing is written then. */
@@ -135,7 +147,7 @@ export async function POST(req: NextRequest) {
     // The hash was NOT stored with the row: only a verification writes one (or keeps it as a claim). Whatever the chain
     // says, the row above exists and the POST is answered as before.
     if (input.txHash !== null) {
-      const confirmed = await confirmSwap({ db, wallet: input.wallet, txHash: input.txHash, chainId: input.chainId })
+      const confirmed = await confirmSwap({ db, wallet: input.wallet, txHash: input.txHash, chainId: input.chainId }, { beforeUpstream: readBudgetOf(req) })
       if (confirmed.result === 'columns_missing') logColumnsMissing()
     }
 
@@ -207,6 +219,15 @@ export async function PATCH(req: NextRequest) {
     // before; nothing is read and nothing is written.
     if (parsed.value.wallet === null) return NextResponse.json({ ok: true })
 
+    // [ADR-029 8.4, details Q.1] A confirmation that names no chain of the app asks every chain: its own small per-IP
+    // limit, on top of the shared one. The official client always names the chain.
+    if (parsed.value.chainId === null) {
+      const chainless = await checkRateLimitWithin(`log-chainless:${clientIp(req)}`, LOG_CHAINLESS_RATE_LIMIT.limit, LOG_CHAINLESS_RATE_LIMIT.windowMs)
+      if (!chainless.allowed) {
+        return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429, headers: { 'X-RateLimit-Reset': String(chainless.resetAt) } })
+      }
+    }
+
     const columns = await verifiedColumnsState(db)
     if (columns === 'missing') {
       logColumnsMissing()
@@ -214,7 +235,9 @@ export async function PATCH(req: NextRequest) {
     }
     if (columns === 'unknown') return NextResponse.json({ ok: false, error: 'storage_unavailable' })
 
-    return confirmResponse(await confirmSwap({ db, wallet: parsed.value.wallet, txHash: parsed.value.txHash, chainId: parsed.value.chainId }))
+    return confirmResponse(
+      await confirmSwap({ db, wallet: parsed.value.wallet, txHash: parsed.value.txHash, chainId: parsed.value.chainId }, { beforeUpstream: readBudgetOf(req) }),
+    )
   } catch {
     console.error('[log-swap] PATCH failed')
     return NextResponse.json({ ok: true })
