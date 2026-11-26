@@ -40,8 +40,23 @@
  *          reverts while the transaction succeeds (S-2)
  *   8453   a Coinbase Smart Wallet (v1.1) swapping 0.05 ETH for USDC through the FeeCollector, the user operation sent
  *          by a bundler to the EntryPoint v0.6 (S-5)
+ *
+ * ROUND3_RECEIPTS (goal 133c, audit A104), NOT in EVERY_SWAP_RECEIPT (the tests that ask for them name them):
+ *   1, 42161  REAL 0x swaps paying ETH for USDC (0x AllowanceHolder, the USDC sent to the payer), from round 1's sample
+ *             of public-node answers read on 2026-11-25 (0x1ed2add5 on Ethereum, 0xa667ad70 on Arbitrum)
+ *   1, 8453, 42161  the A104 auditor's "dust wrap" (a local anvil fork, 2026-11-26, sender 0xa104…a104): SwapRouter02
+ *             multicall{value 20 ETH}[wrapETH(1e12 wei), sweepToken(WETH, 0, wallet), refundETH()]: 20 ETH paid, 19.999…
+ *             refunded with no log, 1e12 wei of WETH received
+ *   8453      the same auditor's "dust real swap": 20 ETH paid, 1e14 wei swapped for 0.17 USDC, the rest refunded
+ * Saved verbatim as the nodes answered (the auditor's files and round 1's cache, copied unchanged).
  */
 import type { ChainRead, ChainReadMethod } from '@/lib/swap-verify/chain-read'
+import mainnetRouterEthToToken from './swap-receipts/1-router-0x-eth-to-token.json'
+import arbitrumRouterEthToToken from './swap-receipts/42161-router-0x-eth-to-token.json'
+import a104MainnetDustWrap from './swap-receipts/fork-1-a104-eth-refund-dust-wrap.json'
+import a104BaseDustWrap from './swap-receipts/fork-8453-a104-eth-refund-dust-wrap.json'
+import a104ArbitrumDustWrap from './swap-receipts/fork-42161-a104-eth-refund-dust-wrap.json'
+import a104BaseDustSwap from './swap-receipts/fork-8453-a104-eth-refund-dust-swap.json'
 import mainnetFcTokenToToken from './swap-receipts/1-fee-collector-token-to-token.json'
 import mainnetFcTokenToEth from './swap-receipts/1-fee-collector-token-to-eth.json'
 import mainnetFcEthToToken from './swap-receipts/1-fee-collector-eth-to-token.json'
@@ -135,6 +150,22 @@ export const FORK_SWAP_RECEIPTS: readonly SwapReceiptFixture[] = Object.values(F
 
 /** Both: what the stub RPC and the recorded chain read serve by default. */
 export const EVERY_SWAP_RECEIPT: readonly SwapReceiptFixture[] = [...ALL_SWAP_RECEIPTS, ...FORK_SWAP_RECEIPTS]
+
+/** Round 1's cached answers carry no `name`: it is given here. */
+const named = (f: unknown, name: string): SwapReceiptFixture => ({ ...(f as SwapReceiptFixture), name })
+
+/** Goal 133c (see the header): served only by the tests that pass them. */
+export const ROUND3_RECEIPTS = {
+  mainnetRouterEthToToken: named(mainnetRouterEthToToken, '1-router-0x-eth-to-token'),
+  arbitrumRouterEthToToken: named(arbitrumRouterEthToToken, '42161-router-0x-eth-to-token'),
+  a104MainnetDustWrap: as(a104MainnetDustWrap),
+  a104BaseDustWrap: as(a104BaseDustWrap),
+  a104ArbitrumDustWrap: as(a104ArbitrumDustWrap),
+  a104BaseDustSwap: as(a104BaseDustSwap),
+} as const
+
+/** The A104 auditor's impersonated sender of its fork transactions. */
+export const A104_FORK_WALLET = '0xa104a104a104a104a104a104a104a104a104a104'
 
 /** The smart wallet of FORK_RECEIPTS.smartWallet (Coinbase Smart Wallet v1.1 on the Base fork). */
 export const FORK_SMART_WALLET = '0x80c4a2bee98d15109e051af1124f2e92d06b7e7b'
