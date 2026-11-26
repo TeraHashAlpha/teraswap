@@ -15,6 +15,11 @@
  * The same spec runs on a build of main (CAPTURE_APP_DIR): the swap completes there too, and its report is the
  * baseline this tree is compared with (SWAP_LOG_E2E_BASELINE): the same wallet prompts, the same console, the same
  * /api/log-swap answers and the same History row.
+ *
+ * [goal 133b, A103 S-4] `SWAP_LOG_E2E_LAG_RECEIPTS=n`: the server's node answers `null` to the first n receipt reads of
+ * the settlement, as a provider's node that has not caught up with the browser's does. This tree answers the first
+ * confirmation 202 (the hash kept as a claim), the official client asks again 2 s later, and the History row must then
+ * be what main shows (main never read the chain, so the lag does not touch it).
  */
 import { expect, test, type BrowserContext, type Page } from '@playwright/test'
 import { createServer, type Server } from 'node:http'
@@ -42,6 +47,9 @@ const HEADER_LABEL = /0x72(49)?(…|\.\.\.)6f67/i
 let db: SwapLogDb
 let upstream: Server
 const upstreamReads: Array<{ chain: number; method: string }> = []
+/** How many receipt reads of the settlement the node answers `null` before it answers (the lag mode, S-4). */
+const LAG_RECEIPTS = Number(process.env.SWAP_LOG_E2E_LAG_RECEIPTS ?? '0') || 0
+let lagLeft = LAG_RECEIPTS
 
 test.beforeAll(async () => {
   db = await startSwapLogDb(DB_PORT)
@@ -63,7 +71,14 @@ test.beforeAll(async () => {
         const hash = String(rpc.params?.[0] ?? '').toLowerCase()
         const ours = chainId === 1 && hash === SETTLEMENT_TX.toLowerCase()
         if (rpc.method === 'eth_getTransactionByHash') return { jsonrpc: '2.0', id: rpc.id ?? null, result: ours ? fixture.tx : null }
-        if (rpc.method === 'eth_getTransactionReceipt') return { jsonrpc: '2.0', id: rpc.id ?? null, result: ours ? fixture.receipt : null }
+        if (rpc.method === 'eth_getTransactionReceipt') {
+          // The lag mode: the node has the transaction but not yet its receipt, for the first LAG_RECEIPTS asks.
+          if (ours && lagLeft > 0) {
+            lagLeft--
+            return { jsonrpc: '2.0', id: rpc.id ?? null, result: null }
+          }
+          return { jsonrpc: '2.0', id: rpc.id ?? null, result: ours ? fixture.receipt : null }
+        }
         return answerRpc(chainId, rpc)
       }
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(Array.isArray(body) ? body.map(one) : one(body)))
@@ -85,6 +100,13 @@ interface Report {
   /** Every /api/log-swap call the page made: method, status and answer. */
   logSwap: Array<{ method: string; status: number; body: string }>
   console: string[]
+  /**
+   * Console lines written by Playwright itself, not by the page: counted here, kept out of `console`. The one there is
+   * ("Service Worker registration blocked by Playwright", from `serviceWorkers: 'block'`) lands at a different place
+   * among the page's own warnings from run to run of the SAME build (goal 133b, browser run 1: main's build put it
+   * first in one run and fifth in the next), so "console as on main" compared the harness's timing, not the tree.
+   */
+  harnessConsole: Record<string, number>
   pageErrors: string[]
   failedResponses: string[]
   /** Every response of status 400 or more the page received, by status and path (or host, when not ours), counted. */
@@ -271,15 +293,19 @@ const UIS = [
   },
 ] as const
 
+/** Console lines Playwright itself writes into the page (see Report.harnessConsole): exact texts, nothing else. */
+const HARNESS_LINES = new Set(['Service Worker registration blocked by Playwright'])
+
 /** Lines that differ from run to run for reasons that have nothing to do with the swap (timings, generated ids). */
 const normalize = (line: string) => line.replace(/https?:\/\/127\.0\.0\.1:\d+/g, '<origin>').replace(/\b\d+(\.\d+)?\s?ms\b/g, '<n> ms').replace(/_next\/static\/[^\s"')]+/g, '<asset>').slice(0, 300)
 
 for (const { ui, baseURL, flip, amount, receiveToken, search, pickUsdt, ctaReady, cta, openHistory, historyRow } of UIS) {
   test(`${ui} · a CoW swap of a recorded real trade: logged, confirmed, and shown in the wallet's history`, async ({ browser }) => {
-    const report: Report = { ui, tree: IS_BASELINE ? 'main' : 'branch', walletPrompts: [], logSwap: [], console: [], pageErrors: [], failedResponses: [], failedLoads: {}, historyRow: '', swapsRows: [], upstreamReads: {} }
+    const report: Report = { ui, tree: IS_BASELINE ? 'main' : 'branch', walletPrompts: [], logSwap: [], console: [], harnessConsole: {}, pageErrors: [], failedResponses: [], failedLoads: {}, historyRow: '', swapsRows: [], upstreamReads: {} }
     const failedLoads = new Map<string, number>()
     db.db.rows().length = 0
     upstreamReads.length = 0
+    lagLeft = LAG_RECEIPTS
 
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, serviceWorkers: 'block' })
     await routeApis(context, new URL(baseURL).origin, report)
@@ -287,7 +313,10 @@ for (const { ui, baseURL, flip, amount, receiveToken, search, pickUsdt, ctaReady
     const page = await context.newPage()
     await page.routeWebSocket(/.*/, (ws) => (new URL(ws.url()).host === new URL(baseURL).host ? void ws.connectToServer() : void ws.close()))
     page.on('console', (message) => {
-      if (message.type() === 'error' || message.type() === 'warning') report.console.push(`${message.type()}: ${normalize(message.text())}`)
+      if (message.type() !== 'error' && message.type() !== 'warning') return
+      const line = `${message.type()}: ${normalize(message.text())}`
+      if (HARNESS_LINES.has(message.text())) report.harnessConsole[line] = (report.harnessConsole[line] ?? 0) + 1
+      else report.console.push(line)
     })
     page.on('pageerror', (error) => void report.pageErrors.push(normalize(String(error))))
     page.on('response', (response) => {
@@ -325,8 +354,9 @@ for (const { ui, baseURL, flip, amount, receiveToken, search, pickUsdt, ctaReady
       for (const end = Date.now() + ms; Date.now() < end; await settle(page, 500)) if (await done()) return true
       return false
     }
-    // Review, then "Confirm & Sign Order" (v1), or the review sheet's confirm (v2), until the PATCH has been answered.
-    const patched = () => report.logSwap.some((c) => c.method === 'PATCH')
+    // Review, then "Confirm & Sign Order" (v1), or the review sheet's confirm (v2), until a PATCH has been answered 200
+    // (in the lag mode, this tree's first PATCH is answered 202 and the client's second asking, 2 s later, is the one).
+    const patched = () => report.logSwap.some((c) => c.method === 'PATCH' && c.status === 200)
     await until(async () => {
       if (patched()) return true
       for (const confirm of [page.getByRole('button', { name: /confirm & sign order/i }), page.getByTestId('review-confirm')]) {
@@ -372,7 +402,11 @@ for (const { ui, baseURL, flip, amount, receiveToken, search, pickUsdt, ctaReady
     expect(db.unmapped, 'requests the database shim could not map').toEqual([])
     expect(report.pageErrors, 'uncaught page errors').toEqual([])
     expect(report.walletPrompts, 'one signature prompt (the CoW order), nothing else').toEqual(['eth_signTypedData_v4'])
-    expect(report.logSwap.map((c) => `${c.method} ${c.status} ${c.body}`), 'the swap log calls and their answers').toEqual(['POST 200 {"ok":true}', 'PATCH 200 {"ok":true}'])
+    // The lag mode on this tree: the first confirmation is answered 202 (the claim kept), the client's second asking 200.
+    const lagged = LAG_RECEIPTS > 0 && !IS_BASELINE
+    expect(report.logSwap.map((c) => `${c.method} ${c.status} ${c.body}`), 'the swap log calls and their answers').toEqual(
+      lagged ? ['POST 200 {"ok":true}', 'PATCH 202 {"ok":false,"outcome":"not_found"}', 'PATCH 200 {"ok":true}'] : ['POST 200 {"ok":true}', 'PATCH 200 {"ok":true}'],
+    )
     expect(report.failedResponses, 'no /api call of the page failed').toEqual([])
     expect(report.historyRow).toMatch(/649\.25\d* USDC/)
     expect(report.historyRow).toMatch(/650\.04\d* USDT/)
@@ -387,8 +421,11 @@ for (const { ui, baseURL, flip, amount, receiveToken, search, pickUsdt, ctaReady
       expect(typeof report.swapsRows[0].verified_at).toBe('string')
       expect(report.swapsRows[0].gas_used).toBe(BigInt(fixture.receipt.gasUsed).toString())
       // One confirmation: the transaction and its receipt, read on Ethereum (plus the chain-id proof, once per server).
-      expect(report.upstreamReads['1:eth_getTransactionByHash']).toBe(1)
-      expect(report.upstreamReads['1:eth_getTransactionReceipt']).toBe(1)
+      // Lag mode: two confirmations; the receipt is asked twice (null, null: 202) and then once more (there).
+      expect(report.upstreamReads['1:eth_getTransactionByHash']).toBe(lagged ? 2 : 1)
+      expect(report.upstreamReads['1:eth_getTransactionReceipt']).toBe(lagged ? 1 + LAG_RECEIPTS : 1)
+      // The claim of the first confirmation was decided by the second: none is left.
+      expect(report.swapsRows[0].claimed_tx_hash ?? null).toBeNull()
 
       const baselineFile = process.env.SWAP_LOG_E2E_BASELINE ? join(process.env.SWAP_LOG_E2E_BASELINE, `swap-to-history-${ui}.json`) : null
       if (baselineFile && existsSync(baselineFile)) {
@@ -396,7 +433,9 @@ for (const { ui, baseURL, flip, amount, receiveToken, search, pickUsdt, ctaReady
         expect(main.tree).toBe('main')
         expect(report.walletPrompts, 'wallet prompts as on main').toEqual(main.walletPrompts)
         expect(report.console, 'console warnings and errors as on main').toEqual(main.console)
-        expect(report.logSwap, '/api/log-swap answers as on main').toEqual(main.logSwap)
+        expect(report.harnessConsole, 'the harness\'s own console lines, counted, as on main').toEqual(main.harnessConsole)
+        // Lag mode: the answers main gave are the first and the last of this tree's (the 202 between them is not seen).
+        expect(lagged ? [report.logSwap[0], report.logSwap[report.logSwap.length - 1]] : report.logSwap, '/api/log-swap answers as on main').toEqual(main.logSwap)
         expect(report.failedResponses).toEqual(main.failedResponses)
         expect(report.historyRow, 'the History row as on main').toBe(main.historyRow)
       }

@@ -3,8 +3,8 @@
  *
  * The real Next server builds a supabase-js client from SUPABASE_URL and sends `/rest/v1/<table>` requests. This answers
  * them from the same in-memory database the vitest route tests use (src/test-utils/fake-swaps-db.ts): filters, `or=(…)`,
- * order, limit and offset, `Prefer: count=…` (HEAD and GET), inserts, updates with `return=representation`, and
- * `/rest/v1/rpc/<function>`. The real /api/log-swap and /api/history handlers therefore run unmodified.
+ * order, limit and offset, `Prefer: count=…` (HEAD and GET), inserts, updates and deletes with `return=representation`,
+ * and `/rest/v1/rpc/<function>`. The real /api/log-swap and /api/history handlers therefore run unmodified.
  * A request it cannot map answers 501 and is listed in `unmapped`: a gap in the shim is a failing assertion.
  */
 import { createServer, type Server } from 'node:http'
@@ -139,6 +139,14 @@ export async function startSwapLogDb(port: number, options: { swaps?: Row[]; mig
         if (returning) q = (q.select as (c: string) => Builder)(select)
         const answer = await q
         if (answer.error) return send(answer.error.code === '23505' ? 409 : 400, answer.error)
+        return returning ? send(200, answer.data ?? []) : void res.writeHead(204).end()
+      }
+      // [goal 133b J] The pending cap retires a scratch row with a DELETE (filters, `return=representation`).
+      if (req.method === 'DELETE') {
+        let q = applyQuery((from().delete as () => Builder)(), url.searchParams)
+        if (returning) q = (q.select as (c: string) => Builder)(select)
+        const answer = await q
+        if (answer.error) return send(400, answer.error)
         return returning ? send(200, answer.data ?? []) : void res.writeHead(204).end()
       }
       unmapped.push(`${req.method} ${table}`)
