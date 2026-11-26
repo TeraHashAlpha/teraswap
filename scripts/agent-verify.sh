@@ -5,7 +5,7 @@
 #   scripts/agent-verify.sh --format RESULTS.tsv        (formatter only; used by the tests)
 #   scripts/agent-verify.sh --codeql-diff HEAD.sarif BASE.sarif   (alert comparison only; used by the tests)
 #
-# Checks (always): suite, lint-delta, tsc, build, v1v2-parity, rpc-budget.
+# Checks (always): suite, lint-delta, tsc, build, v1-css, v1v2-parity, rpc-budget.
 #   --codeql  FULL javascript-security-extended via scripts/codeql-local.sh, HEAD vs base. Alerts are compared by
 #             rule + file + message (not by line, not by total), so one alert swapped for another is a FAIL.
 #   --keeper  keeper `node --test` on every Node major CI uses: the keeper-suite job of ci.yml and keeper-tests.yml.
@@ -26,7 +26,7 @@ KEEPER_DIR="contracts/order-engine/executor"
 KEEPER_WORKFLOW=".github/workflows/keeper-tests.yml"
 KEEPER_CI_WORKFLOW=".github/workflows/ci.yml"
 KEEPER_CI_JOB="keeper-suite"
-CHECK_ORDER="suite lint-delta tsc build v1v2-parity rpc-budget codeql keeper"
+CHECK_ORDER="suite lint-delta tsc build v1-css v1v2-parity rpc-budget codeql keeper"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -117,44 +117,116 @@ check_build() {
   else record build FAIL "exit $rc (log: $OUT/build.log)"; fi
 }
 
-LINT_JS='
-import { ESLint } from "eslint"
-import { execFileSync } from "node:child_process"
-import { readFileSync } from "node:fs"
-const [mb] = process.argv.slice(1)
-const files = readFileSync(0, "utf8").split("\n").filter(Boolean)
-const eslint = new ESLint({ warnIgnored: false })
-const sum = (rs) => rs.reduce((a, r) => [a[0] + r.errorCount + r.fatalErrorCount, a[1] + r.warningCount], [0, 0])
-let he = 0, hw = 0, be = 0, bw = 0
-for (const f of files) {
-  const [e1, w1] = sum(await eslint.lintFiles([f]))
-  he += e1; hw += w1
-  let base = null
-  try { base = execFileSync("git", ["show", mb + ":" + f], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }) } catch {}
-  if (base !== null) { const [e2, w2] = sum(await eslint.lintText(base, { filePath: f })); be += e2; bw += w2 }
+# A build can succeed with an unstyled v1 stylesheet (PR #719 audit). Same command as the CI build job, run on the build
+# that just passed: after a failed one, .next would hold an earlier build's CSS.
+check_v1_css() {
+  local m
+  if m="$(need node)"; then :; else fail_missing v1-css "$m"; return; fi
+  if [ "$(awk -F'\t' '$1 == "build" { s = $2 } END { print s }' "$RESULTS")" != "PASS" ]; then
+    record v1-css FAIL "not run: the build did not pass"; return
+  fi
+  (cd "$ROOT" && node scripts/check-v1-css.mjs) > "$OUT/v1-css.log" 2>&1
+  local rc=$? line
+  line="$(head -1 "$OUT/v1-css.log" | tr '\t' ' ' | cut -c1-300)"
+  if [ "$rc" -eq 0 ]; then record v1-css PASS "$line"
+  else record v1-css FAIL "exit $rc; $line (log: $OUT/v1-css.log)"; fi
 }
-console.log(JSON.stringify({ files: files.length, he, hw, be, bw }))
+
+# ---------- lint-delta
+# Lints exactly what CI lints: the package's own `npm run lint` (ci.yml, job `lint`) over the whole tree, on HEAD and on a
+# worktree of the merge-base with HEAD's node_modules linked in. [PR #727] It used to lint only the changed files matching
+# a hand-kept extension list without .mts/.cts, so a rule crash on a .d.mts file read as "+0/+0" and failed only in CI.
+# eslint exits 0 (clean), 1 (it ran: errors, or over --max-warnings) or 2 (it crashed). Anything but exit 0/1 WITH a
+# readable report is "lint crashed", on either tree.
+
+# "headErrors headWarnings baseErrors baseWarnings headFiles". A file counts on the base side only if HEAD linted it too,
+# so deleting (or newly ignoring) a file with warnings does not pay for new ones elsewhere.
+LINT_COUNT_JS='
+import { readFileSync, realpathSync } from "node:fs"
+import path from "node:path"
+const load = (report, tree) => {
+  const root = realpathSync(tree)
+  return new Map(JSON.parse(readFileSync(report, "utf8")).map((r) => [path.relative(root, r.filePath), r]))
+}
+const [headReport, headTree, baseReport, baseTree] = process.argv.slice(1)
+const head = load(headReport, headTree)
+const base = [...load(baseReport, baseTree)].filter(([file]) => head.has(file)).map(([, r]) => r)
+const sum = (rs, k) => rs.reduce((a, r) => a + r[k], 0)
+const h = [...head.values()]
+console.log([sum(h, "errorCount"), sum(h, "warningCount"), sum(base, "errorCount"), sum(base, "warningCount"), h.length].join(" "))
 '
+
+lint_report_ok() { # report -> 0 when it is a JSON list of at least one linted file
+  node -e 'const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.exitCode = Array.isArray(j) && j.length ? 0 : 1' "$1" 2>/dev/null
+}
+
+# What eslint said between its version line and the stack, on one line; else the log's last line. Tree paths are cut.
+lint_crash_line() { # log tree
+  local text real
+  text="$(strip_ansi < "$1" | awk '/^ESLint: /{ on = 1; next } on && /^ +at /{ exit } on && NF { s = s (n ? " | " : "") $0; if (++n == 4) exit } END { print s }')"
+  if [ -z "$text" ]; then text="$(strip_ansi < "$1" | awk 'NF { l = $0 } END { print l }')"; fi
+  real="$(cd "$2" && pwd -P)"
+  # a literal cut in awk: bash 3.2 keeps the quotes of a quoted ${var//"$path"/} pattern
+  text="$(printf '%s\n' "$text" | CUT="$real/" awk '{ p = ENVIRON["CUT"]; while ((i = index($0, p)) > 0) $0 = substr($0, 1, i - 1) substr($0, i + length(p)); print }')"
+  printf '%s' "$text" | tr '\t' ' ' | cut -c1-400
+}
+
+# Runs CI's lint in a tree. Sets LINT_RC; returns 1 (and records the FAIL) when eslint did not produce a result.
+LINT_RC=0
+lint_tree() { # head|base tree outdir
+  local report="$3/lint-$1.json" log="$3/lint-$1.log" why
+  rm -f "$report"
+  (cd "$2" && npm run lint -- --format json --output-file "$report") > "$log" 2>&1
+  LINT_RC=$?
+  if [ "$LINT_RC" -eq 0 ] || [ "$LINT_RC" -eq 1 ]; then
+    if lint_report_ok "$report"; then return 0; fi
+    why="no readable report; $(lint_crash_line "$log" "$2")"
+  else
+    why="$(lint_crash_line "$log" "$2")"
+  fi
+  record lint-delta FAIL "lint crashed ($1, exit $LINT_RC): $why (log: $log)"
+  return 1
+}
+
+lint_delta_compare() { # base-worktree outdir
+  local head_rc counts de dw detail
+  lint_tree head "$ROOT" "$2" || return
+  head_rc="$LINT_RC"
+  lint_tree base "$1" "$2" || return
+  counts="$(node --input-type=module -e "$LINT_COUNT_JS" "$2/lint-head.json" "$ROOT" "$2/lint-base.json" "$1" 2> "$2/lint-count.log")"
+  if [ -z "$counts" ]; then record lint-delta FAIL "cannot compare the lint reports (log: $2/lint-count.log)"; return; fi
+  set -- $counts
+  de=$(( $1 - $3 )); dw=$(( $2 - $4 ))
+  detail="$(printf 'errors %+d, warnings %+d (npm run lint: %s files; head %s err/%s warn, base %s err/%s warn)' "$de" "$dw" "$5" "$1" "$2" "$3" "$4")"
+  if [ "$de" -gt 0 ] || [ "$dw" -gt 0 ]; then record lint-delta FAIL "$detail"
+  elif [ "$head_rc" -ne 0 ]; then record lint-delta FAIL "npm run lint fails on HEAD (exit $head_rc): $detail"
+  else record lint-delta PASS "$detail"; fi
+}
 
 check_lint_delta() {
   local m
-  if m="$(need git node npx)"; then :; else fail_missing lint-delta "$m"; return; fi
-  local mb files json
+  if m="$(need git node npm)"; then :; else fail_missing lint-delta "$m"; return; fi
+  # `npm run` would fall back to an eslint elsewhere on PATH, so the project-local binary must exist.
+  if [ ! -x "$ROOT/node_modules/.bin/eslint" ]; then fail_missing lint-delta "eslint (node_modules/.bin/eslint; run npm ci)"; return; fi
+  local mb out basewt
   mb="$(cd "$ROOT" && git merge-base "$BASE_REF" HEAD 2>/dev/null)"
   if [ -z "$mb" ]; then record lint-delta FAIL "no merge-base with $BASE_REF"; return; fi
-  files="$(cd "$ROOT" && git diff --name-only --diff-filter=AMR "$mb" -- '*.js' '*.jsx' '*.ts' '*.tsx' '*.mjs' '*.cjs')"
-  if [ -z "$files" ]; then record lint-delta PASS "errors +0, warnings +0 (0 changed files)"; return; fi
-  json="$(cd "$ROOT" && printf '%s\n' "$files" | node --input-type=module -e "$LINT_JS" "$mb" 2> "$OUT/lint.log")"
-  if [ -z "$json" ]; then record lint-delta FAIL "eslint did not run (log: $OUT/lint.log)"; return; fi
-  local n he hw be bw de dw
-  n="$(node -e 'const j=JSON.parse(process.argv[1]);console.log([j.files,j.he,j.hw,j.be,j.bw].join(" "))' "$json")"
-  set -- $n
-  de=$(( $2 - $4 )); dw=$(( $3 - $5 ))
-  local detail
-  detail="$(printf 'errors %+d, warnings %+d (%s changed files; head %s err/%s warn, base %s err/%s warn)' "$de" "$dw" "$1" "$2" "$3" "$4" "$5")"
-  if [ "$de" -le 0 ] && [ "$dw" -le 0 ]; then record lint-delta PASS "$detail"; else record lint-delta FAIL "$detail"; fi
+  out="$(cd "$OUT" && pwd)" # absolute: eslint writes its report from inside each tree
+  basewt="$out/lint-base-wt"
+  if ! (cd "$ROOT" && git worktree add -q --detach "$basewt" "$mb") >/dev/null 2>&1; then
+    record lint-delta FAIL "cannot create the merge-base worktree"; return
+  fi
+  if [ ! -e "$basewt/node_modules" ] && ln -s "$ROOT/node_modules" "$basewt/node_modules"; then
+    lint_delta_compare "$basewt" "$out"
+  else
+    record lint-delta FAIL "cannot link node_modules into the merge-base worktree"
+  fi
+  # the link goes first, so removing the worktree can never reach HEAD's node_modules
+  if [ -L "$basewt/node_modules" ]; then rm "$basewt/node_modules"; fi
+  (cd "$ROOT" && git worktree remove --force "$basewt") >/dev/null 2>&1
 }
 
+# ---------- codeql
 # "head base new": alerts keyed by ruleId + file + message (line numbers move; totals hide swaps). `new` counts alerts
 # whose key occurs more often in HEAD than in base.
 CODEQL_DIFF_JS='
@@ -370,6 +442,7 @@ else
   check_lint_delta
   check_tsc
   check_build
+  check_v1_css
   check_parity
   check_rpc_budget
   [ "$DO_CODEQL" -eq 1 ] && check_codeql
