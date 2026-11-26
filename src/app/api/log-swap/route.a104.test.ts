@@ -486,6 +486,18 @@ describe('A104 R2-4: a budget for confirmations that name no chain, and for ever
     expect(limiterInternal.isKvFailureAlerted()).toBe(false)
   })
 
+  it('Q.1 before the migration is applied: chainless confirmations past the limit still get main\'s answer, nothing read or written', async () => {
+    state.realLimiter = true
+    state.db = createFakeSwapsDb({ migrated: false })
+    const W = '0x00000000000000000000000000000000000b0d02'
+    for (let i = 0; i < CHAINLESS_PER_MINUTE + 4; i++) {
+      const res = await confirm(W, invented(i))
+      expect([res.status, await res.json()]).toEqual([200, { ok: true }])
+    }
+    expect(rpc.calls).toEqual([])
+    expect(state.db.writes()).toEqual([])
+  })
+
   it('Q.2: 60 upstream calls per IP per minute; then 202 without a call, the claim still stored; a minute later it reads again [fails on cbd51bcf]', async () => {
     state.realLimiter = true
     stub({ fixtures: [] })

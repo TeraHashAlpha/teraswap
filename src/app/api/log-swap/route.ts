@@ -219,21 +219,22 @@ export async function PATCH(req: NextRequest) {
     // before; nothing is read and nothing is written.
     if (parsed.value.wallet === null) return NextResponse.json({ ok: true })
 
-    // [ADR-029 8.4, details Q.1] A confirmation that names no chain of the app asks every chain: its own small per-IP
-    // limit, on top of the shared one. The official client always names the chain.
-    if (parsed.value.chainId === null) {
-      const chainless = await checkRateLimitWithin(`log-chainless:${clientIp(req)}`, LOG_CHAINLESS_RATE_LIMIT.limit, LOG_CHAINLESS_RATE_LIMIT.windowMs)
-      if (!chainless.allowed) {
-        return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429, headers: { 'X-RateLimit-Reset': String(chainless.resetAt) } })
-      }
-    }
-
     const columns = await verifiedColumnsState(db)
     if (columns === 'missing') {
       logColumnsMissing()
       return NextResponse.json({ ok: true })
     }
     if (columns === 'unknown') return NextResponse.json({ ok: false, error: 'storage_unavailable' })
+
+    // [ADR-029 8.4, details Q.1] A confirmation that names no chain of the app asks every chain: its own small per-IP
+    // limit, on top of the shared one. The official client always names the chain. Asked only once the chain would be
+    // read (after the migration check), so the answers before the migration is applied are main's.
+    if (parsed.value.chainId === null) {
+      const chainless = await checkRateLimitWithin(`log-chainless:${clientIp(req)}`, LOG_CHAINLESS_RATE_LIMIT.limit, LOG_CHAINLESS_RATE_LIMIT.windowMs)
+      if (!chainless.allowed) {
+        return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429, headers: { 'X-RateLimit-Reset': String(chainless.resetAt) } })
+      }
+    }
 
     return confirmResponse(
       await confirmSwap({ db, wallet: parsed.value.wallet, txHash: parsed.value.txHash, chainId: parsed.value.chainId }, { beforeUpstream: readBudgetOf(req) }),
