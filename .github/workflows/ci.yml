@@ -537,3 +537,6 @@ jobs:
           cache: "npm"
       - run: npm ci
       - run: npm run build
+      # A build can succeed with an unstyled v1 page (the v1 Tailwind pass compiling v2's content, PR #719 audit).
+      - name: v1 stylesheet guard
+        run: node scripts/check-v1-css.mjs
