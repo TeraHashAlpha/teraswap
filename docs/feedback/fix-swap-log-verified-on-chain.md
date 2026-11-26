@@ -90,13 +90,14 @@ Merged origin/main (cdae3ef5, PR #732) first: ca85d041. Then `npm ci`. Tables: `
 
 ### Checklist
 - [x] Merge origin/main, `npm ci`
-- [ ] 1 Router kind only for direct sources (details N)
-- [ ] 2 ETH in side and its USD band (details O)
-- [ ] 3 Claims on rows of their own; retired only by the chain's answer or by age (details P)
-- [ ] 4 Budgets for chainless confirmations and chain reads (details Q)
-- [ ] 5 A row main stored is verified in place (details R)
-- [ ] 6 Tests (details S), each new one failing on cbd51bcf first or proven by a named mutant; mutation; browser v1/v2
-- [ ] `agent-verify.sh --codeql` once on the last code commit; result here; push
+- [x] 1 Router kind only for direct sources (details N) (f6b78147)
+- [x] 2 ETH in side and its USD band (details O) (c6b8aec6; the analytics reader, found by the O test: 42f4a2f0)
+- [x] 3 Claims on rows of their own; retired only by the chain's answer or by age (details P) (a4a60069)
+- [x] 4 Budgets for chainless confirmations and chain reads (details Q) (b17df2de; the chainless limit after the migration check: e616a3df)
+- [x] 5 A row main stored is verified in place (details R) (3f7410da)
+- [x] 6 Tests (details S), failing on cbd51bcf first or proven by a named mutant; mutation; browser v1/v2 (a982538e, 7b2235fe, 235f13a5)
+- [x] Merge origin/main again before the verify (0c31b4ce, dae5fd80, PR #731); citations (fb93dba5, comments)
+- [x] `agent-verify.sh --codeql` once on the last code commit fb93dba5: PASS; result here; push
 
 ### Premise of N, checked before building it (no question needed)
 The official client sends a transaction straight to a source's contract only when `usesFeeCollector(source, chainId)` is
@@ -120,3 +121,15 @@ is `0x`, `cowswap`, `bebop` (`src/lib/chains/activation.ts:39-57`). The targets 
    requests; the script is unchanged.
 4. **O.2 ("no tracker call")**: no large-trade, oracle-unavailable or oracle-deviation event for that row; the
    wallet_activity line is still written, without USD.
+
+### Evidence (round 3)
+1. **Per finding** (Q1): R2-1 N `src/lib/swap-verify/verify-swap-on-chain.ts:204`, `:214`, `:569-622`; O `src/lib/swap-log/confirm.ts:98`, `:448`, `src/app/api/analytics/route.ts:219`. R2-2 `confirm.ts:326` (keepClaim), `:364` (decideClaim), `src/lib/swap-log/store.ts:327`. R2-3 `confirm.ts:294`, `store.ts:161`, `src/app/api/history/route.ts:101`. R2-4 `src/app/api/log-swap/route.ts:45`, `:232`, `src/lib/swap-verify/chain-read.ts:90-96`, `confirm.ts:284-286`. R2-5 `confirm.ts:431`, `src/lib/swap-log/stored-agreement.ts:46`.
+   Tests `verify-swap-on-chain.a104.test.ts` (38), `route.a104.test.ts` (35). On cbd51bcf **52 of the first 70 fail, every one by an assertion**; the 18 that pass there and the 3 added later are each killed by a named mutant (Q4).
+2. **Direct sources** (Q2): `getFeeIncompatibleSources(chain)` minus cowswap = `0x`, `bebop` on 1, 8453, 42161; targets from `ROUTER_WHITELIST_BY_CHAIN`: 0x AllowanceHolder `0x0000000000001fF3684f28c67538d4D072C22734`, Bebop JamSettlement `0xbeb0b0623f66bE8cE162EbDfA2ec543A522F4ea6`, the same on the three chains. Round 1's sample: all 331 router receipts went to the AllowanceHolder; by source, 0x **293 confirmed and 2 failed still verify**, 41 rejected as in round 2, **0 rejected by N**; bebop 0 (never quoted in production).
+3. **Upstream calls** (Q3), naming no chain, first / steady: E1 9 / 6, E2 3 / 0, E3 **4 / 3** (was 12), E4 **5 / 4** (was 15); E5 (E4 naming its chain) 5 / 4. Per IP and minute: **at most 60** upstream calls (was 720 to 1,440), at most 6 chainless requests.
+4. **Property** P.5 seeds 133 and 20261126 (400 requests, about 12 h each, invented hashes only): the victim's claim survived 87 and 95 cap checks while its node lagged, then a cap check recorded its swap; rounds 1 and 2 properties hold (133, 20261125). **Mutation**: 37 mutants, **37 killed by assertions** (run 1 at 7b2235fe: 33 of 35, two survivors pinned in 235f13a5 and killed in run 2). **Browser** v1 and v2, normal and lag, the branch against origin/main's build: **8 of 8** twice (235f13a5 vs cdae3ef5, fb93dba5 vs dae5fd80); lag: 202 then 200, the History row as main. **Differential**: flag off, the nine readers byte-identical to main's golden (unchanged test, green).
+5. **Verify**: one run on fb93dba5 at load 5.58, nothing else verifying: **RESULT: PASS**: suite 12,226 / 0 failed (575 files), lint-delta +0 / +0, tsc, build, v1-css, v1v2-parity 123, rpc-budget 36, CodeQL head 11 = base 11, 0 new (pack 2.5.0, CLI 2.27.5); base origin/main dae5fd80. Last code commit (verified) `fb93dba5c2fd2abe0fdf6f804e75bbbca06e1234`; docs head: the commit adding this text (hand-off message).
+   Diff since 2b8a9cd6: this round's 11 commits 33 files +2289 / -346 (26 files +1767 / -346 without fixtures); with main's PRs #732 and #731: 62 files +3528 / -422. Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/swap-log-verified-on-chain
+   NOT verified: the migration on a real Postgres; Linux CI; a real wallet or bundler; 0x, Bebop or FeeCollector swaps and Base / Arbitrum in the browser; the script on the stored table; the limiter on real Upstash; real Chainlink prices; the flag on in a deployment (Q6).
+
+28 CHANGED EXPECTATIONS IN 9 FILES, ALL IN TESTS THIS BRANCH ADDED IN ROUNDS 1 AND 2 (CAPITALS IN Q5); NO EXPECTATION OF A TEST ON MAIN CHANGED. Concern (Q6): `/api/analytics` estimated a USD for null-USD rows from the symbol, so O needed one reader change (42f4a2f0); a real ETH -> token 0x swap into a token the oracle cannot price now enters no volume (O.2).

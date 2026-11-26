@@ -676,3 +676,236 @@ only its hand-made Supabase mock taught the new reads; none of its eight asserti
   the fork receipts were made on local anvil forks of the three chains (127.0.0.1), whose state was read through
   public nodes. No software was installed; anvil and gitleaks were already there. gitleaks over the round's commits: no
   leaks.
+
+# Round 3 (goal 133c: audit A104 at 2b8a9cd6, blocked 0C/2H; ADR-029 section 8)
+
+## Q1. Per finding: where it is fixed, the tests, and the failing-first proof
+
+New tests: `src/lib/swap-verify/verify-swap-on-chain.a104.test.ts` (38) and `src/app/api/log-swap/route.a104.test.ts`
+(32 at a982538e, 35 now: the Base real swap, the pre-migration chainless case, a spent budget ending the search).
+Failing first: both files, with the
+branch's fixtures, copied into a detached worktree at cbd51bcf (round 2's last code commit): **52 of the 70 fail there,
+every one by an assertion** (log: `~/ts-worktrees/swap-log-r3.rig/failing-first-cbd51bcf.{json,txt}`); the 18 that pass
+there are controls (what must still verify, or what did not change), each killed by a named mutant (Q4).
+
+| Finding | Fixed at (file:line at the docs head) | Tests (fail on cbd51bcf) |
+|---|---|---|
+| R2-1 H, N | `src/lib/swap-verify/verify-swap-on-chain.ts:204` directSourcesOf = getFeeIncompatibleSources minus cowswap, `:214` directSourceOfTarget, `:569` / `:576` / `:622` the decision (reverted and success) | verify a104: a real 0x swap of each chain sent to SwapRouter02, KyberSwap, Velora (9) and CoW's VaultRelayer (3): not_direct_source; a reverted call to SwapRouter02; the four audit receipts as sent (4). Route a104: the same four through the client's flow: 422, nothing public (4) |
+| R2-1 H, O | `src/lib/swap-log/confirm.ts:98` ethInUsd (min/max >= 0.5), `:448` the ETH-in router row, `:184` no security event; `src/app/api/analytics/route.ts:219` (42f4a2f0: the reader estimated a USD for a null-USD row from its symbol, 20 ETH became 70,000 USD of volume) | route a104: the audit's three dust wraps and its dust real swap sent to the 0x AllowanceHolder: confirmed, both USD null, no large-trade / oracle event, wallet activity without USD, volume 0 (4). Controls: real ETH -> USDC through 0x on 1, 8453, 42161 keep both USD values |
+| R2-2 H, P | `confirm.ts:326` keepClaim (key, cap, 7 days), `:364` decideClaim (ask the chain; absent on every chain asked: delete that row; found: record or, rejected, delete), `:294` chooseRow; `src/lib/swap-log/store.ts:327` makeRoomForPending (POST rows of the hour only), `:371`, `:403`, `:418` | route a104: B3 then a later PATCH, B3 then the cap check, B3 then the script, B3b (24 h), at the cap nothing stored + one `swap_claim_cap`, the cap check (3 oldest past 10 min), 7 days, the key with the chain, the claim row reused (9); P.5 property seeds 133 and 20261126 (2) |
+| R2-3 M | `confirm.ts:326` (a POST row never receives a claim), `store.ts:161` (a claim of another hash is never a candidate), `src/app/api/history/route.ts:101` (claim rows left out) | route a104 B4: History shows one item (1); `route.patch.test.ts:289` back to round 1's meaning (CHANGED, Q5) |
+| R2-4 M | `src/app/api/log-swap/route.ts:232` chainless limit (`src/lib/kv-rate-limiter.ts:47`, 6/min), `route.ts:45` readBudgetOf (`kv-rate-limiter.ts:48`, 60 upstream calls/min); `src/lib/swap-verify/chain-read.ts:90`, `:96` (each call paid before it is sent; the chain-id proof only when not cached, never cached as an outage); `confirm.ts:284` (Q.3 a chain that returned the transaction ends the search), `:286` | route a104: Q.1, Q.2, Q.2 with the cap check, E3, E4 (5); verify a104: Q.3 (3), Q.2 at the read (5) |
+| R2-5 L | `confirm.ts:431` the main row first, `src/lib/swap-log/stored-agreement.ts:46` the script's rule (moved, one module), `store.ts:243`, `:261` | route a104: an agreeing main row verified in place, flag-off totalSwaps stays 1; a disagreeing one untouched (2) |
+
+## Q2. Direct sources and their targets per chain (N.2), and round 1's sample (N.4)
+
+| Chain | Direct sources (`getFeeIncompatibleSources(chain)` minus `cowswap`) | 0x target | Bebop target |
+|---|---|---|---|
+| 1 | 0x, bebop | `0x0000000000001fF3684f28c67538d4D072C22734` (AllowanceHolder) | `0xbeb0b0623f66bE8cE162EbDfA2ec543A522F4ea6` (JamSettlement) |
+| 8453 | 0x, bebop | the same | the same |
+| 42161 | 0x, bebop | the same | the same |
+
+Where the client gets them: the 0x adapter calls only the allowance-holder endpoint, which returns the AllowanceHolder as
+`transaction.to` (`src/lib/adapters/zerox.ts:48-66`, `:150`; pinned by `zerox.v2-execution-path.test.ts:106-116`); Bebop's
+`tx.to` must equal its `settlementAddress` (`src/lib/adapters/bebop.ts:147-152`). Both are fixed addresses, the entries of
+`ROUTER_WHITELIST_BY_CHAIN[chain]['0x' | 'bebop']` (`src/lib/chains/routers.ts`), which N reads. The client's own gate
+(`useSwap.ts:425` -> `api.ts:780-805`) accepts any whitelisted router for any source; N uses the per-source entry.
+Every other source goes to the FeeCollector on the three chains (`usesFeeCollector`, `api.ts:676`; `useSwap.ts:375`,
+`useSplitSwap.ts:301`).
+
+Round 1's sample (432 real transactions, `~/ts-worktrees/swap-log-r2.rig/real-cache/`, through the round-3 function;
+`~/ts-worktrees/swap-log-r3.rig/real-cache-r3.json`): every one of the 331 router receipts went to the 0x AllowanceHolder
+(Ethereum 289, Base 25, Arbitrum 17), so N rejects none of them. Still verified, by source: **0x 293 confirmed** (Ethereum
+185 both sides + 64 in side only, Base 18 + 7, Arbitrum 9 + 5), **2 failed** (Ethereum), **41 rejected** (Ethereum 38,
+Arbitrum 3: round 2's owner rule, the sender paid ETH and received no token), **bebop 0** (never quoted in production,
+DISABLED_SOURCES). FeeCollector 61 and CoW 43 as in round 2. ETH-in router rows in the sample: Ethereum 91, Base 0,
+Arbitrum 2 (into a dollar coin: 23, 0, 2); their USD now needs both sides priced and within a factor of two.
+
+## Q3. Upstream calls of one log-swap request (Q.4), measured
+
+`route.a104.test.ts`, the stub RPC counting every request it receives (the chain-id proof included); "first" with the
+chain-id proofs not cached, "steady" with them cached. The audit's four cases name no chain; E5 is E4 naming chain 1.
+
+| Case | 2b8a9cd6 / cbd51bcf first, steady | Now first, steady | Chains asked now |
+|---|---|---|---|
+| E1 unknown hash, every node answers null | 9, 6 | 9, 6 | 1, 8453, 42161 |
+| E2 every node 503 (the proof fails; cached as unverified 30 s) | 3, 0 | 3, 0 | 1, 8453, 42161 |
+| E3 a transaction every chain "has", receipts erroring | 12 (audit: 15 / 12 with its stub) | **4, 3** | 1 only (Q.3) |
+| E4 first transaction read errors then answers, receipts erroring | 15 | **5, 4** | 1 only (Q.3) |
+| E5 = E4 naming its chain | 5, 4 | 5, 4 | 1 |
+
+Per IP and minute, worst case: was 120 requests x 9-15 = 720 to 1,440 upstream calls; now **at most 60** (every call of
+every log-swap request is paid from `log-reads:<ip hash>`), and at most 6 requests that name no chain
+(`log-chainless:<ip hash>`). /api/rpc allows 300 calls. One official confirmation costs 2 to 5 calls.
+
+## Q5. Changed expectations, in capitals (all in tests this branch added in rounds 1 and 2; no test on main changed)
+
+28 marks `CHANGED EXPECTATION (goal 133c …)` in 9 files, each saying at the line what it was. None of the 9 files exists on
+origin/main.
+
+- VERIFY-SWAP-ON-CHAIN.A103.TEST.TS (4): THE SWAPROUTER02 FORK RECEIPTS AS SENT ARE NOT_DIRECT_SOURCE: PULL+SWEEP X1/X2/X50
+  (WAS NO_NET_SWAP), THE REAL WETH -> USDC SWAP (WAS CONFIRMED AS UNISWAPV3), WRAP / UNWRAP / REFUND (WAS CONFIRMED,
+  CONFIRMED, NO_NET_SWAP), S-8'S BASE SWAP (WAS CONFIRMED AS UNISWAPV3). EACH STILL ASSERTS ROUND 2'S ANSWER ON THE SAME
+  LOGS SENT TO BASE'S 0X ALLOWANCEHOLDER (SOURCE 0X); THE NETTING PROPERTY SENDS ITS RANDOM RECEIPTS THERE.
+- ROUTE.A103.TEST.TS (3): THE SAME THROUGH THE ROUTE: 422 AS SENT (WAS 200 CONFIRMED FOR THE REAL SWAP, THE WRAP, THE
+  UNWRAP AND S-8), THEN ROUND 2'S ROWS ON THE LOGS SENT TO 0X.
+- VERIFY-SWAP-ON-CHAIN.TEST.TS (3): A NOT_FOUND AT THE RECEIPT STAGE ALSO SAYS TXFOUND: TRUE (RECEIPT MISSING, A RECEIPT
+  READ ERROR, THE 13 MALFORMED RECEIPTS); THE TRANSACTION STAGE IS UNCHANGED.
+- ROUTE.PATCH.TEST.TS (7): INVENTED HASHES FOR THE VICTIM NEVER WRITE ON ITS POST ROW (ROUND 1'S MEANING; ROUND 2 PUT THE
+  FIRST CLAIM ON IT); NOT FOUND AND THE FOUR FAIL-CLOSED CASES: THE POST ROW BYTE-IDENTICAL, NO UPDATE, THE CLAIM ON A ROW
+  OF ITS OWN (WAS THE CLAIM ON THE ROW); THE LOOKUPS: POST ROWS WITHOUT A CLAIM, CLAIM ROWS HASH-LESS AND UP TO 10 (WAS
+  5), AND A FOURTH (THE MAIN ROW, R); A SPLIT-SWAP INVENTED HASH: TWO ROWS (WAS ONE); AN OLD ROW WITH THE HASH: NOTHING
+  INSERTED (WAS A SECOND VERIFIED ROW, R2-5 ITSELF).
+- ROUTE.POST.TEST.TS (5): THE SPLIT-SWAP LEG'S INVENTED HASH: TWO ROWS (WAS ONE); THE RETIRE DELETE ALSO SAYS NO CLAIM AND
+  THE LAST HOUR; A CLAIM OLDER THAN 24 H IS NOT RETIRED BY A POST (WAS RETIRED); AT 20 SCRATCH ROWS NOTHING IS RETIRED
+  (WAS THE OLDEST, WHATEVER IT CARRIED: R2-2'S VECTOR); THE CAP READS ONCE (WAS TWICE).
+- ROUTE.PROPERTY.TEST.TS (2): P7 COUNTS POST ROWS OF THE HOUR (AT MOST 5) AND CLAIM ROWS (AT MOST 20) APART (WAS ONE COUNT
+  OF AT MOST 20); A CLAIM ROW DISAPPEARS ONLY WHEN ITS OWN HASH WAS ASKED ABOUT.
+- ROUTE.INCIDENT-REPLAY.TEST.TS (1): SHAPE 9: AT MOST 5 POST ROWS AND 20 CLAIM ROWS PER WALLET (WAS AT MOST 5 ROWS: THE
+  CLAIMS SAT ON POST ROWS).
+- SWAPS-READ-CLAIM-COLUMNS.GUARD.TEST.TS (1): OVER ROWS THAT ALL CARRY A CLAIM, HISTORY LISTS NONE (WAS 12, COLUMNS
+  STRIPPED); THE NON-VACUOUS CHECK MOVES TO ROWS WITH EMPTY CLAIM COLUMNS (12 LISTED, THE NAMES STRIPPED).
+- VERIFY-STORED-SWAPS.TEST.TS (2): --APPLY DELETES A CLAIM ROW THE CHAIN REJECTED (WAS: ITS CLAIM COLUMNS CLEARED, AN EMPTY
+  PENDING ROW LEFT); THE SECOND RUN NO LONGER LISTS IT (WAS NO_TX_HASH).
+
+## Q4. Property seeds, mutation proof, browser steps, the nine-reader differential
+
+**Round 1 and 2 hold** (their files green at the last code commit, inside the verify's 12,226 tests): the incident replay,
+the nine-reader flag-off differential against main's golden (bodies and database queries byte-identical; History's
+claim-row filter and the analytics rule for withheld ETH-in rows change no byte of it), the pre-migration behaviour
+(`route.unmigrated.test.ts`, and round 3's own case: ten chainless PATCHes before the migration each answer 200
+`{ ok: true }`, no read, no write), round 2's A103 S-1 to S-6 and S-8 tests (with the changed expectations of Q5).
+
+**Property seeds**: P.5 (`route.a104.test.ts`) seeds 133 and 20261126, 400 requests each: PATCHes of invented hashes
+naming the victim (on 1, 8453, 42161 or no chain), the victim's POSTs, and jumps of the clock up to 18 minutes; the
+victim's node lags until a request drawn from 250 to 349. Invariant after every request: the victim's claim exists or its
+swap is recorded; at most 20 claim rows. Seed 133: 241 invented hashes, 77 POSTs, 775 minutes; the claim survived 87 cap
+checks while the node lagged; a cap check recorded the swap at request 309. Seed 20261126: 245, 79, 731 minutes, 95 cap
+checks, recorded at request 342. On cbd51bcf both fail (the claim is gone at requests 36 and 28). Round 1 and 2
+properties: `route.property.test.ts` 133 and 20261125 (1,000 requests each, P7 changed, Q5);
+`verify-swap-on-chain.a103.test.ts` 133 and 20261126 (2,000 random receipts each, now sent to the 0x AllowanceHolder).
+
+**Mutation proof** (`~/ts-worktrees/swap-log-r3.rig/mutants-r3.mjs`, in the scratch worktree `swap-log-mut`, never the
+branch's): one textual change per mutant, run against the 21 test files of the swap log, History and Analytics (about 600
+tests). Run 1 at 7b2235fe: 35 mutants, 33 killed, **2 survived** (`P-repeat-refreshes`: two tests compared a row with
+itself, the fake database hands back live rows; `Q-budget-search-continues`: a spent budget was asked once per chain,
+with no upstream call either way). Both pinned in 235f13a5. Run 2 at 235f13a5: the two survivors, the chainless mutant
+again (its lines moved in e616a3df) and `Q-chainless-before-migration`: 4 of 4 killed. Run 3 at 235f13a5:
+`Q-unverified-not-cached`, the mutant that pins the E2 control: killed. **37 mutants, 37 killed, every one by failing
+assertions**; the six of details S are the first six rows. The 18 tests that pass on cbd51bcf (controls) and their
+mutants: the direct sources list (`N-config-bebop-off-base`), 0x as recorded x3 (`N-direct-0x-dropped`), Bebop x3
+(`N-direct-bebop-dropped`), wrong_target stays (`N-not-direct-for-any-target`), the dust "20 ETH in" x4
+(`O-eth-value-in-side-removed`), no txFound at the transaction stage (`Q-txfound-on-tx-read`), the real ETH -> USDC swaps
+(`O-eth-band-always-null`), E1 and E5 (`Q-read-three-attempts`), E2 (`Q-unverified-not-cached`). The 3 tests added after
+a982538e: the Base real swap (`O-eth-band-always-null`), the pre-migration case (fails on 7b2235fe: 429 instead of 200;
+`Q-chainless-before-migration`), the spent budget (`Q-budget-search-continues`); and the two comparisons fixed with copies
+(`P-repeat-refreshes`).
+
+| Mutant | Rule removed or weakened | Result |
+|---|---|---|
+| `S-direct-source-check-removed` | N removed: a router of ANY source is a router target (its first source) | killed: 30 failed in swap-verify/verify-swap-on-chain.a103.test.ts, swap-verify/verify-swap-on-chain.a104.test.ts, log-swap/route.a103.test.ts, log-swap/route.a104.test.ts |
+| `S-eth-band-removed` | O removed: an ETH-in router row is priced like any row | killed: 4 failed in log-swap/route.a104.test.ts |
+| `S-claim-on-post-row` | P.1 removed: a claim goes onto the newest POST row of the wallet when there is one | killed: 13 failed in log-swap/route.a104.test.ts, log-swap/route.incident-replay.test.ts, log-swap/route.patch.test.ts, log-swap/route.post.test.ts |
+| `S-claim-deleted-without-asking` | P.3 removed: at the cap, a due claim is deleted without asking the chain | killed: 5 failed in log-swap/route.a104.test.ts |
+| `S-chainless-budget-removed` | Q.1 removed: a confirmation naming no chain has no limit of its own | run 1: killed: 1 failed in log-swap/route.a104.test.ts; run 2: killed: 1 failed in log-swap/route.a104.test.ts |
+| `S-in-place-replaced-by-insert` | R removed: a row main stored is ignored and the transaction inserts its own row | killed: 3 failed in log-swap/route.a104.test.ts, log-swap/route.patch.test.ts |
+| `N-direct-0x-dropped` | 0x is not a direct source | killed: 44 failed in scripts/swaps/verify-stored-swaps.test.ts, swap-verify/verify-swap-on-chain.a103.test.ts, swap-verify/verify-swap-on-chain.a104.test.ts, swap-verify/verify-swap-on-chain.test.ts |
+| `N-direct-bebop-dropped` | bebop is not a direct source | killed: 3 failed in swap-verify/verify-swap-on-chain.a104.test.ts |
+| `N-cowswap-direct` | cowswap counted as a direct source (its VaultRelayer a router target) | killed: 3 failed in swap-verify/verify-swap-on-chain.a104.test.ts |
+| `N-not-direct-for-any-target` | every target that is not a direct source is called not_direct_source | killed: 6 failed in swap-verify/verify-swap-on-chain.a103.test.ts, swap-verify/verify-swap-on-chain.a104.test.ts, swap-verify/verify-swap-on-chain.test.ts |
+| `N-config-bebop-off-base` | the fee-incompatible list of Base loses bebop (the list N reads) | killed: 2 failed in swap-verify/verify-swap-on-chain.a104.test.ts |
+| `O-eth-band-always-null` | every ETH-in router row loses its USD, real swaps too | killed: 3 failed in log-swap/route.a104.test.ts |
+| `O-band-ratio-loose` | the band accepts any ratio above zero | killed: 4 failed in log-swap/route.a104.test.ts |
+| `O-eth-value-in-side-removed` | the transaction value is never an in side | killed: 13 failed in swap-verify/verify-swap-on-chain.a103.test.ts, swap-verify/verify-swap-on-chain.a104.test.ts, log-swap/route.a103.test.ts, log-swap/route.a104.test.ts |
+| `O-analytics-estimates-withheld` | /api/analytics estimates a withheld ETH-in row from its symbol | killed: 4 failed in log-swap/route.a104.test.ts |
+| `O-withheld-alerts` | a withheld ETH-in row still raises the security events | killed: 4 failed in log-swap/route.a104.test.ts |
+| `P-key-without-chain` | the claim key ignores the chain (one row per wallet and hash) | killed: 2 failed in log-swap/route.a104.test.ts |
+| `P-repeat-refreshes` | a repeat moves claimed_at | run 1: SURVIVED (524 passed); run 2: killed: 1 failed in log-swap/route.a104.test.ts |
+| `P-check-age-ignored` | the cap check asks claims of any age | killed: 3 failed in log-swap/route.a104.test.ts, log-swap/route.property.test.ts |
+| `P-check-unlimited` | the cap check asks every due claim, not 3 | killed: 1 failed in log-swap/route.a104.test.ts |
+| `P-deleted-on-any-not-found` | the cap check deletes a claim on any not-found (an RPC error, a missing receipt) | killed: 3 failed in log-swap/route.a104.test.ts |
+| `P-cap-stores-anyway` | at the cap the claim is stored anyway | killed: 6 failed in log-swap/route.a104.test.ts, log-swap/route.property.test.ts |
+| `P-expiry-one-day` | claims expire after one day | killed: 2 failed in log-swap/route.a104.test.ts |
+| `P-candidates-other-claims` | a claim row of another hash is a candidate for the result | killed: 8 failed in log-swap/route.a104.test.ts, log-swap/route.incident-replay.test.ts, log-swap/route.patch.test.ts |
+| `P-post-retire-touches-claims` | the POST retire rule may delete a claim row | killed: 9 failed in log-swap/route.a104.test.ts, log-swap/route.post.test.ts, log-swap/route.property.test.ts |
+| `P-rejected-keeps-claims` | a rejection leaves the hash's claims | killed: 1 failed in scripts/swaps/verify-stored-swaps.test.ts |
+| `P-history-shows-claims` | /api/history lists claim rows | killed: 2 failed in swaps-read-claim-columns.guard.test.ts, log-swap/route.a104.test.ts |
+| `Q-read-budget-not-charged` | the read budget is never asked | killed: 7 failed in swap-verify/verify-swap-on-chain.a104.test.ts, log-swap/route.a104.test.ts |
+| `Q-proof-not-charged` | the chain-id proof is not paid | killed: 5 failed in swap-verify/verify-swap-on-chain.a104.test.ts, log-swap/route.a104.test.ts |
+| `Q-proof-paid-inside-probe` | the proof is paid inside the probe (a refusal is cached as an outage) | killed: 2 failed in swap-verify/verify-swap-on-chain.a104.test.ts |
+| `Q-budget-search-continues` | a spent budget moves on to the next chain | run 1: SURVIVED (524 passed); run 2: killed: 1 failed in log-swap/route.a104.test.ts |
+| `Q-receipt-error-moves-on` | Q.3 removed: a chain that returned the transaction is not the end of the search | killed: 2 failed in log-swap/route.a104.test.ts |
+| `Q-txfound-on-tx-read` | a missing transaction also says it was found | killed: 9 failed in scripts/swaps/verify-stored-swaps.test.ts, swap-log/confirm.test.ts, swap-verify/verify-swap-on-chain.a104.test.ts, swap-verify/verify-swap-on-chain.test.ts |
+| `Q-read-three-attempts` | a read makes three attempts | killed: 25 failed in swap-verify/chain-read.test.ts, log-swap/route.a104.test.ts, log-swap/route.patch.test.ts |
+| `R-no-agreement-check` | a row main stored is verified in place whatever it stores | killed: 2 failed in log-swap/route.a104.test.ts, log-swap/route.patch.test.ts |
+| `Q-chainless-before-migration` | the chainless limit is asked before the migration check (e616a3df undone) | run 2: killed: 2 failed in log-swap/route.a104.test.ts |
+| `Q-unverified-not-cached` | E2 control: a failed chain-id proof is not remembered (steady state asks again) | run 3: killed: 1 failed in log-swap/route.a104.test.ts |
+
+**Browser** (`~/ts-worktrees/swap-log-r3.rig/e2e-run.sh`, the branch's unchanged `e2e/swap-log/swap-to-history.pw.ts`,
+production builds with e2e.yml's public values; every outside host answered by the spec; a CoW swap of a recorded real
+trade), origin/main's build as the baseline, then the branch build compared with it, in the normal mode and in the lag
+mode (the node answers null to the first two receipt reads). Pass 1: main cdae3ef5 against the branch at 235f13a5,
+**8 of 8**. Pass 2, after main moved: main dae5fd80 against the last code commit fb93dba5, **8 of 8**. v1 and v2: one
+wallet prompt (`eth_signTypedData_v4`), the console as on main, `/api/log-swap` answers POST 200, PATCH 200 (normal) and
+POST 200, PATCH 202, PATCH 200 (lag), and the History row `649.2567 USDC -> 650.0449 USDT | CONFIRMED | via cowswap |
+≈ $649.26 | 0xb4b8b5...e2943a` as on main. In the lag mode the claim lived on a row of its own and was deleted when the
+POST row took the result: History showed one item, as on main. Logs: `e2e-run1/` (pass 1) and `e2e-*` (pass 2).
+
+## Q6. Verify runs, SHAs, diff, what was NOT verified, notes
+
+One run, on the last code commit, at a 1-minute load of 5.58 with no other verify or CodeQL process (the rig's waiter),
+2026-11-26 23:01:37 to 23:09:24, logs in `~/ts-worktrees/swap-log-verified-on-chain.verify/r3-run1/`:
+
+```
+branch: fix/swap-log-verified-on-chain @ fb93dba5 (base origin/main @ dae5fd80)
+suite:       PASS 12226 tests passed, 0 failed, 575 files
+lint-delta:  PASS errors +0, warnings +0 (npm run lint: 1246 files; head 0 err/91 warn, base 0 err/91 warn)
+tsc:         PASS 0 errors
+build:       PASS next build ok
+v1-css:      PASS check-v1-css OK: chunks/2_kknl2-38jp9.css (65960 bytes) has .bg-cream-15 .bg-surface-secondary/60 and none of .text-v2-text .font-v2-mono
+v1v2-parity: PASS 123 tests passed, 0 failed, 11 files
+rpc-budget:  PASS 36 tests passed, 0 failed, 3 files
+codeql:      PASS security-extended: head 11, base 11, new by rule+file+message 0 (pack 2.5.0, CLI 2.27.5)
+keeper:      SKIP not requested (--keeper)
+RESULT: PASS
+```
+
+No other verify run was started this round. Last code commit (verified): `fb93dba5c2fd2abe0fdf6f804e75bbbca06e1234`; docs
+head: the commit that adds this text (named in the hand-off message). Diff since 2b8a9cd6 at fb93dba5: this round's own
+11 commits 33 files +2289 / -346 (26 files +1767 / -346 without the 7 receipt fixtures); with main's PRs #732 and #731
+merged in: 62 files +3528 / -422. Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/swap-log-verified-on-chain
+
+NOT verified: the migration on a real Postgres (the claim queries' `is` / `not` / `ilike` filters, the delete-by-filter of
+claim rows, concurrent claims of one key); Linux CI; a real wallet, WalletConnect or bundler; a 0x, Bebop or FeeCollector
+swap in the browser (the rig drives a CoW swap); Base and Arbitrum in the browser; the script against the stored table;
+the limiter on the real Upstash (modelled in the test: pipeline, zrem, zrange); the chain-id proof cache under concurrent
+requests (the read-only check and the ask are two steps); real Chainlink prices (the band ran on a fixed table: ETH at
+1,630 USD for the real swaps, 3,400 for the dust receipts); the flag on in a deployment.
+
+Notes and concerns of round 3:
+- **The analytics estimate** (42f4a2f0). O.2 says a withheld ETH-in row enters no total, but `/api/analytics` estimated a
+  USD for any row with no `amount_in_usd` from its raw amount and a fixed price per symbol (ETH 3,500): the audit's 20 ETH
+  dust wrap became 70,000 USD of volume. A row verified as `router` with the native placeholder as its in side now counts
+  only at its stored USD (none). Rows written before ADR-029 have no `verified_kind` and are estimated as before (flag-off
+  answers on main's rows unchanged, the differential green). Other verified rows with no USD (a token our oracle cannot
+  price) are still estimated from their derived amount and symbol, as in rounds 1 and 2.
+- **A real ETH -> token 0x swap into a token the server cannot price** is confirmed with no USD (O.2: "an out token with
+  no price: null") and so enters no volume either. Round 1's sample: 91 ETH-in 0x swaps on Ethereum, 23 of them into
+  USDC, USDT or DAI; how many of the other 68 bought a token with a Chainlink feed was not measured.
+- **Claim rows in History**: left out in code after the query (the query stays main's and runs before the migration), so
+  a page of 50 rows can show fewer items, and `total` still counts claim rows.
+- **The claim key** (owner's answer): (wallet, named chain or none, hash), so one hash can hold up to 4 rows (3 chains and
+  none). Two requests at the same moment can still write two rows of one key (check-then-insert, no index); the cap
+  counts rows, so both count; the verification deletes every claim row of its hash.
+- **The 7-day expiry** runs only in a request of that wallet that stores a claim; the script does not delete claims
+  (owner's answer: unchanged).
+- **The read budget** pays the chain-id proof before asking, so a cache filled between the check and the ask costs one
+  unit for no call (conservative). The price reads after a verified result are not charged (owner's answer).
+- **R2-6** (out of scope): 30 POSTs still retire a hash-less pending row main wrote within the hour.
+- origin/main moved twice: merged first as the goal says (ca85d041: cdae3ef5, PR #732, verify tooling), then before the
+  verify (0c31b4ce: dae5fd80, PR #731, orders; one file in common, `src/config/product-claims.ts`, comment lines in other
+  hunks: merged clean). `npm ci` after the first merge; the lockfile did not change in the second. The privacy block's
+  line citations moved with this round and were corrected (fb93dba5, comments only; no sentence changed).
+- No production host or database was called. Real receipts: round 1's public-node cache, and one Base transaction read
+  from mainnet.base.org (2,320 recent blocks read to find it). The audit's fork receipts were copied from its rig. No
+  software was installed.
