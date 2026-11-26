@@ -435,3 +435,184 @@ describe('agent-verify --codeql: pinned query pack and tool failure', () => {
     expect(row).toContain('(pack 7.8.9, CLI 9.9.9)')
   })
 })
+
+// ---- lint-delta: CI's own `npm run lint`, and a crashed eslint is a FAIL ----------------------------------------------
+// A throw-away repo whose node_modules/.bin/eslint is a stub. The stub acts on `stub.json` in the tree it runs in, so the
+// base commit and the head commit can behave differently, as two real trees do. git, npm and `npm run` are real.
+describe('agent-verify lint-delta', () => {
+  const ESLINT_STUB = [
+    '#!/usr/bin/env node',
+    "const fs = require('node:fs')",
+    "const path = require('node:path')",
+    'const args = process.argv.slice(2)',
+    "fs.appendFileSync(process.env.STUB_LOG, JSON.stringify({ cwd: process.cwd(), args }) + '\\n')",
+    "const mode = JSON.parse(fs.readFileSync('stub.json', 'utf8'))",
+    'if (mode.crash) {',
+    '  process.stderr.write(\'\\nOops! Something went wrong! :(\\n\\nESLint: 9.39.5\\n\\nTypeError: node.params is not iterable\\nOccurred while linting \' +',
+    "    path.join(process.cwd(), 'scripts/x.d.mts') + ':5\\nRule: \"@typescript-eslint/no-unused-vars\"\\n    at visit (rules.js:1:1)\\n')",
+    '  process.exitCode = 2',
+    '} else {',
+    "  const out = args[args.indexOf('--output-file') + 1]",
+    '  const report = Object.entries(mode.files ?? {})',
+    '    .filter(([f]) => fs.existsSync(f))',
+    '    .map(([f, [errorCount, warningCount]]) => ({ filePath: path.join(process.cwd(), f), errorCount, warningCount, fatalErrorCount: 0 }))',
+    '  if (!mode.noReport) fs.writeFileSync(out, JSON.stringify(report))',
+    '  process.exitCode = mode.exit ?? 0',
+    '}',
+    '',
+  ].join('\n')
+
+  // base / head: { stub: <stub.json>, files: [tracked paths] }
+  function lintDelta(base, head, { noEslint = false, lintScript = 'eslint . --max-warnings 94', before } = {}) {
+    const home = mkdtempSync(path.join(dir, 'ld-'))
+    const repo = path.join(home, 'repo')
+    const out = path.join(home, 'out')
+    mkdirSync(path.join(repo, 'node_modules/.bin'), { recursive: true })
+    mkdirSync(out)
+    if (!noEslint) writeFileSync(path.join(repo, 'node_modules/.bin/eslint'), ESLINT_STUB, { mode: 0o755 })
+    writeFileSync(path.join(repo, '.gitignore'), 'node_modules\n')
+    writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ name: 'x', scripts: { lint: lintScript } }))
+    const git = (...a) => execFileSync('git', ['-C', repo, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    const commit = (tree) => {
+      for (const f of git('ls-files', 'src').split('\n').filter(Boolean)) if (!tree.files.includes(f)) rmSync(path.join(repo, f))
+      for (const f of tree.files) {
+        mkdirSync(path.dirname(path.join(repo, f)), { recursive: true })
+        writeFileSync(path.join(repo, f), `// ${f}\n`)
+      }
+      writeFileSync(path.join(repo, 'stub.json'), JSON.stringify(tree.stub))
+      git('add', '-A')
+      git('-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'x')
+    }
+    git('init', '-q', '-b', 'main')
+    commit(base)
+    const baseSha = git('rev-parse', 'HEAD').trim()
+    git('checkout', '-q', '-b', 'work')
+    commit(head)
+    before?.(out)
+    const src = readFileSync(SCRIPT, 'utf8').split('\n')
+    const cut = (from, to) => {
+      const a = src.findIndex((l) => l.startsWith(from))
+      const b = src.findIndex((l) => l.startsWith(to))
+      expect(a >= 0 && b > a, `script section ${from} .. ${to}`).toBe(true)
+      return src.slice(a, b).join('\n')
+    }
+    const prog = [
+      'set -u; set -o pipefail',
+      `ROOT=${JSON.stringify(repo)}; OUT=${JSON.stringify(out)}; RESULTS=${JSON.stringify(path.join(out, 'res.tsv'))}; BASE_REF=${baseSha}`,
+      cut('record()', '# ---------- checks'),
+      cut('# ---------- lint-delta', '# ---------- codeql'),
+      'check_lint_delta',
+      'cat "$RESULTS"',
+    ].join('\n')
+    const nodeDir = path.dirname(execFileSync('bash', ['-c', 'command -v node'], { encoding: 'utf8' }).trim())
+    const log = path.join(home, 'eslint.log')
+    const r = spawnSync('bash', ['-c', prog], {
+      encoding: 'utf8',
+      env: { HOME: home, PATH: `${nodeDir}:/usr/bin:/bin`, STUB_LOG: log, npm_config_update_notifier: 'false', npm_config_offline: 'true' },
+      timeout: 60000,
+    })
+    const rows = r.stdout.split('\n').filter((l) => l.startsWith('lint-delta\t'))
+    const calls = (() => { try { return readFileSync(log, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { return [] } })()
+    const [, status, detail] = (rows[0] ?? '').split('\t')
+    return { r, rows, status, detail, calls, repo, out, git }
+  }
+  const tree = (stub, files = ['src/a.ts']) => ({ stub, files })
+  const clean = tree({ files: { 'src/a.ts': [0, 2] } })
+  const CRASH_LINE = 'TypeError: node.params is not iterable'
+
+  it('eslint exit 2 on HEAD: FAIL, says "lint crashed", names the crash line, the file and the rule', () => {
+    const x = lintDelta(clean, tree({ crash: true }))
+    expect(x.rows).toHaveLength(1)
+    expect(x.status).toBe('FAIL')
+    expect(x.detail).toContain('lint crashed (head, exit 2)')
+    expect(x.detail).toContain(CRASH_LINE)
+    expect(x.detail).toContain('Occurred while linting scripts/x.d.mts:5')
+    expect(x.detail).toContain('Rule: "@typescript-eslint/no-unused-vars"')
+    expect(x.detail).not.toContain(' at visit') // the stack stays in the log
+    // and the run as a whole fails
+    const f = format([...PASS, ['lint-delta', 'FAIL', x.detail]])
+    expect(f.status).toBe(1)
+    expect(lineOf(f.stdout, 'lint-delta')).toMatch(/FAIL\s+lint crashed/)
+  }, 90000)
+
+  it('eslint exit 2 on the BASE tree: FAIL "lint crashed (base", even though HEAD lints clean', () => {
+    const x = lintDelta(tree({ crash: true }), clean)
+    expect(x.status).toBe('FAIL')
+    expect(x.detail).toContain('lint crashed (base, exit 2)')
+    expect(x.detail).toContain(CRASH_LINE)
+  }, 90000)
+
+  it("runs the package's own lint script (what CI's `npm run lint` runs) over the whole tree, on HEAD and on a merge-base tree", () => {
+    const x = lintDelta(clean, clean, { lintScript: 'eslint . --max-warnings 7' })
+    expect(x.status).toBe('PASS')
+    expect(x.calls).toHaveLength(2)
+    for (const c of x.calls) {
+      expect(c.args.slice(0, 5)).toEqual(['.', '--max-warnings', '7', '--format', 'json'])
+      expect(c.args[5]).toBe('--output-file')
+    }
+    expect(new Set(x.calls.map((c) => c.cwd)).size).toBe(2)
+    const ci = readFileSync(path.join(path.dirname(SCRIPT), '..', '.github/workflows/ci.yml'), 'utf8')
+    expect(ci).toMatch(/^ {8}run: npm run lint$/m)
+  }, 90000)
+
+  it('same counts: PASS +0/+0; the base worktree is removed and HEAD node_modules is still there', () => {
+    const x = lintDelta(clean, clean)
+    expect(x.status).toBe('PASS')
+    expect(x.detail).toBe('errors +0, warnings +0 (npm run lint: 1 files; head 0 err/2 warn, base 0 err/2 warn)')
+    expect(x.git('worktree', 'list').trim().split('\n')).toHaveLength(1)
+    expect(statSync(path.join(x.repo, 'node_modules/.bin/eslint')).isFile()).toBe(true)
+  }, 90000)
+
+  it.each([
+    ['one more warning', [0, 3], /^errors \+0, warnings \+1 /],
+    ['one new error', [1, 2], /^errors \+1, warnings \+0 /],
+  ])('%s is FAIL', (_n, counts, want) => {
+    const x = lintDelta(clean, tree({ files: { 'src/a.ts': counts } }))
+    expect(x.status).toBe('FAIL')
+    expect(x.detail).toMatch(want)
+  }, 90000)
+
+  it('a warning in a file the HEAD diff does not touch is counted too (whole tree, not changed files)', () => {
+    const files = ['src/a.ts', 'src/untouched.d.mts']
+    const x = lintDelta(
+      { stub: { files: { 'src/a.ts': [0, 0], 'src/untouched.d.mts': [0, 0] } }, files },
+      { stub: { files: { 'src/a.ts': [0, 0], 'src/untouched.d.mts': [0, 1] } }, files },
+    )
+    expect(x.status).toBe('FAIL')
+    expect(x.detail).toMatch(/^errors \+0, warnings \+1 \(npm run lint: 2 files/)
+  }, 90000)
+
+  it('deleting a file with warnings does not pay for new ones elsewhere', () => {
+    const stub = (a) => ({ files: { 'src/a.ts': [0, a], 'src/gone.ts': [0, 3] } })
+    const x = lintDelta({ stub: stub(0), files: ['src/a.ts', 'src/gone.ts'] }, { stub: stub(3), files: ['src/a.ts'] })
+    expect(x.status).toBe('FAIL')
+    expect(x.detail).toMatch(/^errors \+0, warnings \+3 \(npm run lint: 1 files; head 0 err\/3 warn, base 0 err\/0 warn\)/)
+  }, 90000)
+
+  it('`npm run lint` failing on HEAD is FAIL even with a zero delta (CI would be red)', () => {
+    const x = lintDelta(clean, tree({ files: { 'src/a.ts': [0, 2] }, exit: 1 }))
+    expect(x.status).toBe('FAIL')
+    expect(x.detail).toMatch(/^npm run lint fails on HEAD \(exit 1\): errors \+0, warnings \+0 /)
+  }, 90000)
+
+  it('a base that fails its own lint without crashing does not fail a HEAD that passes', () => {
+    const x = lintDelta(tree({ files: { 'src/a.ts': [1, 2] }, exit: 1 }), clean)
+    expect(x.status).toBe('PASS')
+  }, 90000)
+
+  it('exit 0 or 1 with no report is "lint crashed", and a report left in the output dir by an earlier run is not read', () => {
+    const stale = (out) => writeFileSync(path.join(out, 'lint-head.json'), JSON.stringify([]))
+    for (const exit of [0, 1]) {
+      const x = lintDelta(clean, tree({ noReport: true, exit }), { before: stale })
+      expect(x.status).toBe('FAIL')
+      expect(x.detail).toContain(`lint crashed (head, exit ${exit}): no readable report`)
+    }
+  }, 90000)
+
+  it('no node_modules/.bin/eslint: FAIL "missing tool", never a copy from somewhere else', () => {
+    const x = lintDelta(clean, clean, { noEslint: true })
+    expect(x.status).toBe('FAIL')
+    expect(x.detail).toMatch(/^missing tool: eslint/)
+    expect(x.calls).toHaveLength(0)
+  }, 90000)
+})
