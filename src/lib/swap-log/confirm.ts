@@ -20,7 +20,8 @@
  * Nothing written comes from the caller but the wallet and the hash the chain was asked about (and, in a claim, the
  * chain the caller named). The trackers (large trade, oracle, failed swap) run after the write, from derived values.
  * USD is the server's price of the DERIVED amounts; for a router row that paid ETH in, only when the out side is worth
- * at least half as much and at most twice as much (ADR-029 8.2, details O): else no USD and no security event.
+ * at least half as much and at most twice as much (ADR-029 8.2, details O): else no USD and no security event. Inside
+ * that band its in side counts the smaller of the two values (ADR-029 9.2, A106 R3-2).
  */
 import { randomUUID } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -88,17 +89,19 @@ export type ConfirmResult =
  * [ADR-029 8.2, details O of goal 133c] The smallest ratio of the two USD values of a router row whose in side is the
  * ETH the transaction paid. That ETH leaves no log, and ETH coming back (a refund) leaves none either, so the chain does
  * not show how much of it was spent; what came back for it is the only measure. Both sides priced and within a factor
- * of two: both USD values are stored. Otherwise the row is confirmed with no USD at all.
+ * of two: both USD values are stored, the in side as the SMALLER of the two (ADR-029 9.2, A106 R3-2: up to half the ETH
+ * paid may have come back, so the value paid is capped by what was received; an honest swap is counted slightly below
+ * what was paid, fee and slippage, accepted). Otherwise the row is confirmed with no USD at all.
  */
 export const ETH_IN_USD_MIN_RATIO = 0.5
 
-/** O.2: the two USD values of an ETH-in router row, or null for both. */
+/** O.2 and 9.2: the two USD values of an ETH-in router row (in = min(usdIn, usdOut)), or null for both. */
 export function ethInUsd(usdIn: number | null, usdOut: number | null): { in: number | null; out: number | null } {
   if (usdIn === null || usdOut === null) return { in: null, out: null }
   const high = Math.max(usdIn, usdOut)
   const low = Math.min(usdIn, usdOut)
   if (!(high > 0) || !(low / high >= ETH_IN_USD_MIN_RATIO)) return { in: null, out: null }
-  return { in: usdIn, out: usdOut }
+  return { in: low, out: usdOut }
 }
 
 /** USD of a derived side, by the server's own price read. null when the side is null or has no price. */
