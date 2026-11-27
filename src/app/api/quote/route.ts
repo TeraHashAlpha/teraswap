@@ -1,9 +1,10 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { bodySizeGuard, bodyTooLargeFrom } from '@/lib/body-limit'
-import { fetchMetaQuote, diagnoseQuoteSources } from '@/lib/api'
+import { fetchMetaQuote, diagnoseQuoteSources, type NormalizedQuote } from '@/lib/api'
 import { isValidAddress } from '@/lib/validation'
 import { SequencerDownError } from '@/lib/chains/sequencer-check'
-import { checkRateLimitWithin, QUOTE_RATE_LIMIT } from '@/lib/kv-rate-limiter'
+import { checkRateLimitWithin, QUOTE_RATE_LIMIT, QUOTE_SPLIT_RATE_LIMIT } from '@/lib/kv-rate-limiter'
+import { splitSubAmounts, type SplitBatch } from '@/lib/split-routing-types'
 import { isSystemHalted } from '@/lib/circuit-breaker'
 import { verifyBearerToken } from '@/lib/auth'
 import { DEFAULT_CHAIN_ID, getChainStatus } from '@/lib/chains'
@@ -71,6 +72,37 @@ function withQuoteEcho<T extends object>(
     decimalsOut: Number(q.dstDecimals),
     amountIn: String(q.amount),
   }
+}
+
+/** The sub-amounts of a base-unit amount; a malformed amount has none (the quote itself then fails as it always did). */
+function splitSubAmountsOf(amount: string): string[] {
+  return /^\d+$/.test(amount) ? splitSubAmounts(BigInt(amount)) : []
+}
+
+/**
+ * [fix/quote-rate-limit-normal-use] One fan-out per sub-amount, each exactly what a plain request for that amount ran:
+ * the same shared cache, no source exclusions (the split analysis never sent any). A sub-amount that fails answers an
+ * empty list, as the failed request did for the hook — it never fails the request.
+ */
+async function quoteSubAmounts(
+  subAmounts: string[],
+  q: { src: string; dst: string; srcDecimals: number; dstDecimals: number; chainId: number | undefined },
+): Promise<SplitBatch> {
+  const { src, dst, srcDecimals, dstDecimals, chainId } = q
+  const entries = await Promise.all(
+    subAmounts.map(async (amount): Promise<[string, NormalizedQuote[]]> => {
+      try {
+        const { result } = await getMetaQuoteCached(
+          { src, dst, amount, srcDecimals, dstDecimals, chainId },
+          () => fetchMetaQuote(src, dst, amount, srcDecimals, dstDecimals, undefined, chainId),
+        )
+        return [amount, result.all]
+      } catch {
+        return [amount, []]
+      }
+    }),
+  )
+  return { status: 'ok', quotes: Object.fromEntries(entries) }
 }
 
 /**
@@ -210,14 +242,30 @@ async function handleQuoteGet(req: NextRequest): Promise<NextResponse> {
     const excludeSources = excludeParam ? excludeParam.split(',').map(s => s.trim()) : undefined
     const chainId = chainIdParam ? Number(chainIdParam) : undefined
 
+    // [fix/quote-rate-limit-normal-use] `split=1`: also price the split analysis' sub-amounts, in this one request.
+    // They passed the same gates above, and each is charged (1 unit on quote-split:) BEFORE any fan-out runs.
+    const subAmounts = searchParams.get('split') === '1' ? splitSubAmountsOf(amount) : null
+    const splitCharge = subAmounts && subAmounts.length > 0
+      ? await checkRateLimitWithin(`quote-split:${ip}`, QUOTE_SPLIT_RATE_LIMIT.limit, QUOTE_SPLIT_RATE_LIMIT.windowMs, subAmounts.length)
+      : null
+
     // [T2] Shared KV cache + single-flight dampener — see meta-quote-cache.ts.
-    const { result, cacheHeader } = await getMetaQuoteCached(
+    const quoted = getMetaQuoteCached(
       { src, dst, amount, srcDecimals, dstDecimals, excludeSources, chainId },
       () => fetchMetaQuote(src, dst, amount, srcDecimals, dstDecimals, excludeSources, chainId),
     )
+    const [{ result, cacheHeader }, split] = await Promise.all([
+      quoted,
+      !subAmounts
+        ? undefined
+        : splitCharge && !splitCharge.allowed
+          ? ({ status: 'deferred', retryAfterMs: Math.max(1_000, splitCharge.resetAt - Date.now()) } satisfies SplitBatch)
+          : quoteSubAmounts(subAmounts, { src, dst, srcDecimals, dstDecimals, chainId }),
+    ])
 
     // Serialize BigInt-safe (toAmount is already a string in NormalizedQuote)
-    return NextResponse.json(withQuoteEcho(result, { src, dst, amount, srcDecimals, dstDecimals, chainId }), {
+    const body = withQuoteEcho(result, { src, dst, amount, srcDecimals, dstDecimals, chainId })
+    return NextResponse.json(split ? { ...body, split } : body, {
       headers: {
         'Cache-Control': 'no-store, max-age=0',
         'X-Quote-Cache': cacheHeader,
