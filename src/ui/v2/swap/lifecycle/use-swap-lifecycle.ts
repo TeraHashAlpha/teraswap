@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSwap, type QuoteToAmountBySource } from '@/hooks/useSwap'
 import { useSplitSwap } from '@/hooks/useSplitSwap'
 import { useSplitRoute } from '@/hooks/useSplitRoute'
+import { isSplitQuoteStale } from '@/lib/split-routing-types'
+import type { SplitPollChannel } from '@/lib/split-poll'
 import { useSwapHistory } from '@/hooks/useSwapHistory'
 import { useActiveApprovals } from '@/hooks/useActiveApprovals'
 import { useAccount } from 'wagmi'
@@ -38,6 +40,10 @@ export interface LifecycleArgs {
   approval: { status: ApprovalStatus; error: string | null; approve: () => Promise<void>; isReady: boolean }
   /** Chainlink price of the buy token (v1: `tokenOutPriceCheck.chainlinkPrice`) — only for the CoW "you saved" line. */
   tokenOutUsdPrice: number | null
+  /** useQuote's channel: the split refresh rides on the quote poll (v1 SwapBox hands useSplitRoute the same one). */
+  splitPoll?: SplitPollChannel
+  /** A split too old to execute has just fallen back to the single route: the card opens that route's review. */
+  onSplitStale?: () => void
 }
 
 /**
@@ -59,7 +65,7 @@ export function useSwapLifecycle(a: LifecycleArgs) {
   const bestNonCowGasUsd = meta?.all.find((q) => q.source !== 'cowswap')?.gasUsd
 
   const swap = useSwap(tokenIn, tokenOut, amountIn, slippage, quoteToAmountBySource, bestNonCowGasUsd)
-  const splitRoute = useSplitRoute(meta, tokenIn, tokenOut, amountIn, a.isChainOkForQuote, activeChainId)
+  const splitRoute = useSplitRoute(meta, tokenIn, tokenOut, amountIn, a.isChainOkForQuote, activeChainId, a.splitPoll)
   const split = useSplitSwap(tokenIn, tokenOut, amountIn, slippage)
 
   const isSplitActive = !!(splitRoute.useSplit && splitRoute.splitResult?.bestSplit.isSplit)
@@ -125,10 +131,20 @@ export function useSwapLifecycle(a: LifecycleArgs) {
         return
       }
       setConsentRequested(false)
+      // [fix/quote-rate-limit-normal-use, owner 2026-11-27] Split sub-quotes older than one poll are not executed (SwapBox's
+      // `splitToExecute`): fall back to the single route, say so, and let its review open. Asked at the moment of execution.
+      if (isSplitActive && splitRoute.splitResult?.bestSplit && isSplitQuoteStale(splitRoute.splitResult)) {
+        splitRoute.fallBackToSingle()
+        stopWaitingSound()
+        toast({ type: 'warning', title: 'Split quotes out of date', description: 'Using the single best route for this swap.', duration: 8000, dedupKey: 'split-stale' })
+        a.onSplitStale?.()
+        return
+      }
       onExecute?.()
       run(c.unpricedAck) // the ack is whatever THIS attempt's consent produced — also after a 409 the client tier did not predict
     },
-    [a.chainActive, a.gates.anyBlocked, a.unpricedPair, approval, run, meta],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `splitRoute` and `a` are fresh each render; the values read from them are listed
+    [a.chainActive, a.gates.anyBlocked, a.unpricedPair, approval, run, meta, isSplitActive, splitRoute.splitResult, splitRoute.fallBackToSingle, a.onSplitStale, toast],
   )
 
   /** SwapBox's `cancelUnpricedSwap` + the review modals' `onCancel={resetSwap | resetSplitSwap}`. */

@@ -7,11 +7,17 @@ import { safeBigInt } from '@/lib/utils'
 import { isExecutableSource } from '@/lib/executable-sources'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { isUsdStablecoin } from '@/lib/chains/stablecoins'
+import { makeQuoteKey, sameQuoteKey, type QuoteKey } from '@/lib/quote-identity'
+import type { PolledSplit, SplitPollChannel } from '@/lib/split-poll'
 import {
+  type SplitBatch,
   type SplitQuoteResult,
   SPLIT_MIN_USD,
   SPLIT_MIN_IMPROVEMENT_BPS,
   SPLIT_ELIGIBLE_SOURCES,
+  SPLIT_SETTLE_MS,
+  SPLIT_UNSELECTED_REFRESH_MS,
+  isSplitQuoteStale,
 } from '@/lib/split-routing-types'
 
 interface UseSplitRouteResult {
@@ -25,11 +31,48 @@ interface UseSplitRouteResult {
   useSplit: boolean
   /** Toggle split on/off */
   toggleSplit: () => void
+  /**
+   * [fix/quote-rate-limit-normal-use] Swap found the split sub-quotes too old to execute: select the single route, and
+   * keep a later recommendation for this same trade from re-selecting the split (the user still can).
+   */
+  fallBackToSingle: () => void
 }
+
+/** The quote useSplitRoute is given: tagged with what it answers, and carrying a split batch when its poll fetched one. */
+type SeedQuote = MetaQuoteResult & { identity?: QuoteKey; split?: PolledSplit }
+
+/** A split batch and when it reached the browser (the age Swap checks is measured from this). */
+interface LoadedBatch {
+  batch: SplitBatch
+  receivedAt: number
+}
+
+/** The cadence bookkeeping of ONE trade (chain, pair, amount). A new trade gets a new object. */
+interface TradeRun {
+  /** When the last analysis attempt ended; 0 = none yet. */
+  ranAt: number
+  /** The split bucket was spent: do not ask before this. 0 = no wait. */
+  retryAt: number
+  inFlight: boolean
+  /** The newest attempt: an older one that ends later is dropped. */
+  sequence: number
+  /** The poll batch already consumed. */
+  polledAt: number
+  /** Swap fell back to the single route: do not auto-select the split again for this trade. */
+  heldOff: boolean
+}
+
+const newTradeRun = (): TradeRun => ({ ranAt: 0, retryAt: 0, inFlight: false, sequence: 0, polledAt: 0, heldOff: false })
 
 /**
  * Analyzes whether splitting the trade across multiple DEXes yields better output.
  * Only activates for trades above SPLIT_MIN_USD threshold.
+ *
+ * [fix/quote-rate-limit-normal-use] An analysis costs ONE /api/quote request (`split=1`; it used to be 11, on every new
+ * quote). It runs when the pair or the settled amount has held SPLIT_SETTLE_MS, on a quote that answers exactly that
+ * trade. After that its refresh rides on the quote poll (`splitPoll`): on every poll while a split is the selected route,
+ * so the sub-quotes Swap executes are never older than one poll; otherwise at most once per
+ * SPLIT_UNSELECTED_REFRESH_MS. The quotes, the router and the execution path are unchanged.
  *
  * @param meta — existing MetaQuoteResult from useQuote
  * @param tokenIn — sell token
@@ -38,7 +81,7 @@ interface UseSplitRouteResult {
  * @param enabled — whether to analyze (connected, correct chain, etc.)
  */
 export function useSplitRoute(
-  meta: MetaQuoteResult | null,
+  meta: SeedQuote | null,
   tokenIn: Token | null,
   tokenOut: Token | null,
   amountIn: string,
@@ -51,17 +94,33 @@ export function useSplitRoute(
   // renderable without a provider; SwapBox supplies useQuoteChainId()
   // [feat/quote-before-wallet] — the quote/browse chain, not just the wallet's.
   chainId: number = DEFAULT_CHAIN_ID,
+  /** useQuote's channel. Without one, a due refresh is asked for on its own when a new quote arrives. */
+  splitPoll?: SplitPollChannel,
 ): UseSplitRouteResult {
-  const [splitResult, setSplitResult] = useState<SplitQuoteResult | null>(null)
-  const [analyzing, setAnalyzing] = useState(false)
-  const [useSplit, setUseSplit] = useState(false)
-  const abortRef = useRef(0)
+  // The trade an analysis belongs to. Null while disabled or while the amount is not a number.
+  const tradeKey = useMemo<QuoteKey | null>(() => {
+    if (!enabled || !tokenIn || !tokenOut || !amountIn) return null
+    try {
+      const amountRaw = parseUnits(amountIn, tokenIn.decimals).toString()
+      return makeQuoteKey({ chainId, tokenIn: tokenIn.address, tokenOut: tokenOut.address, amountRaw, decimalsIn: tokenIn.decimals, decimalsOut: tokenOut.decimals })
+    } catch {
+      return null
+    }
+    // [fix/quote-identity-loop] Keyed on token VALUES, not object identity — see useQuote.ts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, tokenIn?.address, tokenIn?.decimals, tokenOut?.address, tokenOut?.decimals, amountIn, chainId])
+  const tradeId = tradeKey ? Object.values(tradeKey).join('|') : null
+
+  // A quote is analysed only if it answers THIS trade. v1 keeps the previous amount's quote on screen while a new
+  // amount is typed: read as this trade's, it sized the new amount by the old output and sent 11 requests a keystroke.
+  // (useQuote tags every quote; an untagged one has nothing to compare.)
+  const seed = meta && tradeKey && (!meta.identity || sameQuoteKey(meta.identity, tradeKey)) ? meta : null
 
   // Estimate trade USD value using Chainlink
   const executionPriceUsd = useMemo(() => {
-    if (!meta?.best || !tokenIn || !tokenOut || !amountIn) return null
+    if (!seed?.best || !tokenIn || !tokenOut || !amountIn) return null
     // [11-L-01] safeBigInt: malformed toAmount → fall back to 0 (price will compare as null/below-threshold).
-    const outBig = safeBigInt(meta.best.toAmount)
+    const outBig = safeBigInt(seed.best.toAmount)
     const outAmount = outBig !== null ? Number(formatUnits(outBig, tokenOut.decimals)) : 0
     const inAmount = Number(amountIn)
     if (inAmount <= 0) return null
@@ -75,104 +134,201 @@ export function useSplitRoute(
     // This memo doesn't itself loop (its output is stable across equivalent-object renders,
     // so tradeAboveThreshold below never flips), but it's the same anti-pattern.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meta, tokenIn?.symbol, tokenOut?.symbol, tokenOut?.decimals, amountIn, chainId])
+  }, [seed, tokenIn?.symbol, tokenOut?.symbol, tokenOut?.decimals, amountIn, chainId])
 
   const tradeAboveThreshold = executionPriceUsd !== null && executionPriceUsd >= SPLIT_MIN_USD
 
-  const toggleSplit = useCallback(() => {
-    setUseSplit(prev => !prev)
-  }, [])
+  const [analysis, setAnalysis] = useState<{ tradeId: string; result: SplitQuoteResult } | null>(null)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [useSplit, setUseSplit] = useState(false)
+  /** The trade that has held SPLIT_SETTLE_MS. */
+  const [settledId, setSettledId] = useState<string | null>(null)
 
-  // Analyze split routing when meta changes and trade is large enough
+  // A new trade drops the old analysis and selection in the same render (never a split of another pair or amount).
+  const [stateTradeId, setStateTradeId] = useState(tradeId)
+  if (stateTradeId !== tradeId) {
+    setStateTradeId(tradeId)
+    setAnalysis(null)
+    setAnalyzing(false)
+    setUseSplit(false)
+    setSettledId(null)
+  }
+
+  const splitResult = analysis && analysis.tradeId === tradeId && seed && tradeAboveThreshold ? analysis.result : null
+
+  const runRef = useRef<TradeRun>(newTradeRun())
+  const selectedRef = useRef(useSplit)
+  // What the poll channel and the click handlers read: the state as last committed.
+  const latestRef = useRef({ tradeKey, tradeId, seed, tradeAboveThreshold, analysis, eligible: false })
   useEffect(() => {
-    if (!enabled || !meta || !tokenIn || !tokenOut || !amountIn || !tradeAboveThreshold) {
-      setSplitResult(null)
-      setUseSplit(false)
-      return
-    }
+    selectedRef.current = useSplit
+    // `eligible` is only re-judged on a quote: one that drops out for a poll does not change the trade's size.
+    const sameTrade = latestRef.current.tradeId === tradeId
+    const eligible = seed ? tradeAboveThreshold : sameTrade && latestRef.current.eligible
+    latestRef.current = { tradeKey, tradeId, seed, tradeAboveThreshold, analysis, eligible }
+  })
 
-    const runId = ++abortRef.current
-    let rawAmount: string
-    try {
-      rawAmount = parseUnits(amountIn, tokenIn.decimals).toString()
-    } catch {
-      setSplitResult(null)
-      return
-    }
-    // Capture current values to avoid null checks inside async
-    const currentMeta = meta
-    const currentTokenIn = tokenIn
-    const currentTokenOut = tokenOut
+  useEffect(() => {
+    runRef.current = newTradeRun()
+    if (!tradeId) return
+    const timer = setTimeout(() => setSettledId(tradeId), SPLIT_SETTLE_MS)
+    return () => clearTimeout(timer)
+  }, [tradeId])
 
-    async function analyze() {
+  /** One analysis of `seedQuote`, with the sub-amount quotes `load` brings. Same router, same filters as before. */
+  const analyse = useCallback(
+    async (id: string, amountRaw: string, seedQuote: SeedQuote, load: () => Promise<LoadedBatch | null>) => {
+      const run = runRef.current
+      const sequence = ++run.sequence
+      const current = () => runRef.current === run && run.sequence === sequence
+      run.inFlight = true
       setAnalyzing(true)
+      // The router asks per sub-amount; the first ask loads the one batch, the rest read from it.
+      let loading: Promise<LoadedBatch | null> | null = null
+      const batch = () => (loading ??= load().catch(() => null))
       try {
-        // Fetch quotes at sub-amounts by calling fetchMetaQuote at reduced amounts
-        const fetchQuoteAtAmount = async (subAmount: string): Promise<NormalizedQuote[]> => {
-          try {
-            const params = new URLSearchParams({
-              src: currentTokenIn.address,
-              dst: currentTokenOut.address,
-              amount: subAmount,
-              srcDecimals: currentTokenIn.decimals.toString(),
-              dstDecimals: currentTokenOut.decimals.toString(),
-            })
-            // [CHORE-SPLITROUTE-CHAINID] Price sub-legs on the ACTIVE chain.
-            // Same P219 convention as useQuote (this endpoint's primary
-            // caller): append the param only off-mainnet so the mainnet
-            // request stays byte-identical — /api/quote's P217 default IS
-            // chain 1. Omitting this priced Base sub-legs on MAINNET (502s
-            // for Base-only addresses → split routing silently dead on Base;
-            // mainnet-priced analyses for same-address tokens). Triage:
-            // PR #262 (audit/splitroute-chain-awareness, W4-followup report).
-            if (chainId !== DEFAULT_CHAIN_ID) params.set('chainId', String(chainId))
-            const res = await fetch(`/api/quote?${params}`)
-            if (!res.ok) return []
-            const subMeta: MetaQuoteResult = await res.json()
-            return subMeta.all.filter(q => SPLIT_ELIGIBLE_SOURCES.has(q.source) && isExecutableSource(q.source, chainId))
-          } catch {
-            return []
-          }
-        }
-
         const quoteMap = await fetchSplitQuotes(
-          fetchQuoteAtAmount,
-          rawAmount,
+          async (subAmount: string): Promise<NormalizedQuote[]> => {
+            const loaded = await batch()
+            if (loaded?.batch.status !== 'ok') return []
+            return (loaded.batch.quotes[subAmount] ?? []).filter(q => SPLIT_ELIGIBLE_SOURCES.has(q.source) && isExecutableSource(q.source, chainId))
+          },
+          amountRaw,
           // [CHORE-SUSHI-V7] Seed only with legs that can settle on this chain.
-          currentMeta.all.filter(q => isExecutableSource(q.source, chainId)),
+          seedQuote.all.filter(q => isExecutableSource(q.source, chainId)),
         )
+        const loaded = loading ? await (loading as Promise<LoadedBatch | null>) : undefined
 
-        if (runId !== abortRef.current) return // stale
+        if (!current()) return // stale
 
-        const bestSplit = findBestSplit(quoteMap, rawAmount, currentMeta.best)
+        run.ranAt = Date.now()
+        // Refused or failed: nothing was priced, so the last analysis stays (and ages). Not a "no split" answer.
+        if (loaded === null) return
+        if (loaded?.batch.status === 'deferred') {
+          run.retryAt = loaded.receivedAt + loaded.batch.retryAfterMs
+          return
+        }
+        run.retryAt = 0
+
+        const bestSplit = findBestSplit(quoteMap, amountRaw, seedQuote.best)
 
         const result: SplitQuoteResult = {
-          bestSingle: currentMeta.best,
+          bestSingle: seedQuote.best,
           bestSplit,
-          allSingles: currentMeta.all,
+          allSingles: seedQuote.all,
           splitRecommended: bestSplit.isSplit && bestSplit.improvementBps >= SPLIT_MIN_IMPROVEMENT_BPS,
-          fetchedAt: Date.now(),
+          fetchedAt: loaded?.receivedAt ?? Date.now(),
         }
 
-        setSplitResult(result)
+        setAnalysis({ tradeId: id, result })
 
         // Auto-enable split if recommended
-        if (result.splitRecommended) {
+        if (result.splitRecommended && !run.heldOff) {
+          selectedRef.current = true
           setUseSplit(true)
         }
       } catch {
-        if (runId === abortRef.current) {
-          setSplitResult(null)
+        if (current()) {
+          run.ranAt = Date.now()
+          setAnalysis(null)
         }
       } finally {
-        if (runId === abortRef.current) {
+        if (current()) {
+          run.inFlight = false
           setAnalyzing(false)
         }
       }
-    }
+    },
+    [chainId],
+  )
 
-    analyze()
-  }, [meta?.fetchedAt, tokenIn?.address, tokenOut?.address, amountIn, enabled, tradeAboveThreshold, chainId])
+  /** The batch as a request of its own: the analysis of a new trade, or a refresh no poll can carry. */
+  const requestBatch = useCallback(
+    async (key: QuoteKey): Promise<LoadedBatch | null> => {
+      if (!tokenIn || !tokenOut) return null
+      const params = new URLSearchParams({
+        src: tokenIn.address,
+        dst: tokenOut.address,
+        amount: key.amountRaw,
+        srcDecimals: tokenIn.decimals.toString(),
+        dstDecimals: tokenOut.decimals.toString(),
+      })
+      // [CHORE-SPLITROUTE-CHAINID] Price sub-legs on the ACTIVE chain.
+      // Same P219 convention as useQuote (this endpoint's primary
+      // caller): append the param only off-mainnet so the mainnet
+      // request stays byte-identical — /api/quote's P217 default IS
+      // chain 1. Omitting this priced Base sub-legs on MAINNET (502s
+      // for Base-only addresses → split routing silently dead on Base;
+      // mainnet-priced analyses for same-address tokens). Triage:
+      // PR #262 (audit/splitroute-chain-awareness, W4-followup report).
+      if (chainId !== DEFAULT_CHAIN_ID) params.set('chainId', String(chainId))
+      params.set('split', '1')
+      const res = await fetch(`/api/quote?${params}`)
+      if (!res.ok) return null
+      const body: { split?: SplitBatch } = await res.json()
+      return body.split ? { batch: body.split, receivedAt: Date.now() } : null
+    },
+    // [fix/quote-identity-loop] Keyed on token VALUES, not object identity — see useQuote.ts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tokenIn?.address, tokenIn?.decimals, tokenOut?.address, tokenOut?.decimals, chainId],
+  )
+
+  /** Is a refresh due? The rule behind both ways a refresh can happen. */
+  const refreshDue = useCallback((): boolean => {
+    const run = runRef.current
+    if (run.inFlight || run.ranAt === 0) return false // a trade's first analysis is the hook's own request
+    if (run.retryAt) return Date.now() >= run.retryAt
+    const selected = selectedRef.current && latestRef.current.analysis?.result.bestSplit.isSplit === true
+    return selected || Date.now() - run.ranAt >= SPLIT_UNSELECTED_REFRESH_MS
+  }, [])
+
+  // The next quote poll for this very trade carries the refresh when one is due.
+  useEffect(
+    () =>
+      splitPoll?.register((key) => {
+        const now = latestRef.current
+        return !!now.tradeKey && now.eligible && sameQuoteKey(key, now.tradeKey) && refreshDue()
+      }),
+    [splitPoll, refreshDue],
+  )
+
+  useEffect(() => {
+    if (!tradeId || !tradeKey || !seed || !tradeAboveThreshold) return
+    const run = runRef.current
+    const polled = seed.split
+    if (polled && polled.receivedAt !== run.polledAt) {
+      run.polledAt = polled.receivedAt
+      analyse(tradeId, tradeKey.amountRaw, seed, async () => ({ batch: polled, receivedAt: polled.receivedAt }))
+      return
+    }
+    if (settledId !== tradeId || run.inFlight) return
+    if (run.ranAt === 0 || (!splitPoll && refreshDue())) {
+      analyse(tradeId, tradeKey.amountRaw, seed, () => requestBatch(tradeKey))
+    }
+    // Runs once per settled trade and once per new quote (`seed` is a new object every render in some callers).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tradeId, settledId, seed?.fetchedAt, seed?.split?.receivedAt, tradeAboveThreshold])
+
+  const toggleSplit = useCallback(() => {
+    const next = !selectedRef.current
+    selectedRef.current = next
+    setUseSplit(next)
+    if (!next) return
+    const run = runRef.current
+    run.heldOff = false
+    // Selected on an analysis too old to execute: refresh it now rather than at the next poll (not while a deferral runs).
+    const now = latestRef.current
+    if (now.tradeKey && now.tradeId && now.seed && now.analysis && !run.inFlight && Date.now() >= run.retryAt && isSplitQuoteStale(now.analysis.result)) {
+      const key = now.tradeKey
+      analyse(now.tradeId, key.amountRaw, now.seed, () => requestBatch(key))
+    }
+  }, [analyse, requestBatch])
+
+  const fallBackToSingle = useCallback(() => {
+    runRef.current.heldOff = true
+    selectedRef.current = false
+    setUseSplit(false)
+  }, [])
 
   return {
     splitResult,
@@ -180,5 +336,6 @@ export function useSplitRoute(
     splitRecommended: splitResult?.splitRecommended ?? false,
     useSplit,
     toggleSplit,
+    fallBackToSingle,
   }
 }

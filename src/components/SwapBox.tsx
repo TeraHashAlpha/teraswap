@@ -36,6 +36,7 @@ import { setParticleTurbo } from './ParticleNetwork'
 // Security tracking moved server-side — events are recorded by /api/log-swap
 import { useActiveApprovals } from '@/hooks/useActiveApprovals'
 import { useSplitRoute } from '@/hooks/useSplitRoute'
+import { isSplitQuoteStale } from '@/lib/split-routing-types'
 import { useSplitSwap } from '@/hooks/useSplitSwap'
 import SplitRouteVisualizer from './SplitRouteVisualizer'
 import { findToken, isNativeETH, type Token } from '@/lib/tokens'
@@ -156,7 +157,7 @@ export default function SwapBox() {
   })
 
   const excludeArray = useMemo(() => excludedSources.size > 0 ? Array.from(excludedSources) : undefined, [excludedSources])
-  const { meta: rawMeta, loading: quoteLoading, error: quoteError, retryIn: quoteRetryIn, countdown, refresh: refreshQuote } =
+  const { meta: rawMeta, loading: quoteLoading, error: quoteError, retryIn: quoteRetryIn, splitPoll, countdown, refresh: refreshQuote } =
     useQuote(tokenIn, tokenOut, amountIn, isChainOkForQuote, excludeArray, { logQuote: true })
 
   // [LP-04 / P140] Smart MEV routing — logic extracted to
@@ -294,8 +295,8 @@ export default function SwapBox() {
   const depegCheck = useDepegCheck(tokenIn?.address, tokenOut?.address)
   const { addRecord } = useSwapHistory()
   const { addApproval } = useActiveApprovals()
-  const { splitResult, analyzing: splitAnalyzing, useSplit, toggleSplit } =
-    useSplitRoute(meta, tokenIn, tokenOut, amountIn, isChainOkForQuote, activeChainId)
+  const { splitResult, analyzing: splitAnalyzing, useSplit, toggleSplit, fallBackToSingle } =
+    useSplitRoute(meta, tokenIn, tokenOut, amountIn, isChainOkForQuote, activeChainId, splitPoll)
 
   const {
     status: splitSwapStatus,
@@ -657,6 +658,17 @@ export default function SwapBox() {
   // [fix/unpriced-ack-paths L-3] …and the split hook's 409 opens the same dialog.
   const unpricedConsentOpen = unpricedConsentRequested || unpricedAckRequired || splitUnpricedAckRequired
 
+  // [fix/quote-rate-limit-normal-use, owner 2026-11-27] The split Swap may execute, asked at the moment of execution.
+  // Sub-quotes older than one poll (the split bucket was spent, or polls are failing) are not executed: the same press
+  // goes down the single best route, which has its own review, and the toast says so.
+  const splitToExecute = useCallback(() => {
+    if (!isSplitActive || !splitResult?.bestSplit) return null
+    if (!isSplitQuoteStale(splitResult)) return splitResult.bestSplit
+    fallBackToSingle()
+    toast({ type: 'warning', title: 'Split quotes out of date', description: 'Using the single best route for this swap.', duration: 8000, dedupKey: 'split-stale' })
+    return null
+  }, [isSplitActive, splitResult, fallBackToSingle, toast])
+
   const handleApproveAndSwap = useCallback(async () => {
     if (!chainActive) return // [P223] swaps disabled on coming-soon chains
     if (anyBlocked) {
@@ -681,14 +693,15 @@ export default function SwapBox() {
     // [feat/swap-price-tiers D3] No reference price on either leg → informed consent before executing.
     if (unpricedPair) { stopWaitingSound(); setUnpricedConsentRequested(true); return }
 
-    if (isSplitActive && splitResult?.bestSplit) {
-      executeSplitSwap(splitResult.bestSplit)
+    const split = splitToExecute()
+    if (split) {
+      executeSplitSwap(split)
     } else if (meta?.best.source) {
       // [SPRINT-9O Part B] Pass ranked fallbacks so a best route that reverts
       // pre-swap simulation auto-switches to the next working source.
       executeSwap(meta.best.source, orderExecutableFallbacks(meta, meta.best.source, activeChainId))
     }
-  }, [approvalReady, approve, meta, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap, chainActive, activeChainId, unpricedPair])
+  }, [approvalReady, approve, meta, executeSwap, anyBlocked, splitToExecute, executeSplitSwap, chainActive, activeChainId, unpricedPair])
 
   const handleSwap = useCallback(() => {
     if (!chainActive) return // [P223] swaps disabled on coming-soon chains
@@ -710,14 +723,15 @@ export default function SwapBox() {
     // [feat/swap-price-tiers D3] No reference price on either leg → informed consent before executing.
     if (unpricedPair) { setUnpricedConsentRequested(true); return }
     startWaitingSound()
-    if (isSplitActive && splitResult?.bestSplit) {
-      executeSplitSwap(splitResult.bestSplit)
+    const split = splitToExecute()
+    if (split) {
+      executeSplitSwap(split)
     } else if (meta?.best.source) {
       // [SPRINT-9O Part B] Pass ranked fallbacks so a best route that reverts
       // pre-swap simulation auto-switches to the next working source.
       executeSwap(meta.best.source, orderExecutableFallbacks(meta, meta.best.source, activeChainId))
     }
-  }, [meta, executeSwap, anyBlocked, isSplitActive, splitResult, executeSplitSwap, chainActive, activeChainId, unpricedPair])
+  }, [meta, executeSwap, anyBlocked, splitToExecute, executeSplitSwap, chainActive, activeChainId, unpricedPair])
 
   // [feat/swap-price-tiers D3] Consent given → the same execution path, with the ack.
   // [fix/unpriced-ack-paths] The ack is decided HERE, once, and rides every /api/swap call — the
@@ -725,12 +739,13 @@ export default function SwapBox() {
   const confirmUnpricedSwap = useCallback(() => {
     setUnpricedConsentRequested(false)
     startWaitingSound()
-    if (isSplitActive && splitResult?.bestSplit) {
-      executeSplitSwap(splitResult.bestSplit, { unpricedAck: true })
+    const split = splitToExecute()
+    if (split) {
+      executeSplitSwap(split, { unpricedAck: true })
     } else if (meta?.best.source) {
       executeSwap(meta.best.source, orderExecutableFallbacks(meta, meta.best.source, activeChainId), { unpricedAck: true })
     }
-  }, [meta, executeSwap, isSplitActive, splitResult, executeSplitSwap, activeChainId])
+  }, [meta, executeSwap, splitToExecute, executeSplitSwap, activeChainId])
   const cancelUnpricedSwap = useCallback(() => {
     setUnpricedConsentRequested(false)
     stopWaitingSound()
