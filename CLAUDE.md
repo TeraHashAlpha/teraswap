@@ -108,11 +108,9 @@ Major versions below; exact pins live only in `package.json` (Dependabot moves t
 
 ## Code Agent Feedback Convention
 
-**Per-PR, not shared.** The old shared append-only `FEEDBACK.md` conflicted on every parallel PR — GitHub's
-squash/rebase merge does not honor the `merge=union` git attribute (tried in `CHORE-FEEDBACK-MERGE-UNION`),
-so every PR touching it paid a rebase tax. Each PR now carries its **own** feedback instead: either a
-`## Feedback` section in the PR body, or a per-PR file at `docs/feedback/<branch-name>.md`. Never append to
-the old shared `FEEDBACK.md` (archived, see below) — a new PR never has a reason to touch it.
+**Per-PR, not shared.** Each PR carries its **own** feedback: either a `## Feedback` section in the PR body, or a
+per-PR file at `docs/feedback/<branch-name>.md`. A shared feedback file conflicts on every parallel PR, because
+GitHub's squash/rebase merge ignores the `merge=union` git attribute.
 
 **Feedback file lifecycle:** Create `docs/feedback/<branch>.md` in the FIRST commit with this goal's task checklist.
 Tick items and add findings as you go. The final FEEDBACK is the last edit of that file, not a report written at
@@ -143,8 +141,7 @@ Within a single PR the file/section is append-only — each prompt in that PR ad
 previous entries. If no feedback applies to a prompt, do NOT create a feedback section/file (no empty sections).
 The Architect reviews each PR's feedback at merge time and triages items into the backlog.
 
-The legacy shared `FEEDBACK.md` is archived at `archive/FEEDBACK.md` (rule #4 escape valve) — its content is
-preserved for historical reference; do not append to it or resurrect it at the repo root.
+`archive/FEEDBACK.md` is a historical record (rule #4): do not append to it or restore it at the repo root.
 
 ---
 
