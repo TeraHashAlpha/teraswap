@@ -37,6 +37,20 @@ screen, so `useSplitRoute` reads its USDC output as the trade's value and sends 
 half-typed amount: 67 of the 122 requests above asked for 0.02 ETH or less. v2 passes the hook only a quote that
 matches the field, and sent 1. A small amount that never passed through a large one never got a 429 in this rig.
 
+## Owner answers (asked once, 2026-11-27; they supersede the goal text)
+1. **Split cost:** QUOTE_RATE_LIMIT stays 30/min. A split call costs 1 unit there plus 1 per sub-quote (11) on a NEW
+   `quote-split:` bucket of 66/min. Bucket spent: no error, the split comes later. One IP's fan-out ceiling rises from 30
+   to about 95 a minute.
+2. **Budget test:** each step 0 action gets its own minute, under 15 requests, two tabs counted together; the whole
+   back-to-back session has zero 429s. The split starts once the pair and amount have held about 1.5 s.
+3. **Split age (owner's own words):** "While a split is the selected route, refresh its analysis with every 15 s poll (one
+   batched call), so the sub-quotes execution reads are never older than today. The 60 s rule applies only while no split
+   is selected. If Swap is pressed with split sub-quotes older than 15 s (bucket spent), do not execute the split: fall
+   back to the single best route and say so in the UI."
+
+Design that follows (mine, forced by 2 + 3): the refresh **rides on the poll** (`/api/quote?…&split=1` answers the
+single quote and the sub-quotes). As a separate request, two tabs with a split selected would make 16 a minute.
+
 ## Further reads (the task needed them)
 `src/lib/meta-quote-cache.ts`, `src/lib/client-ip-key.ts`, `src/lib/rate-limiter.ts`, `src/lib/api.ts` (fetchMetaQuote),
 `src/lib/fetch-json.ts`, `src/hooks/useDebounce.ts`, `src/lib/kv.ts`, `node_modules/@upstash/redis` (REST encoding, for
