@@ -28,7 +28,8 @@ let fillEqCalls: Array<[unknown, unknown]> = []
 
 function makeBuilder(table: string, result: unknown) {
   const builder: Record<string, unknown> = {}
-  for (const m of ['select', 'order', 'limit', 'in', 'gte']) {
+  // [ADR-029 9.3] `is` too: the route's swaps query now leaves claim rows out (supabase-js has it; no assertion changed).
+  for (const m of ['select', 'order', 'limit', 'in', 'gte', 'is']) {
     builder[m] = () => builder
   }
   builder.range = (from: number, to: number) => {

@@ -291,7 +291,15 @@ compare('flag OFF: every reader is byte-identical to main', () => {
     expect(now.status).toBe(golden.status)
     expect(now.headers).toEqual(golden.headers)
     expect(now.body).toBe(golden.body)
-    expect(now.ops).toEqual(golden.ops)
+    // CHANGED EXPECTATION (GOAL 133D, A106 R3-3, ADR-029 9.3): HISTORY'S SWAPS QUERY LEAVES CLAIM ROWS OUT IN THE
+    // DATABASE (ONE FILTER AFTER THE WALLET'S), SO THEY ARE OUT OF THE PAGE AND OF `total`; ITS BODY STAYS MAIN'S BYTES
+    // (ABOVE). EVERY OTHER READER SENDS MAIN'S QUERIES, UNCHANGED.
+    const history = name === 'GET /api/history?wallet'
+    const expected = history
+      ? golden.ops.map((op) => (op.table === 'swaps' ? { ...op, filters: [op.filters[0], 'claimed_tx_hash=is.null', ...op.filters.slice(1)] } : op))
+      : golden.ops
+    if (history) expect(golden.ops.filter((op) => op.table === 'swaps')).toHaveLength(1)
+    expect(now.ops).toEqual(expected)
   })
 
   it.each(['false', '1', 'TRUE', 'yes', ''])('a flag value of %j is OFF: still main\'s answers', async (value) => {
