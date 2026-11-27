@@ -1,6 +1,6 @@
 # src/app/api — API routes and proxies
 
-Scoped to `src/app/api/`. Root rules in `/CLAUDE.md` still apply. 45 `route.ts` files (counted 2026-11-11). The worked example for
+Scoped to `src/app/api/`. Root rules in `/CLAUDE.md` still apply. The worked example for
 everything below is `src/app/api/rpc/route.ts`; its header (`:13-56`) says why each guard exists.
 
 ## Rate limiting

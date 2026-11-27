@@ -29,7 +29,10 @@ route under `src/app/api/**/route.ts`.
 
 ## Rate limiting
 
-- Tier-based via `checkRateLimit(req, tier)` from `@/lib/rate-limiter`.
+- v1 (API-key) routes: `verifyApiKey()` applies the key's tier limit and returns `rateLimitHeaders` — forward them
+  (`src/app/api/v1/quote/route.ts`).
+- Every other new or touched route: `checkRateLimitWithin(key, limit, windowMs, cost?)` from `@/lib/kv-rate-limiter`,
+  keyed by `clientIpKey(req)` — rules and reasons in `src/app/api/CLAUDE.md` ("Rate limiting", "Keys and logs").
 - Mock Upstash KV in tests — see `src/lib/kv-rate-limiter.test.ts` for the mocking pattern.
 - Always set rate limit response headers on success and on 429.
 

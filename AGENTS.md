@@ -1,4 +1,4 @@
-<!-- claude-md-sha256: 4efc2119ddc4561053cc55af6d6691c6f9714a6af59bcd64622e812c5bbdce5b -->
+<!-- claude-md-sha256: 0e68abc7b65b09bb75b15e8ffe6fbbcd6f4147829563fa690b759291eac9b9b3 -->
 # AGENTS.md — TeraSwap for Grok Build and other non-Claude coding agents
 
 Grok Build reads this file, not `CLAUDE.md`. This file exists so a second coding agent gets the same
@@ -22,7 +22,11 @@ model/effort tier, files-affected allow-list, Do NOT list). Before touching any 
 fund-flow code, check open findings in `docs/security/AUDIT-TOTAL.md` — never proceed against an open
 Critical/High.
 
-## Hard rules (verbatim from `CLAUDE.md` — do not paraphrase these away)
+## Hard rules (do not paraphrase these away)
+
+Each rule below is also stated in `CLAUDE.md`. Bash compatibility, both agent-verify rules and Grok Build launch are
+copied from it; address hygiene, chain-awareness, the dependency rules and the `.env*` sentence are in its Conventions
+in the same words; Credential hygiene extends its Do NOT 13, and the deletion rule is its Do NOT 4.
 
 **Address hygiene.** No hand-typed hex. Addresses and hashes flow script → config, never keyboard → file.
 Hex equality is never checked by eye — always computed. Re-extract addresses from chain state at the point of
@@ -32,9 +36,9 @@ sentinel for every derivation (hash, address, slice) so truncation or corruption
 silent.
 
 **Credential hygiene.** Never read the macOS keychain or any credential helper (`git credential-*`,
-`security find-*`), even read-only. Never read or print `.env`, `.env.local`, `.env.production`, or
-`.env.production.local`. If a task needs auth the agent lacks, report the manual step and stop — do not work
-around it.
+`security find-*`), even read-only. Never read or print any `.env*` file — `.env`, `.env.local`, `.env.production` and
+`.env.production.local` included; only the tracked `.env*.example` templates may be read. If a task needs auth the
+agent lacks, report the manual step and stop — do not work around it.
 
 **Chain-awareness is the #1 root cause of past incidents.** Any change touching pricing, a safety/value gate,
 an RPC transport, or router selection must explicitly answer: *"is this chain-aware?"* A path that silently

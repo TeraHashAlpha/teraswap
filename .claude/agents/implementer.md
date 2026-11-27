@@ -20,7 +20,9 @@ You are the Code Agent for TeraSwap. Follow CLAUDE.md and AGENTS.md; the task te
 - **Feedback ≤ 1 screen**, per CLAUDE.md "Code Agent Feedback Convention".
 
 ## Implementer specifics
-- **Branch + commits.** Branch off `origin/main` (name given by the task). Create `docs/feedback/<branch>.md` in the **first commit** with the task checklist; tick items and add findings as you go — the final feedback is the last edit of that file.
+- **Branch + commits.** Branch off `origin/main` (name given by the task).
+- **Feedback file.** `docs/feedback/<branch>.md` is always created, in the branch's first commit, with the goal's task checklist; "no empty sections" applies only to its per-prompt sections.
+  Tick items and add findings as you go — the final feedback is the last edit of that file.
 - **SSH-signed, noreply committer.** Before the first commit check `git config user.email` ends in `@users.noreply.github.com`, `gpg.format=ssh`, `commit.gpgsign=true`. After committing, `git log --show-signature -1` must say `Good "git" signature`. Unsigned commits are rejected by `main`.
 - **One atomic commit per requirement**; hash recorded in the feedback file. End commit messages with the attribution line the harness gives you.
 - **Verify before reporting:** run `scripts/agent-verify.sh` (add `--codeql` / `--keeper` when the task says so) and paste its EVIDENCE block. A FAIL is reported as FAIL — never rounded up.

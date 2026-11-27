@@ -67,12 +67,14 @@ Never write "think carefully", "step by step", "explain your reasoning", or othe
 
 *(Reference — pull only what the task needs into the `/goal`, keep it ≤ 4000.)*
 
-- **What/where.** Permissionless, no-KYC meta-aggregator, 0.1% fee. **LIVE on Ethereum mainnet + Base L2.** 11 sources
-  (+ Bebop = 12th, ADR-010).
-- **Contracts** (Solidity 0.8.28, Foundry). Mainnet: real `OrderExecutor` v2 + `FeeCollector V2 = 0x47f2…7459`. Base:
-  `0xeFC3…f130 = FeeCollector` (swap fns only, **no** `executeOrder`) — **BaseScan mislabels it "OrderExecutor"**; env
-  `NEXT_PUBLIC_BASE_FEE_COLLECTOR=0xeFC3…f130`. **Base has NO real OrderExecutor yet** → Base conditional orders stay
-  fail-closed until one is deployed.
+- **What/where.** Permissionless, no-KYC meta-aggregator, 0.1% fee. **LIVE on Ethereum mainnet, Base and Arbitrum
+  One.** 12 registered adapters, 4 in `DISABLED_SOURCES` (`src/lib/constants.ts`) → 8 live sources.
+- **Contracts** (Solidity 0.8.28, Foundry). Addresses come only from the Contracts table in `docs/DEPLOYMENTS.md`,
+  always qualified by chain: one address is a different contract per chain. `0xeFC3…f130` is the mainnet
+  `OrderExecutor` v2 but the `FeeCollector` on Base and Arbitrum (swap fns only, **no** `executeOrder`) — **BaseScan
+  mislabels it "OrderExecutor"**; env `NEXT_PUBLIC_BASE_FEE_COLLECTOR=0xeFC3…f130`. Base and Arbitrum each have an
+  `OrderExecutor V3` (oracle floor) row; for whether it is operational, read its "Verified facts" column **and** the
+  dated notes above the table (the 2026-11-13 note supersedes the Arbitrum row's "NOT operational").
 - **Chain-awareness = the #1 historical root cause.** Most past bugs = a path not chain-aware (RPC URL, price feeds,
   safety/oracle gates, router whitelist) → Base priced/gated off mainnet. For ANY prompt touching pricing / gates / RPC
   / routers, require *"is this chain-aware?"*. Router whitelist: **mainnet Augustus V5 / Base V6**.
@@ -80,19 +82,24 @@ Never write "think carefully", "step by step", "explain your reasoning", or othe
   `minimumOutput` + chain-correct router whitelist. `api/swap` fail-closed gates: **SC-04** (`isKnownSwapSelector`) +
   **R1** (`validateCallDataRecipient`). **Chainlink validation is mandatory** for all swaps (29 mainnet feeds);
   **DefiLlama blocks swaps > $10k** when unavailable; never trust single-source price.
-- **DCA caveat (flagship P1a).** DCA signs `minOut = 1 wei` → the on-chain `minimumOutput` is a **NO-OP for DCA**; the
-  current bound is the **off-chain Phase-0 floor (#279, `order-floor.js`)** until the **v3 on-chain fix (ADR-013)**. Base
-  uses the **sequencer private mempool** (not public-mempool-sandwichable).
+- **DCA floor (flagship P1a).** On the v2 signing path DCA signs `minOut = 1 wei` → the on-chain `minimumOutput` is a
+  **NO-OP** there. Where V3 is wired (`getOrderExecutorV3(chainId)`, which `isDcaLive` requires) DCA signs a derived
+  `minAmountOut`, never 1 (`src/components/DCAPanel.tsx`), and **OrderExecutor V3 enforces a per-chunk floor on-chain
+  (ADR-013)**: the higher of the oracle floor and the scaled signed minimum, or the latter alone with no usable feed. The
+  keeper adds its own floor (`order-floor.js`) with a price quorum (ADR-024: two agreeing sources → normal floor; one →
+  tighter floor and a $ cap; none, or two that disagree → skip the cycle; never fill blind). Base uses the **sequencer
+  private mempool** (not public-mempool-sandwichable).
 - **Order engine.** DCA/Limit/SL·TP are **L2-only** (Base first; mainnet gas unviable for small orders). **Keeper is
   self-hosted** (Gelato deprecated Mar-2026); `executor.js` signs + pays gas; **keeper stays on KMS**, never
-  `ALLOW_PLAINTEXT_KEY` in prod. DCA go-live = flip `NEXT_PUBLIC_DCA_ENABLED=true` (default off); the DCA gate pins
-  `chainId === 8453`.
-- **Stack invariants.** Next.js 16 · React 18 · TS 5.5 · Wagmi 2.19 · Viem 2.47 · RainbowKit 2.1 · Zustand 4.5 ·
-  Tailwind 3.4. Backend: Next API Routes on **Vercel Pro** (no CPU cap) + **Upstash Redis** + **Supabase (PostgreSQL +
+  `ALLOW_PLAINTEXT_KEY` in prod. DCA go-live = flip `NEXT_PUBLIC_DCA_ENABLED=true` (default off); DCA is live on a
+  chain only when `isDcaLive(chainId)` holds (`src/lib/dca-launch.ts`: the chain is in `DCA_CHAINS` = 8453, 42161 —
+  mainnet deliberately absent — is active, and has an `OrderExecutorV3` wired).
+- **Stack invariants.** Next.js 16 · React 18 · TS 5.9 · wagmi 2 · viem 2 · RainbowKit 2 · Zustand 4 · Tailwind 3
+  (exact pins: `package.json`). Backend: Next API Routes on **Vercel Pro** (no CPU cap) + **Upstash Redis** + **Supabase (PostgreSQL +
   RLS)**. Alchemy PAYG. **NEVER bump to wagmi v3** (P184 caused the WalletConnect multi-Core outage).
 - **Repo conventions.** ADR: Proposed→Accepted→**Superseded (never deleted)**, `docs/ADR/ADR-NNN-slug.md`. Incidents:
-  `INC-YYYY-MM-DD-NNN`, append-only, `Audits/Incidents/`. **RICE** for priority. Sprints:
-  `docs/Prompts/SPRINT-{N}{A-Z}.md`. **Marketing → `dex-aggregator 2.marketing/`, NEVER in the code repo.** Stay on
+  `INC-YYYY-MM-DD-NNN`, append-only, `Audits/Incidents/`. **RICE** for priority.
+  **Marketing → `dex-aggregator 2.marketing/`, NEVER in the code repo.** Stay on
   **npm** (`min-release-age=7d`). **Never re-enable a disabled source** without its incident's reactivation criteria.
   Rule #4 = never delete → mark superseded OR move to `archive/`.
 - **Roles & hard Do-NOTs.** Architect never edits source (produce prompts); Auditor never edits (classifies C/H/M/L,
@@ -113,8 +120,8 @@ Never write "think carefully", "step by step", "explain your reasoning", or othe
 ## Do NOT                  (explicit guardrails — the "never" list)
 ## Files affected (read ONLY these)   (the allow-list that scopes the agent)
 ## Expected output         (branch name, SSH-signed, push+report-not-poll, tests, FEEDBACK <= 1 screen)
-   Create docs/feedback/<branch>.md in the FIRST commit with this goal's task checklist; tick items and add
-   findings as you go; the final FEEDBACK is the last edit of that file, not a report written at the end.
+   `docs/feedback/<branch>.md` is always created, in the branch's first commit, with the goal's task checklist; "no empty sections" applies only to its per-prompt sections.
+   Tick items and add findings as you go; the final FEEDBACK is the last edit of that file, not a report written at the end.
    Exit = branch pushed + compare link reported + local verification done. CI runs once the OWNER opens the
    PR and must be green before merge — PR creation is never the agent's job.
    **Why:** compaction kills interim feedback; session death before final report loses the evidence. A
@@ -129,14 +136,16 @@ Never write "think carefully", "step by step", "explain your reasoning", or othe
 
 ---
 
-## 5. Parallelism & git hygiene (learned 2026-07-08)
+## 5. Parallelism & git hygiene
 
-- **Each parallel session runs in its OWN git worktree** — `git worktree add ../wt-<branch> origin/main`; never share
-  the main checkout (a stray `git checkout` moves HEAD → one branch's commit leaks onto another's).
+- **Each parallel session runs in its OWN git worktree** — `git worktree add "${TS_WORKTREE_BASE:-$HOME/ts-worktrees}/<slug>" origin/main`,
+  outside the repo and never under `.claude/worktrees/`; never share the main checkout (a stray `git checkout` moves
+  HEAD → one branch's commit leaks onto another's).
 - **Parallelise only on non-overlapping files.**
-- **Stray commit on an unmerged feature branch** → `rebase`-drop it, then **RE-SIGN the replayed commits** (rebase makes
-  new objects → they lose signatures; verify `git log --show-signature` before force-push). Feature-branch force-push is
-  fine; `main` protection stays intact.
+- **Stray commit on an unmerged feature branch** → report it. Dropping it rewrites history, so it needs a force-push:
+  never on a branch with an open PR, otherwise only on the owner's explicit word (CLAUDE.md "Branches"). If the owner
+  says yes, **RE-SIGN the replayed commits** (rebase makes new objects → they lose signatures; verify
+  `git log --show-signature` before the push).
 
 ---
 
@@ -146,7 +155,8 @@ Never write "think carefully", "step by step", "explain your reasoning", or othe
 - **Commit the spec in its implementation PR.** If the agent reports "missing spec file": **proceed from the
   self-contained `/goal` AND commit this spec in the PR**.
 - **SSH-signed commits, noreply committer** (rule #12) — `main` rejects unsigned.
-- **Per-PR feedback** (PR body or `docs/feedback/<branch>.md`), **not** the shared append-only `FEEDBACK.md`.
+- **Per-PR feedback**, **not** the shared append-only `FEEDBACK.md`:
+  `docs/feedback/<branch>.md` is always created, in the branch's first commit, with the goal's task checklist; "no empty sections" applies only to its per-prompt sections.
 - **PT-PT to the owner, EN in prompts.**
 
 ---

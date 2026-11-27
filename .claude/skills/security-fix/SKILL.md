@@ -41,11 +41,12 @@ code paths.
 
 ## CodeQL annotations
 
-- For confirmed false positives, add an inline `// CodeQL: <query-id> — FALSE POSITIVE: <reason>` comment per the P87 pattern.
+- For confirmed false positives, add an inline `// CodeQL: <query-id> — FALSE POSITIVE: <reason>` comment, as in `src/app/api/v1/swap/route.ts:140`.
 - For accepted risks, use `// CodeQL: <query-id> — ACCEPTED RISK: <reason>` and link the rationale.
 - Never use `// eslint-disable` or `// @ts-ignore` to silence CodeQL.
 
 ## Cross-references
 
-- Update `docs/security/AUDIT-TOTAL.md` to mark the finding closed (status + commit hash).
+- Update `docs/security/AUDIT-TOTAL.md` to mark the finding closed: status + branch name; add the PR number when it
+  exists. Never leave a bare commit hash as the only reference.
 - If the fix changes auth or rate-limiting *behaviour* (not just shape), update the entire relevant test suite, not just the new test.

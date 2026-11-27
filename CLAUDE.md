@@ -1,6 +1,6 @@
 # TeraSwap
 
-Multi-chain meta-aggregator on Ethereum Mainnet (1), Base (8453) and Arbitrum One (42161) — contracts per chain in `docs/DEPLOYMENTS.md`, the only source for addresses. All pricing, gating, RPC and router logic MUST be chain-aware. 12 adapters are registered (`src/lib/adapters/index.ts:15-19`); 4 are in `DISABLED_SOURCES` (`src/lib/constants.ts:202-232`: Balancer — dead SOR endpoint; Odos — vendor shutdown 2026-07-30, permanent; OpenOcean and Bebop — no vendor key, INC-2026-09-03-001), leaving 8 liquidity sources live. Each disabled entry carries its own written re-enable criterion. Also: conditional orders through OrderExecutor (UI v2 shows Limit and SL/TP as "Soon" — `src/ui/v2/__tests__/parity-sweep.test.tsx:12-13`), CoW Protocol as an ordinary source (the "Force MEV Protection" toggle is retired — `src/ui/v2/swap/retire-force-mev.swap.test.tsx:3-7`), Permit2 approvals (`src/ui/v2/modals/permit2-sheet.test.tsx`). Contracts: TeraSwapFeeCollector + TeraSwapOrderExecutor (Solidity 0.8.28, Foundry — `contracts/foundry.toml:6`, `contracts/order-engine/foundry.toml:5`).
+Multi-chain meta-aggregator on Ethereum Mainnet (1), Base (8453) and Arbitrum One (42161) — contracts per chain in `docs/DEPLOYMENTS.md`, the only source for addresses. All pricing, gating, RPC and router logic is chain-aware: a path that reuses a mainnet assumption on another chain is the most common defect class in this repo's incident history. 12 adapters are registered (`src/lib/adapters/index.ts:15-19`); 4 are in `DISABLED_SOURCES` (`src/lib/constants.ts:202-232`: Balancer — dead SOR endpoint; Odos — vendor shutdown 2026-07-30, permanent; OpenOcean and Bebop — no vendor key, INC-2026-09-03-001), leaving 8 liquidity sources live. Each disabled entry carries its own written re-enable criterion. Also: conditional orders through OrderExecutor (UI v2 shows Limit and SL/TP as "Soon" — `src/ui/v2/__tests__/parity-sweep.test.tsx:12-13`), CoW Protocol as an ordinary source (the "Force MEV Protection" toggle is retired — `src/ui/v2/swap/retire-force-mev.swap.test.tsx:3-7`), Permit2 approvals (`src/ui/v2/modals/permit2-sheet.test.tsx`). Contracts: TeraSwapFeeCollector + TeraSwapOrderExecutor (Solidity 0.8.28, Foundry — `contracts/foundry.toml:6`, `contracts/order-engine/foundry.toml:5`).
 
 **State:** see "Current state" at the bottom — every number there was measured on the date it names.
 
@@ -21,8 +21,11 @@ Multi-chain meta-aggregator on Ethereum Mainnet (1), Base (8453) and Arbitrum On
 - **ADR lifecycle:** Proposed → Accepted → Superseded (never deleted). Location: `docs/ADR/ADR-NNN-slug.md`.
 - **Incidents:** one file per incident, `INC-YYYY-MM-DD-NNN`, never overwritten. Location: `Audits/Incidents/`.
 - **Prioritisation:** RICE (Reach × Impact × Confidence / Effort).
-- **Sprint naming:** `docs/Prompts/SPRINT-{N}{A-Z}.md` — one file per sprint phase.
 - **Commits:** each prompt = 1 atomic commit, hash recorded in sprint packet.
+- **Address hygiene.** No hand-typed hex. Addresses and hashes flow script → config, never keyboard → file. Hex equality is never checked by eye — always computed. Re-extract addresses from chain state at the point of use, don't trust a value carried from an earlier step. Every on-chain assertion ships a positive AND a negative control (prove it fails on the wrong input, not just passes on the right one). Print a length sentinel for every derivation (hash, address, slice) so truncation or corruption is visible in the log, not silent.
+- **Chain-awareness is the #1 root cause of past incidents.** Any change touching pricing, a safety/value gate, an RPC transport, or router selection must explicitly answer: *"is this chain-aware?"* A path that silently reuses a mainnet assumption on another chain (or vice versa) is the single most common defect class in this repo's incident history.
+- **Dependency policy.** Never bump to wagmi v3. npm only, `min-release-age=7d` — no yanking a dependency the moment it publishes.
+- **Environment files.** Never read or print any `.env*` file — `.env`, `.env.local`, `.env.production` and `.env.production.local` included; only the tracked `.env*.example` templates may be read.
 - **Bash compatibility:** every `.sh` in this repo must run on macOS stock bash 3.2.57 — no `${var,,}` / `${var^^}`, no `declare -A`, no `mapfile` / `readarray`, no `globstar`. Lowercase via `tr '[:upper:]' '[:lower:]'`.
 - **Grok Build launch:** in this repo Grok is launched ONLY via `scripts/grok-dispatch.sh` or from a shell that sourced `scripts/grok-guard.sh`. A bare `grok` here has no credential guard. Their `--deny` flags (`Read(.env*)`, `Bash(security*)`, `Bash(git credential-*)`) do NOT protect `.env*` — measured (`docs/security/GROK-DENY-CANARY-2026-08-28.md`): Grok routes around a denied read by choosing a different command, because a `Bash(...)` deny rule matches the invoked command name, not its arguments, so `Bash(*.env*)` cannot match `cat .env.canary`. Only `--deny "Bash(*)"` actually refuses, and that blocks the whole shell — unusable for real work, so there is no usable middle. Treat those three flags as speed bumps and intent signals only, never as enforcement. What actually holds: (a) `--deny "Bash(*)"`, when acceptable to run unusable-for-real-work; (b) running in a git worktree that does not contain `.env*` at all — `scripts/grok-dispatch.sh` creates its worktree outside this repo (`${TS_WORKTREE_BASE:-$HOME/ts-worktrees}`, never under `.claude/worktrees/`, which is still inside the repo and reachable via `../../../`).
 - **Marketing:** all marketing content goes to `dex-aggregator 2.marketing/`, NEVER in this repo.
@@ -56,7 +59,7 @@ Consult security-knowledge **before** approving any change to contracts or fund 
 
 - [`ARCHITECT-INDEX.md`](ARCHITECT-INDEX.md) — master index of all architectural artifacts
 - [`docs/DEPLOYMENTS.md`](docs/DEPLOYMENTS.md) — contracts, wallets and keeper signers per chain (source of truth for addresses)
-- [`docs/ADR/`](docs/ADR/) — architectural decision records, ADR-001 to ADR-026 (status is in each file's header)
+- [`docs/ADR/`](docs/ADR/) — architectural decision records (count and latest: the generated "ADRs" line below; status is in each file's header)
 - [`docs/Prompts/`](docs/Prompts/) — sprint packets (`SPRINT-*.md`, highest numbered: `SPRINT-48-ARBITRUM-DCA-PREP.md`) and prompt packets
 - [`docs/feedback/`](docs/feedback/) — one feedback file per branch (see the convention below)
 - [`Audits/`](Audits/) — audit reports, external analysis, incident reports (`Audits/Incidents/`)
@@ -69,10 +72,10 @@ Consult security-knowledge **before** approving any change to contracts or fund 
 
 ## Stack
 
-Versions from `package.json:42-76` (exact pins).
+Major versions below; exact pins live only in `package.json` (Dependabot moves them).
 
-- **Frontend:** Next.js 16.4.3 (App Router), React 18.3.1, TypeScript ~5.9.3, Tailwind 3.4.19, wagmi 2.19.5, viem 2.57.3, RainbowKit 2.2.10, Zustand 4.5.7, TanStack Query 5.104.5; tests on vitest 4.1.12
-- **Backend:** Next.js API routes on Vercel (45 `route.ts` under `src/app/api`), Upstash Redis (`@upstash/redis` 1.39.0) for rate limiting + state, Supabase (`@supabase/supabase-js` 2.118.0; schema in `supabase/`)
+- **Frontend:** Next.js 16 (App Router), React 18, TypeScript 5.9, Tailwind 3, wagmi 2, viem 2, RainbowKit 2, Zustand 4, TanStack Query 5; tests on vitest 4
+- **Backend:** Next.js API routes on Vercel (`route.ts` files under `src/app/api`), Upstash Redis (`@upstash/redis`) for rate limiting + state, Supabase (`@supabase/supabase-js`; schema in `supabase/`)
 - **Blockchain:** Solidity 0.8.28 / Foundry (`contracts/`, `contracts/order-engine/`); Chainlink feed registry per chain in `src/lib/chains/chainlink-feeds.ts`; contracts per chain in the state section below
 - **Keeper:** self-hosted Node process, one instance per chain (`contracts/order-engine/executor/executor.js:40-44`), tests via `node --test`
 - **Browser → server:** on-chain reads go through `/api/rpc` (Ethereum, Base, Arbitrum — `src/app/api/rpc/route.ts:20-27`), CoW Protocol through `/api/cow/*` (`src/lib/kv-rate-limiter.ts:47-48`); the CSP `connect-src` is `'self'` plus wallet hosts only (`csp-policy.js:12-13`) and the CI job `third-party-hosts` fails any other host (`.github/workflows/e2e.yml:93-99`)
@@ -83,43 +86,41 @@ Versions from `package.json:42-76` (exact pins).
 
 ## Do NOT
 
-1. **NEVER edit source files directly** (Architect/Auditor) — always produce a prompt for the Code Agent.
-2. **NEVER approve changes to contracts or fund flows** without checking open audit findings in `docs/security/AUDIT-TOTAL.md`.
-3. **NEVER deploy without audit pass** (0C/0H). Sprint must be APPROVED before merge.
-4. **NEVER delete files** — git history preserves everything. Mark as superseded/deprecated **or** move to
+1. **Never edit source files directly** (Architect/Auditor) — always produce a prompt for the Code Agent.
+2. **Never approve changes to contracts or fund flows** without checking open audit findings in `docs/security/AUDIT-TOTAL.md`.
+3. **Never deploy without audit pass** (0C/0H). Sprint must be approved before merge.
+4. **Never delete files** — git history preserves everything. Mark as superseded/deprecated **or** move to
    `archive/<original-path>/` (mirroring the file's original location, e.g. `docs/Prompts/FOO.md` →
    `archive/docs/Prompts/FOO.md`), preserving content and history. Use `archive/` when a file is fully retired
    (no longer referenced anywhere) but still worth preserving verbatim — e.g. a superseded FEEDBACK.md, a removed
    prompt packet, a dead runbook. Use superseded/deprecated marking in place when the file is still linked from
    the index or referenced by ID (ADRs, incidents). Either way, nothing is ever deleted.
-5. **NEVER ignore open findings** — check `docs/security/AUDIT-TOTAL.md` and the latest sprint packet before starting work.
-6. **NEVER create ADRs or incidents outside conventions** — use the naming, format, and location defined above.
+5. **Never ignore open findings** — check `docs/security/AUDIT-TOTAL.md` and the latest sprint packet before starting work.
+6. **Never create ADRs or incidents outside conventions** — use the naming, format, and location defined above.
 7. **NEVER hardcode secrets or API keys** — all via env vars, no `NEXT_PUBLIC_` for server-only secrets.
-8. **NEVER re-enable disabled sources** without fulfilling reactivation criteria in the incident report (e.g., §4.3 of INC-2026-04-14-001).
-9. **NEVER trust single-source price data** — Chainlink validation is mandatory for all swaps. DefiLlama blocks swaps >$10k when unavailable.
-10. **NEVER put marketing files in this repo** — use `dex-aggregator 2.marketing/` to avoid leaking strategy via git.
-11. **NEVER push without CI green** — lint, typecheck, test, audit must pass. Admin bypass only for documented emergencies.
-12. **NEVER commit without a GPG/SSH signature** — every commit on every branch must be cryptographically signed; `main` rejects unsigned commits at branch protection. Setup: `docs/Runbooks/SIGNED-COMMITS.md`.
-13. **NEVER invoke credential helpers or read the keychain** (`git credential-*`, `security find-*`) for any purpose; if an action needs auth the session lacks, report the manual step and stop. Why: two agent sessions independently reached for the macOS keychain, one nearly self-merging a PR (keychain near-miss, 2026-07-09).
-14. **NEVER treat "PR open" as a goal's exit condition** — exit = branch pushed + compare link reported + local verification done. CI runs once the OWNER opens the PR and must be green before merge — PR creation is never the agent's job. Why: a stop-hook deadlocked 9 cycles requiring "PR open" when PR creation is owner-manual (stop-hook deadlock, 2026-07-09); a follow-up deadlocked again requiring "CI green" pre-PR when this repo's CI only triggers on push/PR to `main` (CHORE-HYGIENE-2, 2026-07-11).
-15. **STOP only if blocked or before anything irreversible** (force-push, delete, prod DB write, secrets); otherwise keep going and put status in the same message as your next action. Why: a session died 2026-09-19 before writing its feedback file, and the run's evidence was lost.
+8. **Never re-enable disabled sources** without fulfilling reactivation criteria in the incident report (e.g., §4.3 of INC-2026-04-14-001).
+9. **Never trust single-source price data** — Chainlink validation is mandatory for all swaps. DefiLlama blocks swaps >$10k when unavailable.
+10. **Never put marketing files in this repo** — use `dex-aggregator 2.marketing/` to avoid leaking strategy via git.
+11. **Never merge without CI green** (the owner merges) — lint, typecheck, test, audit must pass. An agent never pushes without `scripts/agent-verify.sh` passing on its last code commit. Admin bypass only for documented emergencies.
+12. **Never commit without a GPG/SSH signature** — every commit on every branch must be cryptographically signed; `main` rejects unsigned commits at branch protection. Setup: `docs/Runbooks/SIGNED-COMMITS.md`.
+13. **Never invoke credential helpers or read the keychain** (`git credential-*`, `security find-*`) for any purpose; if an action needs auth the session lacks, report the manual step and stop. Why: two agent sessions independently reached for the macOS keychain, one nearly self-merging a PR (keychain near-miss, 2026-07-09).
+14. **Never treat "PR open" as a goal's exit condition** — exit = branch pushed + compare link reported + local verification done. CI runs once the owner opens the PR and must be green before merge — PR creation is never the agent's job. Why: a stop-hook deadlocked 9 cycles requiring "PR open" when PR creation is owner-manual (stop-hook deadlock, 2026-07-09); a follow-up deadlocked again requiring "CI green" pre-PR when this repo's CI only triggers on push/PR to `main` (CHORE-HYGIENE-2, 2026-07-11).
+15. **Stop only if blocked or before anything irreversible** (force-push, delete, prod DB write, secrets); otherwise keep going and put status in the same message as your next action. Why: a session died 2026-09-19 before writing its feedback file, and the run's evidence was lost.
 
 ---
 
 ## Code Agent Feedback Convention
 
-**Per-PR, not shared.** The old shared append-only `FEEDBACK.md` conflicted on every parallel PR — GitHub's
-squash/rebase merge does not honor the `merge=union` git attribute (tried in `CHORE-FEEDBACK-MERGE-UNION`),
-so every PR touching it paid a rebase tax. Each PR now carries its **own** feedback instead: either a
-`## Feedback` section in the PR body, or a per-PR file at `docs/feedback/<branch-name>.md`. Never append to
-the old shared `FEEDBACK.md` (archived, see below) — a new PR never has a reason to touch it.
+**Per-PR, not shared.** Each PR carries its **own** feedback, in a per-PR file at `docs/feedback/<branch>.md`. A shared
+feedback file conflicts on every parallel PR, because GitHub's squash/rebase merge ignores the `merge=union` git
+attribute.
 
-**Feedback file lifecycle:** Create `docs/feedback/<branch>.md` in the FIRST commit with this goal's task checklist.
+**Feedback file lifecycle:**
+`docs/feedback/<branch>.md` is always created, in the branch's first commit, with the goal's task checklist; "no empty sections" applies only to its per-prompt sections.
 Tick items and add findings as you go. The final FEEDBACK is the last edit of that file, not a report written at
 the end. **Why:** compaction kills interim feedback; session death before final report loses the evidence.
 
-When implementing a prompt, if you encounter any of the following, document it in the PR's own feedback
-(PR body section or `docs/feedback/<branch>.md`):
+When implementing a prompt, if you encounter any of the following, document it in that file:
 
 - **Edge case not covered by the prompt** — e.g. a function that also needs the fix but wasn't listed
 - **Assumption that turned out wrong** — e.g. an import path that changed, a deprecated API
@@ -139,12 +140,11 @@ Format:
 - {description}
 ```
 
-Within a single PR the file/section is append-only — each prompt in that PR adds its own section, never removes
-previous entries. If no feedback applies to a prompt, do NOT create a feedback section/file (no empty sections).
+Within a single PR the file is append-only — each prompt in that PR adds its own section, never removes
+previous entries. If no feedback applies to a prompt, do NOT create a section for it (no empty sections).
 The Architect reviews each PR's feedback at merge time and triages items into the backlog.
 
-The legacy shared `FEEDBACK.md` is archived at `archive/FEEDBACK.md` (rule #4 escape valve) — its content is
-preserved for historical reference; do not append to it or resurrect it at the repo root.
+`archive/FEEDBACK.md` is a historical record (rule #4): do not append to it or restore it at the repo root.
 
 ---
 
@@ -194,9 +194,10 @@ always qualify by chain. Operational status and the checks behind each row are i
   user's order — only `order` misses advance the 8-miss ladder (`retry-policy.js:40-57`, ADR-026 Decision 2); ADR-024 (Accepted): DCA floor price quorum,
   skip the cycle, never the order; per-chain gas tiers (`gas-tier.js:1-17`); one instance per chain, verified against the chain at
   boot (`executor.js:46-60`). Scoped rules: `contracts/order-engine/CLAUDE.md`.
-- **Supply chain:** the CI `audit` job runs `scripts/audit-gate.mjs` (`ci.yml:73-86`). `audit-allowlist.json` holds 6 entries; every
-  entry carries `expires`, and an expired or undated entry blocks (`audit-allowlist.json` `$comment`; `scripts/audit-gate-lib.mjs:5-9`).
-  Earliest expiry: 2026-11-22.
+- **Supply chain:** the CI `audit` job runs `scripts/audit-gate.mjs` (`ci.yml:73-86`). Every `audit-allowlist.json`
+  entry is dated: `expires`, or, when no patched release exists, `noPatch: true` with a `reviewDate`. An expired or undated
+  entry blocks (`audit-allowlist.json` `$comment`; `scripts/audit-gate-lib.mjs:4-11`); read the file for the current entries
+  and the earliest date.
 - **Force-MEV retired (owner decision 2026-11-06):** the toggle, its notice and the "Use Gasless Route" CTA are gone from v1 and v2; CoW
   stays an ordinary, ranked source. The test header records why: CoW's free quote API has answered 429 to our servers since 2026-10-29
   (`src/ui/v2/swap/retire-force-mev.swap.test.tsx:3-7`).
