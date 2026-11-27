@@ -97,7 +97,7 @@ Major versions below; exact pins live only in `package.json` (Dependabot moves t
    the index or referenced by ID (ADRs, incidents). Either way, nothing is ever deleted.
 5. **Never ignore open findings** — check `docs/security/AUDIT-TOTAL.md` and the latest sprint packet before starting work.
 6. **Never create ADRs or incidents outside conventions** — use the naming, format, and location defined above.
-7. **Never hardcode secrets or API keys** — all via env vars, no `NEXT_PUBLIC_` for server-only secrets.
+7. **NEVER hardcode secrets or API keys** — all via env vars, no `NEXT_PUBLIC_` for server-only secrets.
 8. **Never re-enable disabled sources** without fulfilling reactivation criteria in the incident report (e.g., §4.3 of INC-2026-04-14-001).
 9. **Never trust single-source price data** — Chainlink validation is mandatory for all swaps. DefiLlama blocks swaps >$10k when unavailable.
 10. **Never put marketing files in this repo** — use `dex-aggregator 2.marketing/` to avoid leaking strategy via git.
