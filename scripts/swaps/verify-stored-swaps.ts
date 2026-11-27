@@ -14,6 +14,8 @@
  * lists `callerColumns`: what the caller stored that becomes public once verified with the flag on.
  * --apply sets verified_at and verified_kind on "mark" rows only, each only while it is still unverified, and nothing
  * else on an old row. A row holding a claim (ADR-029 7.3) is decided as the route decides it (claim_* decisions).
+ * Of rows with one chain, transaction and wallet only one is "mark" (the rest "duplicate"), and a chain with rows to
+ * check and no FeeCollector configured stops the run unless --allow-missing-fee-collector is given.
  *
  * It never prints a key or an RPC URL: the database is named by SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY and read
  * from the environment, the chain endpoints by RPC_URL_<chain id>, and failures are printed as fixed words.
@@ -83,6 +85,7 @@ void main({
   db: database,
   confirmClaim,
   describe,
+  feeCollectorOf: (chain) => feeCollectorsOf(chain).current,
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }).then(
   (code) => {

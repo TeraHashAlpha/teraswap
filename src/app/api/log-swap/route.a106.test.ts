@@ -57,7 +57,7 @@ import { __resetChainIdentityCache } from '@/lib/rpc-chain-identity'
 import { trackLargeTrade, trackOracleDeviation, trackOracleUnavailable, trackSwapFailed } from '@/lib/security-tracker'
 import { _resetVerifiedColumnsCache } from '@/lib/swap-log/store'
 import { generateSurplusReport } from '@/lib/surplus-report'
-import { verifySwapOnChain, type VerifySwapResult } from '@/lib/swap-verify/verify-swap-on-chain'
+import { feeCollectorsOf, verifySwapOnChain, type VerifySwapResult } from '@/lib/swap-verify/verify-swap-on-chain'
 import { trackWalletAction } from '@/lib/wallet-activity-server'
 import { createFakeSwapsDb, type Row } from '@/test-utils/fake-swaps-db'
 import { fakeUpstash } from '@/test-utils/fake-upstash-kv'
@@ -187,6 +187,7 @@ async function report(): Promise<Array<Record<string, unknown>>> {
   await scriptMain({
     argv: ['--from-db'], readStdin: async () => '', out: async (l) => void lines.push(l), err: (l) => void lines.push(`ERR ${l}`),
     verify: (input) => verifySwapOnChain(input), db: () => state.db.service as unknown as SwapsDb, describe: () => [], sleep: async () => {},
+    feeCollectorOf: (chain) => feeCollectorsOf(chain).current,
   })
   expect(lines.filter((l) => l.startsWith('ERR'))).toEqual([])
   return lines.map((l) => JSON.parse(l) as Record<string, unknown>).filter((o) => 'decision' in o)
