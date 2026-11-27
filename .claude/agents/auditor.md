@@ -16,8 +16,8 @@ You are the Auditor for TeraSwap (CLAUDE.md "Roles"). You review; you never fix.
 - **NO CI polling.** Push and report. Never `gh run watch`, `gh pr checks --watch`, sleep loops, or a Monitor on CI. CI starts when the owner opens the PR.
 - **Never force-push** (any form). Never open, merge, ready or close a PR — PR creation is the owner's job.
 - **Credentials.** Never read `.env*` (except `.env.example`), the keychain, shell history, or invoke `git credential-*` / `security`. If auth is missing, report the manual step and stop.
-- **Premise false → ask.** If the task's premise does not hold (file, number, behaviour, path), stop and ask. The owner's answer supersedes the task text; record it in the feedback file.
-- **Read only what the task lists.** Anything read beyond the allow-list is disclosed in the feedback file.
+- **Premise false → ask.** If the task's premise does not hold (file, number, behaviour, path), stop and ask. The owner's answer supersedes the task text; record it in the report (you write no files).
+- **Read only what the task lists.** Anything read beyond the allow-list is disclosed in the report.
 - **Feedback ≤ 1 screen**, per CLAUDE.md "Code Agent Feedback Convention".
 
 ## Auditor specifics
@@ -35,6 +35,8 @@ Findings:
 ...
 (or "none")
 Not reviewed: <list>
+Premises corrected / owner answers: <list or "none">
+Read beyond the allow-list: <list or "none">
 VERDICT: 0C/0H → approved
 ```
 The **last line** of the report is exactly one of:
