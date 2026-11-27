@@ -1,14 +1,26 @@
+import { randomUUID } from 'node:crypto'
 import { NextResponse, type NextRequest } from 'next/server'
-// [P114/M-03] POST is a pure insert → logger (INSERT-only) client.
-// PATCH updates existing rows → must stay on service-role since the
-// logger role has no UPDATE grant.
+// [P114/M-03] POST inserts through the logger (INSERT-only) client. Its reads (are the verification columns there, how
+// many pending rows has this wallet) and everything PATCH does need the service role: the logger role can neither
+// SELECT nor UPDATE.
 import { getSupabase, getSupabaseLogger } from '@/lib/supabase'
-import { trackLargeTrade, trackSwapFailed, trackOracleDeviation, trackOracleUnavailable } from '@/lib/security-tracker'
 import { trackWalletAction } from '@/lib/wallet-activity-server'
-import { computeTokenAmountUsd } from '@/lib/chainlink'
-import { checkRateLimitWithin, LOG_RATE_LIMIT } from '@/lib/kv-rate-limiter'
+import { checkRateLimitWithin, LOG_CHAINLESS_RATE_LIMIT, LOG_RATE_LIMIT, LOG_READ_BUDGET } from '@/lib/kv-rate-limiter'
 import { bodySizeGuard, clientIp } from '@/lib/body-limit'
 import { forLog } from '@/lib/log-sanitize'
+import { confirmSwap, type ConfirmResult } from '@/lib/swap-log/confirm'
+import { parseConfirmSwap, parsePendingSwap } from '@/lib/swap-log/input'
+import { findWalletVerifiedByTx, hasMainRow, insertPending, makeRoomForPending, verifiedColumnsState } from '@/lib/swap-log/store'
+import { catalogSymbol } from '@/lib/swap-log/symbols'
+
+// [133b H.5] A confirmation that names its chain (the official client's) reads that chain twice: up to 4 + 9.5 + 9.5 s
+// (chain-id proof, transaction, receipt; each read one attempt and one retry, 4 s each, 1.5 s before a null is asked
+// again), then prices up to two tokens. One that names no chain asks the candidate chains in turn and starts no new one
+// after 20 s (confirm.ts CHAIN_SEARCH_BUDGET_MS): at most 20 + 13.5 + 9.5 s of chain reads before pricing, so the claim
+// is stored well inside this limit. [133c Q] A chain that returned the transaction ends the search (a failed receipt
+// read included), every upstream call is paid from the per-IP read budget (LOG_READ_BUDGET), and a confirmation naming
+// no chain has its own per-IP limit (LOG_CHAINLESS_RATE_LIMIT).
+export const maxDuration = 60
 
 // [AUDIT-W6 / W6-M-02 + W6-L-01] Shared guards for both handlers: body cap +
 // the per-IP budget shared by all log-* routes, BEFORE any parse/DB work.
@@ -26,272 +38,218 @@ async function ingestionGuards(req: NextRequest): Promise<NextResponse | null> {
 }
 
 /**
+ * [ADR-029 8.4, details Q.2 of goal 133c] The per-IP read budget: asked before every upstream chain call this request
+ * triggers (chain-read.ts). `false`: that call is not sent, and the confirmation answers 202 (the claim stored if the
+ * claim rules allow). The key is the one-way hash of the client IP, as for every limiter.
+ */
+function readBudgetOf(req: NextRequest): () => Promise<boolean> {
+  const key = `log-reads:${clientIp(req)}`
+  return async () => (await checkRateLimitWithin(key, LOG_READ_BUDGET.limit, LOG_READ_BUDGET.windowMs)).allowed
+}
+
+/** [ADR-029, details E] The one line logged while the migration is not applied: nothing is written then. */
+function logColumnsMissing(): void {
+  console.warn('[log-swap] swaps_verified_columns_missing')
+}
+
+/**
  * POST /api/log-swap
  *
- * Fire-and-forget endpoint to log swap executions to Supabase.
- * If Supabase is not configured, returns 200 silently.
+ * [ADR-029, details B] The browser calls this when the user submits a swap: no transaction exists yet, so nothing
+ * here can be checked on-chain. It therefore inserts ONLY a private pending row, from validated input:
+ *   - the wallet, the chain, the source (a name of the app's list), the two token ADDRESSES and the two declared
+ *     amounts (decimal digits); anything else is a 400;
+ *   - the symbols are the token catalog's for those addresses on that chain, never the caller's text;
+ *   - status is `pending`, there is no transaction hash, no USD value, no fee amount, no mev figure, whatever the
+ *     body says, and no alert or tracker call carries a USD value;
+ *   - [133b J] pending rows are scratch, and the cap never refuses: at 5 pending rows of the wallet in the last hour
+ *     the wallet's oldest scratch row is retired first (store.ts makeRoomForPending); only the per-IP limit answers 429.
+ * A row becomes `confirmed` or `failed` only by the server, after it read the transaction on-chain. A transaction hash
+ * sent with the POST (the split-swap client sends one, after its receipt) is handled as a PATCH on the POST's chain
+ * after the insert; a hash main stored for this wallet on that chain inserts nothing (ADR-029 9.1). The official
+ * client's calls keep their answer: 200 `{ ok: true }`.
  */
 export async function POST(req: NextRequest) {
   try {
     const refused = await ingestionGuards(req)
     if (refused) return refused
 
-    // [P114/M-03] INSERT-only logger client. Falls back to service-role
-    // when SUPABASE_LOGGER_KEY is unset (with a one-time warn in
-    // supabase.ts), so this branch stays alive during the rollout
-    // window before the dashboard key is provisioned.
-    const supabase = getSupabaseLogger()
-    if (!supabase) {
+    const logger = getSupabaseLogger()
+    const db = getSupabase()
+    if (!logger || !db) {
       console.warn('[log-swap] Supabase not configured — swap NOT logged. Check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY env vars.')
       return NextResponse.json({ ok: false, skipped: true, reason: 'supabase_not_configured' })
     }
 
-    const body = await req.json()
-
-    const {
-      wallet,
-      txHash,
-      chainId = 1,
-      source,
-      tokenIn,
-      tokenInSymbol,
-      tokenOut,
-      tokenOutSymbol,
-      amountIn,
-      amountOut,
-      amountInUsd,
-      amountOutUsd,
-      slippage = 0.5,
-      mevProtected = false,
-      feeCollected = false,
-      feeAmount,
-      status = 'pending',
-      // Security metadata (sent by client for server-side tracking)
-      oracleUnavailable = false,
-      priceDeviation = 0,
-      // [LP-05] MEV-savings telemetry (CoW-routed swaps only)
-      mevSavingsEstimate,
-      mevSavingsActual,
-      // [P118 / Sprint 16B] Quoted output amount in raw token wei, before
-      // slippage tolerance is applied. Persisted to swaps.expected_output
-      // for the ADR-006 surplus analysis. Accept as a numeric string or null.
-      expectedOutput,
-      // [P104 / 13A-L-02] Raw adapter gas USD on the best non-CoW route,
-      // sent advisory by the client. The server derives gas_savings_usd
-      // from it (clamped to [0, 500]) so clients cannot inflate aggregate
-      // totals. The older `gasSavingsUsd` field is silently ignored —
-      // accepted for backwards compat but never persisted directly.
-      bestNonCowGasUsd,
-    } = body
-
-    if (!wallet || !source || !tokenIn || !tokenOut || !amountIn || !amountOut) {
-      return NextResponse.json(
-        { error: 'Missing required fields' },
-        { status: 400 },
-      )
+    let body: unknown
+    try {
+      body = await req.json()
+    } catch {
+      // Not JSON, or longer than the body cap: as before, a 200 that says it was not logged.
+      return NextResponse.json({ ok: false, error: 'invalid_body' })
     }
 
-    // ── [10-L-03] Server-side USD valuation ──
-    // We can no longer trust `amountInUsd` from the request body for
-    // monitoring thresholds: a malicious public-API consumer would just
-    // send `amountInUsd: 1` on a $50k swap to slip past trackLargeTrade.
-    // Server-compute it via Chainlink + the token's on-chain decimals;
-    // fall back to the client value only when Chainlink can't price
-    // the token (long-tail tokens with no feed). Track both for drift
-    // monitoring during the transition.
-    const [serverInUsdResult, serverOutUsdResult] = await Promise.all([
-      computeTokenAmountUsd(tokenIn, amountIn).catch(() => null),
-      amountOut ? computeTokenAmountUsd(tokenOut, amountOut).catch(() => null) : Promise.resolve(null),
-    ])
+    const parsed = parsePendingSwap(body)
+    if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
+    const input = parsed.value
 
-    const clientInUsdNum = Number(amountInUsd)
-    const clientOutUsdNum = Number(amountOutUsd)
+    const columns = await verifiedColumnsState(db)
+    if (columns === 'missing') {
+      logColumnsMissing()
+      return NextResponse.json({ ok: true })
+    }
+    if (columns === 'unknown') return NextResponse.json({ ok: false, error: 'storage_unavailable' })
 
-    const serverInUsd = serverInUsdResult?.usd ?? null
-    const serverOutUsd = serverOutUsdResult?.usd ?? null
-
-    const finalInUsd: number | null =
-      serverInUsd ?? (Number.isFinite(clientInUsdNum) && clientInUsdNum > 0 ? clientInUsdNum : null)
-    const finalOutUsd: number | null =
-      serverOutUsd ?? (Number.isFinite(clientOutUsdNum) && clientOutUsdNum > 0 ? clientOutUsdNum : null)
-
-    const usdSourceInClient = serverInUsd === null && finalInUsd !== null
-    const usdSourceOutClient = serverOutUsd === null && finalOutUsd !== null
-
-    // Transitional drift monitoring: when both server + client agree on a
-    // value, log a warning if they disagree by >5%. Spot-checks production
-    // for client-side bugs and gives us evidence to fully drop the client
-    // field once usdSourceClient stays near zero.
-    if (serverInUsd != null && Number.isFinite(clientInUsdNum) && clientInUsdNum > 0) {
-      const drift = Math.abs(clientInUsdNum - serverInUsd) / serverInUsd
-      if (drift > 0.05) {
-        console.warn(
-          `[log-swap] USD drift on tokenIn: client=$${clientInUsdNum.toFixed(2)} server=$${serverInUsd.toFixed(2)} (drift=${(drift * 100).toFixed(1)}%) for ${forLog(tokenInSymbol)} (${forLog(tokenIn)})`,
-        )
-      }
+    // A repeat of a POST whose transaction this wallet already has verified: nothing to add.
+    if (input.txHash !== null && (await findWalletVerifiedByTx(db, input.wallet, input.txHash)) === true) return NextResponse.json({ ok: true })
+    // [ADR-029 9.1, A106 R3-1; owner's answer of 2026-11-27] A hash main stored for this wallet on this chain: that row
+    // stands for the swap and is read-only, so nothing is inserted beside it and the chain is not read. Unsure (the
+    // lookup failed): nothing is written either.
+    if (input.txHash !== null) {
+      const mainRow = await hasMainRow(db, input.wallet, input.chainId, input.txHash)
+      if (mainRow === 'error') return NextResponse.json({ ok: false, error: 'storage_unavailable' })
+      if (mainRow) return NextResponse.json({ ok: true })
     }
 
-    const { error } = await supabase.from('swaps').insert({
-      wallet: wallet.toLowerCase(),
-      tx_hash: txHash ?? null,
-      chain_id: chainId,
-      source,
-      token_in: tokenIn.toLowerCase(),
+    // Details J: make room (never refuse). A failed read of the scratch rows does not stop the insert.
+    if ((await makeRoomForPending(db, input.wallet, new Date())) === 'error') console.warn('[log-swap] pending cap not applied')
+
+    const tokenInSymbol = catalogSymbol(input.tokenIn, input.chainId)
+    const tokenOutSymbol = catalogSymbol(input.tokenOut, input.chainId)
+    const rowId = randomUUID()
+
+    const inserted = await insertPending(logger, {
+      id: rowId,
+      wallet: input.wallet,
+      chain_id: input.chainId,
+      source: input.source,
+      token_in: input.tokenIn,
       token_in_symbol: tokenInSymbol,
-      token_out: tokenOut.toLowerCase(),
+      token_out: input.tokenOut,
       token_out_symbol: tokenOutSymbol,
-      amount_in: amountIn,
-      amount_out: amountOut,
-      // Use the server-computed value when available; client fallback otherwise.
-      amount_in_usd: finalInUsd,
-      amount_out_usd: finalOutUsd,
-      slippage,
-      mev_protected: mevProtected,
-      fee_collected: feeCollected,
-      fee_amount: feeAmount ?? null,
-      status,
-      // [LP-05] Both columns are nullable numerics; existing rows are unaffected.
-      // Stored as raw output-token wei; USD conversion is a read-time concern.
-      mev_savings_estimate: mevSavingsEstimate ?? null,
-      mev_savings_actual: mevSavingsActual ?? null,
-      // [P118 / Sprint 16B] Quoted output (pre-slippage) for ADR-006 surplus
-      // analysis. Validated as numeric-string-or-null — any other shape is
-      // dropped to null rather than failing the insert.
-      expected_output:
-        typeof expectedOutput === 'string' && /^\d+$/.test(expectedOutput)
-          ? expectedOutput
-          : null,
+      amount_in: input.amountIn,
+      amount_out: input.amountOut,
+      slippage: input.slippage,
+      mev_protected: input.mevProtected,
+      fee_collected: input.feeCollected,
+      expected_output: input.expectedOutput,
       // [P96] Gasless flag — derived from source (server is authoritative).
-      is_gasless: source === 'cowswap',
-      // [P104 / 13A-L-02] gas_savings_usd is derived from the advisory
-      // bestNonCowGasUsd and clamped to [0, 500]. No single Ethereum
-      // mainnet swap saves >$500 in gas — anything above that is either
-      // a client bug or an attempt to poison aggregates.
-      gas_savings_usd:
-        source === 'cowswap' && Number.isFinite(Number(bestNonCowGasUsd))
-          ? Math.max(0, Math.min(Number(bestNonCowGasUsd), 500))
-          : 0,
+      is_gasless: input.source === 'cowswap',
+      gas_savings_usd: input.gasSavingsUsd,
     })
-
-    if (error) {
-      console.error('[log-swap] Supabase insert error:', error.message, error.details, error.hint)
-      return NextResponse.json({ ok: false, error: error.message })
+    if (!inserted.ok) {
+      // The database's error text can quote the row: only its code is logged.
+      console.error(`[log-swap] insert failed code=${forLog(inserted.code, 20)}`)
+      return NextResponse.json({ ok: false, error: 'insert_failed' })
     }
 
-    // ── Server-side wallet activity tracking (fire-and-forget) ──
-    trackWalletAction(wallet, {
+    // Wallet activity (fire-and-forget): validated values only, no USD, no transaction hash.
+    trackWalletAction(input.wallet, {
       category: 'swap',
       action: 'swap_logged',
-      source,
+      source: input.source,
       tokenIn: tokenInSymbol,
       tokenOut: tokenOutSymbol,
-      // [10-L-03] Use server-computed amountUsd (with client fallback).
-      amountUsd: finalInUsd ?? undefined,
-      txHash: txHash ?? undefined,
-      metadata: { status, slippage, mevProtected, feeCollected, usdSourceInClient, usdSourceOutClient },
+      metadata: { status: 'pending', slippage: input.slippage, mevProtected: input.mevProtected, feeCollected: input.feeCollected },
     })
 
-    // ── Server-side security event tracking (fire-and-forget) ──
-    // [10-L-03] tradeUsd is now derived from the server-computed value
-    // when available, so a malicious caller cannot suppress this alert
-    // by sending amountInUsd: 1 on a real $50k swap.
-    const tradeUsd = finalInUsd ?? 0
-
-    // Large trade monitoring (>$50k)
-    if (tradeUsd >= 50_000) {
-      trackLargeTrade({ wallet, tokenIn: tokenInSymbol, tokenOut: tokenOutSymbol, amountUsd: tradeUsd, source })
-    }
-
-    // Oracle unavailable warning
-    if (oracleUnavailable) {
-      trackOracleUnavailable({ wallet, tokenIn: tokenInSymbol, tokenOut: tokenOutSymbol, amountUsd: tradeUsd, blocked: false })
-    }
-
-    // Price deviation from Chainlink (≥2%)
-    if (Number(priceDeviation) >= 0.02) {
-      trackOracleDeviation({ wallet, tokenIn: tokenInSymbol, tokenOut: tokenOutSymbol, deviation: Number(priceDeviation), amountUsd: tradeUsd, blocked: false })
+    // The hash was NOT stored with the row: only a verification writes one (or keeps it as a claim). Whatever the chain
+    // says, the row above exists and the POST is answered as before.
+    if (input.txHash !== null) {
+      const confirmed = await confirmSwap({ db, wallet: input.wallet, txHash: input.txHash, chainId: input.chainId }, { beforeUpstream: readBudgetOf(req) })
+      if (confirmed.result === 'columns_missing') logColumnsMissing()
     }
 
     return NextResponse.json({ ok: true })
-  } catch (err) {
-    console.error('[log-swap] Error:', err)
-    return NextResponse.json({ ok: false, error: String(err) })
+  } catch {
+    // No error text: an error message can carry what the caller sent.
+    console.error('[log-swap] POST failed')
+    return NextResponse.json({ ok: false, error: 'internal_error' })
+  }
+}
+
+/** What each outcome of a confirmation answers (details C). */
+function confirmResponse(confirmed: ConfirmResult): NextResponse {
+  switch (confirmed.result) {
+    // Verified now (a pending row of the wallet updated, or a row made by the transaction), or already verified for
+    // this wallet and this transaction: the browser's call is answered as before.
+    case 'verified':
+      return NextResponse.json({ ok: true })
+    // The chain has no such transaction or receipt yet, or could not be read: the hash is kept as a private claim and
+    // the client asks again (analytics.ts: after 2, 8 and 30 s).
+    case 'not_found':
+      return NextResponse.json({ ok: false, outcome: 'not_found' }, { status: 202 })
+    case 'rejected':
+      return NextResponse.json({ error: 'Transaction not accepted for this swap' }, { status: 422 })
+    case 'duplicate':
+      return NextResponse.json({ error: 'Transaction already recorded' }, { status: 409 })
+    case 'columns_missing':
+      logColumnsMissing()
+      return NextResponse.json({ ok: true })
+    case 'storage_error':
+      console.error('[log-swap] PATCH storage error')
+      return NextResponse.json({ ok: false, error: 'storage_unavailable' })
   }
 }
 
 /**
  * PATCH /api/log-swap
  *
- * Update a swap record after tx confirmation (add tx_hash, gas, status).
+ * [ADR-029 section 7, details I of goal 133b] The browser calls this when it saw the transaction confirm. The body is
+ * `{ txHash, wallet, chainId? }`; a status, gas figures or mev figures in it are not read. The server then reads the
+ * transaction on that chain (or, with no chain, on the candidate chains: H.5) and THE TRANSACTION MAKES THE ROW
+ * (lib/swap-log/confirm.ts): its derived values go to a pending row of THAT wallet that agrees with it, or to a new row
+ * (never a row of another wallet). 202 when the chain has no such transaction yet (the hash is kept as a private claim
+ * and the client asks again), 422 when it is not this wallet's swap, 409 only when the unique index refuses a write and
+ * no verified row of this wallet carries the hash.
  */
 export async function PATCH(req: NextRequest) {
   try {
     const refused = await ingestionGuards(req)
     if (refused) return refused
 
-    const supabase = getSupabase()
-    if (!supabase) {
+    const db = getSupabase()
+    if (!db) {
       console.warn('[log-swap] PATCH skipped — Supabase not configured')
       return NextResponse.json({ ok: false, skipped: true, reason: 'supabase_not_configured' })
     }
 
-    const body = await req.json()
-    const { txHash, status, gasUsed, gasPrice, wallet, mevSavingsEstimate, mevSavingsActual } = body
-
-    if (!txHash) {
-      return NextResponse.json(
-        { error: 'txHash is required' },
-        { status: 400 },
-      )
+    let body: unknown
+    try {
+      body = await req.json()
+    } catch {
+      // Not JSON, or longer than the body cap: as before.
+      return NextResponse.json({ ok: true })
     }
 
-    const update: Record<string, unknown> = { status, tx_hash: txHash }
-    if (gasUsed) update.gas_used = gasUsed
-    if (gasPrice) update.gas_price = gasPrice
-    // [LP-05] Optional MEV-savings telemetry — only set when caller provided
-    // a value so we don't overwrite an existing row's columns with NULL.
-    if (mevSavingsEstimate != null) update.mev_savings_estimate = mevSavingsEstimate
-    if (mevSavingsActual != null) update.mev_savings_actual = mevSavingsActual
+    const parsed = parseConfirmSwap(body)
+    if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
+    // No wallet named (the browser's call after the wallet disconnected): there is no row to look for. Answered as
+    // before; nothing is read and nothing is written.
+    if (parsed.value.wallet === null) return NextResponse.json({ ok: true })
 
-    // Track failed swap server-side
-    if (status === 'failed' && wallet) {
-      trackSwapFailed({ wallet, tokenIn: '', tokenOut: '', amountUsd: 0, source: '', error: 'Transaction reverted' })
-      trackWalletAction(wallet, {
-        category: 'swap', action: 'swap_status_update',
-        txHash, metadata: { status: 'failed' },
-      })
+    const columns = await verifiedColumnsState(db)
+    if (columns === 'missing') {
+      logColumnsMissing()
+      return NextResponse.json({ ok: true })
     }
+    if (columns === 'unknown') return NextResponse.json({ ok: false, error: 'storage_unavailable' })
 
-    // Try 1: Match by tx_hash (row already has the hash)
-    const { data: matched, error: err1 } = await supabase
-      .from('swaps')
-      .update(update)
-      .eq('tx_hash', txHash)
-      .select('id')
-
-    if (err1) {
-      console.error('[log-swap] PATCH by tx_hash error:', err1.message)
-    }
-
-    // Try 2: If no row matched (initial log had tx_hash=null), find latest pending for this wallet
-    if ((!matched || matched.length === 0) && wallet) {
-      const { error: err2 } = await supabase
-        .from('swaps')
-        .update(update)
-        .eq('wallet', wallet.toLowerCase())
-        .eq('status', 'pending')
-        .is('tx_hash', null)
-        .order('created_at', { ascending: false })
-        .limit(1)
-
-      if (err2) {
-        console.error('[log-swap] PATCH by wallet fallback error:', err2.message)
+    // [ADR-029 8.4, details Q.1] A confirmation that names no chain of the app asks every chain: its own small per-IP
+    // limit, on top of the shared one. The official client always names the chain. Asked only once the chain would be
+    // read (after the migration check), so the answers before the migration is applied are main's.
+    if (parsed.value.chainId === null) {
+      const chainless = await checkRateLimitWithin(`log-chainless:${clientIp(req)}`, LOG_CHAINLESS_RATE_LIMIT.limit, LOG_CHAINLESS_RATE_LIMIT.windowMs)
+      if (!chainless.allowed) {
+        return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429, headers: { 'X-RateLimit-Reset': String(chainless.resetAt) } })
       }
     }
 
-    return NextResponse.json({ ok: true })
-  } catch (err) {
-    console.error('[log-swap] PATCH Error:', err)
+    return confirmResponse(
+      await confirmSwap({ db, wallet: parsed.value.wallet, txHash: parsed.value.txHash, chainId: parsed.value.chainId }, { beforeUpstream: readBudgetOf(req) }),
+    )
+  } catch {
+    console.error('[log-swap] PATCH failed')
     return NextResponse.json({ ok: true })
   }
 }

@@ -14,6 +14,7 @@
 
 import { kv } from './kv'
 import { getSupabase } from './supabase'
+import { publicSwaps } from './swap-log/public-filter'
 
 // ── Tunables ─────────────────────────────────────────────
 
@@ -72,10 +73,13 @@ export async function generateSurplusReport(): Promise<SurplusReport> {
 
   const cutoff = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString()
 
-  const { data, error } = await supabase
-    .from('swaps')
-    .select('source, mev_savings_actual')
-    .eq('status', 'confirmed')
+  // [ADR-029] With SWAPS_PUBLIC_VERIFIED_ONLY on, the report (it is sent to the ops channel) counts verified swaps only.
+  const { data, error } = await publicSwaps(
+    supabase
+      .from('swaps')
+      .select('source, mev_savings_actual')
+      .eq('status', 'confirmed'),
+  )
     .gt('created_at', cutoff)
 
   if (error || !data) {

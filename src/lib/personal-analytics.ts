@@ -13,6 +13,7 @@
  */
 
 import { getSupabase } from './supabase'
+import { publicSwaps } from './swap-log/public-filter'
 
 export interface TopPair {
   pair: string
@@ -189,12 +190,15 @@ export async function fetchPersonalAnalytics(
   // Lowercase to match how log-swap persists the wallet column.
   const walletLc = wallet.toLowerCase()
 
-  const { data, error } = await supabase
-    .from('swaps')
-    .select(
-      'created_at, source, token_in_symbol, token_out_symbol, amount_in_usd, is_gasless, gas_savings_usd, status, tx_hash',
-    )
-    .eq('wallet', walletLc)
+  // [ADR-029] With SWAPS_PUBLIC_VERIFIED_ONLY on, the aggregate is over swaps the server verified on-chain.
+  const { data, error } = await publicSwaps(
+    supabase
+      .from('swaps')
+      .select(
+        'created_at, source, token_in_symbol, token_out_symbol, amount_in_usd, is_gasless, gas_savings_usd, status, tx_hash',
+      )
+      .eq('wallet', walletLc),
+  )
     // Bound the scan — a wallet with > 10k swaps is wildly out of band
     // for retail use and the aggregate stays stable enough on the most
     // recent slice.

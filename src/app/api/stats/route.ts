@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/supabase'
+import { publicSwaps, swapsPublicVerifiedOnly } from '@/lib/swap-log/public-filter'
 
 /**
  * GET /api/stats
  *
  * Public analytics: total swaps, volume, top sources, top pairs.
+ * [ADR-029] With SWAPS_PUBLIC_VERIFIED_ONLY on, every count here is of rows the server verified on-chain.
  */
 export async function GET() {
   const supabase = getSupabase()
@@ -14,10 +16,12 @@ export async function GET() {
 
   try {
     // Total swaps: confirmed + pending-with-tx (real txns whose status wasn't updated)
-    const { count: totalSwaps } = await supabase
-      .from('swaps')
-      .select('*', { count: 'exact', head: true })
-      .or('status.eq.confirmed,and(status.eq.pending,tx_hash.not.is.null)')
+    const { count: totalSwaps } = await publicSwaps(
+      supabase
+        .from('swaps')
+        .select('*', { count: 'exact', head: true })
+        .or('status.eq.confirmed,and(status.eq.pending,tx_hash.not.is.null)'),
+    )
 
     // Total quotes
     const { count: totalQuotes } = await supabase
@@ -25,10 +29,12 @@ export async function GET() {
       .select('*', { count: 'exact', head: true })
 
     // Top sources (by swap count)
-    const { data: sourceStats } = await supabase
-      .from('swaps')
-      .select('source')
-      .or('status.eq.confirmed,and(status.eq.pending,tx_hash.not.is.null)')
+    const { data: sourceStats } = await publicSwaps(
+      supabase
+        .from('swaps')
+        .select('source')
+        .or('status.eq.confirmed,and(status.eq.pending,tx_hash.not.is.null)'),
+    )
 
     const sourceCounts: Record<string, number> = {}
     for (const row of sourceStats ?? []) {
@@ -54,8 +60,26 @@ export async function GET() {
     // .reduce() the SUM client-side — O(N) memory + network. The
     // gasless_stats() function (migration 20260514) returns COUNT + SUM
     // in a single row, so we never see individual swap records here.
-    const { data: gaslessRpc } = await supabase.rpc('gasless_stats')
-    const gaslessRow = Array.isArray(gaslessRpc) ? gaslessRpc[0] : gaslessRpc
+    // [ADR-029] The SQL function counts every gasless row and cannot see the server flag. With the flag on, the same
+    // COUNT and SUM are taken here over verified rows only (same status rule as the function); with it off, the
+    // function is called exactly as before.
+    let gaslessRow: { total_gasless?: unknown; total_gas_saved?: unknown } | null | undefined
+    if (swapsPublicVerifiedOnly()) {
+      const { data: verifiedGasless } = await supabase
+        .from('swaps')
+        .select('gas_savings_usd')
+        .eq('is_gasless', true)
+        .or('status.eq.confirmed,and(status.eq.pending,tx_hash.not.is.null)')
+        .not('verified_at', 'is', null)
+      const gasless = verifiedGasless ?? []
+      gaslessRow = {
+        total_gasless: gasless.length,
+        total_gas_saved: gasless.reduce((sum, row) => sum + (Number(row.gas_savings_usd) || 0), 0),
+      }
+    } else {
+      const { data: gaslessRpc } = await supabase.rpc('gasless_stats')
+      gaslessRow = Array.isArray(gaslessRpc) ? gaslessRpc[0] : gaslessRpc
+    }
     const totalGaslessSwaps = Number(gaslessRow?.total_gasless ?? 0)
     const totalGasSavedUsd = Number(gaslessRow?.total_gas_saved ?? 0)
 

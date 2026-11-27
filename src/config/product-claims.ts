@@ -169,17 +169,27 @@ export const PRIVACY_PROVIDERS_NOTE =
   'Our hosting and network providers, Vercel and Cloudflare, process every request to the Interface, including your IP address, in order to deliver it, under their own policies. We do not ask them for analytics.'
 // [fix/privacy-leftovers-a78b S-10] Privacy §6. Verified against the routes: /api/analytics (no auth, every confirmed swap and
 // confirmed order fill in the totals; `recentTrades` = the newest 50 of them minus the fills of orders that are not finished
-// [A97 S-2, owner decision 2026-11-19: analytics/route.ts:328-331, :490], with the wallet cut to first 6 + last 4 characters),
+// [A97 S-2, owner decision 2026-11-19: analytics/route.ts:343-346, :505], with the wallet cut to first 6 + last 4 characters),
 // the tab renders pair, route, time and a tx link and no wallet; /api/analytics/personal and /api/analytics/export take
 // `?wallet=` with no signature. So "the tab lists recent swaps and order fills" lists an order's fills once the order is finished.
 // [S-22] Sentence 2: the feed rows render pair, source, time and tx link only (AnalyticsDashboard.tsx:114-134, v2 AnalyticsTab.tsx:87-105),
-// while /api/analytics returns each trade whole with only `wallet` shortened (analytics/route.ts:488-493): amountIn, amountOut, volumeUsd
+// while /api/analytics returns each trade whole with only `wallet` shortened (analytics/route.ts:503-508): amountIn, amountOut, volumeUsd
 // (TradeEvent, analytics-types.ts:25-30) stay in the response.
+// [ADR-029, fix/swap-log-verified-on-chain] The sentences below are unchanged and still hold. A swap is still sent to our server and
+// stored with the wallet address (POST and PATCH /api/log-swap); what changed is who decides that it is confirmed: the server, after
+// reading the transaction on-chain. No new data is collected: verified_at and verified_kind are derived from public chain data and the
+// clock. With the server flag SWAPS_PUBLIC_VERIFIED_ONLY on (it starts off), "recent swaps" and the totals are the verified ones; the
+// swap history a wallet's address can be asked for (/api/history) is the same with the flag on or off. The line numbers of
+// analytics/route.ts, analytics/personal/route.ts and analytics/export/route.ts cited in this block were re-checked at that change
+// (those three files moved down by 4, 5 and 1 to 3 lines). [goal 133c] Re-checked again: analytics/route.ts moved down 11 more
+// lines (a verified ETH-in row with no USD enters no volume) and history/route.ts 1 line (round 2's import) and, below :97, 3
+// (round 3 leaves claim rows out of the History tab); no sentence changed. [goal 133d] history/route.ts again: the swaps read
+// is now :90-97 and the fills below it moved down 4 (A106 R3-3: the query leaves claim rows out); no sentence changed.
 // [S-13, A87 S-1, A97 S-6] The last sentence, clause by clause (line numbers re-checked at the head of PR #719, A97 round 2):
-//  - "swap history" = /api/history swaps: wallet param only (history/route.ts:50), swaps read with no proof (:86-91); the proof
-//    gates only the fills (:106-115).
-//  - "swap statistics" = /api/analytics/personal: wallet param, no signature check in the file (analytics/personal/route.ts:40).
-//  - "swap export" = /api/analytics/export: wallet param, swaps read with no proof (analytics/export/route.ts:155, :212).
+//  - "swap history" = /api/history swaps: wallet param only (history/route.ts:51), swaps read with no proof (:90-97); the proof
+//    gates only the fills (:113-122).
+//  - "swap statistics" = /api/analytics/personal: wallet param, no signature check in the file (analytics/personal/route.ts:45).
+//  - "swap export" = /api/analytics/export: wallet param, swaps read with no proof (analytics/export/route.ts:156, :215).
 //  - "the records of its executed, cancelled, expired or failed orders" = the list GET (orders/route.ts:972-974, body :977-1053)
 //    needs no proof when every status asked for is terminal (:1010-1011, PUBLIC_ORDER_STATUSES at read-auth.ts:37-42); by id,
 //    the same (orders/[id]/route.ts:70-85).
@@ -191,9 +201,9 @@ export const PRIVACY_PROVIDERS_NOTE =
 //    read signature (:81-89, :111) [A97 S-3; these five line numbers re-checked at A102 R3-2, which moved the lines down].
 //  - "open orders ... need a signature from that wallet" = 401 READ_AUTH_REQUIRED (list orders/route.ts:1012-1027, the 401 at
 //    :1018-1026; by id orders/[id]/route.ts:70-85; the fills and progress of an open order, orders/[id]/executions/route.ts:78-93
-//    [A87b R2-1]). The Analytics feed lists no fill of an open order (analytics/route.ts:490) [A97 S-2].
+//    [A87b R2-1]). The Analytics feed lists no fill of an open order (analytics/route.ts:505) [A97 S-2].
 //  - "the DCA fills in a wallet's history need a signature from that wallet" = /api/history withholds the fills without the read
-//    signature (history/route.ts:106-115, `fillsIncluded: false`).
+//    signature (history/route.ts:113-122, `fillsIncluded: false`).
 //  - "the fills of a finished order can be read with its record" = /api/orders/[id]/executions asks for the wallet parameter only
 //    for a finished order (orders/[id]/executions/route.ts:49), checks that the order belongs to it (:69) and returns the
 //    order_executions rows (:95-99); the status test (:78, PUBLIC_ORDER_STATUSES, the same terminal set orders/[id]/route.ts:70

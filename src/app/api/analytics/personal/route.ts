@@ -26,6 +26,7 @@ import {
 import { isValidAddress } from '@/lib/validation'
 import { checkRateLimit } from '@/lib/kv-rate-limiter'
 import { kv } from '@/lib/kv'
+import { swapsPublicVerifiedOnly } from '@/lib/swap-log/public-filter'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,7 +34,11 @@ const CACHE_TTL_SECONDS = 300 // 5 minutes
 const RATE_LIMIT = { limit: 10, windowMs: 60_000 }
 
 function cacheKey(wallet: string): string {
-  return `analytics:personal:${wallet.toLowerCase()}`
+  // [ADR-029] The aggregate is cached for five minutes. With SWAPS_PUBLIC_VERIFIED_ONLY on it is kept under its own
+  // key, so an aggregate cached before the flag was turned on (it counted unverified rows) is not served after it.
+  return swapsPublicVerifiedOnly()
+    ? `analytics:personal:verified:${wallet.toLowerCase()}`
+    : `analytics:personal:${wallet.toLowerCase()}`
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {

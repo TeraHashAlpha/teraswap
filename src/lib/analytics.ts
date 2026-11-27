@@ -88,7 +88,7 @@ export function logSwapToSupabase(params: LogSwapParams): void {
 /**
  * [P122 / 16B-I-04] Options-object signature so callers don't need
  * positional `undefined` placeholders to reach the trailing MEV-savings
- * fields. PATCH body shape is unchanged.
+ * fields.
  */
 export interface UpdateSwapStatusParams {
   txHash: string
@@ -96,31 +96,51 @@ export interface UpdateSwapStatusParams {
   gasUsed?: string
   gasPrice?: string
   wallet?: string
+  /**
+   * [ADR-029, goal 133b I.1] The chain the transaction was SENT on (the swap's own chain, captured when it was sent;
+   * never the wallet's chain at receipt time). The server reads the transaction there.
+   */
+  chainId?: number
   /** [LP-05] Pre-swap CoW-vs-non-CoW-median delta, output-token wei. */
   mevSavingsEstimate?: string
   /** [LP-05] Realised solver surplus, output-token wei. */
   mevSavingsActual?: string
 }
 
+/**
+ * [ADR-029 section 7.3, goal 133b I.5] When the server answers 202 (its node has not got the transaction yet; it kept
+ * the hash), the same confirmation is sent again after these pauses, then no more. Quiet: no prompt, nothing on the
+ * page, nothing in the console.
+ */
+export const UPDATE_SWAP_STATUS_RETRY_DELAYS_MS = [2_000, 8_000, 30_000] as const
+
 export function updateSwapStatus(params: UpdateSwapStatusParams): void {
   const {
-    txHash, status, gasUsed, gasPrice, wallet,
+    txHash, status, gasUsed, gasPrice, wallet, chainId,
     mevSavingsEstimate, mevSavingsActual,
   } = params
-  try {
-    fetch('/api/log-swap', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        txHash, status, gasUsed, gasPrice, wallet,
-        mevSavingsEstimate, mevSavingsActual,
-      }),
-    }).catch((err) => {
-      console.warn('[analytics] updateSwapStatus failed:', err)
-    })
-  } catch {
-    // silently ignore
+  const body = JSON.stringify({
+    txHash, status, gasUsed, gasPrice, wallet, chainId,
+    mevSavingsEstimate, mevSavingsActual,
+  })
+  const send = (attempt: number): void => {
+    try {
+      fetch('/api/log-swap', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      }).then((res) => {
+        const delay = UPDATE_SWAP_STATUS_RETRY_DELAYS_MS[attempt]
+        if (res?.status === 202 && delay !== undefined) setTimeout(() => send(attempt + 1), delay)
+      }).catch((err) => {
+        // The one warning there was before: a request that could not be sent. It ends the confirmation.
+        console.warn('[analytics] updateSwapStatus failed:', err)
+      })
+    } catch {
+      // silently ignore
+    }
   }
+  send(0)
 }
 
 // ── Quote logging ───────────────────────────────────────────

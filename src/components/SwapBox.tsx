@@ -414,6 +414,7 @@ export default function SwapBox() {
           txHash,
           status: 'confirmed',
           wallet: address,
+          chainId: txChainId, // [ADR-029 133b I.1] the chain the tx was SENT on
           mevSavingsEstimate: mevEstimate ? mevEstimate.amountWei.toString() : undefined,
           mevSavingsActual: realisedSurplusWei ? realisedSurplusWei.toString() : undefined,
         })
