@@ -7,6 +7,7 @@
  * - orders POST, orders/[id] PATCH, log-swap POST and PATCH are outside this branch (goal's Do-NOT; owner answer
  *   2026-11-17): their read stops at the cap as well and nothing is written; they answer their own error.
  * - log-event, monitor/alerts and monitor/tick never read a body: they take 0 bytes and answer as before.
+ * - monitor/validate-execution is closed (goal 139): it takes 0 bytes and answers an empty 404.
  * No route reaches a database write or an upstream fetch.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -138,7 +139,6 @@ const EDITED: Case[] = [
   { route: 'cow/quote', handler: cowQuote.POST as Handler, query: '?chainId=1', cap: COW_PROXY_MAX_BODY_BYTES },
   { route: 'log-activity', handler: logActivity.POST as Handler },
   { route: 'log-quote', handler: logQuote.POST as Handler },
-  { route: 'monitor/validate-execution', handler: validateExecution.POST as Handler, headers: BEARER },
   { route: 'quote', handler: quote.POST as Handler },
   { route: 'rpc', handler: rpc.POST as Handler, cap: RPC_MAX_BODY_BYTES },
   { route: 'telegram/webhook', handler: telegram.POST as Handler, headers: { 'x-telegram-bot-api-secret-token': SECRET } },
@@ -153,6 +153,19 @@ describe('routes this branch edits: a chunked over-cap body answers 413', () => 
     expect(await res.json()).toEqual({ error: 'Request body too large' })
     expect(taken()).toBeGreaterThan(cap)
     expect(taken()).toBeLessThanOrEqual(cap + CHUNK)
+    expect(writes).toEqual([])
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
+// CHANGED EXPECTATION (goal 139, owner, 2026-11-27; was: 413 in the list above): the route is closed.
+describe('the closed route: an over-cap body is never read', () => {
+  it('POST /api/monitor/validate-execution answers an empty 404 and takes 0 bytes, even with the right bearer', async () => {
+    const { req, taken } = chunkedRequest({ route: 'monitor/validate-execution', handler: validateExecution.POST as unknown as Handler, headers: BEARER })
+    // Called as Next calls it, with the request; the handler declares no parameter.
+    const res = await (validateExecution.POST as unknown as Handler)(req)
+    expect([res.status, await res.text()]).toEqual([404, ''])
+    expect(taken()).toBe(0)
     expect(writes).toEqual([])
     expect(fetchSpy).not.toHaveBeenCalled()
   })

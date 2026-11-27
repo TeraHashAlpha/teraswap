@@ -133,7 +133,7 @@ The executor itself does NOT push alerts. Alerting goes through the existing Ter
 |--------|--------|-----------|
 | Executor stopped polling | Absence of `OrderExecuted` events in P47 on-chain monitor | Telegram via `on-chain-monitor.ts` |
 | Suspicious tx from executor EOA | P47 watches `OrderExecuted` topic | Telegram |
-| Critical post-execution validation | P45 `/api/monitor/validate-execution` | Telegram + auto-disable of source |
+| Critical post-execution validation | None: `/api/monitor/validate-execution` is closed: every method answers 404, and nothing called it (the validator module remains, uncalled) | No alert and no auto-disable |
 | Gas-cap hit (no execution despite triggered order) | Supabase: `order_executions` row with `status='skipped'` and `reason` containing `gas` | Manual audit |
 | Execution failure streak | Repeated rows with `status='failed'` for the same order | Manual audit |
 | Process OOM / crash loop | PM2 logs, `pm2 status` | Host-level monitoring (out of scope here) |
