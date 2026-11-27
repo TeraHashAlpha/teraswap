@@ -13,6 +13,30 @@ the Swap tab is left and reopened. Base: origin/main `dae5fd80` (the goal read `
 - [ ] Tests that fail on origin/main first
 - [ ] One `scripts/agent-verify.sh` run on the last code commit; push
 
+## Step 0, before (origin/main `dae5fd80`, production build)
+Rig (scratchpad, not in the repo): Chromium → `next start` → the unmodified limiter at 30/min over a fake Upstash REST
+store; a server preload answers KyberSwap and Velora and fails every other upstream, so nothing external is called.
+Wallet-less visitor. Cells: `/api/quote` requests / 429s, each action in its own limiter window, after "amount entered".
+
+| action | v1 $100 | v2 $100 | v1 $10,000 | v2 $10,000 |
+|---|---|---|---|---|
+| amount entered (first 8 s) | 2 / 0 | 2 / 0 | 12 / 0 | 12 / 0 |
+| idle 60 s | 4 / 0 | 4 / 0 | 25 / 8 | 25 / 8 |
+| 5 token changes in 30 s | 5 / 0 | 5 / 0 | 27 / 10 | 27 / 10 |
+| amount typed digit by digit (700 ms a key) | 3 / 0 | 3 / 0 | 39 / 22 | 28 / 11 |
+| flip, type, flip back | 3 / 0 | 3 / 0 | 27 / 10 | 16 / 0 |
+| 1,234,567 USDC deleted to 12, key by key | 51 / 23 | 40 / 12 | 29 / 12 | 29 / 12 |
+| two tabs idle 60 s (both counted) | 9 / 0 | 9 / 0 | 40 / 11 | 40 / 11 |
+| 3.3333 ETH replaced by 0.0123456, 150 ms a key | 122 / 106 | 1 / 0 | n/a | n/a |
+
+First 429 in one back-to-back session: **$10,000: idle, 31 s in, no action at all** (the third poll: 3 × 12 > 30), v1
+and v2. $100: the large-to-small deletion; no other action.
+
+**A small amount reaches the limit one other way, in v1 only.** After a large quote, quick edits keep the old quote on
+screen, so `useSplitRoute` reads its USDC output as the trade's value and sends 11 requests per keystroke, for the
+half-typed amount: 67 of the 122 requests above asked for 0.02 ETH or less. v2 passes the hook only a quote that
+matches the field, and sent 1. A small amount that never passed through a large one never got a 429 in this rig.
+
 ## Further reads (the task needed them)
 `src/lib/meta-quote-cache.ts`, `src/lib/client-ip-key.ts`, `src/lib/rate-limiter.ts`, `src/lib/api.ts` (fetchMetaQuote),
 `src/lib/fetch-json.ts`, `src/hooks/useDebounce.ts`, `src/lib/kv.ts`, `node_modules/@upstash/redis` (REST encoding, for
