@@ -83,26 +83,26 @@ Major versions below; exact pins live only in `package.json` (Dependabot moves t
 
 ## Do NOT
 
-1. **NEVER edit source files directly** (Architect/Auditor) — always produce a prompt for the Code Agent.
-2. **NEVER approve changes to contracts or fund flows** without checking open audit findings in `docs/security/AUDIT-TOTAL.md`.
-3. **NEVER deploy without audit pass** (0C/0H). Sprint must be APPROVED before merge.
-4. **NEVER delete files** — git history preserves everything. Mark as superseded/deprecated **or** move to
+1. **Never edit source files directly** (Architect/Auditor) — always produce a prompt for the Code Agent.
+2. **Never approve changes to contracts or fund flows** without checking open audit findings in `docs/security/AUDIT-TOTAL.md`.
+3. **Never deploy without audit pass** (0C/0H). Sprint must be approved before merge.
+4. **Never delete files** — git history preserves everything. Mark as superseded/deprecated **or** move to
    `archive/<original-path>/` (mirroring the file's original location, e.g. `docs/Prompts/FOO.md` →
    `archive/docs/Prompts/FOO.md`), preserving content and history. Use `archive/` when a file is fully retired
    (no longer referenced anywhere) but still worth preserving verbatim — e.g. a superseded FEEDBACK.md, a removed
    prompt packet, a dead runbook. Use superseded/deprecated marking in place when the file is still linked from
    the index or referenced by ID (ADRs, incidents). Either way, nothing is ever deleted.
-5. **NEVER ignore open findings** — check `docs/security/AUDIT-TOTAL.md` and the latest sprint packet before starting work.
-6. **NEVER create ADRs or incidents outside conventions** — use the naming, format, and location defined above.
-7. **NEVER hardcode secrets or API keys** — all via env vars, no `NEXT_PUBLIC_` for server-only secrets.
-8. **NEVER re-enable disabled sources** without fulfilling reactivation criteria in the incident report (e.g., §4.3 of INC-2026-04-14-001).
-9. **NEVER trust single-source price data** — Chainlink validation is mandatory for all swaps. DefiLlama blocks swaps >$10k when unavailable.
-10. **NEVER put marketing files in this repo** — use `dex-aggregator 2.marketing/` to avoid leaking strategy via git.
-11. **NEVER push without CI green** — lint, typecheck, test, audit must pass. Admin bypass only for documented emergencies.
-12. **NEVER commit without a GPG/SSH signature** — every commit on every branch must be cryptographically signed; `main` rejects unsigned commits at branch protection. Setup: `docs/Runbooks/SIGNED-COMMITS.md`.
-13. **NEVER invoke credential helpers or read the keychain** (`git credential-*`, `security find-*`) for any purpose; if an action needs auth the session lacks, report the manual step and stop. Why: two agent sessions independently reached for the macOS keychain, one nearly self-merging a PR (keychain near-miss, 2026-07-09).
-14. **NEVER treat "PR open" as a goal's exit condition** — exit = branch pushed + compare link reported + local verification done. CI runs once the OWNER opens the PR and must be green before merge — PR creation is never the agent's job. Why: a stop-hook deadlocked 9 cycles requiring "PR open" when PR creation is owner-manual (stop-hook deadlock, 2026-07-09); a follow-up deadlocked again requiring "CI green" pre-PR when this repo's CI only triggers on push/PR to `main` (CHORE-HYGIENE-2, 2026-07-11).
-15. **STOP only if blocked or before anything irreversible** (force-push, delete, prod DB write, secrets); otherwise keep going and put status in the same message as your next action. Why: a session died 2026-09-19 before writing its feedback file, and the run's evidence was lost.
+5. **Never ignore open findings** — check `docs/security/AUDIT-TOTAL.md` and the latest sprint packet before starting work.
+6. **Never create ADRs or incidents outside conventions** — use the naming, format, and location defined above.
+7. **Never hardcode secrets or API keys** — all via env vars, no `NEXT_PUBLIC_` for server-only secrets.
+8. **Never re-enable disabled sources** without fulfilling reactivation criteria in the incident report (e.g., §4.3 of INC-2026-04-14-001).
+9. **Never trust single-source price data** — Chainlink validation is mandatory for all swaps. DefiLlama blocks swaps >$10k when unavailable.
+10. **Never put marketing files in this repo** — use `dex-aggregator 2.marketing/` to avoid leaking strategy via git.
+11. **Never push without CI green** — lint, typecheck, test, audit must pass. Admin bypass only for documented emergencies.
+12. **Never commit without a GPG/SSH signature** — every commit on every branch must be cryptographically signed; `main` rejects unsigned commits at branch protection. Setup: `docs/Runbooks/SIGNED-COMMITS.md`.
+13. **Never invoke credential helpers or read the keychain** (`git credential-*`, `security find-*`) for any purpose; if an action needs auth the session lacks, report the manual step and stop. Why: two agent sessions independently reached for the macOS keychain, one nearly self-merging a PR (keychain near-miss, 2026-07-09).
+14. **Never treat "PR open" as a goal's exit condition** — exit = branch pushed + compare link reported + local verification done. CI runs once the owner opens the PR and must be green before merge — PR creation is never the agent's job. Why: a stop-hook deadlocked 9 cycles requiring "PR open" when PR creation is owner-manual (stop-hook deadlock, 2026-07-09); a follow-up deadlocked again requiring "CI green" pre-PR when this repo's CI only triggers on push/PR to `main` (CHORE-HYGIENE-2, 2026-07-11).
+15. **Stop only if blocked or before anything irreversible** (force-push, delete, prod DB write, secrets); otherwise keep going and put status in the same message as your next action. Why: a session died 2026-09-19 before writing its feedback file, and the run's evidence was lost.
 
 ---
 
