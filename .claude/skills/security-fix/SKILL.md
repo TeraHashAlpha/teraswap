@@ -47,5 +47,6 @@ code paths.
 
 ## Cross-references
 
-- Update `docs/security/AUDIT-TOTAL.md` to mark the finding closed (status + commit hash).
+- Update `docs/security/AUDIT-TOTAL.md` to mark the finding closed: status + branch name; add the PR number when it
+  exists. Never leave a bare commit hash as the only reference.
 - If the fix changes auth or rate-limiting *behaviour* (not just shape), update the entire relevant test suite, not just the new test.
