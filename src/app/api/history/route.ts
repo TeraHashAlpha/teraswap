@@ -7,6 +7,7 @@ import {
   ORDERS_READ_HEADER_SIGNATURE,
 } from '@/lib/order-engine/read-auth'
 import { checkRateLimit } from '@/lib/kv-rate-limiter'
+import { isMissingClaimColumn, isSwapClaimRow, withoutClaimRows, withoutPrivateSwapColumns } from '@/lib/swap-log/private-columns'
 
 // [CHORE-API-HARDENING-2 / P3d] Per-wallet rate limit — this route had NONE,
 // unlike its /api/orders and /api/analytics/export siblings. Generous enough for
@@ -83,19 +84,25 @@ export async function GET(req: NextRequest) {
     // statistics-based for high counts) instead of 'exact' — avoids a full
     // COUNT(*) table scan on every request while staying accurate for the common
     // case (a wallet with a modest swap history).
-    const { data: swapRows, error, count } = await supabase
-      .from('swaps')
-      .select('*', { count: 'estimated' })
-      .eq('wallet', wallet)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1)
+    // [ADR-029 9.3, A106 R3-3] A claim row (a hash the chain could not answer yet, on a row of its own) is not a History
+    // item: the query leaves it out, so it is out of the page AND out of `total`. Before the migration the column does
+    // not exist (so no claim row can): the database refuses the filter and main's query runs instead.
+    const swapsPage = (withoutClaims: boolean) => {
+      const query = supabase.from('swaps').select('*', { count: 'estimated' }).eq('wallet', wallet)
+      return (withoutClaims ? withoutClaimRows(query) : query)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1)
+    }
+    let { data: swapRows, error, count } = await swapsPage(true)
+    if (isMissingClaimColumn(error)) ({ data: swapRows, error, count } = await swapsPage(false))
 
     if (error) {
       console.error('[history] Supabase error:', error.message)
       return NextResponse.json({ swaps: [], total: 0 })
     }
 
-    const swapItems = (swapRows ?? []).map(mapSwapRow)
+    // [ADR-029 8.3, details P of goal 133c] The query above already leaves claim rows out; this is a second guard.
+    const swapItems = (swapRows ?? []).filter((row) => !isSwapClaimRow(row)).map(mapSwapRow)
 
     // [CHORE-DCA-VISIBILITY-AND-STATS #2] W6 read-auth gate for the DCA fills.
     // Same trust anchor as /api/orders (recoverTypedDataAddress over the signed
@@ -159,7 +166,9 @@ export interface HistoryItem {
 /** A `swaps` row, tagged with the `kind` discriminator. All original columns are
  *  preserved so WalletHistory keeps rendering instant swaps byte-identically. */
 export function mapSwapRow(row: Record<string, unknown>): HistoryItem {
-  return { ...(row as object), kind: 'swap' } as HistoryItem
+  // [ADR-029 section 7.3] The swaps read is `select *`: the private claim columns are dropped here, so no answer of this
+  // route carries them (src/app/api/swaps-read-claim-columns.guard.test.ts). Every other column is passed on as before.
+  return { ...withoutPrivateSwapColumns(row), kind: 'swap' } as HistoryItem
 }
 
 /**

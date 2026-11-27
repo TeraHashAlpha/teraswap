@@ -225,6 +225,16 @@ function ttlFor(status: ChainIdentityVerdict['status']): number {
   return CHAIN_IDENTITY_UNVERIFIED_TTL_MS
 }
 
+/**
+ * [ADR-029 8.4] Whether `assertChainIdentity` would answer this (chain, endpoint) pair from its cache, without a probe.
+ * Read-only: a caller that pays for each upstream call (the swap log's read budget) charges the probe BEFORE asking,
+ * and never makes the probe itself fail, which would be cached as an outage for every other caller.
+ */
+export function chainIdentityIsCached(expectedChainId: number, endpoint: string, now: () => number = Date.now): boolean {
+  const cached = verdictCache.get(`${expectedChainId}|${endpoint}`)
+  return cached !== undefined && cached.expiresAt > now()
+}
+
 /** Test-only: drop every cached verdict so cases cannot leak into one another. */
 export function __resetChainIdentityCache(): void {
   verdictCache.clear()

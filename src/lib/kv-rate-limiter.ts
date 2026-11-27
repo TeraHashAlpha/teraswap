@@ -44,6 +44,13 @@ export const RPC_RATE_LIMIT = { limit: 300, windowMs: 60_000 }
 // 120/min covers a busy real session across all of them while bounding
 // spam / analytics-poisoning / Supabase-cost floods; degraded fallback 60/min.
 export const LOG_RATE_LIMIT = { limit: 120, windowMs: 60_000 }
+// [ADR-029 8.4, goal 133c Q] /api/log-swap reads the chain for a confirmation. The official client always names the
+// chain, so a confirmation that names none has its own small per-IP limit (key `log-chainless:<ip>`, 429 beyond); and
+// EVERY upstream chain call a log-swap request triggers (each attempt, the re-ask of a null, an uncached chain-id proof,
+// the claim-cap check) is paid from a per-IP read budget (key `log-reads:<ip>`): spent, the request reads nothing more
+// and answers 202. One official confirmation costs 2 to 5 calls, so 60/min is a dozen confirmations a minute per IP.
+export const LOG_CHAINLESS_RATE_LIMIT = { limit: 6, windowMs: 60_000 }
+export const LOG_READ_BUDGET = { limit: 60, windowMs: 60_000 }
 // Every order creation needs a fresh wallet signature, so 10/min/IP is
 // generous for humans while stopping self-signed spam loops (fallback 5/min).
 // Complements (does not replace) the per-wallet DB limit in the orders route.

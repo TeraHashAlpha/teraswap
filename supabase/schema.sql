@@ -199,3 +199,62 @@ CREATE INDEX IF NOT EXISTS idx_wallet_activity_created ON wallet_activity (creat
 CREATE INDEX IF NOT EXISTS idx_wallet_activity_action  ON wallet_activity (action);
 
 ALTER TABLE wallet_activity ENABLE ROW LEVEL SECURITY;
+
+-- ── Swaps: verified on-chain (ADR-029) ──────────────────────
+-- Mirror of supabase/migrations/20261125120000_swaps_verified.sql (its header says why).
+-- A row becomes confirmed or failed only by the server, after it read the transaction on the
+-- row's chain. verified_at / verified_kind record that; one transaction counts once per wallet
+-- (ADR-029 section 7); a side the receipt cannot give is NULL, so the six token/symbol/amount
+-- columns of the CREATE TABLE above are nullable from here on. claimed_tx_hash / claimed_chain_id
+-- / claimed_at are PRIVATE: a hash the chain could not answer yet, kept until it is decided; no
+-- reader returns them. Kept as ALTERs (not edited into the CREATE TABLE) so running this file on
+-- an existing database applies them too.
+SET lock_timeout = '5s';
+
+ALTER TABLE swaps ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+ALTER TABLE swaps ADD COLUMN IF NOT EXISTS verified_kind TEXT;
+ALTER TABLE swaps ADD COLUMN IF NOT EXISTS claimed_tx_hash TEXT;
+ALTER TABLE swaps ADD COLUMN IF NOT EXISTS claimed_chain_id INTEGER;
+ALTER TABLE swaps ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'swaps_verified_kind_check' AND conrelid = 'swaps'::regclass
+  ) THEN
+    ALTER TABLE swaps ADD CONSTRAINT swaps_verified_kind_check
+      CHECK (verified_kind IS NULL OR verified_kind IN ('fee_collector', 'router', 'cow')) NOT VALID;
+  END IF;
+END
+$$;
+ALTER TABLE swaps VALIDATE CONSTRAINT swaps_verified_kind_check;
+
+ALTER TABLE swaps
+  ALTER COLUMN token_in DROP NOT NULL,
+  ALTER COLUMN token_in_symbol DROP NOT NULL,
+  ALTER COLUMN token_out DROP NOT NULL,
+  ALTER COLUMN token_out_symbol DROP NOT NULL,
+  ALTER COLUMN amount_in DROP NOT NULL,
+  ALTER COLUMN amount_out DROP NOT NULL;
+
+RESET lock_timeout;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_swaps_verified_tx
+  ON swaps (chain_id, lower(tx_hash), lower(wallet))
+  WHERE verified_at IS NOT NULL;
+
+COMMENT ON COLUMN swaps.verified_at IS
+  'When the server verified this row against the chain (the transaction exists on chain_id, it is this wallet''s swap, and its receipt gave the status). NULL = never verified: a pending row, or a row written before ADR-029. Set only by the server. ADR-029.';
+
+COMMENT ON COLUMN swaps.verified_kind IS
+  'How the verified transaction was recognised: fee_collector | router | cow. NULL exactly when verified_at is NULL. ADR-029.';
+
+COMMENT ON COLUMN swaps.claimed_tx_hash IS
+  'PRIVATE. A transaction hash this wallet''s confirmation named while the chain could not answer yet; asked again later, cleared when decided. No reader returns it. ADR-029 section 7.';
+
+COMMENT ON COLUMN swaps.claimed_chain_id IS
+  'PRIVATE. The chain the claim named, NULL when it named none (then every chain of the app is asked). ADR-029 section 7.';
+
+COMMENT ON COLUMN swaps.claimed_at IS
+  'PRIVATE. When the claim was first stored. ADR-029 section 7.';

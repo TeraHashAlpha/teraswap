@@ -223,6 +223,7 @@ export function useSwapLifecycle(a: LifecycleArgs) {
           txHash: swap.txHash,
           status: 'confirmed',
           wallet: address,
+          chainId: swap.txChainId, // [ADR-029 133b I.1] the chain the tx was SENT on, as v1 (SwapBox.tsx)
           mevSavingsEstimate: mevEstimate ? mevEstimate.amountWei.toString() : undefined,
           mevSavingsActual: summary.realisedSurplusWei ? summary.realisedSurplusWei.toString() : undefined,
         })

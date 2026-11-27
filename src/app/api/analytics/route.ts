@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/supabase'
+import { NATIVE_ETH } from '@/lib/constants'
 import { PUBLIC_ORDER_STATUSES } from '@/lib/order-engine/read-auth'
+import { publicSwaps } from '@/lib/swap-log/public-filter'
 
 /**
  * GET /api/analytics
@@ -32,11 +34,14 @@ export async function GET() {
     // gives automatic backfill of already-executed chunks with no contract or
     // keeper change. The execution fetch is fail-soft: any error returns [] so a
     // problem there never regresses instant-swap analytics.
+    // [ADR-029] With SWAPS_PUBLIC_VERIFIED_ONLY on, only swaps the server verified on-chain are counted and listed.
     const [{ data: swaps, error }, executions] = await Promise.all([
-      supabase
-        .from('swaps')
-        .select('*')
-        .eq('status', 'confirmed')
+      publicSwaps(
+        supabase
+          .from('swaps')
+          .select('*')
+          .eq('status', 'confirmed'),
+      )
         .order('created_at', { ascending: false })
         .limit(5000),
       fetchConfirmedExecutions(supabase),
@@ -205,6 +210,16 @@ function rawToHuman(rawVal: string, symbol: string): number {
   }
 }
 
+/**
+ * [ADR-029 8.2, details O of goal 133c] A row the server verified as a router swap that paid ETH in carries USD only when
+ * what came back was worth about as much (src/lib/swap-log/confirm.ts); with no USD it enters no total. Its amount-in
+ * is the transaction value, which a refund (no log) can make almost all of: the estimate below must not turn it back
+ * into volume. Rows written before ADR-029 have no `verified_kind` and are estimated as before.
+ */
+function ethInUsdWithheld(row: Record<string, unknown>): boolean {
+  return row.verified_kind === 'router' && String(row.token_in ?? '').toLowerCase() === NATIVE_ETH.toLowerCase() && (row.amount_in_usd === null || row.amount_in_usd === undefined)
+}
+
 function estimateUsdValue(rawAmount: string, symbol: string): number {
   const human = rawToHuman(rawAmount, symbol)
   const price = APPROX_PRICES[symbol?.toUpperCase()] ?? 0
@@ -225,7 +240,7 @@ function swapToEvent(row: Record<string, unknown>): TradeEvent {
   const storedUsd = Number(row.amount_in_usd) || 0
   const volumeUsd = storedUsd > 0
     ? storedUsd
-    : estimateUsdValue(rawAmountIn, tokenInSymbol)
+    : ethInUsdWithheld(row) ? 0 : estimateUsdValue(rawAmountIn, tokenInSymbol)
 
   // Fee: 0.1% of volume
   const feeCollected = row.fee_collected as boolean

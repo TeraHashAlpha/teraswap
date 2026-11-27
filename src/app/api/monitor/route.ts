@@ -3,6 +3,7 @@ import { getSupabase } from '@/lib/supabase'
 import { safeCompare, isAllowedOrigin } from '@/lib/validation'
 import { checkSourceHealthAlerts, type SourceHealthFinding } from '@/lib/source-health-monitor'
 import { registrySourceNames } from '@/lib/adapters'
+import { publicSwaps } from '@/lib/swap-log/public-filter'
 
 // API-HIGH-03: CORS restricted to app domain (was wildcard *)
 function corsHeaders(req: Request) {
@@ -70,10 +71,13 @@ export async function GET(req: Request) {
             .order('created_at', { ascending: false })
             .limit(200)
         ).catch(() => ({ data: null, error: { message: 'wallet_activity table not found' } })),
-        supabase
-          .from('swaps')
-          .select('created_at, source, token_in_symbol, token_out_symbol, amount_in_usd, status, tx_hash, mev_protected')
-          .eq('wallet', walletQuery)
+        // [ADR-029] With SWAPS_PUBLIC_VERIFIED_ONLY on, verified swaps only (details D names this reader).
+        publicSwaps(
+          supabase
+            .from('swaps')
+            .select('created_at, source, token_in_symbol, token_out_symbol, amount_in_usd, status, tx_hash, mev_protected')
+            .eq('wallet', walletQuery),
+        )
           .order('created_at', { ascending: false })
           .limit(100),
         supabase
@@ -130,9 +134,12 @@ export async function GET(req: Request) {
   try {
     // Parallel fetch — select ONLY needed columns (never select('*') for security & performance)
     const [swapsRes, quotesRes, securityRes] = await Promise.all([
-      supabase
-        .from('swaps')
-        .select('created_at, wallet, source, token_in_symbol, token_out_symbol, amount_in_usd, status, mev_protected, fee_collected')
+      // [ADR-029] With SWAPS_PUBLIC_VERIFIED_ONLY on, every metric below is over verified swaps only.
+      publicSwaps(
+        supabase
+          .from('swaps')
+          .select('created_at, wallet, source, token_in_symbol, token_out_symbol, amount_in_usd, status, mev_protected, fee_collected'),
+      )
         .order('created_at', { ascending: false })
         .limit(5000),
       supabase

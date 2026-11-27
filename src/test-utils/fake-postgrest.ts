@@ -7,8 +7,10 @@
  *     the child when no parent matches or a filter on the parent fails);
  *   - a column the table does not have (a migration not applied) is an error `{ code: '42703' }`, as Postgres says it;
  *   - `{ count, head: true }` returns only the count.
- * Supported: from, select, eq, in, gte, order, limit, range, single, then (awaiting the builder runs the query). Every
+ * Supported: from, select, eq, in, gte, is, order, limit, range, single, then (awaiting the builder runs the query). Every
  * `select` is recorded in `selects`, so a test can assert what each route asked the database for.
+ * [ADR-029 9.3] `is(column, null | boolean)`: as PostgREST's `is.`; a column the table does not have is 42703, as Postgres
+ * answers a filter on it (the /api/history swaps query filters on a column a table without the swap-log migration lacks).
  */
 
 export type Row = Record<string, unknown>
@@ -46,6 +48,7 @@ type Filter =
   | { kind: 'eq'; path: string; value: unknown }
   | { kind: 'in'; path: string; values: unknown[] }
   | { kind: 'gte'; path: string; value: unknown }
+  | { kind: 'is'; path: string; value: null | boolean }
 
 interface SelectItem {
   kind: 'star' | 'column' | 'embed'
@@ -135,6 +138,7 @@ export function createFakePostgrest(opts: FakePostgrestOptions) {
   function matches(f: Filter, v: unknown): boolean {
     if (f.kind === 'eq') return String(v) === String(f.value)
     if (f.kind === 'in') return f.values.some((x) => String(x) === String(v))
+    if (f.kind === 'is') return f.value === null ? v === null || v === undefined : v === f.value
     return compare(v, f.value) >= 0
   }
 
@@ -149,6 +153,9 @@ export function createFakePostgrest(opts: FakePostgrestOptions) {
 
     function run(): { data: Row[] | null; error: PgError | null; count: number | null } {
       const items = parseSelect(columns)
+      const schema = opts.schema[table] ?? []
+      const missing = filters.find((f) => f.kind === 'is' && !f.path.includes('.') && !schema.includes(f.path))
+      if (missing) return { data: null, error: { code: '42703', message: `column ${table}.${missing.path} does not exist` }, count: null }
       // Order by the ORIGINAL row's column, before projection (the column need not be selected), as PostgREST does.
       const rows = [...(opts.tables[table] ?? [])]
       if (orderBy) {
@@ -195,6 +202,7 @@ export function createFakePostgrest(opts: FakePostgrestOptions) {
       eq(path: string, value: unknown) { filters.push({ kind: 'eq', path, value }); return b },
       in(path: string, values: unknown[]) { filters.push({ kind: 'in', path, values }); return b },
       gte(path: string, value: unknown) { filters.push({ kind: 'gte', path, value }); return b },
+      is(path: string, value: null | boolean) { filters.push({ kind: 'is', path, value }); return b },
       order(col: string, o?: { ascending?: boolean }) { orderBy = { col, ascending: o?.ascending !== false }; return b },
       limit(n: number) { limitN = n; return b },
       range(from: number, to: number) { range = [from, to]; return b },

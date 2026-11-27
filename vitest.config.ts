@@ -22,6 +22,8 @@ export default defineConfig({
       'scripts/dca-feeds/**/*.test.ts',
       // [fix/orders-server-side-order-hash] order-hash vectors drift guard + check-order-hashes on fixtures.
       'scripts/orders/**/*.test.ts',
+      // [ADR-029 / fix/swap-log-verified-on-chain] verify-stored-swaps on recorded real receipts (no network).
+      'scripts/swaps/**/*.test.ts',
       // [CHORE-GROK-DISPATCH] repo-hygiene scripts get the same coverage as source.
       // [CHORE-COLOR-CONTRAST-CHECK] CIEDE2000 + CVD tests live next to the checker.
       // [CHORE-PRODUCT-CLAIMS-TRUTH] hard-coded source-count / live-chain claims.
