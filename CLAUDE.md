@@ -107,16 +107,16 @@ Major versions below; exact pins live only in `package.json` (Dependabot moves t
 
 ## Code Agent Feedback Convention
 
-**Per-PR, not shared.** Each PR carries its **own** feedback: either a `## Feedback` section in the PR body, or a
-per-PR file at `docs/feedback/<branch-name>.md`. A shared feedback file conflicts on every parallel PR, because
-GitHub's squash/rebase merge ignores the `merge=union` git attribute.
+**Per-PR, not shared.** Each PR carries its **own** feedback, in a per-PR file at `docs/feedback/<branch>.md`. A shared
+feedback file conflicts on every parallel PR, because GitHub's squash/rebase merge ignores the `merge=union` git
+attribute.
 
-**Feedback file lifecycle:** Create `docs/feedback/<branch>.md` in the FIRST commit with this goal's task checklist.
+**Feedback file lifecycle:**
+`docs/feedback/<branch>.md` is always created, in the branch's first commit, with the goal's task checklist; "no empty sections" applies only to its per-prompt sections.
 Tick items and add findings as you go. The final FEEDBACK is the last edit of that file, not a report written at
 the end. **Why:** compaction kills interim feedback; session death before final report loses the evidence.
 
-When implementing a prompt, if you encounter any of the following, document it in the PR's own feedback
-(PR body section or `docs/feedback/<branch>.md`):
+When implementing a prompt, if you encounter any of the following, document it in that file:
 
 - **Edge case not covered by the prompt** — e.g. a function that also needs the fix but wasn't listed
 - **Assumption that turned out wrong** — e.g. an import path that changed, a deprecated API
@@ -136,8 +136,8 @@ Format:
 - {description}
 ```
 
-Within a single PR the file/section is append-only — each prompt in that PR adds its own section, never removes
-previous entries. If no feedback applies to a prompt, do NOT create a feedback section/file (no empty sections).
+Within a single PR the file is append-only — each prompt in that PR adds its own section, never removes
+previous entries. If no feedback applies to a prompt, do NOT create a section for it (no empty sections).
 The Architect reviews each PR's feedback at merge time and triages items into the backlog.
 
 `archive/FEEDBACK.md` is a historical record (rule #4): do not append to it or restore it at the repo root.

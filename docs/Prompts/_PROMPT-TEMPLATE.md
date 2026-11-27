@@ -120,8 +120,8 @@ Never write "think carefully", "step by step", "explain your reasoning", or othe
 ## Do NOT                  (explicit guardrails — the "never" list)
 ## Files affected (read ONLY these)   (the allow-list that scopes the agent)
 ## Expected output         (branch name, SSH-signed, push+report-not-poll, tests, FEEDBACK <= 1 screen)
-   Create docs/feedback/<branch>.md in the FIRST commit with this goal's task checklist; tick items and add
-   findings as you go; the final FEEDBACK is the last edit of that file, not a report written at the end.
+   `docs/feedback/<branch>.md` is always created, in the branch's first commit, with the goal's task checklist; "no empty sections" applies only to its per-prompt sections.
+   Tick items and add findings as you go; the final FEEDBACK is the last edit of that file, not a report written at the end.
    Exit = branch pushed + compare link reported + local verification done. CI runs once the OWNER opens the
    PR and must be green before merge — PR creation is never the agent's job.
    **Why:** compaction kills interim feedback; session death before final report loses the evidence. A
@@ -155,7 +155,8 @@ Never write "think carefully", "step by step", "explain your reasoning", or othe
 - **Commit the spec in its implementation PR.** If the agent reports "missing spec file": **proceed from the
   self-contained `/goal` AND commit this spec in the PR**.
 - **SSH-signed commits, noreply committer** (rule #12) — `main` rejects unsigned.
-- **Per-PR feedback** (PR body or `docs/feedback/<branch>.md`), **not** the shared append-only `FEEDBACK.md`.
+- **Per-PR feedback**, **not** the shared append-only `FEEDBACK.md`:
+  `docs/feedback/<branch>.md` is always created, in the branch's first commit, with the goal's task checklist; "no empty sections" applies only to its per-prompt sections.
 - **PT-PT to the owner, EN in prompts.**
 
 ---
