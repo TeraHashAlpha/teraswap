@@ -58,7 +58,7 @@ interface TradeRun {
   sequence: number
   /** The poll batch already consumed. */
   polledAt: number
-  /** Swap fell back to the single route: do not auto-select the split again for this trade. */
+  /** Switched off by hand, or by Swap's fallback to the single route: do not auto-select the split again for this trade. */
   heldOff: boolean
 }
 
@@ -70,9 +70,10 @@ const newTradeRun = (): TradeRun => ({ ranAt: 0, retryAt: 0, inFlight: false, se
  *
  * [fix/quote-rate-limit-normal-use] An analysis costs ONE /api/quote request (`split=1`; it used to be 11, on every new
  * quote). It runs when the pair or the settled amount has held SPLIT_SETTLE_MS, on a quote that answers exactly that
- * trade. After that its refresh rides on the quote poll (`splitPoll`): on every poll while a split is the selected route,
- * so the sub-quotes Swap executes are never older than one poll; otherwise at most once per
- * SPLIT_UNSELECTED_REFRESH_MS. The quotes, the router and the execution path are unchanged.
+ * trade. After that, while a split is the selected route its refresh rides on every quote poll (`splitPoll`), so the
+ * sub-quotes Swap executes are never older than one poll. While none is selected, it is a request of its own, at most
+ * once per SPLIT_UNSELECTED_REFRESH_MS [fix/quote-split-followups, A108 S-1]: the screen's quote poll never waits for
+ * split work nobody selected. The quotes, the router and the execution path are unchanged.
  *
  * @param meta — existing MetaQuoteResult from useQuote
  * @param tokenIn — sell token
@@ -94,7 +95,7 @@ export function useSplitRoute(
   // renderable without a provider; SwapBox supplies useQuoteChainId()
   // [feat/quote-before-wallet] — the quote/browse chain, not just the wallet's.
   chainId: number = DEFAULT_CHAIN_ID,
-  /** useQuote's channel. Without one, a due refresh is asked for on its own when a new quote arrives. */
+  /** useQuote's channel, for a selected split. Without one, every due refresh is asked for on its own on a new quote. */
   splitPoll?: SplitPollChannel,
 ): UseSplitRouteResult {
   // The trade an analysis belongs to. Null while disabled or while the amount is not a number.
@@ -203,7 +204,11 @@ export function useSplitRoute(
 
         run.ranAt = Date.now()
         // Refused or failed: nothing was priced, so the last analysis stays (and ages). Not a "no split" answer.
-        if (loaded === null) return
+        // A deferral's wait is used up either way: left behind, it would make every later quote look overdue.
+        if (loaded === null) {
+          run.retryAt = 0
+          return
+        }
         if (loaded?.batch.status === 'deferred') {
           run.retryAt = loaded.receivedAt + loaded.batch.retryAfterMs
           return
@@ -273,23 +278,29 @@ export function useSplitRoute(
     [tokenIn?.address, tokenIn?.decimals, tokenOut?.address, tokenOut?.decimals, chainId],
   )
 
+  /** Is a split the route Swap would execute? */
+  const splitSelected = useCallback(
+    (): boolean => selectedRef.current && latestRef.current.analysis?.result.bestSplit.isSplit === true,
+    [],
+  )
+
   /** Is a refresh due? The rule behind both ways a refresh can happen. */
   const refreshDue = useCallback((): boolean => {
     const run = runRef.current
     if (run.inFlight || run.ranAt === 0) return false // a trade's first analysis is the hook's own request
     if (run.retryAt) return Date.now() >= run.retryAt
-    const selected = selectedRef.current && latestRef.current.analysis?.result.bestSplit.isSplit === true
-    return selected || Date.now() - run.ranAt >= SPLIT_UNSELECTED_REFRESH_MS
-  }, [])
+    return splitSelected() || Date.now() - run.ranAt >= SPLIT_UNSELECTED_REFRESH_MS
+  }, [splitSelected])
 
-  // The next quote poll for this very trade carries the refresh when one is due.
+  // While a split is SELECTED, the next quote poll for this very trade carries the refresh when one is due. Otherwise no
+  // poll does: it would answer only after the slowest sub-amount [fix/quote-split-followups, A108 S-1].
   useEffect(
     () =>
       splitPoll?.register((key) => {
         const now = latestRef.current
-        return !!now.tradeKey && now.eligible && sameQuoteKey(key, now.tradeKey) && refreshDue()
+        return !!now.tradeKey && now.eligible && sameQuoteKey(key, now.tradeKey) && splitSelected() && refreshDue()
       }),
-    [splitPoll, refreshDue],
+    [splitPoll, splitSelected, refreshDue],
   )
 
   useEffect(() => {
@@ -302,7 +313,8 @@ export function useSplitRoute(
       return
     }
     if (settledId !== tradeId || run.inFlight) return
-    if (run.ranAt === 0 || (!splitPoll && refreshDue())) {
+    // A due refresh is asked for here, on a new quote, unless a poll is the one to carry it.
+    if (run.ranAt === 0 || (!(splitPoll && splitSelected()) && refreshDue())) {
       analyse(tradeId, tradeKey.amountRaw, seed, () => requestBatch(tradeKey))
     }
     // Runs once per settled trade and once per new quote (`seed` is a new object every render in some callers).
@@ -313,9 +325,11 @@ export function useSplitRoute(
     const next = !selectedRef.current
     selectedRef.current = next
     setUseSplit(next)
-    if (!next) return
     const run = runRef.current
-    run.heldOff = false
+    // [fix/quote-split-followups] A choice made by hand holds for this trade: switched off, no later recommendation
+    // switches it back on. A new pair or amount is a new `run`, so the choice resets with it.
+    run.heldOff = !next
+    if (!next) return
     // Selected on an analysis too old to execute: refresh it now rather than at the next poll (not while a deferral runs).
     const now = latestRef.current
     if (now.tradeKey && now.tradeId && now.seed && now.analysis && !run.inFlight && Date.now() >= run.retryAt && isSplitQuoteStale(now.analysis.result)) {

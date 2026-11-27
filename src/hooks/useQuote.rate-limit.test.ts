@@ -163,6 +163,132 @@ describe('useQuote: a new selection clears the 429', () => {
   })
 })
 
+describe('useQuote: the 429 wait follows the server', () => {
+  /** A refusal that says when the window frees, as /api/quote does (epoch ms). */
+  const limitedWith = (reset: string) =>
+    new Response(JSON.stringify({ error: 'Rate limit exceeded. Try again in a minute.' }), {
+      status: 429,
+      headers: { 'content-type': 'application/json', 'X-RateLimit-Reset': reset },
+    })
+  /** A server whose window frees at `freesAt`: it refuses until then, and says so each time. */
+  const windowUntil = (freesAt: number): Answer => (url) => (Date.now() < freesAt ? limitedWith(String(freesAt)) : ok(url))
+
+  it('a 60 s window recovers at about 60 s with one retry, and the countdown shows that wait', async () => {
+    answer = windowUntil(Date.now() + 60_000)
+    const { result } = mount()
+    await advance(1)
+    expect(result.current.retryIn).toBe(61) // the 60 s the server gave, plus the 1 s margin
+    await advance(10_000)
+    expect(result.current.retryIn).toBe(51)
+    await advance(50_500)
+    expect(requests).toHaveLength(1)
+    await advance(500)
+    expect(requests).toHaveLength(2)
+    expect(requests[1].at - requests[0].at).toBeLessThanOrEqual(61_000)
+    expect(result.current.error).toBeNull()
+    expect(result.current.retryIn).toBeNull()
+    expect(result.current.meta).not.toBeNull()
+    await advance(15_000)
+    expect(requests).toHaveLength(3) // back on the normal cadence
+  })
+
+  it('a window that freed while the refusal was on its way is retried after the margin alone', async () => {
+    let n = 0
+    answer = (url) => (++n === 1 ? limitedWith(String(Date.now() - 200)) : ok(url))
+    const { result } = mount()
+    await advance(1)
+    expect(result.current.retryIn).toBe(1)
+    await advance(1_000)
+    expect(requests).toHaveLength(2)
+    expect(result.current.error).toBeNull()
+  })
+
+  it('a reset further off than 120 s waits 120 s', async () => {
+    answer = windowUntil(Date.now() + 500_000)
+    const { result } = mount()
+    await advance(1)
+    expect(result.current.retryIn).toBe(120)
+    await advance(119_000)
+    expect(requests).toHaveLength(1)
+    await advance(1_000)
+    expect(requests).toHaveLength(2)
+  })
+
+  it.each([
+    ['missing', () => null],
+    ['empty', () => ''],
+    ['not a number', () => 'soon'],
+    ['not a whole number', () => `${Date.now() + 5_000}.5`],
+    ['a minute in the past', () => String(Date.now() - 60_000)],
+    ['in seconds, not milliseconds', () => String(Math.floor(Date.now() / 1000) + 60)],
+    ['more than an hour ahead', () => String(Date.now() + 3_600_001)],
+  ] as [string, () => string | null][])('a header that is %s keeps the doubling (30, 60, 120 s); a good one is then followed', async (_label, header) => {
+    let good = false
+    answer = () => {
+      if (good) return limitedWith(String(Date.now() + 20_000))
+      const value = header()
+      return value === null ? limited() : limitedWith(value)
+    }
+    const { result } = mount()
+    await advance(1)
+    expect(result.current.retryIn).toBe(30)
+    await advance(30_000)
+    expect(requests).toHaveLength(2)
+    expect(result.current.retryIn).toBe(60)
+    await advance(60_000)
+    expect(requests).toHaveLength(3)
+    expect(result.current.retryIn).toBe(120)
+    good = true
+    await advance(120_000)
+    expect(requests).toHaveLength(4)
+    expect(result.current.retryIn).toBe(21)
+  })
+
+  it('the doubling counts refusals in a row, not the waits the server gave', async () => {
+    let n = 0
+    answer = () => (++n === 1 ? limitedWith(String(Date.now() + 4_000)) : limited())
+    const { result } = mount()
+    await advance(1)
+    expect(result.current.retryIn).toBe(5)
+    await advance(5_000)
+    expect(requests).toHaveLength(2)
+    expect(result.current.retryIn).toBe(60) // today's second refusal, not 2 x 5 s
+  })
+
+  it('a short wait never aborts its own slow retry', async () => {
+    let n = 0
+    answer = (url) => {
+      if (++n === 1) return limitedWith(String(Date.now() + 1_000))
+      return new Promise<Response>((resolve) => setTimeout(() => resolve(ok(url)), 5_000))
+    }
+    const { result } = mount()
+    await advance(1)
+    expect(result.current.retryIn).toBe(2)
+    await advance(2_000 + 5_000)
+    expect(requests).toHaveLength(2) // the 2 s timer did not supersede the request on the wire
+    expect(result.current.meta).not.toBeNull()
+    expect(result.current.retryIn).toBeNull()
+  })
+
+  it('…but a retry that hangs for a whole poll interval is superseded', async () => {
+    let n = 0
+    answer = (url) => {
+      if (++n === 1) return limitedWith(String(Date.now() + 1_000))
+      return n === 2 ? never() : ok(url)
+    }
+    const { result } = mount()
+    await advance(1)
+    await advance(2_000)
+    expect(requests).toHaveLength(2)
+    await advance(14_000)
+    expect(requests).toHaveLength(2)
+    await advance(2_000)
+    expect(requests).toHaveLength(3)
+    expect(requests[2].at - requests[1].at).toBe(16_000)
+    expect(result.current.meta).not.toBeNull()
+  })
+})
+
 describe('useQuote: the poll carries the split refresh when the split hook asks for it', () => {
   const batch = { status: 'ok', quotes: { '500000000000000000': [] } }
 
