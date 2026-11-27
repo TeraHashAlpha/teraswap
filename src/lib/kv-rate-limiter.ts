@@ -26,6 +26,11 @@ import { forLog } from '@/lib/log-sanitize'
 
 export const SWAP_RATE_LIMIT = { limit: 20, windowMs: 60_000 }
 export const QUOTE_RATE_LIMIT = { limit: 30, windowMs: 60_000 }
+// [fix/quote-rate-limit-normal-use, owner 2026-11-27] /api/quote?split=1 runs one more fan-out per split sub-amount
+// (11). They are charged here, 1 unit each, key `quote-split:<ip hash>`; the request itself still costs 1 unit on
+// `quote:`. A separate bucket, so split work can never use up the budget the swap screen's own quote needs. 66 = 6
+// analyses a minute. When it is spent the quote still answers and only the split is deferred. Degraded: 33/min.
+export const QUOTE_SPLIT_RATE_LIMIT = { limit: 66, windowMs: 60_000 }
 // RPC proxy is read-only (the blacklist in src/app/api/rpc/route.ts blocks
 // every write/sign method). Injected wallet extensions (MetaMask, Rainbow,
 // ...) poll through this endpoint for block headers, balances, gas, and

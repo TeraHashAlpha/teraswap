@@ -900,3 +900,14 @@ describe('SwapBox: [SPRINT-9R R2] Review modal renders the frozen pendingSwap (n
     expect(probe.getAttribute('data-expected-out')).toBe(fmtToken(BigInt(FROZEN_PENDING.swapToAmount), 6))
   })
 })
+
+// [fix/quote-rate-limit-normal-use] While /api/quote rate limits us the card says how long the wait is.
+describe('SwapBox: rate-limit wait', () => {
+  const limited = { meta: null, loading: false, error: 'Rate limit exceeded. Try again in a minute.', countdown: 28, refetch: vi.fn(), refresh: vi.fn() }
+
+  it('shows the seconds until the automatic retry beside the error', () => {
+    useQuoteMock.mockReturnValue({ ...limited, retryIn: 28 })
+    const { container } = renderWithProviders(<SwapBox />)
+    expect(container.textContent).toContain('Rate limit exceeded. Try again in a minute. Retrying in 28s.')
+  })
+})

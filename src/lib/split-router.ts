@@ -11,6 +11,7 @@ import {
   SPLIT_CONFIGS_2WAY,
   SPLIT_CONFIGS_3WAY,
   SPLIT_ELIGIBLE_SOURCES,
+  splitSubPercents,
 } from './split-routing-types'
 
 // ── Split Router Engine ─────────────────────────────────────
@@ -42,25 +43,11 @@ export async function fetchSplitQuotes(
     quoteMap.get(q.source)!.set(100, q)
   }
 
-  // Determine sub-percentages we need
-  const neededPercents = new Set<number>()
-  for (const [a, b] of SPLIT_CONFIGS_2WAY) {
-    neededPercents.add(a)
-    neededPercents.add(b)
-  }
-  for (const [a, b, c] of SPLIT_CONFIGS_3WAY) {
-    neededPercents.add(a)
-    neededPercents.add(b)
-    neededPercents.add(c)
-  }
-
-  // Remove 100% (already have it)
-  neededPercents.delete(100)
-
-  // Fetch quotes at each sub-amount in parallel
+  // Fetch quotes at each sub-amount in parallel. The percentages are shared with /api/quote?split=1
+  // (splitSubAmounts), so the batched request prices exactly what is asked for here.
   const fetchPromises: Promise<void>[] = []
 
-  for (const pct of neededPercents) {
+  for (const pct of splitSubPercents()) {
     // [11-L-01] safeBigInt: malformed pct → skip this percentage split.
     const pctBig = safeBigInt(pct)
     if (pctBig === null) continue

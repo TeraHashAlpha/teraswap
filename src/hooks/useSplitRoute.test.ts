@@ -23,11 +23,11 @@ vi.mock('@/lib/utils', async () => {
   return actual
 })
 
-import { renderHook, act, waitFor } from '@testing-library/react'
+import { renderHook, act } from '@testing-library/react'
 import { useSplitRoute } from './useSplitRoute'
 import type { Token } from '@/lib/tokens'
 import type { MetaQuoteResult, NormalizedQuote } from '@/lib/api'
-import type { SplitRoute } from '@/lib/split-routing-types'
+import { SPLIT_SETTLE_MS, type SplitRoute } from '@/lib/split-routing-types'
 
 const USDC: Token = {
   address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
@@ -82,13 +82,20 @@ function makeBestSplit(isSplit: boolean, improvementBps = 0): SplitRoute {
   }
 }
 
+/** [fix/quote-rate-limit-normal-use] An analysis starts once the trade has held SPLIT_SETTLE_MS: run the clock past it. */
+async function pastSettle() {
+  await act(async () => { await vi.advanceTimersByTimeAsync(SPLIT_SETTLE_MS + 50) })
+}
+
 beforeEach(() => {
+  vi.useFakeTimers()
   vi.clearAllMocks()
   mockFetchSplitQuotes.mockResolvedValue(new Map())
   mockFindBestSplit.mockReturnValue(makeBestSplit(false))
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.restoreAllMocks()
 })
 
@@ -107,8 +114,7 @@ describe('useSplitRoute: disabled / below-threshold paths', () => {
     // 100 USDC out — well below the $5k threshold.
     const meta = makeMeta('100000000')
     renderHook(() => useSplitRoute(meta, ETH, USDC, '1', true))
-    // Give effects a tick to run.
-    await act(async () => { await Promise.resolve() })
+    await pastSettle()
     expect(mockFetchSplitQuotes).not.toHaveBeenCalled()
   })
 
@@ -124,7 +130,7 @@ describe('useSplitRoute: disabled / below-threshold paths', () => {
     // executionPriceUsd is null → tradeAboveThreshold=false.
     const meta = makeMeta('10000000000000000000000') // 10k FOO out (huge but unstable)
     renderHook(() => useSplitRoute(meta, ETH, FOO, '5', true))
-    await act(async () => { await Promise.resolve() })
+    await pastSettle()
     expect(mockFetchSplitQuotes).not.toHaveBeenCalled()
   })
 })
@@ -137,7 +143,8 @@ describe('useSplitRoute: recommendation gating', () => {
     const { result } = renderHook(() =>
       useSplitRoute(meta, ETH, USDC, '5', true),
     )
-    await waitFor(() => expect(result.current.splitRecommended).toBe(true))
+    await pastSettle()
+    expect(result.current.splitRecommended).toBe(true)
     expect(result.current.useSplit).toBe(true) // auto-enabled
     expect(result.current.splitResult).not.toBeNull()
   })
@@ -148,7 +155,8 @@ describe('useSplitRoute: recommendation gating', () => {
     const { result } = renderHook(() =>
       useSplitRoute(meta, ETH, USDC, '5', true),
     )
-    await waitFor(() => expect(result.current.splitResult).not.toBeNull())
+    await pastSettle()
+    expect(result.current.splitResult).not.toBeNull()
     expect(result.current.splitRecommended).toBe(false)
     expect(result.current.useSplit).toBe(false)
   })
@@ -159,7 +167,8 @@ describe('useSplitRoute: recommendation gating', () => {
     const { result } = renderHook(() =>
       useSplitRoute(meta, ETH, USDC, '5', true),
     )
-    await waitFor(() => expect(result.current.splitResult).not.toBeNull())
+    await pastSettle()
+    expect(result.current.splitResult).not.toBeNull()
     expect(result.current.splitRecommended).toBe(false)
   })
 })
@@ -169,7 +178,8 @@ describe('useSplitRoute: USD estimation paths', () => {
     const meta = makeMeta('10000000000') // 10k USDC out
     mockFindBestSplit.mockReturnValue(makeBestSplit(true, 30))
     renderHook(() => useSplitRoute(meta, ETH, USDC, '5', true))
-    await waitFor(() => expect(mockFetchSplitQuotes).toHaveBeenCalled())
+    await pastSettle()
+    expect(mockFetchSplitQuotes).toHaveBeenCalled()
   })
 
   it('uses input amount when input token is a stablecoin', async () => {
@@ -177,7 +187,8 @@ describe('useSplitRoute: USD estimation paths', () => {
     const meta = makeMeta('5000000000000000000') // arbitrary FOO out
     mockFindBestSplit.mockReturnValue(makeBestSplit(true, 30))
     renderHook(() => useSplitRoute(meta, USDC, FOO, '10000', true))
-    await waitFor(() => expect(mockFetchSplitQuotes).toHaveBeenCalled())
+    await pastSettle()
+    expect(mockFetchSplitQuotes).toHaveBeenCalled()
   })
 })
 
@@ -205,7 +216,7 @@ describe('useSplitRoute: robustness', () => {
     const { result } = renderHook(() =>
       useSplitRoute(meta, ETH, USDC, 'not-a-number', true),
     )
-    await act(async () => { await Promise.resolve() })
+    await pastSettle()
     expect(result.current.splitResult).toBeNull()
     expect(mockFetchSplitQuotes).not.toHaveBeenCalled()
   })
@@ -216,7 +227,8 @@ describe('useSplitRoute: robustness', () => {
     const { result } = renderHook(() =>
       useSplitRoute(meta, ETH, USDC, '5', true),
     )
-    await waitFor(() => expect(result.current.analyzing).toBe(false))
+    await pastSettle()
+    expect(result.current.analyzing).toBe(false)
     expect(result.current.splitResult).toBeNull()
   })
 
@@ -233,9 +245,11 @@ describe('useSplitRoute: robustness', () => {
         useSplitRoute(meta, ETH, USDC, amount, true),
       { initialProps: { amount: '5' } },
     )
-    await waitFor(() => expect(mockFetchSplitQuotes).toHaveBeenCalledTimes(1))
+    await pastSettle()
+    expect(mockFetchSplitQuotes).toHaveBeenCalledTimes(1)
     rerender({ amount: '6' })
-    await waitFor(() => expect(mockFetchSplitQuotes).toHaveBeenCalledTimes(2))
+    await pastSettle()
+    expect(mockFetchSplitQuotes).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -262,7 +276,8 @@ describe('useSplitRoute: sub-quote fetch URL chain awareness [CHORE-SPLITROUTE-C
         ? useSplitRoute(meta, ETH, USDC, '5', true)
         : useSplitRoute(meta, ETH, USDC, '5', true, chainId),
     )
-    await waitFor(() => expect(mockFetchSplitQuotes).toHaveBeenCalled())
+    await pastSettle()
+    expect(mockFetchSplitQuotes).toHaveBeenCalled()
     // First arg of fetchSplitQuotes is the hook's REAL fetchQuoteAtAmount.
     const fetchQuoteAtAmount = mockFetchSplitQuotes.mock.calls[0][0] as (amount: string) => Promise<unknown>
 
@@ -289,7 +304,10 @@ describe('useSplitRoute: sub-quote fetch URL chain awareness [CHORE-SPLITROUTE-C
     expect(url.searchParams.get('chainId')).toBe('8453')
     expect(url.searchParams.get('src')).toBe(ETH.address)
     expect(url.searchParams.get('dst')).toBe(USDC.address)
-    expect(url.searchParams.get('amount')).toBe('2500000000000000000')
+    // [fix/quote-rate-limit-normal-use] CHANGED EXPECTATION: one batched request names the TRADE's amount (5 ETH) with
+    // split=1 and the server derives the sub-amounts; it used to be one request per sub-amount ('2500000000000000000').
+    expect(url.searchParams.get('amount')).toBe('5000000000000000000')
+    expect(url.searchParams.get('split')).toBe('1')
   })
 
   it('mainnet request stays byte-identical: no chainId param (P219; the P217 default IS chain 1)', async () => {
@@ -330,19 +348,21 @@ describe('chain-keyed stable membership for the USD estimate', () => {
   it('counts USDbC output as ~USD on Base (8453) → split analysis runs', async () => {
     const meta = makeMeta('10000000000') // 10k USDbC (6 dp) out — above the $5k threshold.
     renderHook(() => useSplitRoute(meta, ETH, USDbC, '5', true, 8453))
-    await waitFor(() => expect(mockFetchSplitQuotes).toHaveBeenCalled())
+    await pastSettle()
+    expect(mockFetchSplitQuotes).toHaveBeenCalled()
   })
 
   it('does NOT count BOLD as ~USD on Base. BOLD is a mainnet-only stable', async () => {
     const meta = makeMeta('10000000000000000000000') // 10k BOLD (18 dp) out.
     renderHook(() => useSplitRoute(meta, ETH, BOLD, '5', true, 8453))
-    await act(async () => { await Promise.resolve() })
+    await pastSettle()
     expect(mockFetchSplitQuotes).not.toHaveBeenCalled()
   })
 
   it('still counts BOLD as ~USD on mainnet (default chain)', async () => {
     const meta = makeMeta('10000000000000000000000') // 10k BOLD (18 dp) out.
     renderHook(() => useSplitRoute(meta, ETH, BOLD, '5', true))
-    await waitFor(() => expect(mockFetchSplitQuotes).toHaveBeenCalled())
+    await pastSettle()
+    expect(mockFetchSplitQuotes).toHaveBeenCalled()
   })
 })

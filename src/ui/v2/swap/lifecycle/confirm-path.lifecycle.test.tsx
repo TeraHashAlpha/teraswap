@@ -29,6 +29,11 @@ const h = vi.hoisted(() => {
     route: {} as Record<string, unknown>,
     depeg: { mode: 'ok', divergence: 0, symbol: '', message: null } as Record<string, unknown>,
     rec: { swap: [], split: [], approval: [], route: [] } as Record<'swap' | 'split' | 'approval' | 'route', unknown[][]>,
+    toasts: [] as Array<{ title?: string; description?: string }>,
+    toasted(t: { title?: string; description?: string }) {
+      this.toasts = [...this.toasts, t]
+      return 'toast-id'
+    },
   }
 })
 
@@ -53,8 +58,8 @@ vi.mock('@/hooks/useSwapHistory', () => ({ useSwapHistory: () => ({ addRecord: (
 vi.mock('@/hooks/useActiveApprovals', () => ({ useActiveApprovals: () => ({ addApproval: () => {} }) }))
 vi.mock('@/components/ActiveApprovals', () => ({ default: () => null }))
 vi.mock('@/components/ParticleNetwork', () => ({ setParticleTurbo: () => {} }))
-vi.mock('@/components/ToastProvider', () => ({ useToast: () => ({ toast: () => '', dismiss: () => {} }) }))
-vi.mock('../../shell/toasts', () => ({ useV2Toast: () => ({ toast: () => 'toast-id', dismiss: () => {}, update: () => {} }) }))
+vi.mock('@/components/ToastProvider', () => ({ useToast: () => ({ toast: (t: { title?: string }) => h.toasted(t), dismiss: () => {} }) }))
+vi.mock('../../shell/toasts', () => ({ useV2Toast: () => ({ toast: (t: { title?: string }) => h.toasted(t), dismiss: () => {}, update: () => {} }) }))
 vi.mock('@/components/TokenSelector', () => ({ default: ({ selected }: { selected: { symbol: string } | null }) => <button type="button">{selected?.symbol}</button> }))
 vi.mock('@/lib/analytics', () => ({ updateSwapStatus: () => {}, logQuoteToSupabase: () => {} }))
 vi.mock('@/lib/wallet-activity-tracker', () => ({ trackWalletActivity: () => {} }))
@@ -97,6 +102,10 @@ const SPLIT = {
   },
   bestSingle: { source: 'velora', toAmount: '2484000000', gasUsd: 0.03 },
   splitRecommended: true,
+  // [fix/quote-rate-limit-normal-use] A split analysis says when its sub-quotes arrived; Swap refuses one older than 15 s.
+  get fetchedAt() {
+    return Date.now()
+  },
 }
 
 beforeEach(() => {
@@ -410,5 +419,88 @@ describe('409 unpriced_ack_required: the consent comes back, unticked, even afte
     expect(approve()).not.toHaveBeenCalled()
     expect(splitExec()).toHaveBeenCalledTimes(1)
     expect(swapExecute()).not.toHaveBeenCalled()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// [fix/quote-rate-limit-normal-use, owner 2026-11-27] "If Swap is pressed with split sub-quotes older than 15 s, do not
+// execute the split: fall back to the single best route and say so in the UI."
+// ─────────────────────────────────────────────────────────────
+describe('split sub-quotes older than 15 s: the split is not executed, the single best route is, and the UI says so', () => {
+  let fallBack: ReturnType<typeof vi.fn>
+  const selectSplit = (ageMs: number) => {
+    h.toasts = []
+    fallBack = vi.fn(() => { h.route = { ...h.route, useSplit: false } }) // what the real hook does
+    h.route = { splitResult: { ...SPLIT, fetchedAt: Date.now() - ageMs }, analyzing: false, useSplit: true, toggleSplit: noop, fallBackToSingle: fallBack }
+  }
+  const said = () => h.toasts.filter((t) => /split quotes out of date/i.test(t.title ?? ''))
+  beforeEach(() => selectSplit(15_001))
+
+  it('v1 Swap → the single execute(source, fallbacks); v2 Swap opens the single review, whose Confirm makes the same call', async () => {
+    const one = v1Run(() => v1Click('Swap'))
+    expect(one.split).toHaveLength(0)
+    expect(one.execute).toHaveLength(1)
+    expect(one.execute[0][0]).toBe('velora')
+    expect(fallBack).toHaveBeenCalledTimes(1)
+    expect(said()).toHaveLength(1)
+    expect(said()[0].description).toMatch(/single best route/i)
+
+    selectSplit(15_001)
+    v2Render()
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }))
+    await flush()
+    expect(calls(h.split.execute)).toHaveLength(0)
+    expect(calls(h.swap.execute)).toHaveLength(0) // nothing executes unseen: the single route's review comes first
+    expect(fallBack).toHaveBeenCalledTimes(1)
+    expect(said()).toHaveLength(1)
+    fireEvent.click(confirmBtn())
+    await flush()
+    expect(calls(h.split.execute)).toHaveLength(0)
+    expect(calls(h.swap.execute)).toEqual(one.execute)
+
+    // The control, in both screens: a split 14 s old executes as before, with nothing said.
+    cleanup()
+    h.swap = swapHook()
+    selectSplit(14_000)
+    const fresh = v1Run(() => v1Click('Swap'))
+    expect(fresh.split).toHaveLength(1)
+    expect(fresh.execute).toHaveLength(0)
+    v2Render()
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }))
+    await flush()
+    expect(calls(h.split.execute)).toHaveLength(1)
+    expect(fallBack).not.toHaveBeenCalled()
+    expect(said()).toHaveLength(0)
+  })
+
+  it('unpriced: consent given on a split that went stale never executes the split (v1 keeps the ack on the single route)', async () => {
+    h.tier = unpricedTier
+    const one = v1Run(() => {
+      v1Click('Swap')
+      fireEvent.click(screen.getByTestId('unpriced-consent-checkbox'))
+      fireEvent.click(screen.getByTestId('unpriced-consent-confirm'))
+    })
+    expect(one.split).toHaveLength(0)
+    expect(one.execute).toHaveLength(1)
+    expect(one.execute[0][2]).toEqual({ unpricedAck: true })
+
+    selectSplit(15_001)
+    v2Render()
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }))
+    await flush()
+    fireEvent.click(screen.getByTestId('unpriced-consent-checkbox'))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Continue' }))
+    await flush()
+    expect(calls(h.split.execute)).toHaveLength(0)
+    expect(said()).toHaveLength(1)
+  })
+
+  it('both screens hand useSplitRoute the poll channel of their useQuote', () => {
+    const splitPoll = { register: () => () => {}, wants: () => false }
+    h.quote = { ...h.quote, splitPoll } as typeof h.quote
+    const one = v1Run(() => {})
+    expect((one.hooks.route as unknown[])[6]).toBe(splitPoll)
+    v2Render()
+    expect((v2Out().hooks.route as unknown[])[6]).toBe(splitPoll)
   })
 })

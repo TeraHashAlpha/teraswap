@@ -1,4 +1,4 @@
-import type { AggregatorName } from './constants'
+import { QUOTE_REFRESH_MS, type AggregatorName } from './constants'
 import type { NormalizedQuote } from './api'
 
 // ── Split Routing Types ──────────────────────────────────────
@@ -80,6 +80,57 @@ export const SPLIT_CONFIGS_3WAY: [number, number, number][] = [
   [60, 25, 15],
   [34, 33, 33],
 ]
+
+/** Every sub-percentage the configurations above need, except 100 (the full-amount quote already covers it). */
+export function splitSubPercents(): number[] {
+  const needed = new Set<number>()
+  for (const config of [...SPLIT_CONFIGS_2WAY, ...SPLIT_CONFIGS_3WAY]) {
+    for (const percent of config) needed.add(percent)
+  }
+  needed.delete(100)
+  return [...needed]
+}
+
+/**
+ * [fix/quote-rate-limit-normal-use] The raw sub-amounts one split analysis prices. The router asks for exactly these
+ * (split-router.ts) and /api/quote?split=1 fans out exactly these: the server derives them from the total, so a
+ * request cannot name amounts of its own.
+ */
+export function splitSubAmounts(total: bigint): string[] {
+  const amounts = new Set<string>()
+  for (const percent of splitSubPercents()) {
+    const sub = (total * BigInt(percent)) / 100n
+    if (sub > 0n) amounts.add(sub.toString())
+  }
+  return [...amounts]
+}
+
+/** What /api/quote?split=1 answers beside the full-amount quote. */
+export type SplitBatch =
+  /** `quotes[subAmount]` is the `all` list a plain request for that sub-amount would have answered ([] if it failed). */
+  | { status: 'ok'; quotes: Record<string, NormalizedQuote[]> }
+  /** The split rate-limit bucket is spent: no sub-quote ran. Not an error; ask again after `retryAfterMs`. */
+  | { status: 'deferred'; retryAfterMs: number }
+
+// ── Refresh cadence [fix/quote-rate-limit-normal-use, owner 2026-11-27] ──
+
+/** A new pair or amount is analysed once it has held this long (so typing costs one analysis, not one per digit). */
+export const SPLIT_SETTLE_MS = 1_500
+
+/** While no split is the selected route, an analysis is refreshed at most this often. */
+export const SPLIT_UNSELECTED_REFRESH_MS = 60_000
+
+/**
+ * The oldest split sub-quotes Swap may execute. While a split is selected every quote poll refreshes them, so this is
+ * one poll interval; older (the split bucket was spent, or polls are failing) and Swap uses the single best route.
+ */
+export const SPLIT_MAX_AGE_MS = QUOTE_REFRESH_MS
+
+/** Fail closed: a result without a readable timestamp is stale. */
+export function isSplitQuoteStale(result: Pick<SplitQuoteResult, 'fetchedAt'> | null | undefined, now: number = Date.now()): boolean {
+  const fetchedAt = result?.fetchedAt
+  return !(typeof fetchedAt === 'number' && now - fetchedAt <= SPLIT_MAX_AGE_MS)
+}
 
 /** Sources that can participate in split routing execution (must support partial amounts) */
 export const SPLIT_ELIGIBLE_SOURCES: ReadonlySet<AggregatorName> = new Set([

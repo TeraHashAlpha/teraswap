@@ -393,7 +393,8 @@ describe('SwapBox: [fix/unpriced-ack-paths] split route: the ack reaches useSpli
     ],
   }
   function splitActive() {
-    useSplitRouteMock.mockReturnValue({ splitResult: { bestSplit, splitRecommended: true }, analyzing: false, splitRecommended: true, useSplit: true, toggleSplit: vi.fn() })
+    // [fix/quote-rate-limit-normal-use] fetchedAt: a split analysis says when its sub-quotes arrived (Swap refuses > 15 s).
+    useSplitRouteMock.mockReturnValue({ splitResult: { bestSplit, splitRecommended: true, fetchedAt: Date.now() }, analyzing: false, splitRecommended: true, useSplit: true, toggleSplit: vi.fn() })
   }
 
   it('unpriced + split active → Continue calls executeSplitSwap(bestSplit, { unpricedAck: true }); the single execute is never called', async () => {

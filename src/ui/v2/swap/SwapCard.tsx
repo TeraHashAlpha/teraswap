@@ -152,7 +152,7 @@ export function SwapCard() {
   })
 
   const excludeArray = useMemo(() => (excludedSources.size > 0 ? Array.from(excludedSources) : undefined), [excludedSources])
-  const { meta: rawMeta, loading: quoteLoading, error: quoteError, countdown, refresh: refreshQuote } = useQuote(tokenIn, tokenOut, amountIn, isChainOkForQuote, excludeArray, { logQuote: true })
+  const { meta: rawMeta, loading: quoteLoading, error: quoteError, retryIn: quoteRetryIn, splitPoll, countdown, refresh: refreshQuote } = useQuote(tokenIn, tokenOut, amountIn, isChainOkForQuote, excludeArray, { logQuote: true })
 
   // [fix/stale-quote-pair-flip #604] Only a quote whose identity matches the CURRENT chain/pair/decimals feeds the display.
   const matchedRawMeta = useMemo(
@@ -265,6 +265,13 @@ export function SwapCard() {
     gates,
     approval,
     tokenOutUsdPrice: tokenOutPriceCheck.chainlinkPrice,
+    splitPoll,
+    // [fix/quote-rate-limit-normal-use] A split too old to execute fell back to the single route: that route's review comes
+    // next, as for any single swap, so nothing executes that the user has not seen.
+    onSplitStale: () => {
+      setConfirmedModel(null)
+      setReviewRequested(true)
+    },
   })
 
   // v1 resets both swap hooks and drops any review whenever the trade changes under them (typed amount, 50% / MAX, ⇅, a token pick), and
@@ -549,7 +556,7 @@ export function SwapCard() {
 
         {quoteError && (
           <div className="mt-3">
-            <Notice tone="red">{quoteError}</Notice>
+            <Notice tone="red">{quoteError}{quoteRetryIn != null && ` Retrying in ${quoteRetryIn}s.`}</Notice>
           </div>
         )}
 

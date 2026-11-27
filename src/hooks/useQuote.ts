@@ -19,6 +19,8 @@ import {
   type QuoteIdentity,
   type QuoteKey,
 } from '@/lib/quote-identity'
+import { createSplitPollChannel, type PolledSplit, type SplitPollChannel } from '@/lib/split-poll'
+import type { SplitBatch } from '@/lib/split-routing-types'
 
 /**
  * Typed error carrying the /api/quote HTTP status. Lets the hook
@@ -59,7 +61,9 @@ async function fetchQuoteViaApi(
   // token pair or amount changes mid-flight. AbortError is swallowed by the
   // caller — it means a newer request already took over.
   signal?: AbortSignal,
-): Promise<MetaQuoteResult> {
+  // [fix/quote-rate-limit-normal-use] Also price the split analysis' sub-amounts, in this same request.
+  withSplit?: boolean,
+): Promise<MetaQuoteResult & { split?: SplitBatch }> {
   const params = new URLSearchParams({
     src,
     dst,
@@ -72,6 +76,9 @@ async function fetchQuoteViaApi(
   }
   if (chainId && chainId !== 1) {
     params.set('chainId', String(chainId))
+  }
+  if (withSplit) {
+    params.set('split', '1')
   }
 
   // [SPRINT-9X X3] Parse via fetchJson: an HTML platform error (e.g. a 504 from a maxDuration kill)
@@ -93,14 +100,18 @@ async function fetchQuoteViaApi(
   return data as MetaQuoteResult
 }
 
-/** [fix/stale-quote-pair-flip] A quote tagged with the request it answered. */
-export type TaggedMetaQuote = MetaQuoteResult & { identity: QuoteIdentity }
+/** [fix/stale-quote-pair-flip] A quote tagged with the request it answered. `split` only when this poll fetched one. */
+export type TaggedMetaQuote = MetaQuoteResult & { identity: QuoteIdentity; split?: PolledSplit }
 
 interface UseQuoteResult {
   meta: TaggedMetaQuote | null
   loading: boolean
   error: string | null
   countdown: number
+  /** [fix/quote-rate-limit-normal-use] Seconds until the next try while /api/quote is rate limiting us; else null. */
+  retryIn: number | null
+  /** [fix/quote-rate-limit-normal-use] Where useSplitRoute asks for its refresh to ride on this hook's poll. */
+  splitPoll: SplitPollChannel
   refetch: () => void
   /** Manual quote refresh trigger. No-op if a fetch is already in flight.
    *  Resets the countdown to the current poll interval (respects backoff). */
@@ -138,6 +149,9 @@ export function useQuote(
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [countdown, setCountdown] = useState(QUOTE_REFRESH_MS / 1000)
+  // [fix/quote-rate-limit-normal-use] True from a 429 until a success, another error or a new selection.
+  const [rateLimited, setRateLimited] = useState(false)
+  const [splitPoll] = useState(createSplitPollChannel)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -305,8 +319,18 @@ export function useQuote(
     }
 
     const startTime = Date.now()
+    let requestKey: QuoteKey | null = null
     try {
       const rawAmount = parseUnits(debouncedAmount, tokenIn.decimals).toString()
+      requestKey = makeQuoteKey({
+        chainId: activeChainId,
+        tokenIn: tokenIn.address,
+        tokenOut: tokenOut.address,
+        amountRaw: rawAmount,
+        decimalsIn: tokenIn.decimals,
+        decimalsOut: tokenOut.decimals,
+      })
+      const withSplit = splitPoll.wants(requestKey)
       const result = await fetchQuoteViaApi(
         tokenIn.address,
         tokenOut.address,
@@ -316,7 +340,9 @@ export function useQuote(
         excludeSources,
         activeChainId,
         signal,
+        withSplit,
       )
+      const receivedAt = Date.now()
 
       // [P94] Compute the gasless recommendation client-side so it uses the
       // current ETH price + gas price (the server doesn't have either).
@@ -340,7 +366,9 @@ export function useQuote(
       // The echo fields are routing metadata, not part of the quote itself.
       const quote: Record<string, unknown> = { ...result }
       for (const k of QUOTE_ECHO_KEYS) delete quote[k]
-      setMeta({ ...(quote as unknown as MetaQuoteResult), gasless, identity: { ...responseKey, fetchedAt: result.fetchedAt } })
+      delete quote.split
+      const polled: PolledSplit | undefined = withSplit && result.split ? { ...result.split, receivedAt } : undefined
+      setMeta({ ...(quote as unknown as MetaQuoteResult), gasless, identity: { ...responseKey, fetchedAt: result.fetchedAt }, ...(polled ? { split: polled } : {}) })
       // [hotfix] First success after backoff — snap back to the normal
       // cadence and clear the error in one shot (we skipped that reset
       // at the top of this call). If we weren't in backoff, the
@@ -349,6 +377,7 @@ export function useQuote(
         inBackoffRef.current = false
         currentIntervalMsRef.current = QUOTE_REFRESH_MS
         setError(null)
+        setRateLimited(false)
         rearmPollTimer()
       }
       setCountdown(QUOTE_REFRESH_MS / 1000)
@@ -372,6 +401,10 @@ export function useQuote(
       if (err instanceof DOMException && err.name === 'AbortError') {
         return
       }
+      // [fix/quote-rate-limit-normal-use] Same rule when the refusal itself had already arrived: a failure for a request
+      // that was superseded, or for a selection that is no longer on screen, must not start a backoff or paint an error.
+      if (signal.aborted) return
+      if (requestKey && (!currentKeyRef.current || !sameQuoteKey(requestKey, currentKeyRef.current))) return
       // [hotfix] Treat HTTP 429 distinctly: enter (or extend) backoff
       // up to MAX_BACKOFF_MS, double the polling interval, and rearm
       // the timer. Other errors keep the normal cadence — backoff is
@@ -393,6 +426,7 @@ export function useQuote(
         currentIntervalMsRef.current = QUOTE_REFRESH_MS
         rearmPollTimer()
       }
+      setRateLimited(isRateLimit)
       setError(err instanceof Error ? err.message : 'Failed to fetch quotes')
       setMeta(null)
     } finally {
@@ -424,7 +458,13 @@ export function useQuote(
     rearmPollTimer,
     activeChainId,
     logQuote,
+    splitPoll,
   ])
+
+  // [fix/quote-rate-limit-normal-use] What a rate-limit backoff belongs to: the chain, the pair and the SETTLED amount.
+  // (Not the wallet or the source filter, which also rebuild doFetch.)
+  const selection = `${activeChainId}|${inAddr}|${inDec}|${outAddr}|${outDec}|${debouncedAmount}`
+  const selectionRef = useRef(selection)
 
   // [hotfix] doFetchRef anchors the latest doFetch for the
   // setInterval callback in rearmPollTimer — without it the timer
@@ -441,7 +481,22 @@ export function useQuote(
       // starts at the normal cadence rather than a stale 120s window.
       inBackoffRef.current = false
       currentIntervalMsRef.current = QUOTE_REFRESH_MS
+      setRateLimited(false)
       return
+    }
+
+    // [fix/quote-rate-limit-normal-use] A new pair, amount or chain is a new question: drop the old one's backoff and its
+    // error, so startTimers() below asks at once on the normal cadence. Before this, the wait (up to 120 s) and "Rate
+    // limit exceeded" followed the user from pair to pair until the Swap tab was left.
+    if (selectionRef.current !== selection) {
+      selectionRef.current = selection
+      if (inBackoffRef.current) {
+        inBackoffRef.current = false
+        currentIntervalMsRef.current = QUOTE_REFRESH_MS
+        setCountdown(QUOTE_REFRESH_MS / 1000)
+      }
+      setRateLimited(false)
+      setError(null)
     }
 
     // [fix/quote-poll-visibility] Quotes now render for anonymous visitors
@@ -524,7 +579,7 @@ export function useQuote(
         abortControllerRef.current.abort()
       }
     }
-  }, [doFetch, enabled])
+  }, [doFetch, enabled, selection])
 
   // Manual refresh: invoke the latest doFetch via the ref (matches the
   // timer's call site), and reset the countdown so the next visible tick
@@ -536,5 +591,7 @@ export function useQuote(
     setCountdown(Math.ceil(currentIntervalMsRef.current / 1000))
   }, [])
 
-  return { meta, loading, error, countdown, refetch: doFetch, refresh }
+  const retryIn = rateLimited && error ? countdown : null
+
+  return { meta, loading, error, countdown, retryIn, splitPoll, refetch: doFetch, refresh }
 }
