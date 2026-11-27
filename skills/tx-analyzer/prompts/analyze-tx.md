@@ -28,7 +28,8 @@ cast run $TX_HASH --rpc-url $RPC_URL 2>/dev/null || echo "Trace unavailable"
 ### Step 2: Decode the transaction
 
 1. Check the `to` address against the known addresses in SKILL.md
-2. If it matches a TeraSwap contract, decode calldata using the ABI files in `skills/tx-analyzer/abis/`:
+2. If it matches a TeraSwap contract, decode calldata using the ABI files in `skills/tx-analyzer/abis/`. The addresses
+   below are Ethereum Mainnet (1); on Base and Arbitrum the same addresses are different contracts — use `docs/DEPLOYMENTS.md`:
    - **OrderExecutor** (`0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130`): use `TeraSwapOrderExecutor.json`
    - **FeeCollector V2** (`0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459`, current): use `TeraSwapFeeCollector.json` — note V2 calldata carries the extra `tokenOut` + `minimumOutput` arguments per H-04
    - **FeeCollector V1** (`0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD`, frozen): use `TeraSwapFeeCollector.json` — V1 swap functions take only `(router, routerData)` / `(token, totalAmount, router, routerData)`; expect this on any tx dated before the V2 deploy

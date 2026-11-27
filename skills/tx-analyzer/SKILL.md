@@ -64,11 +64,15 @@ curl -s $RPC_URL -X POST -H "Content-Type: application/json" \
 
 ### Step 2: Decode the transaction
 
-1. **Identify the target contract** — check `to` against known addresses:
+1. **Identify the chain, then the target contract.** One address is a different TeraSwap contract on each chain, so
+   look `to` up in the Contracts table of `docs/DEPLOYMENTS.md` for the transaction's chain. On Ethereum Mainnet (1):
    - `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130` = TeraSwapOrderExecutor
    - `0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459` = TeraSwapFeeCollector V2 (current — `minimumOutput` enforced)
    - `0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD` = TeraSwapFeeCollector V1 (frozen — historical txs only)
    - Common DEX routers (1inch, Uniswap, etc.)
+
+   On Base (8453) and Arbitrum One (42161), `0xeFC3…f130` is the FeeCollector; `0x47f2…7459` is OrderExecutor V3 on
+   Arbitrum and an abandoned, unbootstrapped deploy on Base.
 
 2. **Decode calldata** using the ABI files in `skills/tx-analyzer/abis/`:
 
@@ -168,9 +172,10 @@ graph LR
     1inchRouter -->|2950 USDC| User
 ```
 
-## Known addresses
+## Known addresses — Ethereum Mainnet (1)
 
-These addresses should be labeled in the analysis output:
+These addresses should be labeled in the analysis output of a mainnet transaction. For Base and Arbitrum, take the
+TeraSwap contracts from `docs/DEPLOYMENTS.md` for that chain; the TeraSwap rows below are mainnet-only.
 
 | Address | Label |
 |---------|-------|
@@ -180,7 +185,7 @@ These addresses should be labeled in the analysis output:
 | `0x107F6eB7C3866c9cEf5860952066e185e9383ABA` | Fee Recipient |
 | `0x111111125421cA6dc452d289314280a0f8842A65` | 1inch v6 Router |
 | `0xDef1C0ded9bec7F1a1670819833240f027b25EfF` | 0x Exchange Proxy |
-| `0xDEF171Fe48CF0115B1d80b88dc8eAB59176FEe57` | ParaSwap Augustus v6 |
+| `0xDEF171Fe48CF0115B1d80b88dc8eAB59176FEe57` | ParaSwap Augustus V5 (legacy) |
 | `0xE592427A0AEce92De3Edee1F18E0157C05861564` | Uniswap V3 SwapRouter |
 | `0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45` | Uniswap SwapRouter02 |
 | `0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2` | WETH |
