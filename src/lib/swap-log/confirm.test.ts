@@ -14,9 +14,11 @@ vi.mock('@/lib/chainlink', () => ({ computeTokenAmountUsd: vi.fn(async () => nul
 vi.mock('@/lib/wallet-activity-server', () => ({ trackWalletAction: vi.fn() }))
 vi.mock('@/lib/security-tracker', () => ({ trackLargeTrade: vi.fn(), trackSwapFailed: vi.fn(), trackOracleDeviation: vi.fn(), trackOracleUnavailable: vi.fn() }))
 
-import { SWAP_RECEIPTS as R, recordedChainRead } from '@/lib/__fixtures__/swap-receipts'
+import { computeTokenAmountUsd } from '@/lib/chainlink'
+import { A107_RECEIPTS, ROUND4_RECEIPTS, SWAP_RECEIPTS as R, recordedChainRead, type SwapReceiptFixture } from '@/lib/__fixtures__/swap-receipts'
+import { trackLargeTrade, trackOracleDeviation } from '@/lib/security-tracker'
 import { createFakeSwapsDb, type FakeSwapsDb } from '@/test-utils/fake-swaps-db'
-import { CHAIN_SEARCH_BUDGET_MS, confirmSwap } from './confirm'
+import { CHAIN_SEARCH_BUDGET_MS, ORACLE_DEVIATION_WARN, confirmSwap } from './confirm'
 
 const f = R.arbitrumFcTokenToEth
 const wallet = String(f.tx.from).toLowerCase()
@@ -58,5 +60,57 @@ describe('the chains a confirmation asks (H.5)', () => {
     const again = await confirmSwap({ db: db.service as never, wallet, txHash: f.hash, chainId: null }, { read: recordedChainRead().read })
     expect(again).toEqual({ result: 'verified' })
     expect(db.rows()).toEqual([expect.objectContaining({ chain_id: 42161, verified_kind: 'fee_collector', claimed_tx_hash: null })])
+  })
+})
+
+describe('the oracle-deviation alert of an ETH-in router row sees both priced sides (A107 R4-1)', () => {
+  const NATIVE = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+  const WETH = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'
+  const USDT = '0xdac17f958d2ee523a2206206994597c13d831ec7'
+
+  /** The oracle: ETH (priced as WETH) at `eth` USD, USDT at 1. Records every call the confirmation makes to the alerts. */
+  function oracle(eth: number) {
+    vi.mocked(computeTokenAmountUsd).mockImplementation(async (token: string, amount: string) => {
+      const entry: [number, number] | null = token.toLowerCase() === WETH ? [eth, 18] : token.toLowerCase() === USDT ? [1, 6] : null
+      return entry ? { usd: (Number(BigInt(amount)) / 10 ** entry[1]) * entry[0], price: entry[0], decimals: entry[1] } : null
+    })
+    vi.mocked(trackOracleDeviation).mockClear()
+    vi.mocked(trackLargeTrade).mockClear()
+  }
+
+  async function confirmed(receipt: SwapReceiptFixture) {
+    const sender = String(receipt.tx.from).toLowerCase()
+    const result = await confirmSwap({ db: db.service as never, wallet: sender, txHash: receipt.hash, chainId: 1 }, { read: recordedChainRead([receipt]).read })
+    expect(result).toEqual({ result: 'verified' })
+    expect(db.rows()).toHaveLength(1)
+    return { sender, row: db.rows()[0] }
+  }
+
+  it('the real 0x ETH -> USDT swap priced 10.80 / 10.36: the alert fires with the 4.07% between them; 10.36 is stored', async () => {
+    expect(ORACLE_DEVIATION_WARN).toBe(0.02)
+    oracle(1800)
+    const { sender, row } = await confirmed(A107_RECEIPTS.mainnetRouterEthToUsdt)
+    expect(row).toMatchObject({ verified_kind: 'router', source: '0x', token_in: NATIVE, amount_in: '6000000000000000', token_out: USDT, amount_out: '10357597', amount_in_usd: 10.36, amount_out_usd: 10.36 })
+    expect(vi.mocked(trackOracleDeviation).mock.calls).toEqual([
+      [{ wallet: sender, tokenIn: 'ETH', tokenOut: 'USDT', deviation: expect.closeTo((10.8 - 10.36) / 10.8, 10), amountUsd: 10.36, blocked: false }],
+    ])
+  })
+
+  it('the same swap with both sides priced 10.36: no alert', async () => {
+    // 0.006 ETH at 1,726.67 is 10.36002, stored as 10.36; 10.357597 USDT is 10.36.
+    oracle(1726.67)
+    const { row } = await confirmed(A107_RECEIPTS.mainnetRouterEthToUsdt)
+    expect(row).toMatchObject({ amount_in_usd: 10.36, amount_out_usd: 10.36 })
+    expect(trackOracleDeviation).not.toHaveBeenCalled()
+  })
+
+  it('the A106 half-wrap stores 34,000 and its deviation is 68,000 against 34,000; the large-trade alert is not raised', async () => {
+    oracle(3400)
+    const { sender, row } = await confirmed(ROUND4_RECEIPTS.mainnetHalfWrap)
+    expect(row).toMatchObject({ amount_in: '20000000000000000000', amount_in_usd: 34_000, amount_out_usd: 34_000 })
+    expect(vi.mocked(trackOracleDeviation).mock.calls).toEqual([
+      [expect.objectContaining({ wallet: sender, deviation: (68_000 - 34_000) / 68_000, amountUsd: 34_000, blocked: false })],
+    ])
+    expect(trackLargeTrade).not.toHaveBeenCalled()
   })
 })

@@ -57,9 +57,15 @@
  *             mainnet.base.org: the swap of the audit's R3-1 path
  *   1, 8453, 42161  the "half wrap" (a local anvil fork, 2026-11-27, sender 0xa106…a106): AllowanceHolder.exec{value 20
  *             ETH} into a contract that wraps 10 ETH for the sender and sends the other 10 back with no log (R3-2)
+ *
+ * A107_RECEIPTS (goal 139, audit A107 R4-1), NOT in EVERY_SWAP_RECEIPT either:
+ *   1         a REAL 0x swap paying 0.006 ETH for 10.357597 USDT (0x9859bed7, AllowanceHolder, the USDT sent to the
+ *             payer), read on 2026-11-27 from ethereum-rpc.publicnode.com by the round-3 auditor; its file
+ *             real0x-1-eth-1.json, copied unchanged. The A107 probe priced it 10.80 / 10.36 (ETH at 1,800)
  */
 import type { ChainRead, ChainReadMethod } from '@/lib/swap-verify/chain-read'
 import mainnetRouterEthToToken from './swap-receipts/1-router-0x-eth-to-token.json'
+import mainnetRouterEthToUsdt from './swap-receipts/1-router-0x-eth-to-usdt.json'
 import baseRouterEthToToken from './swap-receipts/8453-router-0x-eth-to-token.json'
 import arbitrumRouterEthToToken from './swap-receipts/42161-router-0x-eth-to-token.json'
 import a104MainnetDustWrap from './swap-receipts/fork-1-a104-eth-refund-dust-wrap.json'
@@ -184,6 +190,11 @@ export const ROUND4_RECEIPTS = {
   mainnetHalfWrap: as(a106MainnetHalfWrap),
   baseHalfWrap: as(a106BaseHalfWrap),
   arbitrumHalfWrap: as(a106ArbitrumHalfWrap),
+} as const
+
+/** Goal 139 (see the header): served only by the tests that pass it. */
+export const A107_RECEIPTS = {
+  mainnetRouterEthToUsdt: as(mainnetRouterEthToUsdt),
 } as const
 
 /** The A104 auditor's impersonated sender of its fork transactions. */
