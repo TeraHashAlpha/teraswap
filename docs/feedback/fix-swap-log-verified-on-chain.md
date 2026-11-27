@@ -138,13 +138,23 @@ is `0x`, `cowswap`, `bebop` (`src/lib/chains/activation.ts:39-57`). The targets 
 origin/main had not moved (dae5fd80, already merged in round 3): no merge. `npm ci` ok.
 
 ### Checklist
-- [ ] 1 R3-1: a request never writes on a row main stored; a POST naming its hash inserts nothing
-- [ ] 2 R3-2: an ETH-in router row inside the band counts min(usdIn, usdOut)
-- [ ] 3 R3-3: claim rows out of History's page and total, before and after the migration
-- [ ] 4 Tests: failing on fb93dba5 first or a named mutant; the three named mutants; rounds 1 to 3 hold
-- [ ] `agent-verify.sh --codeql` once on the last code commit; result here; push
+- [x] 1 R3-1: a request never writes on a row main stored; a POST naming its hash inserts nothing (da715e3e)
+- [x] 2 R3-2: an ETH-in router row inside the band counts min(usdIn, usdOut) (2db1941c)
+- [x] 3 R3-3: claim rows out of History's page and total, before and after the migration (f070c7fa; citations d716ba3d)
+- [x] 4 Tests: failing on fb93dba5 first or a named mutant; the three named mutants; rounds 1 to 3 hold (0a75cc79, 31b79420)
+- [x] `agent-verify.sh --codeql` on the last code commit: run 1 red (a test fake lacked `is()`), fixed (60dc66a5), run 2 PASS; push
 
 ### Owner answers (asked once, 2026-11-27; they supersede the goal text)
 1. **PATCH for a hash main stored, while the chain has no receipt**: round 3's claim rule stands (a private claim row,
    no tx_hash, never public or in History, deleted when the chain answers; main's row stays byte-identical, then 200).
 2. **POST naming a hash main stored for that wallet and chain**: nothing is inserted, no chain read, `{ ok: true }`.
+
+### Evidence (round 4; tables S1 to S3)
+1. **Per finding** (S1): R3-1 `src/lib/swap-log/confirm.ts:432-438`, `src/lib/swap-log/store.ts:244`, POST `src/app/api/log-swap/route.ts:105-112`; R3-2 `confirm.ts:104`; R3-3 `src/app/api/history/route.ts:90-97`, `src/lib/swap-log/private-columns.ts:20`, `:28`. Tests `route.a106.test.ts` (18): on fb93dba5 **13 fail, all by assertion**; the 5 controls (a disagreeing row, real swaps at ETH 1,500, History before the migration) are each killed by a named mutant.
+   **Mutants 9 of 9 killed by assertions, 0 other errors**: the goal's three (M1 the in-place write restored, M2 min -> usdIn, M3 claim rows counted in total) and M4 to M9 (S1). The audit's path: row byte-identical, unverified, the report still `mark` with its caller columns, no public reader shows it flag on, flag-off stats 1.
+2. **Differential and replay** (S2): nine readers flag off, bodies byte-identical to main's golden, queries main's except History's one claim filter; incident replay and rounds 1 to 3's route probes green. Two seeded runs of 200 requests naming main's hashes: main's rows byte-identical, nothing verified or public, only private claims beside them, cleared when the chain answers.
+3. **Verify** (S3), each at 1-minute load under 10 with no other verify or CodeQL: run 1 on d716ba3d **FAIL**, suite 5 failed (three of main's orders tests drive History through `fake-postgrest`, which had no `is()`), every other check PASS; fixed in 60dc66a5 (the fake only, no assertion changed); run 2 on 60dc66a5 **RESULT: PASS**: suite 12,245 / 0 failed (576 files), lint-delta +0 / +0, tsc, build, v1-css, v1v2-parity 123, rpc-budget 36, CodeQL head 11 = base 11, 0 new (pack 2.5.0, CLI 2.27.5); base origin/main dae5fd80.
+   Last code commit (verified) `60dc66a5bc0632f5254153084332fd16b70d814e`; docs head: the commit adding this text (hand-off message). Diff since e1789dae at 60dc66a5: 8 commits, 20 files +1064 / -82 (8 source files +73 / -70; tests and test fakes +498 / -12; 4 fixtures +478; this file +15). Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/swap-log-verified-on-chain
+4. **NOT verified**: real Postgres (the claim filter, the 42703 / PGRST204 text the real API gives, the estimated count with the filter); Linux CI; the browser rig (not run this round); real Chainlink prices; a real wallet; the script and R3-1 against the stored production table; the flag on in a deployment.
+
+THREE CHANGED EXPECTATIONS, ALL IN TESTS THIS BRANCH ADDED IN ROUNDS 1 AND 3 (CAPITALS IN S2 AND IN THE FILES). Two harnesses on main gained the `is` filter the real client has (S2); no assertion of a test on main changed.

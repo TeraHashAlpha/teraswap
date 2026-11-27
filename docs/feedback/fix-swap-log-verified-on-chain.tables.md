@@ -909,3 +909,97 @@ Notes and concerns of round 3:
 - No production host or database was called. Real receipts: round 1's public-node cache, and one Base transaction read
   from mainnet.base.org (2,320 recent blocks read to find it). The audit's fork receipts were copied from its rig. No
   software was installed.
+
+## S1. Round 4 (goal 133d, A106): per finding, the tests, failing-first and mutation proof
+Code commits: d5d84735 (FEEDBACK checklist), da715e3e (R3-1), 2db1941c (R3-2), f070c7fa (R3-3), 0a75cc79 (tests and
+fixtures), 31b79420 (test titles), d716ba3d (privacy-block line citations, comments only), 60dc66a5 (fake-postgrest
+`is()`, after verify run 1: S3).
+
+| Finding | Fixed at | Tests (route.a106.test.ts unless named) |
+|---|---|---|
+| R3-1 PATCH | `src/lib/swap-log/confirm.ts:432-438`: a row main stored for (wallet, chain, hash), unverified, is read-only; 200; the hash's claim rows deleted (round 3's rule, owner's answer 1); `store.ts:244` `hasMainRow` (existence, limit 1); `markMainRowVerified` and `storedAgrees` removed | the audit's path (real Base 0x swap 0x86583c6e, 5,000,000 USD, `CALLER<b>TEXT`, PATCH from 192.0.2.77): row byte-identical, `verified_at` null, the report's line for it identical before and after (`mark`, `callerColumns` with 5,000,000 and the symbol), the eight public readers flag on answer exactly what they answer with no swap stored (health's liveness probe aside), flag-off `/api/stats` 1; a disagreeing row (`stored_differs` kept); seeds 133 and 20261127, 200 requests each |
+| R3-1 POST | `src/app/api/log-swap/route.ts:105-112`: a hash main stored for that wallet and chain: `{ ok: true }`, nothing inserted, no chain read; a failed lookup writes nothing (`storage_unavailable`) (owner's answer 2) | a split-swap POST naming the hash: 200, rows byte-identical, 0 RPC calls; control: on another chain its pending row (and, the chain lacking the hash, a private claim) is inserted |
+| R3-2 | `confirm.ts:104`: inside the band `in = min(usdIn, usdOut)`, `out` its own; trackers and readers use the stored value | the audit's AllowanceHolder.exec half wrap on 1, 8453, 42161 (20 ETH in, 10 WETH out): 34,000 / 34,000, no large-trade or deviation event, wallet activity 34,000, `/api/analytics` volume 34,000; ETH at 6,000: the one large-trade event carries 60,000; real ETH -> USDC 0x swaps on the three chains: at ETH 1,800 in = the USDC side, at 1,500 in = the ETH side, out = its own |
+| R3-3 | `src/app/api/history/route.ts:90-97` (`withoutClaimRows`, `src/lib/swap-log/private-columns.ts:20`; before the migration 42703 / PGRST204 naming the column, `:28`, then main's query) | the audit's B4: 1 item, total 1; 60 swaps + 5 claim rows: page 1 = the 50 newest swaps, page 2 the other 10, total 60; before the migration: main's query answers, 3 items, total 3 |
+
+**Failing first** (fb93dba5, scratch tree `~/ts-worktrees/swap-log-r4-ff`, the test file and the fixtures copied in, nothing
+else): **13 of 18 fail, all 13 by `AssertionError`** (0 TypeError / ReferenceError). The 5 that pass there are controls: the
+disagreeing row, the three real swaps at ETH 1,500, History before the migration.
+
+**Mutation** (`~/ts-worktrees/swap-log-r4.rig/mutants-r4.mjs`, tree `swap-log-mut` at 31b79420; nine test files, 220 tests:
+route.a106/a104/patch/post/unmigrated/incident-replay/property, the differential, main's history route.test.ts): **9 of 9
+killed, every one by assertion failures, 0 other errors**; the tree clean afterwards.
+
+| Mutant | Killed by |
+|---|---|
+| M1 the in-place write restored (round 3's R: an agreeing main row marked verified) | a106 audit's path, both seeds; a104 R2-5 agreeing row (4) |
+| M2 min replaced by usdIn | the three half wraps, ETH 6,000, the three real swaps at 1,800 (7) |
+| M3 claim rows counted in total (History query without the filter) | B4, 60 + 5, the differential's History query (3) |
+| M4 the in-place write for ANY main row | + the disagreeing-row control, a104 disagreeing row, route.patch "an old row that already carries the hash" (7) |
+| M5 POST early exit removed | the POST test, both seeds (3) |
+| M6 History's pre-migration fallback removed | the before-migration control (1) |
+| M7 in replaced by usdOut | the three real swaps at 1,500 (controls) (3) |
+| M8 the main-row lookup ignores the chain | the POST test's other-chain control; route.patch's lookup filters (2) |
+| M9 a main row found: the hash's claim rows kept | both seeds (the last step: only main's rows left) (2) |
+
+Seeded runs (each of the 7 real swaps stored by main with the caller's USD and symbol; one in three agreeing, one
+disagreeing and pending, one `failed`): every kind of request appears (PATCH with, without and with the wrong chain,
+another wallet, a lagging node, split-swap POST) and answers 200 / 200 / 202 / 422 / 202 / 200; afterwards main's rows are
+byte-identical, no row is verified, the only other rows are private claims (no hash, tokens or USD), no tracker ran, the
+public readers show none of it, flag-off stats unchanged, the report's lines identical; one PATCH per transaction once the
+nodes answer leaves exactly main's rows, byte for byte.
+
+## S2. Round 4: differential, replay, changed expectations
+- Nine-reader differential (unchanged seeded data and golden of main 5465ceb0): flag off, every body byte-identical to main;
+  every reader's queries main's except History's, which gains one filter after the wallet's (below). Flag on: unchanged.
+- Incident replay (`route.incident-replay.test.ts`), rounds 1 to 3's route probes (a103, a104, property, patch, post,
+  unmigrated, slow-kv) and the stored-rows script tests: green, unchanged except the two expectations below.
+- THREE CHANGED EXPECTATIONS, ALL IN TESTS THIS BRANCH ADDED IN ROUNDS 1 AND 3 (CAPITALS IN THE FILES):
+  1. `route.a104.test.ts` R2-5 "IT AGREES WITH THE RECEIPT": WAS "VERIFIED IN PLACE (verified_kind fee_collector,
+     verified_at set)", NOW "LEFT BYTE-IDENTICAL AND UNVERIFIED" (A106 R3-1, ADR-029 9.1 replaces 8.5).
+  2. `route.patch.test.ts` "EVERY ROW LOOKUP OF A PATCH IS SCOPED": THE FOURTH LOOKUP'S FILTERS WERE `order=created_at.asc,
+     limit=10`, NOW `limit=1` (AN EXISTENCE CHECK; NOTHING IS PICKED TO MARK).
+  3. `swaps-readers.differential.test.ts`: HISTORY'S SWAPS QUERY NOW CARRIES `claimed_tx_hash=is.null` AFTER THE WALLET
+     FILTER; ITS BODY IS STILL MAIN'S BYTES; EVERY OTHER READER'S QUERIES UNCHANGED.
+- Two test harnesses on main gained the `is` filter the real client has, no assertion of any test changed:
+  `src/app/api/history/route.test.ts` (its builder mock's method list) and `src/test-utils/fake-postgrest.ts` (60dc66a5:
+  `is(column, null | boolean)`; a filter on a column the table lacks is 42703, as Postgres answers). The orders tests that
+  drive History through fake-postgrest have main's `swaps` columns, so they now cover History's before-the-migration path.
+
+## S3. Round 4: verify runs, SHAs, diff, what was NOT verified, notes
+Every run through `~/ts-worktrees/swap-log-r4.rig/verify-waiter*.sh`: it starts only when the 1-minute load is under 10 on
+two checks 30 s apart and no other `agent-verify.sh` or CodeQL process runs; logs in
+`~/ts-worktrees/swap-log-verified-on-chain.verify/r4-run1` and `r4-run2`.
+
+| Run | Commit | Start (load) | Result |
+|---|---|---|---|
+| 1 | d716ba3d | 2026-11-27 12:37:30 (6.27) | **FAIL**: suite 12,240 passed, 5 failed (576 files): `orders-privacy-clause.test.ts` (3), `orders-read-no-signature.test.ts` (1), `orders-read-select-guard.test.ts` (1), each `[history] Error: TypeError: query.is is not a function` (their shared `fake-postgrest` had no `is()`). lint-delta, tsc, build, v1-css, v1v2-parity 123, rpc-budget 36, CodeQL 11 = 11 / 0 new: PASS |
+| 2 | 60dc66a5 | 2026-11-27 12:47:10 (1.49) | **RESULT: PASS**: suite 12,245 / 0 failed (576 files), lint-delta +0 / +0, tsc 0, build ok, v1-css ok, v1v2-parity 123, rpc-budget 36, CodeQL security-extended head 11 = base 11, 0 new (pack 2.5.0, CLI 2.27.5); keeper not requested (not touched) |
+
+- Last code commit (verified): `60dc66a5bc0632f5254153084332fd16b70d814e`; base origin/main `dae5fd80` (not moved since
+  round 3, no merge). Docs head: the commit adding this text (hand-off message).
+- `git diff --stat e1789dae 60dc66a5`: 8 commits, 20 files, +1064 / -82: source 8 files +73 / -70 (confirm.ts, store.ts,
+  stored-agreement.ts, private-columns.ts, log-swap/route.ts, history/route.ts, verify-stored-swaps-lib.ts comment,
+  product-claims.ts comments); tests and test fakes 6 files +498 / -12; fixtures 5 files +478 (4 JSON + the registry);
+  FEEDBACK checklist +15. Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/swap-log-verified-on-chain
+- Why run 1 missed it before the verify: the targeted runs covered the History and swap-log tests, not every test file
+  that imports the History route; the three orders tests do (through `fake-postgrest`). The fix is in the fake (it now
+  models `is.` and Postgres's 42703 for an absent column); the route is unchanged between the two runs.
+- NOT verified: real Postgres (the `claimed_tx_hash is null` filter with `count: 'estimated'`, the exact 42703 / PGRST204
+  text PostgREST returns for the absent column before the migration, so the fallback's match is unproven there); Linux
+  CI; the browser rig of rounds 1 to 3 (not run this round; History's body is pinned to main by the differential);
+  real Chainlink prices (fixed table: ETH 3,400, 6,000, 1,800, 1,500); a real wallet or bundler; the stored-rows script and
+  R3-1 against the stored production table; the flag on in a deployment.
+
+Notes of round 4:
+- **A main row with the hash on another chain** is not the (chain, hash, wallet) key: a PATCH or POST naming the other
+  chain is handled as any other (the chain lacks the transaction: 202 and a private claim). Tested as the POST's control.
+- **The claim beside a main row** (owner's answer 1): while the node has no receipt a PATCH still stores round 3's private
+  claim for the hash; the next answer from the chain deletes it. The seeded runs end with only main's rows left.
+- **A failed main-row lookup on POST** answers `{ ok: false, error: 'storage_unavailable' }` and writes nothing (fail
+  closed); the official client does not read the POST's answer. Not covered by a test (no fault injection for that read).
+- **R3-2 at the band's edge**: the half wrap is exactly 0.5 (in band) and is now counted at its out side; outside the band
+  (< 0.5) the row still has no USD at all (round 3, unchanged). An honest ETH -> token swap is counted at the smaller side,
+  so slightly below what was paid when the token side is worth less (ADR-029 9.2: accepted).
+- Fixtures: the A106 auditor's files, byte-identical (sha256 checked against `~/ts-worktrees/audit-pr729-r3.logs/probes/`).
+  No production host or database was called; no public node was read this round; no software was installed.
