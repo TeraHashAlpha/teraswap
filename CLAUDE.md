@@ -69,10 +69,10 @@ Consult security-knowledge **before** approving any change to contracts or fund 
 
 ## Stack
 
-Versions from `package.json:42-76` (exact pins).
+Major versions below; exact pins live only in `package.json` (Dependabot moves them).
 
-- **Frontend:** Next.js 16.4.3 (App Router), React 18.3.1, TypeScript ~5.9.3, Tailwind 3.4.19, wagmi 2.19.5, viem 2.57.3, RainbowKit 2.2.10, Zustand 4.5.7, TanStack Query 5.104.5; tests on vitest 4.1.12
-- **Backend:** Next.js API routes on Vercel (45 `route.ts` under `src/app/api`), Upstash Redis (`@upstash/redis` 1.39.0) for rate limiting + state, Supabase (`@supabase/supabase-js` 2.118.0; schema in `supabase/`)
+- **Frontend:** Next.js 16 (App Router), React 18, TypeScript 5.9, Tailwind 3, wagmi 2, viem 2, RainbowKit 2, Zustand 4, TanStack Query 5; tests on vitest 4
+- **Backend:** Next.js API routes on Vercel (`route.ts` files under `src/app/api`), Upstash Redis (`@upstash/redis`) for rate limiting + state, Supabase (`@supabase/supabase-js`; schema in `supabase/`)
 - **Blockchain:** Solidity 0.8.28 / Foundry (`contracts/`, `contracts/order-engine/`); Chainlink feed registry per chain in `src/lib/chains/chainlink-feeds.ts`; contracts per chain in the state section below
 - **Keeper:** self-hosted Node process, one instance per chain (`contracts/order-engine/executor/executor.js:40-44`), tests via `node --test`
 - **Browser → server:** on-chain reads go through `/api/rpc` (Ethereum, Base, Arbitrum — `src/app/api/rpc/route.ts:20-27`), CoW Protocol through `/api/cow/*` (`src/lib/kv-rate-limiter.ts:47-48`); the CSP `connect-src` is `'self'` plus wallet hosts only (`csp-policy.js:12-13`) and the CI job `third-party-hosts` fails any other host (`.github/workflows/e2e.yml:93-99`)
