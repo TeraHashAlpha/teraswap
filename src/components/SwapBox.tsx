@@ -156,7 +156,7 @@ export default function SwapBox() {
   })
 
   const excludeArray = useMemo(() => excludedSources.size > 0 ? Array.from(excludedSources) : undefined, [excludedSources])
-  const { meta: rawMeta, loading: quoteLoading, error: quoteError, countdown, refresh: refreshQuote } =
+  const { meta: rawMeta, loading: quoteLoading, error: quoteError, retryIn: quoteRetryIn, countdown, refresh: refreshQuote } =
     useQuote(tokenIn, tokenOut, amountIn, isChainOkForQuote, excludeArray, { logQuote: true })
 
   // [LP-04 / P140] Smart MEV routing — logic extracted to
@@ -906,7 +906,7 @@ export default function SwapBox() {
         )}
 
         {/* Errors */}
-        {quoteError && <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{quoteError}</div>}
+        {quoteError && <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{quoteError}{quoteRetryIn != null && ` Retrying in ${quoteRetryIn}s.`}</div>}
         {/* DefiLlama Price Guard — server-side oracle blocked the swap */}
         {priceGuardBlocked && (
           <div className="mb-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">

@@ -465,3 +465,12 @@ describe('26 / 25: the review and Permit2 sheets opened from the card (B4 sheets
     expect(cancel).toHaveBeenCalledTimes(1)
   })
 })
+
+// [fix/quote-rate-limit-normal-use] While /api/quote rate limits us the card says how long the wait is.
+describe('rate-limit wait', () => {
+  it('shows the seconds until the automatic retry beside the error', () => {
+    h.quote = { meta: null, loading: false, error: 'Rate limit exceeded. Try again in a minute.', countdown: 28, retryIn: 28, refresh: vi.fn() } as typeof h.quote
+    render(<SwapCard />)
+    expect(document.querySelector('[data-swap-card]')?.textContent).toContain('Rate limit exceeded. Try again in a minute. Retrying in 28s.')
+  })
+})
