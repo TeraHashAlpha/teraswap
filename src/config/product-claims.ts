@@ -183,10 +183,11 @@ export const PRIVACY_PROVIDERS_NOTE =
 // analytics/route.ts, analytics/personal/route.ts and analytics/export/route.ts cited in this block were re-checked at that change
 // (those three files moved down by 4, 5 and 1 to 3 lines). [goal 133c] Re-checked again: analytics/route.ts moved down 11 more
 // lines (a verified ETH-in row with no USD enters no volume) and history/route.ts 1 line (round 2's import) and, below :97, 3
-// (round 3 leaves claim rows out of the History tab); no sentence changed.
+// (round 3 leaves claim rows out of the History tab); no sentence changed. [goal 133d] history/route.ts again: the swaps read
+// is now :90-97 and the fills below it moved down 4 (A106 R3-3: the query leaves claim rows out); no sentence changed.
 // [S-13, A87 S-1, A97 S-6] The last sentence, clause by clause (line numbers re-checked at the head of PR #719, A97 round 2):
-//  - "swap history" = /api/history swaps: wallet param only (history/route.ts:51), swaps read with no proof (:87-92); the proof
-//    gates only the fills (:109-118).
+//  - "swap history" = /api/history swaps: wallet param only (history/route.ts:51), swaps read with no proof (:90-97); the proof
+//    gates only the fills (:113-122).
 //  - "swap statistics" = /api/analytics/personal: wallet param, no signature check in the file (analytics/personal/route.ts:45).
 //  - "swap export" = /api/analytics/export: wallet param, swaps read with no proof (analytics/export/route.ts:156, :215).
 //  - "the records of its executed, cancelled, expired or failed orders" = the list GET (orders/route.ts:972-974, body :977-1053)
@@ -202,7 +203,7 @@ export const PRIVACY_PROVIDERS_NOTE =
 //    :1018-1026; by id orders/[id]/route.ts:70-85; the fills and progress of an open order, orders/[id]/executions/route.ts:78-93
 //    [A87b R2-1]). The Analytics feed lists no fill of an open order (analytics/route.ts:505) [A97 S-2].
 //  - "the DCA fills in a wallet's history need a signature from that wallet" = /api/history withholds the fills without the read
-//    signature (history/route.ts:109-118, `fillsIncluded: false`).
+//    signature (history/route.ts:113-122, `fillsIncluded: false`).
 //  - "the fills of a finished order can be read with its record" = /api/orders/[id]/executions asks for the wallet parameter only
 //    for a finished order (orders/[id]/executions/route.ts:49), checks that the order belongs to it (:69) and returns the
 //    order_executions rows (:95-99); the status test (:78, PUBLIC_ORDER_STATUSES, the same terminal set orders/[id]/route.ts:70
