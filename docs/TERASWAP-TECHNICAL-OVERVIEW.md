@@ -395,7 +395,7 @@ SHA-256 pre-hash eliminates length leak. Returns 503 if secret not configured (f
 ### Layer 17 — Forensic Tooling
 
 - **Executor compromise runbook** (`docs/Runbooks/executor-compromise.md`): Decision tree with time targets (<5min kill-switch, 5-30min assessment, 30min-2h containment), copy-paste command templates, quarterly drill schedule with 4 rotating scenarios.
-- **TxAnalyzer skill** (`skills/tx-analyzer/`): On-demand forensic analysis — decodes TX receipt, maps fund flows, flags anomalies (flash loans, reentrancy, unexpected recipients). Includes ABIs for both TeraSwap contracts + common DeFi protocols (ERC20, UniV2/V3, Permit2, Aave, Balancer, Curve, CoW).
+- **TxAnalyzer skill** (`.claude/skills/tx-analyzer/`): On-demand forensic analysis — decodes TX receipt, maps fund flows, flags anomalies (flash loans, reentrancy, unexpected recipients). Includes ABIs for both TeraSwap contracts + common DeFi protocols (ERC20, UniV2/V3, Permit2, Aave, Balancer, Curve, CoW).
 
 ---
 

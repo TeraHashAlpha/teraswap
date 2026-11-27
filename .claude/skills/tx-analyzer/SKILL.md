@@ -1,3 +1,8 @@
+---
+name: tx-analyzer
+description: Use when asked to analyze or investigate a transaction hash (a flagged OrderExecuted event, a failed post-execution check, an incident or post-mortem). Decodes calldata, maps fund flows, flags anomalies and labels TeraSwap contracts by chain.
+---
+
 # TX Analyzer — Forensic Transaction Analysis
 
 On-demand forensic analysis skill for investigating suspicious Ethereum transactions. Decodes calldata, traces fund flows, and identifies exploit patterns.
@@ -71,10 +76,10 @@ curl -s $RPC_URL -X POST -H "Content-Type: application/json" \
    - `0x4dAEAf24Cd300a3DBc0caff3292B7840CDDa58eD` = TeraSwapFeeCollector V1 (frozen — historical txs only)
    - Common DEX routers (1inch, Uniswap, etc.)
 
-   On Base (8453) and Arbitrum One (42161), `0xeFC3…f130` is the FeeCollector; `0x47f2…7459` is OrderExecutor V3 on
+   On Base (8453) and Arbitrum One (42161), `0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130` is the FeeCollector; `0x47f24068932Ac49bcbeD3aD105af57C6ECDF7459` is OrderExecutor V3 on
    Arbitrum and an abandoned, unbootstrapped deploy on Base.
 
-2. **Decode calldata** using the ABI files in `skills/tx-analyzer/abis/`:
+2. **Decode calldata** using the ABI files in `.claude/skills/tx-analyzer/abis/`:
 
 ```bash
 # If target is OrderExecutor
