@@ -41,7 +41,7 @@ code paths.
 
 ## CodeQL annotations
 
-- For confirmed false positives, add an inline `// CodeQL: <query-id> — FALSE POSITIVE: <reason>` comment per the P87 pattern.
+- For confirmed false positives, add an inline `// CodeQL: <query-id> — FALSE POSITIVE: <reason>` comment, as in `src/app/api/v1/swap/route.ts:140`.
 - For accepted risks, use `// CodeQL: <query-id> — ACCEPTED RISK: <reason>` and link the rationale.
 - Never use `// eslint-disable` or `// @ts-ignore` to silence CodeQL.
 
