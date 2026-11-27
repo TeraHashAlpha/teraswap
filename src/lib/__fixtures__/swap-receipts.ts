@@ -51,6 +51,12 @@
  *             refunded with no log, 1e12 wei of WETH received
  *   8453      the same auditor's "dust real swap": 20 ETH paid, 1e14 wei swapped for 0.17 USDC, the rest refunded
  * Saved verbatim as the nodes answered (the auditor's files and round 1's cache, copied unchanged).
+ *
+ * ROUND4_RECEIPTS (goal 133d, audit A106), NOT in EVERY_SWAP_RECEIPT either; the A106 auditor's files, copied unchanged:
+ *   8453      a REAL 0x swap of a token for a token (0x86583c6e, AllowanceHolder, no ETH paid), read on 2026-11-27 from
+ *             mainnet.base.org: the swap of the audit's R3-1 path
+ *   1, 8453, 42161  the "half wrap" (a local anvil fork, 2026-11-27, sender 0xa106…a106): AllowanceHolder.exec{value 20
+ *             ETH} into a contract that wraps 10 ETH for the sender and sends the other 10 back with no log (R3-2)
  */
 import type { ChainRead, ChainReadMethod } from '@/lib/swap-verify/chain-read'
 import mainnetRouterEthToToken from './swap-receipts/1-router-0x-eth-to-token.json'
@@ -60,6 +66,10 @@ import a104MainnetDustWrap from './swap-receipts/fork-1-a104-eth-refund-dust-wra
 import a104BaseDustWrap from './swap-receipts/fork-8453-a104-eth-refund-dust-wrap.json'
 import a104ArbitrumDustWrap from './swap-receipts/fork-42161-a104-eth-refund-dust-wrap.json'
 import a104BaseDustSwap from './swap-receipts/fork-8453-a104-eth-refund-dust-swap.json'
+import a106BaseRouterTokenToToken from './swap-receipts/8453-router-0x-token-to-token-a106.json'
+import a106MainnetHalfWrap from './swap-receipts/fork-1-a106-ah-half-wrap.json'
+import a106BaseHalfWrap from './swap-receipts/fork-8453-a106-ah-half-wrap.json'
+import a106ArbitrumHalfWrap from './swap-receipts/fork-42161-a106-ah-half-wrap.json'
 import mainnetFcTokenToToken from './swap-receipts/1-fee-collector-token-to-token.json'
 import mainnetFcTokenToEth from './swap-receipts/1-fee-collector-token-to-eth.json'
 import mainnetFcEthToToken from './swap-receipts/1-fee-collector-eth-to-token.json'
@@ -166,6 +176,14 @@ export const ROUND3_RECEIPTS = {
   a104BaseDustWrap: as(a104BaseDustWrap),
   a104ArbitrumDustWrap: as(a104ArbitrumDustWrap),
   a104BaseDustSwap: as(a104BaseDustSwap),
+} as const
+
+/** Goal 133d (see the header): served only by the tests that pass them. */
+export const ROUND4_RECEIPTS = {
+  baseRouterTokenToToken: as(a106BaseRouterTokenToToken),
+  mainnetHalfWrap: as(a106MainnetHalfWrap),
+  baseHalfWrap: as(a106BaseHalfWrap),
+  arbitrumHalfWrap: as(a106ArbitrumHalfWrap),
 } as const
 
 /** The A104 auditor's impersonated sender of its fork transactions. */
