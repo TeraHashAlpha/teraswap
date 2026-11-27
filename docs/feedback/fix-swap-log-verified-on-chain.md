@@ -133,3 +133,18 @@ is `0x`, `cowswap`, `bebop` (`src/lib/chains/activation.ts:39-57`). The targets 
    NOT verified: the migration on a real Postgres; Linux CI; a real wallet or bundler; 0x, Bebop or FeeCollector swaps and Base / Arbitrum in the browser; the script on the stored table; the limiter on real Upstash; real Chainlink prices; the flag on in a deployment (Q6).
 
 28 CHANGED EXPECTATIONS IN 9 FILES, ALL IN TESTS THIS BRANCH ADDED IN ROUNDS 1 AND 2 (CAPITALS IN Q5); NO EXPECTATION OF A TEST ON MAIN CHANGED. Concern (Q6): `/api/analytics` estimated a USD for null-USD rows from the symbol, so O needed one reader change (42f4a2f0); a real ETH -> token 0x swap into a token the oracle cannot price now enters no volume (O.2).
+
+## Round 4 (goal 133d: audit A106 at e1789dae, blocked 0C/1H; ADR-029 section 9)
+origin/main had not moved (dae5fd80, already merged in round 3): no merge. `npm ci` ok.
+
+### Checklist
+- [ ] 1 R3-1: a request never writes on a row main stored; a POST naming its hash inserts nothing
+- [ ] 2 R3-2: an ETH-in router row inside the band counts min(usdIn, usdOut)
+- [ ] 3 R3-3: claim rows out of History's page and total, before and after the migration
+- [ ] 4 Tests: failing on fb93dba5 first or a named mutant; the three named mutants; rounds 1 to 3 hold
+- [ ] `agent-verify.sh --codeql` once on the last code commit; result here; push
+
+### Owner answers (asked once, 2026-11-27; they supersede the goal text)
+1. **PATCH for a hash main stored, while the chain has no receipt**: round 3's claim rule stands (a private claim row,
+   no tx_hash, never public or in History, deleted when the chain answers; main's row stays byte-identical, then 200).
+2. **POST naming a hash main stored for that wallet and chain**: nothing is inserted, no chain read, `{ ok: true }`.
