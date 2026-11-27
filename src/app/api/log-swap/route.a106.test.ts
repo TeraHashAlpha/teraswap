@@ -392,11 +392,11 @@ describe('A106 R3-2: an ETH-in router row counts the smaller side', () => {
 
   // Real ETH -> USDC swaps through 0x (ROUND3_RECEIPTS). The receipts' own rate was 1,619 to 1,693 USDC per ETH, so at
   // 1,800 the ETH side is the larger (in = the USDC side), at 1,500 the smaller (in = the ETH side).
-  const REAL: Array<[number, SwapReceiptFixture, number, string]> = [
-    [1, R3.mainnetRouterEthToToken, 1800, 'the USDC side'], [8453, R3.baseRouterEthToToken, 1800, 'the USDC side'], [42161, R3.arbitrumRouterEthToToken, 1800, 'the USDC side'],
-    [1, R3.mainnetRouterEthToToken, 1500, 'the ETH side'], [8453, R3.baseRouterEthToToken, 1500, 'the ETH side'], [42161, R3.arbitrumRouterEthToToken, 1500, 'the ETH side'],
+  const REAL: Array<[number, number, string, SwapReceiptFixture]> = [
+    [1, 1800, 'the USDC side', R3.mainnetRouterEthToToken], [8453, 1800, 'the USDC side', R3.baseRouterEthToToken], [42161, 1800, 'the USDC side', R3.arbitrumRouterEthToToken],
+    [1, 1500, 'the ETH side', R3.mainnetRouterEthToToken], [8453, 1500, 'the ETH side', R3.baseRouterEthToToken], [42161, 1500, 'the ETH side', R3.arbitrumRouterEthToToken],
   ]
-  it.each(REAL)('chain %i, a real ETH -> USDC 0x swap at ETH %i USD: both USD values present, in = the smaller (%s) [fails on fb93dba5 at 1,800]', async (chainId, f, price, smaller) => {
+  it.each(REAL)('chain %i, a real ETH -> USDC 0x swap at ETH %i USD: both USD values present, in = the smaller (%s) [fails on fb93dba5 at 1,800]', async (chainId, price, smaller, f) => {
     state.prices = { ...PRICES_3400, [WETH[chainId]]: [price, 18] }
     const wallet = sender(f)
     await submit(wallet, chainId, '0x', NATIVE, USDC_OF[chainId], String(BigInt(String(f.tx.value))))
