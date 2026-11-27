@@ -22,7 +22,10 @@ model/effort tier, files-affected allow-list, Do NOT list). Before touching any 
 fund-flow code, check open findings in `docs/security/AUDIT-TOTAL.md` — never proceed against an open
 Critical/High.
 
-## Hard rules (verbatim from `CLAUDE.md` — do not paraphrase these away)
+## Hard rules (do not paraphrase these away)
+
+Bash compatibility, both agent-verify rules and Grok Build launch are copied from `CLAUDE.md`, and Credential hygiene extends its Do NOT 13.
+Address hygiene, the chain-awareness rule and the dependency rules are not in `CLAUDE.md`: they are stated here.
 
 **Address hygiene.** No hand-typed hex. Addresses and hashes flow script → config, never keyboard → file.
 Hex equality is never checked by eye — always computed. Re-extract addresses from chain state at the point of
