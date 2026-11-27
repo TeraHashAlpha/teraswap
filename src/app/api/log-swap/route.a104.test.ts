@@ -601,7 +601,9 @@ describe('A104 R2-4: a budget for confirmations that name no chain, and for ever
 })
 
 // ── R2-5: R ────────────────────────────────────────────────────────────────────────────────────────────────────────
-describe('A104 R2-5: a row main stored for the transaction is verified in place, never doubled', () => {
+// CHANGED EXPECTATION (GOAL 133D, A106 R3-1, ADR-029 9.1 REPLACES 8.5): A ROW MAIN STORED IS READ-ONLY FOR A REQUEST.
+// THE FIRST TEST SAID "VERIFIED IN PLACE"; IT NOW SAYS THE ROW IS BYTE-IDENTICAL AND STAYS UNVERIFIED. Never doubled: kept.
+describe('A104 R2-5: a row main stored for the transaction is never doubled (and, since A106 R3-1, never written)', () => {
   const f = R.mainnetFcTokenToToken
   /** A row as main stored it after its own PATCH: confirmed, with the hash, the caller's symbols and USD. */
   const mainRow = (overrides: Row = {}): Row => ({
@@ -611,17 +613,15 @@ describe('A104 R2-5: a row main stored for the transaction is verified in place,
     mev_savings_estimate: null, mev_savings_actual: null, is_gasless: false, gas_savings_usd: 0, expected_output: null, ...overrides,
   })
 
-  it('it agrees with the receipt: verified in place (two columns and the status), nothing inserted, flag-off totalSwaps stays 1 [fails on cbd51bcf]', async () => {
+  it('it agrees with the receipt: LEFT BYTE-IDENTICAL AND UNVERIFIED, nothing inserted, flag-off totalSwaps stays 1 [fails on cbd51bcf]', async () => {
     state.db = createFakeSwapsDb({ swaps: [mainRow()] })
     expect((await publicCounts()).totalSwaps).toBe(1)
-    const before = { ...rows()[0] }
+    const before = JSON.stringify(rows())
     expect((await confirm(sender(f), f.hash, 1)).status).toBe(200)
     expect(rows()).toHaveLength(1)
-    const after = rows()[0]
-    expect(after).toMatchObject({ verified_kind: 'fee_collector', status: 'confirmed' })
-    expect(after.verified_at).not.toBeNull()
-    // Every other column as main stored it.
-    for (const key of Object.keys(before)) if (!['verified_at', 'verified_kind', 'status'].includes(key)) expect(after[key], key).toEqual(before[key])
+    // CHANGED EXPECTATION (A106 R3-1): WAS verified_kind 'fee_collector' AND verified_at SET; NOW EVERY COLUMN AS MAIN STORED IT.
+    expect(JSON.stringify(rows())).toBe(before)
+    expect(rows()[0].verified_at ?? null).toBeNull()
     expect((await publicCounts()).totalSwaps).toBe(1)
     expect(trackLargeTrade).not.toHaveBeenCalled()
     expect(trackWalletAction).not.toHaveBeenCalled()

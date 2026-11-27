@@ -27,7 +27,7 @@ import { getSupportedChainIds } from '@/lib/chains/registry'
 import { compareStored } from '@/lib/swap-log/stored-agreement'
 import type { DerivedSwap, VerifiedKind, VerifySwapInput, VerifySwapResult } from '@/lib/swap-verify/verify-swap-on-chain'
 
-// [goal 133c R] The agreement rule is the route's too (a confirmation that finds a row main stored): one module.
+// The agreement rule lives in its own module; this script is its one caller (a request never marks a row main stored).
 export { compareStored, OUT_RATIO_MAX_DEN, OUT_RATIO_MAX_NUM, OUT_RATIO_MIN_DEN, OUT_RATIO_MIN_NUM } from '@/lib/swap-log/stored-agreement'
 
 /**

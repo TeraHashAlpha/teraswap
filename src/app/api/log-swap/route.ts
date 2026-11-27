@@ -10,7 +10,7 @@ import { bodySizeGuard, clientIp } from '@/lib/body-limit'
 import { forLog } from '@/lib/log-sanitize'
 import { confirmSwap, type ConfirmResult } from '@/lib/swap-log/confirm'
 import { parseConfirmSwap, parsePendingSwap } from '@/lib/swap-log/input'
-import { findWalletVerifiedByTx, insertPending, makeRoomForPending, verifiedColumnsState } from '@/lib/swap-log/store'
+import { findWalletVerifiedByTx, hasMainRow, insertPending, makeRoomForPending, verifiedColumnsState } from '@/lib/swap-log/store'
 import { catalogSymbol } from '@/lib/swap-log/symbols'
 
 // [133b H.5] A confirmation that names its chain (the official client's) reads that chain twice: up to 4 + 9.5 + 9.5 s
@@ -66,7 +66,8 @@ function logColumnsMissing(): void {
  *     the wallet's oldest scratch row is retired first (store.ts makeRoomForPending); only the per-IP limit answers 429.
  * A row becomes `confirmed` or `failed` only by the server, after it read the transaction on-chain. A transaction hash
  * sent with the POST (the split-swap client sends one, after its receipt) is handled as a PATCH on the POST's chain
- * after the insert. The official client's calls keep their answer: 200 `{ ok: true }`.
+ * after the insert; a hash main stored for this wallet on that chain inserts nothing (ADR-029 9.1). The official
+ * client's calls keep their answer: 200 `{ ok: true }`.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -101,6 +102,14 @@ export async function POST(req: NextRequest) {
 
     // A repeat of a POST whose transaction this wallet already has verified: nothing to add.
     if (input.txHash !== null && (await findWalletVerifiedByTx(db, input.wallet, input.txHash)) === true) return NextResponse.json({ ok: true })
+    // [ADR-029 9.1, A106 R3-1; owner's answer of 2026-11-27] A hash main stored for this wallet on this chain: that row
+    // stands for the swap and is read-only, so nothing is inserted beside it and the chain is not read. Unsure (the
+    // lookup failed): nothing is written either.
+    if (input.txHash !== null) {
+      const mainRow = await hasMainRow(db, input.wallet, input.chainId, input.txHash)
+      if (mainRow === 'error') return NextResponse.json({ ok: false, error: 'storage_unavailable' })
+      if (mainRow) return NextResponse.json({ ok: true })
+    }
 
     // Details J: make room (never refuse). A failed read of the scratch rows does not stop the insert.
     if ((await makeRoomForPending(db, input.wallet, new Date())) === 'error') console.warn('[log-swap] pending cap not applied')

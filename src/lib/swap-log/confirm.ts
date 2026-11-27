@@ -50,17 +50,15 @@ import {
   deleteExpiredClaims,
   findCandidateRows,
   findClaimRows,
-  findMainRows,
   findWalletVerifiedByTx,
+  hasMainRow,
   insertClaimRow,
   insertVerified,
-  markMainRowVerified,
   markVerified,
   type ClaimRow,
   type PendingCandidate,
   type VerifiedUpdate,
 } from './store'
-import { storedAgrees } from './stored-agreement'
 import { catalogSymbolOrNull } from './symbols'
 
 /** A trade at or above this many USD is recorded as a large trade (monitoring only). */
@@ -424,20 +422,14 @@ async function recordFound(args: ConfirmArgs, candidates: readonly PendingCandid
   const outcome = verified.outcome as 'confirmed' | 'failed'
   const derived = verified.derived
 
-  // R (ADR-029 8.5, owner's answer of 2026-11-26): a row main stored for this transaction stands for it; nothing is
-  // inserted beside it. It is verified in place (the two verification columns and the status) only when what it stores
-  // agrees with the receipt by the stored-rows script's rule; else it stays exactly as main stored it. No tracker runs:
-  // main ran them when it was written.
-  const mainRows = await findMainRows(args.db, args.wallet, chainId, args.txHash)
-  if (mainRows === 'error') return { result: 'storage_error' }
-  if (mainRows.length > 0) {
-    const agreeing = mainRows.find((row) => storedAgrees(row, outcome, derived))
-    if (agreeing) {
-      const marked = await markMainRowVerified(args.db, String(agreeing.id), args.wallet, { verified_at: now.toISOString(), verified_kind: verified.kind, status: outcome })
-      if (marked === 'columns_missing') return { result: 'columns_missing' }
-      if (marked === 'error') return { result: 'storage_error' }
-      if (marked === 'duplicate' && (await findWalletVerifiedByTx(args.db, args.wallet, args.txHash)) !== true) return { result: 'duplicate' }
-    }
+  // [ADR-029 9.1, A106 R3-1; replaces 8.5 (owner's decision of 2026-11-27)] A row main stored for this transaction
+  // stands for it and is READ-ONLY for a request: no column of it changes and no row is inserted beside it, whether
+  // what it stores agrees with the receipt or not. Only the stored-rows script with --apply marks it, after the owner
+  // read its report (which lists its caller columns). The answer is the transaction's own: verified. No tracker runs.
+  const mainRow = await hasMainRow(args.db, args.wallet, chainId, args.txHash)
+  if (mainRow === 'error') return { result: 'storage_error' }
+  if (mainRow) {
+    // The chain answered: this hash's claim rows are decided (round 3's claim rule; owner's answer of 2026-11-27).
     if (claimRows.length > 0) await deleteClaimsOf(args.db, args.wallet, args.txHash)
     return { result: 'verified' }
   }

@@ -723,8 +723,10 @@ describe('the request itself', () => {
     // its rows holding a claim of that hash. Round 1 had a by-hash row, a fallback row and a duplicate check.
     // CHANGED EXPECTATION (goal 133c R): four, the fourth (after the chain answered) a row main stored with this
     // wallet, chain and hash.
+    // CHANGED EXPECTATION (GOAL 133D, A106 R3-1): THE FOURTH LOOKUP ONLY ASKS WHETHER SUCH A ROW EXISTS (LIMIT 1, NO
+    // ORDER): A REQUEST NEVER WRITES ON IT, SO IT NO LONGER PICKS ONE OF UP TO 10 TO MARK.
     expect(lookups).toHaveLength(4)
-    expect(lookups[3].filters).toEqual([`wallet=eq.${sender(f)}`, 'chain_id=eq.1', `tx_hash=ilike.${f.hash.toLowerCase()}`, 'verified_at=is.null', 'order=created_at.asc', 'limit=10'])
+    expect(lookups[3].filters).toEqual([`wallet=eq.${sender(f)}`, 'chain_id=eq.1', `tx_hash=ilike.${f.hash.toLowerCase()}`, 'verified_at=is.null', 'limit=1'])
     for (const op of lookups) expect(op.filters[0], JSON.stringify(op)).toBe(`wallet=eq.${sender(f)}`)
     expect(lookups[0].filters).toEqual([`wallet=eq.${sender(f)}`, `tx_hash=ilike.${f.hash.toLowerCase()}`, 'verified_at=not.is.null', 'limit=1'])
     // CHANGED EXPECTATION (goal 133c P.2): the recent rows are POST rows only (claimed_tx_hash is null: a claim row of

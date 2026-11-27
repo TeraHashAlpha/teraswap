@@ -1,18 +1,18 @@
 /**
- * [ADR-029 section 4 and 8.5] Does a row written BEFORE ADR-029 agree with what the chain says its transaction did?
+ * [ADR-029 section 4 and 9.1] Does a row written BEFORE ADR-029 agree with what the chain says its transaction did?
  *
  * Such a row holds what its caller DECLARED (tokens, amounts, symbols, and main stored the caller's USD whenever the
  * server could not price a token). Marking it verified makes those stored values public once the flag is on, and only
- * the two verification columns (and, for a confirmation, the status) may be written on it. So it is marked only when
- * what it stores agrees with the receipt (owner's answer of 2026-11-25 for the stored-rows script; owner's answer of
- * 2026-11-26 applies the same rule to a confirmation that finds such a row, details R of goal 133c):
+ * the two verification columns may be written on it. So the stored-rows script marks it only when what it stores
+ * agrees with the receipt (owner's answer of 2026-11-25):
  *   - the stored status agrees: `confirmed` or `pending` with a confirmed transaction, `failed` with a reverted one;
  *   - both stored token addresses equal the receipt's;
  *   - the stored amount-in equals the receipt's;
  *   - the receipt's amount-out is between 50% and 200% of the stored one (old rows stored the QUOTE, so it is never equal).
  * A side the receipt cannot give counts as differing.
  *
- * The one rule for both callers: scripts/swaps/verify-stored-swaps-lib.ts and src/lib/swap-log/confirm.ts.
+ * Its one caller is scripts/swaps/verify-stored-swaps-lib.ts. A request never marks such a row (ADR-029 9.1, A106 R3-1:
+ * a row main stored is read-only for POST and PATCH, src/lib/swap-log/confirm.ts).
  */
 import type { DerivedSwap } from '@/lib/swap-verify/verify-swap-on-chain'
 
@@ -73,10 +73,4 @@ export function compareStored(
     if (!atLeastHalf || !atMostTwice) differs.push('amount_out')
   }
   return { statusAgrees, differs, outRatio }
-}
-
-/** The stored row agrees with the receipt on every count above. */
-export function storedAgrees(row: Record<string, unknown>, outcome: 'confirmed' | 'failed', derived: DerivedSwap): boolean {
-  const compared = compareStored(row, outcome, derived)
-  return compared.statusAgrees && compared.differs.length === 0
 }
