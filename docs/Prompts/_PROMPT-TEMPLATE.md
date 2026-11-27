@@ -136,14 +136,16 @@ Never write "think carefully", "step by step", "explain your reasoning", or othe
 
 ---
 
-## 5. Parallelism & git hygiene (learned 2026-07-08)
+## 5. Parallelism & git hygiene
 
-- **Each parallel session runs in its OWN git worktree** — `git worktree add ../wt-<branch> origin/main`; never share
-  the main checkout (a stray `git checkout` moves HEAD → one branch's commit leaks onto another's).
+- **Each parallel session runs in its OWN git worktree** — `git worktree add "${TS_WORKTREE_BASE:-$HOME/ts-worktrees}/<slug>" origin/main`,
+  outside the repo and never under `.claude/worktrees/`; never share the main checkout (a stray `git checkout` moves
+  HEAD → one branch's commit leaks onto another's).
 - **Parallelise only on non-overlapping files.**
-- **Stray commit on an unmerged feature branch** → `rebase`-drop it, then **RE-SIGN the replayed commits** (rebase makes
-  new objects → they lose signatures; verify `git log --show-signature` before force-push). Feature-branch force-push is
-  fine; `main` protection stays intact.
+- **Stray commit on an unmerged feature branch** → report it. Dropping it rewrites history, so it needs a force-push:
+  never on a branch with an open PR, otherwise only on the owner's explicit word (CLAUDE.md "Branches"). If the owner
+  says yes, **RE-SIGN the replayed commits** (rebase makes new objects → they lose signatures; verify
+  `git log --show-signature` before the push).
 
 ---
 
