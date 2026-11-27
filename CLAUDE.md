@@ -56,7 +56,7 @@ Consult security-knowledge **before** approving any change to contracts or fund 
 
 - [`ARCHITECT-INDEX.md`](ARCHITECT-INDEX.md) — master index of all architectural artifacts
 - [`docs/DEPLOYMENTS.md`](docs/DEPLOYMENTS.md) — contracts, wallets and keeper signers per chain (source of truth for addresses)
-- [`docs/ADR/`](docs/ADR/) — architectural decision records, ADR-001 to ADR-026 (status is in each file's header)
+- [`docs/ADR/`](docs/ADR/) — architectural decision records (count and latest: the generated "ADRs" line below; status is in each file's header)
 - [`docs/Prompts/`](docs/Prompts/) — sprint packets (`SPRINT-*.md`, highest numbered: `SPRINT-48-ARBITRUM-DCA-PREP.md`) and prompt packets
 - [`docs/feedback/`](docs/feedback/) — one feedback file per branch (see the convention below)
 - [`Audits/`](Audits/) — audit reports, external analysis, incident reports (`Audits/Incidents/`)
