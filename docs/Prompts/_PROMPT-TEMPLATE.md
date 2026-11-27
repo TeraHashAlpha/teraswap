@@ -98,8 +98,8 @@ Never write "think carefully", "step by step", "explain your reasoning", or othe
   (exact pins: `package.json`). Backend: Next API Routes on **Vercel Pro** (no CPU cap) + **Upstash Redis** + **Supabase (PostgreSQL +
   RLS)**. Alchemy PAYG. **NEVER bump to wagmi v3** (P184 caused the WalletConnect multi-Core outage).
 - **Repo conventions.** ADR: Proposed→Accepted→**Superseded (never deleted)**, `docs/ADR/ADR-NNN-slug.md`. Incidents:
-  `INC-YYYY-MM-DD-NNN`, append-only, `Audits/Incidents/`. **RICE** for priority. Sprints:
-  `docs/Prompts/SPRINT-{N}{A-Z}.md`. **Marketing → `dex-aggregator 2.marketing/`, NEVER in the code repo.** Stay on
+  `INC-YYYY-MM-DD-NNN`, append-only, `Audits/Incidents/`. **RICE** for priority.
+  **Marketing → `dex-aggregator 2.marketing/`, NEVER in the code repo.** Stay on
   **npm** (`min-release-age=7d`). **Never re-enable a disabled source** without its incident's reactivation criteria.
   Rule #4 = never delete → mark superseded OR move to `archive/`.
 - **Roles & hard Do-NOTs.** Architect never edits source (produce prompts); Auditor never edits (classifies C/H/M/L,
