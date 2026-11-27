@@ -194,9 +194,10 @@ always qualify by chain. Operational status and the checks behind each row are i
   user's order — only `order` misses advance the 8-miss ladder (`retry-policy.js:40-57`, ADR-026 Decision 2); ADR-024 (Accepted): DCA floor price quorum,
   skip the cycle, never the order; per-chain gas tiers (`gas-tier.js:1-17`); one instance per chain, verified against the chain at
   boot (`executor.js:46-60`). Scoped rules: `contracts/order-engine/CLAUDE.md`.
-- **Supply chain:** the CI `audit` job runs `scripts/audit-gate.mjs` (`ci.yml:73-86`). `audit-allowlist.json` holds 6 entries; every
-  entry carries `expires`, and an expired or undated entry blocks (`audit-allowlist.json` `$comment`; `scripts/audit-gate-lib.mjs:5-9`).
-  Earliest expiry: 2026-11-22.
+- **Supply chain:** the CI `audit` job runs `scripts/audit-gate.mjs` (`ci.yml:73-86`). Every `audit-allowlist.json`
+  entry is dated: `expires`, or, when no patched release exists, `noPatch: true` with a `reviewDate`. An expired or undated
+  entry blocks (`audit-allowlist.json` `$comment`; `scripts/audit-gate-lib.mjs:4-11`); read the file for the current entries
+  and the earliest date.
 - **Force-MEV retired (owner decision 2026-11-06):** the toggle, its notice and the "Use Gasless Route" CTA are gone from v1 and v2; CoW
   stays an ordinary, ranked source. The test header records why: CoW's free quote API has answered 429 to our servers since 2026-10-29
   (`src/ui/v2/swap/retire-force-mev.swap.test.tsx:3-7`).
