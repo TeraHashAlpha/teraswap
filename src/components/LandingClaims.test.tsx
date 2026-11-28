@@ -28,14 +28,12 @@ import { renderToString } from 'react-dom/server'
 import { render, screen } from '@/test-utils/render'
 import LandingPage from './LandingPage'
 import {
-  VERIFICATION_STAGE_COUNT,
   VERIFICATION_CHECK_COUNT,
   chainNameFor,
   chainlinkFeedCountFor,
   PRICE_DEVIATION_WARN_PCT,
   PRICE_DEVIATION_BLOCK_PCT,
   CHAINLINK_STALENESS_CLAIM,
-  POST_EXECUTION_SHORTFALL_WARN_PCT,
   INTEGRATED_DEX_SOURCE_LABELS,
   formatChainList,
 } from '@/config/product-claims'
@@ -45,11 +43,12 @@ beforeEach(() => {
 })
 
 describe('hero stats', () => {
-  // [fix/hero-stat-layout] Same shape as its neighbours: <checks> is the numeral, <stages> rides in the label.
-  it('reads <checks> as the numeral and "<stages> STAGES" in the label from the verification list', () => {
-    render(<LandingPage onLaunchApp={vi.fn()} />)
-    const label = screen.getByText(`VERIFICATION CHECKS · ${VERIFICATION_STAGE_COUNT} STAGES`)
+  // [fix/hero-stat-layout] Same shape as its neighbours: <checks> is the numeral, the caption names it.
+  it('reads <checks> as the numeral from the verification list, under a caption with no stage wording', () => {
+    const { container } = render(<LandingPage onLaunchApp={vi.fn()} />)
+    const label = screen.getByText('VERIFICATION CHECKS')
     expect(label.previousElementSibling?.textContent).toBe(String(VERIFICATION_CHECK_COUNT))
+    expect(container.textContent).not.toMatch(/\bstages?\b/i)
   })
 
   it('shows the ACTIVE chain\'s feed count and name', () => {
@@ -77,6 +76,7 @@ describe('below-the-fold claims', () => {
     const html = renderToString(<BelowFold onLaunchApp={() => {}} />)
     expect(html).toContain(`>${VERIFICATION_CHECK_COUNT}<`)
     expect(html).toContain(`>${chainlinkFeedCountFor(1)}<`)
+    expect(html).not.toContain('✓ Verified')
   })
 
   it('interpolates thresholds, staleness limit and the active chain in the Security list', async () => {
@@ -87,7 +87,7 @@ describe('below-the-fold claims', () => {
     expect(text).toContain(`${chainlinkFeedCountFor(8453)} token price feeds on ${chainNameFor(8453)}`)
     expect(text).toContain(`warns at ${PRICE_DEVIATION_WARN_PCT}+ deviation, blocks at ${PRICE_DEVIATION_BLOCK_PCT}`)
     expect(text).toContain(CHAINLINK_STALENESS_CLAIM)
-    expect(text).toContain(`Shortfall above ${POST_EXECUTION_SHORTFALL_WARN_PCT}`)
+    expect(text).not.toMatch(/post[- ]?(execution|swap)|shortfall|auto-disabled|P0 alert/i)
     expect(text).not.toMatch(/every hour/i)
   })
 

@@ -46,11 +46,8 @@ import {
   chainlinkFeedCountFor,
   chainNameFor,
   formatPercent,
-  VERIFICATION_STAGES,
   VERIFICATION_CHECKS,
-  VERIFICATION_STAGE_COUNT,
   VERIFICATION_CHECK_COUNT,
-  VERIFICATION_SUMMARY,
   MIRRORED_CONSTANTS,
   PLATFORM_FEE_LABEL,
   QUOTE_TIMEOUT_SEC,
@@ -258,21 +255,40 @@ describe('product-claims: C1 integratedSourcesFor(chainId)', () => {
   })
 })
 
-describe('product-claims: C2 verification stages / checks', () => {
-  it('has the two stages and a summary built from the same lists', () => {
-    expect([...VERIFICATION_STAGES]).toEqual(['pre-trade', 'post-execution'])
-    expect(VERIFICATION_STAGE_COUNT).toBe(VERIFICATION_STAGES.length)
+describe('product-claims: C2 verification checks', () => {
+  // [fix/remove-post-execution-claim, owner 2026-11-28] FIVE checks, all applied before a swap.
+  it('lists exactly the five checks and counts that list', () => {
+    expect(VERIFICATION_CHECKS.map((c) => c.id)).toEqual([
+      'chainlink-deviation',
+      'chainlink-staleness',
+      'lst-depeg',
+      'unverified-swap-gate',
+      'permit2-caps',
+    ])
+    expect(VERIFICATION_CHECK_COUNT).toBe(5)
     expect(VERIFICATION_CHECK_COUNT).toBe(VERIFICATION_CHECKS.length)
-    expect(VERIFICATION_SUMMARY).toBe(`${VERIFICATION_STAGES.length} stages · ${VERIFICATION_CHECKS.length} checks`)
   })
 
-  it('every check sits in a declared stage and names an existing file as its proof', () => {
+  it('exports no stage figure and no post-execution number', async () => {
+    const claims = await import('./product-claims')
+    for (const name of [
+      'VERIFICATION_STAGES',
+      'VERIFICATION_STAGE_COUNT',
+      'VERIFICATION_SUMMARY',
+      'POST_EXECUTION_SHORTFALL_WARN',
+      'POST_EXECUTION_SHORTFALL_WARN_PCT',
+    ]) {
+      expect(Object.keys(claims), name).not.toContain(name)
+    }
+    for (const check of VERIFICATION_CHECKS) expect(Object.keys(check).sort()).toEqual(['id', 'label', 'provedBy'])
+    expect(MIRRORED_CONSTANTS.map((c) => c.id)).not.toContain('POST_EXECUTION_SHORTFALL_WARN')
+  })
+
+  it('every check names an existing file as its proof, under its own id', () => {
     for (const check of VERIFICATION_CHECKS) {
-      expect(VERIFICATION_STAGES).toContain(check.stage)
       expect(() => readFileSync(join(process.cwd(), check.provedBy), 'utf8')).not.toThrow()
     }
     expect(new Set(VERIFICATION_CHECKS.map((c) => c.id)).size).toBe(VERIFICATION_CHECKS.length)
-    expect(VERIFICATION_STAGES.every((st) => VERIFICATION_CHECKS.some((c) => c.stage === st))).toBe(true)
   })
 })
 
@@ -302,12 +318,6 @@ describe('product-claims: C4 thresholds interpolate the constants', () => {
     expect(CHAINLINK_MAX_STALENESS_MIN).toBe(CHAINLINK_MAX_STALENESS_SEC / 60)
     expect(CHAINLINK_STALENESS_CLAIM).toContain(`older than ${CHAINLINK_MAX_STALENESS_SEC / 60} min are rejected`)
     expect(CHAINLINK_STALENESS_CLAIM).not.toMatch(/every hour/i)
-  })
-
-  it('"auto-disabled + P0" is backed by the validator critical path', () => {
-    const src = readFileSync(join(process.cwd(), 'src/lib/post-execution-validator.ts'), 'utf8')
-    expect(src).toMatch(/await forceDisable\(source/)
-    expect(src).toMatch(/Emit P0 alert/)
   })
 })
 

@@ -9,7 +9,6 @@ import {
   INTEGRATED_DEX_SOURCE_COUNT_WORDS,
   INTEGRATED_DEX_SOURCE_LABELS,
   OUTLIER_MEDIAN_MULTIPLE,
-  POST_EXECUTION_SHORTFALL_WARN_PCT,
   PRICE_DEVIATION_BLOCK_PCT,
   PRICE_DEVIATION_WARN_PCT,
   PRIVACY_BADGE,
@@ -123,11 +122,6 @@ export function SecuritySection() {
       title: 'Chainlink Oracle Check',
       body: `${feedCount} token price feeds on ${chainName}: warns at ${PRICE_DEVIATION_WARN_PCT}+ deviation, blocks at ${PRICE_DEVIATION_BLOCK_PCT}. ${CHAINLINK_STALENESS_CLAIM}`,
     },
-    {
-      tag: 'POST-SWAP',
-      title: 'Post-Execution Validation',
-      body: `Transfer event logs verify actual output vs expected. Shortfall above ${POST_EXECUTION_SHORTFALL_WARN_PCT} triggers a P0 alert and the source is auto-disabled.`,
-    },
   ]
   return (
     <section id="security" data-ts-narrative="security" className={`ts-v2-scrim ${SECTION}`}>
@@ -152,7 +146,7 @@ export function SecuritySection() {
               </p>
             </div>
           </div>
-          <ul className="grid list-none gap-4 sm:grid-cols-2">
+          <ul className="grid list-none gap-4">
             {CHECKS.map((c, i) => (
               <li key={c.tag} className="ts-v2-rv" style={rvAt(i)}>
                 <Surface edge="rule" className="h-full py-1">
@@ -165,11 +159,11 @@ export function SecuritySection() {
           </ul>
         </div>
         <Surface edge="both" className="ts-v2-rv mt-8 py-6 sm:py-8" style={rvAt(CHECKS.length)}>
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-6 lg:grid-cols-4">
+          <dl className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-3">
             {stats.map((s) => (
               <div key={s.label} className="flex min-w-0 flex-col-reverse justify-end gap-2">
                 <dt className="text-[13px] text-v2-muted">{s.label}</dt>
-                <dd className="font-v2-display text-5xl font-bold leading-none text-v2-cream sm:text-6xl">{s.value === null ? s.text : s.value}</dd>
+                <dd className="font-v2-display text-5xl font-bold leading-none text-v2-cream sm:text-6xl">{s.value}</dd>
               </div>
             ))}
           </dl>

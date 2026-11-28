@@ -42,7 +42,7 @@ import { render, screen } from '@/test-utils/render'
 import LandingPage from './LandingPage'
 import { findToken } from '@/lib/tokens'
 import { getChainTokenList } from '@/lib/chains'
-import { VERIFICATION_CHECKS, VERIFICATION_STAGES, VERIFICATION_SUMMARY } from '@/config/product-claims'
+import { VERIFICATION_CHECKS } from '@/config/product-claims'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -148,8 +148,8 @@ describe('LandingPage: SwapPreview follows the widget\'s chain [fix/landing-prev
 })
 
 // [fix/hero-stat-layout] The hero stat strip is three cells of ONE shape — a numeral <dd>
-// above an uppercase <dt> label. The verification cell used to render VERIFICATION_SUMMARY
-// ("2 stages · 6 checks") as wrapped body text, breaking the row's rhythm.
+// above an uppercase <dt> label. The verification cell used to render a two-figure summary
+// ("N stages · M checks") as wrapped body text, breaking the row's rhythm.
 function verificationCell(root: ParentNode) {
   const label = Array.from(root.querySelectorAll('dt')).find((dt) =>
     dt.textContent?.startsWith('VERIFICATION CHECKS'),
@@ -162,14 +162,14 @@ describe('LandingPage: hero stat strip [fix/hero-stat-layout]', () => {
     useQuoteMock.mockReturnValue({ meta: null, loading: true, error: null, countdown: 0, refetch: vi.fn(), refresh: vi.fn() })
   })
 
-  it('renders the verification cell as numeral VERIFICATION_CHECKS.length + a label carrying the stage count', () => {
+  it('renders the verification cell as numeral VERIFICATION_CHECKS.length + a label with no stage wording', () => {
     const { container } = render(<LandingPage onLaunchApp={vi.fn()} />)
     const { label, numeral } = verificationCell(container)
 
     expect(numeral?.tagName).toBe('DD')
     expect(numeral?.textContent).toBe(String(VERIFICATION_CHECKS.length))
-    expect(label?.textContent).toBe(`VERIFICATION CHECKS · ${VERIFICATION_STAGES.length} STAGES`)
-    expect(screen.queryByText(VERIFICATION_SUMMARY)).not.toBeInTheDocument()
+    expect(label?.textContent).toBe('VERIFICATION CHECKS')
+    expect(container.textContent).not.toMatch(/\bstages?\b/i)
   })
 
   it('every cell in the strip has the same shape: a bare numeral, never body text', () => {
@@ -185,7 +185,7 @@ describe('LandingPage: hero stat strip [fix/hero-stat-layout]', () => {
     const { label, numeral } = verificationCell(host)
 
     expect(numeral?.textContent).toBe(String(VERIFICATION_CHECKS.length))
-    expect(label?.textContent).toContain(`${VERIFICATION_STAGES.length} STAGES`)
+    expect(label?.textContent).toBe('VERIFICATION CHECKS')
   })
 })
 

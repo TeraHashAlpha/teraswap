@@ -291,43 +291,30 @@ export function chainlinkFeedCountFor(chainId: number): number {
   return feedCountByChain.get(chainId) ?? 0
 }
 
-// ── (e) Verification stages / checks ─────────────────────────────────────────
-
-export const VERIFICATION_STAGES = ['pre-trade', 'post-execution'] as const
-export type VerificationStage = (typeof VERIFICATION_STAGES)[number]
+// ── (e) Verification checks ──────────────────────────────────────────────────
 
 export interface VerificationCheck {
   id: string
-  stage: VerificationStage
   label: string
   /** File that DECLARES the constant behind the check (enforcement sites are not claimed here). */
   provedBy: string
 }
 
 /**
- * Post-execution shortfall tolerance. post-execution-validator.ts declares it as the module-private
- * `const WARNING_THRESHOLD = 0.02` in a server-only module (it imports kv + viem clients), so it
- * can be neither imported into a client bundle nor re-exported without editing that file. This is
- * a typed slot, mirrored and drift-checked via MIRRORED_CONSTANTS (section h).
- */
-export const POST_EXECUTION_SHORTFALL_WARN = 0.02
-
-/**
- * The checks the in-repo constants prove. Each is a declared threshold, so the list and its
- * count cannot outgrow what the code defines; a check with no `provedBy` does not belong here.
+ * The checks the in-repo constants prove, all applied before a swap. Each is a declared threshold, so the list
+ * and its count cannot outgrow what the code defines; a check with no `provedBy` does not belong here.
+ * [owner 2026-11-28] Nothing that runs after a swap is listed or claimed until something calls it
+ * (no-post-execution-claim.test.tsx).
  */
 export const VERIFICATION_CHECKS: readonly VerificationCheck[] = [
-  { id: 'chainlink-deviation', stage: 'pre-trade', label: 'Chainlink price deviation (warn / block)', provedBy: 'src/lib/constants.ts' },
-  { id: 'chainlink-staleness', stage: 'pre-trade', label: 'Chainlink feed staleness limit', provedBy: 'src/lib/constants.ts' },
-  { id: 'lst-depeg', stage: 'pre-trade', label: 'Liquid-staking depeg divergence (warn / block)', provedBy: 'src/lib/constants.ts' },
-  { id: 'unverified-swap-gate', stage: 'pre-trade', label: 'Size gate on swaps without an independent price', provedBy: 'src/lib/constants.ts' },
-  { id: 'permit2-caps', stage: 'pre-trade', label: 'Permit2 signature deadline and allowance expiry caps', provedBy: 'src/lib/constants.ts' },
-  { id: 'post-execution-shortfall', stage: 'post-execution', label: 'Post-execution output vs expected', provedBy: 'src/lib/post-execution-validator.ts' },
+  { id: 'chainlink-deviation', label: 'Chainlink price deviation (warn / block)', provedBy: 'src/lib/constants.ts' },
+  { id: 'chainlink-staleness', label: 'Chainlink feed staleness limit', provedBy: 'src/lib/constants.ts' },
+  { id: 'lst-depeg', label: 'Liquid-staking depeg divergence (warn / block)', provedBy: 'src/lib/constants.ts' },
+  { id: 'unverified-swap-gate', label: 'Size gate on swaps without an independent price', provedBy: 'src/lib/constants.ts' },
+  { id: 'permit2-caps', label: 'Permit2 signature deadline and allowance expiry caps', provedBy: 'src/lib/constants.ts' },
 ]
 
-export const VERIFICATION_STAGE_COUNT = VERIFICATION_STAGES.length
 export const VERIFICATION_CHECK_COUNT = VERIFICATION_CHECKS.length
-export const VERIFICATION_SUMMARY = `${VERIFICATION_STAGE_COUNT} stages · ${VERIFICATION_CHECK_COUNT} checks`
 
 // ── (e) Threshold copy slots ─────────────────────────────────────────────────
 
@@ -335,7 +322,6 @@ export const PRICE_DEVIATION_WARN_PCT = formatPercent(PRICE_DEVIATION_WARN)
 export const PRICE_DEVIATION_BLOCK_PCT = formatPercent(PRICE_DEVIATION_BLOCK)
 export const DEPEG_DIVERGENCE_WARN_PCT = formatPercent(DEPEG_DIVERGENCE_WARN)
 export const DEPEG_DIVERGENCE_BLOCK_PCT = formatPercent(DEPEG_DIVERGENCE_BLOCK)
-export const POST_EXECUTION_SHORTFALL_WARN_PCT = formatPercent(POST_EXECUTION_SHORTFALL_WARN)
 export const CHAINLINK_MAX_STALENESS_MIN = CHAINLINK_MAX_STALENESS_SEC / 60
 export const UNVERIFIED_SWAP_WARN_USD_LABEL = `$${UNVERIFIED_SWAP_WARN_USD.toLocaleString('en-US')}`
 export const UNVERIFIED_SWAP_BLOCK_USD_LABEL = `$${UNVERIFIED_SWAP_BLOCK_USD.toLocaleString('en-US')}`
@@ -436,7 +422,6 @@ export interface MirroredConstant {
 }
 
 export const MIRRORED_CONSTANTS: readonly MirroredConstant[] = [
-  { id: 'POST_EXECUTION_SHORTFALL_WARN', value: POST_EXECUTION_SHORTFALL_WARN, file: 'src/lib/post-execution-validator.ts', pattern: /^const WARNING_THRESHOLD = ([0-9.]+)/gm, group: 1 },
   { id: 'DEFILLAMA_BLOCK_DEVIATION', value: DEFILLAMA_BLOCK_DEVIATION, file: 'src/lib/defillama.ts', pattern: /const BLOCK_THRESHOLD = -([0-9.]+)/g, group: 1 },
   { id: 'DEFILLAMA_HIGH_VALUE_USD', value: DEFILLAMA_HIGH_VALUE_USD, file: 'src/lib/defillama.ts', pattern: /export const HIGH_VALUE_THRESHOLD_USD = ([0-9_]+)/g, group: 1 },
   { id: 'CROSS_QUOTE_WARN_THRESHOLD', value: CROSS_QUOTE_WARN_THRESHOLD, file: 'src/lib/api.ts', pattern: /const CROSS_QUOTE_WARN_THRESHOLD = ([0-9.]+)/g, group: 1 },

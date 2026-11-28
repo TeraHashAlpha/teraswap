@@ -27,7 +27,6 @@ import {
   PRIVACY_BADGE,
   SWAP_CHAIN_LIST_LABEL,
   VERIFICATION_CHECKS,
-  VERIFICATION_STAGES,
   chainNameFor,
   chainlinkFeedCountFor,
 } from '@/config/product-claims'
@@ -320,12 +319,11 @@ function HeroSection({ onLaunchApp }: { onLaunchApp: () => void }) {
   // Three anchor numbers pulled above the H1 (Stat-Led DNA). Every figure is a slot of
   // product-claims.ts — the verification cell counts the same VERIFICATION_CHECKS list as the
   // Security section's stats bar, and the feed count is the active chain's own registry.
-  // [fix/hero-stat-layout] All three cells share one shape (numeral + label); the stage count
-  // lives in the label so the row keeps its rhythm.
+  // [fix/hero-stat-layout] All three cells share one shape (numeral + label).
   const chainId = useQuoteChainId()
   const ANCHOR_STATS: { v: number; label: string }[] = [
     { v: INTEGRATED_DEX_SOURCE_COUNT, label: 'LIQUIDITY SOURCES' },
-    { v: VERIFICATION_CHECKS.length, label: `VERIFICATION CHECKS · ${VERIFICATION_STAGES.length} STAGES` },
+    { v: VERIFICATION_CHECKS.length, label: 'VERIFICATION CHECKS' },
     { v: chainlinkFeedCountFor(chainId), label: `CHAINLINK ORACLES · ${chainNameFor(chainId)}` },
   ]
 

@@ -7,7 +7,6 @@ import {
   INTEGRATED_DEX_SOURCE_COUNT,
   VERIFICATION_CHECKS,
   VERIFICATION_CHECK_COUNT,
-  VERIFICATION_STAGES,
   chainNameFor,
   chainlinkFeedCountFor,
 } from '@/config/product-claims'
@@ -19,15 +18,11 @@ export interface StatCell {
   slot: string
 }
 
-/** Hero: 3 cells, numeral + label (fix/hero-stat-layout). The stage count lives in the label. */
+/** Hero: 3 cells, numeral + label (fix/hero-stat-layout). */
 export function heroStats(chainId: number): StatCell[] {
   return [
     { value: INTEGRATED_DEX_SOURCE_COUNT, label: 'LIQUIDITY SOURCES', slot: 'INTEGRATED_DEX_SOURCE_COUNT' },
-    {
-      value: VERIFICATION_CHECKS.length,
-      label: `VERIFICATION CHECKS · ${VERIFICATION_STAGES.length} STAGES`,
-      slot: 'VERIFICATION_CHECKS.length · VERIFICATION_STAGES.length',
-    },
+    { value: VERIFICATION_CHECKS.length, label: 'VERIFICATION CHECKS', slot: 'VERIFICATION_CHECKS.length' },
     {
       value: chainlinkFeedCountFor(chainId),
       label: `CHAINLINK ORACLES · ${chainNameFor(chainId)}`,
@@ -36,8 +31,8 @@ export function heroStats(chainId: number): StatCell[] {
   ]
 }
 
-/** Security bar (pack 10 §4): sources · checks · feeds on the selected chain · the post-execution mark. */
-export function securityStats(chainId: number): Array<StatCell | { value: null; label: string; text: string; slot: string }> {
+/** Security bar (pack 10 §4): sources · checks · feeds on the selected chain. */
+export function securityStats(chainId: number): StatCell[] {
   return [
     { value: INTEGRATED_DEX_SOURCE_COUNT, label: 'Liquidity sources', slot: 'INTEGRATED_DEX_SOURCE_COUNT' },
     { value: VERIFICATION_CHECK_COUNT, label: 'Independent verification checks', slot: 'VERIFICATION_CHECK_COUNT' },
@@ -46,6 +41,5 @@ export function securityStats(chainId: number): Array<StatCell | { value: null; 
       label: `Chainlink token price feeds on ${chainNameFor(chainId)}`,
       slot: 'chainlinkFeedCountFor(chainId) · chainNameFor(chainId)',
     },
-    { value: null, label: 'Post-execution verified', text: '✓ Verified', slot: '(text, no number)' },
   ]
 }
