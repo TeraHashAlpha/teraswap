@@ -31,11 +31,14 @@ class QuoteApiError extends Error {
   status: number
   /** The response's X-RateLimit-Reset (epoch ms, as sent), when it had one. */
   rateLimitReset: string | null
-  constructor(message: string, status: number, rateLimitReset: string | null = null) {
+  /** The response's Date (the server's clock, whole seconds), when it had one. */
+  date: string | null
+  constructor(message: string, status: number, rateLimitReset: string | null = null, date: string | null = null) {
     super(message)
     this.name = 'QuoteApiError'
     this.status = status
     this.rateLimitReset = rateLimitReset
+    this.date = date
   }
 }
 
@@ -54,11 +57,14 @@ const MAX_RESET_AHEAD_MS = 3_600_000
  * [fix/quote-split-followups] The wait a 429's X-RateLimit-Reset asks for, capped at MAX_BACKOFF_MS. Null — the caller
  * then doubles, as before — when the header is missing or absurd: not a whole number, more than an hour ahead, or past
  * by RESET_MARGIN_MS or more. A reset that passed more recently than that freed while the answer was on its way.
- * It is read against this device's clock. A clock running ahead retries early once, then falls to the doubling.
+ * [A109 S-2] The reset is the server's time, so it is read against the response's own `date`, never against this
+ * device's clock (`now`) unless Date is missing or unparseable. Date drops the milliseconds, so the wait it gives is
+ * up to 1 s longer than asked, never shorter.
  */
-function waitFromReset(header: string | null, now: number): number | null {
+function waitFromReset(header: string | null, date: string | null, now: number): number | null {
   if (!header || !/^\d+$/.test(header)) return null
-  const ahead = Number(header) - now
+  const sentOn = Date.parse(date ?? '')
+  const ahead = Number(header) - (Number.isNaN(sentOn) ? now : sentOn)
   if (!(ahead > -RESET_MARGIN_MS && ahead <= MAX_RESET_AHEAD_MS)) return null
   return Math.min(MAX_BACKOFF_MS, Math.max(0, ahead) + RESET_MARGIN_MS)
 }
@@ -116,6 +122,7 @@ async function fetchQuoteViaApi(
       data.error || `Quote API error ${res.status}`,
       res.status,
       res.headers.get('x-ratelimit-reset'),
+      res.headers.get('date'),
     )
   }
 
@@ -204,8 +211,9 @@ export function useQuote(
   // [hotfix] Backoff state for rate-limit responses.
   // `currentIntervalMsRef` holds the effective poll interval: QUOTE_REFRESH_MS
   // (15s) normally; after a 429, the wait the response's X-RateLimit-Reset
-  // gives [fix/quote-split-followups], else the doubling below; it snaps back to
-  // the normal cadence on the first successful fetch.
+  // gives [fix/quote-split-followups], from the second refusal in a row no less
+  // than the backoff step [A109 S-1]; with no usable header, the doubling below.
+  // It snaps back to the normal cadence on the first successful fetch.
   // `inBackoffRef` gates the `setError(null)` reset at the top of every
   // doFetch — without it the error toggles null → "Rate limit…" → null
   // → "Rate limit…" every poll and floods the toast layer.
@@ -440,8 +448,8 @@ export function useQuote(
       if (signal.aborted) return
       if (requestKey && (!currentKeyRef.current || !sameQuoteKey(requestKey, currentKeyRef.current))) return
       // [hotfix] Treat HTTP 429 distinctly: enter (or extend) backoff,
-      // wait as long as the server says — or double, up to
-      // MAX_BACKOFF_MS, when it does not — and rearm the timer. Other
+      // wait as long as the server says (never under the step below) — or
+      // double, up to MAX_BACKOFF_MS, when it does not — and rearm the timer. Other
       // errors keep the normal cadence — backoff is reserved for
       // explicit rate limits.
       const rateLimit = err instanceof QuoteApiError && err.status === 429 ? err : null
@@ -449,11 +457,17 @@ export function useQuote(
       if (rateLimit) {
         const wasInBackoff = inBackoffRef.current
         inBackoffRef.current = true
+        // [A109 S-1] The reset says when ONE slot frees, not when this tab is served: on a crowded address the others
+        // take it, so a tab refused again must slow down whatever the header says. The step under this refusal is none
+        // for the first in a row (a lone visitor recovers at the header's time), then 30, 60, 120 s: the doubling as
+        // it stood after the refusal before this one.
+        const stepMs = wasInBackoff ? doublingMsRef.current : 0
         doublingMsRef.current = Math.min(
           MAX_BACKOFF_MS,
           wasInBackoff ? doublingMsRef.current * 2 : QUOTE_REFRESH_MS * 2,
         )
-        currentIntervalMsRef.current = waitFromReset(rateLimit.rateLimitReset, Date.now()) ?? doublingMsRef.current
+        const askedMs = waitFromReset(rateLimit.rateLimitReset, rateLimit.date, Date.now())
+        currentIntervalMsRef.current = askedMs === null ? doublingMsRef.current : Math.max(askedMs, stepMs)
         rearmPollTimer()
       } else if (inBackoffRef.current) {
         // Non-429 error during a prior backoff — clear the backoff
