@@ -48,11 +48,29 @@ The browser rig reuses the goal 136 and A108 rig scripts (outside the repo), cop
 committed. The detached worktree `~/ts-worktrees/quote-followups-main-ref` served as the "before" build.
 
 ## Round 2 (goal 137b: A109 S-1, S-2, S-3; the 429 wait only)
-- [ ] S-1 a tab that keeps being refused slows down · - [ ] S-2 the reset is read against the response's Date · - [ ] S-3 the two mutants die
-- [ ] Failing-first / mutant proof · - [ ] one verify run · - [ ] push
+- [x] S-1 a tab that keeps being refused slows down (one target NOT MET: 10 tabs, below) · - [x] S-2 the reset is read against the response's Date · - [x] S-3 the two mutants die
+- [x] Failing-first / mutant proof · - [x] one verify run · - [x] push
 
 **Owner answers (asked once, 2026-11-28, before any code; they supersede the goal text):** (1) "10 tabs: no more refusals a
 minute than main" cannot hold with the written rule: KEEP THE RULE, the 10-tab test pins the measured numbers and the
 target is reported NOT MET. (2) No usable reset keeps today's 30/60/120 s from the first such refusal. (3) The 120 s cap
 wins over "never earlier than the reset" (only a reset the 60 s limiter cannot send). (4) "Never early" covers the wait's
 own retry; tab return, manual refresh and wallet or source-filter refetches stay as on main.
+
+### Evidence, round 2
+**S-1** `useQuote.ts:464-470`: wait = max(header, step 0/30/60/120); no usable header: the doubling, as before. Tests: `useQuote.rate-limit.test.ts:302` (7 new), `.limiter.test.ts:109` (2, real route + limiter). **CHANGED EXPECTATION: A NEAR RESET ON THE FOURTH REFUSAL IN A ROW WAITS 120 S (WAS 21).**
+**S-2** `useQuote.ts:64-67,125`: reset minus the response's `Date` (device clock if missing or unparseable). Tests `:373`, `.limiter.test.ts:143` (2 s fast, 5 min fast/slow: one retry, never early, ≤ 62 s). Chromium reads `Date` on a real 429 (local production build). **Failing first** on `1153bc4f`: 22 of the two files' 44 fail.
+**S-3** `:403`; both pass on `1153bc4f`, so mutant proof: "a reset ≤ 30 s past is accepted" → both past cases fail; "timer guard also outside a backoff" → the tick test fails. Also killed: 10 of 10 mutants of the new code (no step, early or late step, Date ignored or unread, no fallback, count kept).
+| Auditor's S-1 case (same probe; real limiter, "reset = now" a stub) | main | before `feb9948e` | after |
+|---|---|---|---|
+| One tab, bucket kept full, 5 min: refusals (≤ 8) · server always "reset = now", 10 min: requests (≤ 8) | 4 · 7 | 143 · 601 | **5 · 8** |
+| 8 · 20 tabs: refusals in 6 min · lone visitor: refusals, recovery (1, ≤ 62 s) | 10 · 112 · 2, 90 s | 89 · 1127 · 1, 59 s | **20 · 217 · 1, 59 s** |
+| **10 tabs: refusals, minutes 1-6 (target ≤ main): NOT MET** | 10,10,0,10,10,10 | 55,55,54,53,55,52 | **19,1,9,10,9,9** |
+**10 tabs:** minute 1 is "a first refusal follows the header" (all are told one reset); steeper later steps keep the 19. Over 7 start offsets, 20-min average 8.3-10.9 refusals a minute (main 5.7-8.0). Served in 6 min: 170 (main 140). The test pins both rows. At 8 and 20 tabs it is also about twice main.
+**Verify, round 2:** one run, `agent-verify.sh --codeql` on code `80c86ac3`, load 7.80, clean tree: **PASS** (12354 tests, 0 failed, 582 files; lint +0 err, +0 warn; tsc, build, v1-css, parity, rpc-budget; CodeQL 11 = 11, 0 new; keeper SKIP). This docs-only commit follows it.
+**Since `feb9948e`** (to `80c86ac3`): 4 files, +375 −11: `useQuote.ts` +23 −9, two test files (one new), this file. https://github.com/TeraHashAlpha/teraswap/compare/main...fix/quote-split-followups
+**NOT verified:** production (never called) · Vercel's `Date` header and real Upstash (`Date` seen only on local `next start`, in-memory limiter, installed Chromium 1248) · a skewed clock in a real browser · Firefox, Safari · v1/v2 browser run not repeated (the jsdom step 0 budget tests are in the suite) · real wallet or chain · Linux CI.
+
+**Further reads, round 2:** `src/lib/{fetch-json,kv}.ts`, `src/test-utils/fake-kv.ts`, `src/ui/v2/__tests__/quote-budget/budget.test.tsx`,
+`scripts/agent-verify.sh` (head), the A137 audit's probe (its session scratchpad) and `~/ts-worktrees/audit-137-r1.logs/{probes/*.json,mutants.*}`,
+my own memory notes. The probe ran as a temporary uncommitted file; temporary copies of main's and trial hooks gave the offsets figures.
