@@ -96,8 +96,6 @@ const claimsIn = (strings: readonly string[]) => strings.filter((s) => CLAIM_RE.
 // ── Is there a caller? ───────────────────────────────────────────────────────
 
 const VALIDATOR = 'src/lib/post-execution-validator.ts'
-/** The validator's only importer, and a route nothing calls: it is the thing a caller would call, not a caller. */
-const ROUTE = 'src/app/api/monitor/validate-execution/route.ts'
 const REFERENCE_RE = /post-execution-validator|monitor\/validate-execution|validate-execution\/route/
 const ROUTE_REFERENCE_RE = /monitor\/validate-execution|validate-execution\/route/
 
@@ -132,7 +130,7 @@ function validatorCallers(): string[] {
     ...walk('.github', CALLER_FILES),
     'vercel.json',
     'package.json',
-  ].filter((rel) => rel !== VALIDATOR && rel !== ROUTE && existsSync(join(ROOT, rel)) && callsValidator(readFileSync(join(ROOT, rel), 'utf8'), rel))
+  ].filter((rel) => rel !== VALIDATOR && existsSync(join(ROOT, rel)) && callsValidator(readFileSync(join(ROOT, rel), 'utf8'), rel))
 }
 
 const CALLERS = validatorCallers()
