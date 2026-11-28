@@ -46,3 +46,13 @@ Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/quote-spli
 `.github/workflows/e2e.yml`, `scripts/agent-verify.sh`, `docs/feedback/feat-ui-v2-mobile-parity.md` (one row).
 The browser rig reuses the goal 136 and A108 rig scripts (outside the repo), copied into the session scratchpad; it is not
 committed. The detached worktree `~/ts-worktrees/quote-followups-main-ref` served as the "before" build.
+
+## Round 2 (goal 137b: A109 S-1, S-2, S-3; the 429 wait only)
+- [ ] S-1 a tab that keeps being refused slows down · - [ ] S-2 the reset is read against the response's Date · - [ ] S-3 the two mutants die
+- [ ] Failing-first / mutant proof · - [ ] one verify run · - [ ] push
+
+**Owner answers (asked once, 2026-11-28, before any code; they supersede the goal text):** (1) "10 tabs: no more refusals a
+minute than main" cannot hold with the written rule: KEEP THE RULE, the 10-tab test pins the measured numbers and the
+target is reported NOT MET. (2) No usable reset keeps today's 30/60/120 s from the first such refusal. (3) The 120 s cap
+wins over "never earlier than the reset" (only a reset the 60 s limiter cannot send). (4) "Never early" covers the wait's
+own retry; tab return, manual refresh and wallet or source-filter refetches stay as on main.
