@@ -1,4 +1,4 @@
-Contact: mailto:teraswap@proton.me
+Contact: mailto:support_teraswap@proton.me
 Expires: 2027-11-27T00:00:00Z
 Preferred-Languages: en, pt
 Canonical: https://www.teraswap.app/.well-known/security.txt

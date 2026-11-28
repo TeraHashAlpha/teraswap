@@ -20,7 +20,7 @@
 
 ## Feedback
 ### Privacy page (not changed)
-- It gives `support_teraswap@proton.me` (`SUPPORT_EMAIL`, `src/lib/constants.ts:8`); security.txt gives `teraswap@proton.me`, as the goal says. The policy does not name the second mailbox, so reports mailed there arrive at an address it does not mention. If you want it covered, section 14 needs one sentence (v1 `LegalPage.tsx` and v2 `LegalPageV2.tsx`).
+- It gives `support_teraswap@proton.me` (`SUPPORT_EMAIL`, `src/lib/constants.ts:8`). security.txt gave a second mailbox until the 2026-11-28 follow-up, which now gives the same address, so the policy names every address reports can reach.
 
 ### Concern
 - `product-claims.ts:325` still lists "Post-execution output vs expected" as a verification check the site counts. Nothing runs it (nothing called the route before either). Left as is: nothing visible is removed here. Owner decision.

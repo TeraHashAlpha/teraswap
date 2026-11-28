@@ -22,7 +22,8 @@ describe('security.txt', () => {
   it('has exactly the four fields, once each', () => {
     expect(fields().map(([name]) => name)).toEqual(['Contact', 'Expires', 'Preferred-Languages', 'Canonical'])
     const value = Object.fromEntries(fields())
-    expect(value.Contact).toBe('mailto:teraswap@proton.me')
+    // CHANGED EXPECTATION (owner decision, 2026-11-28): THE CONTACT IS THE PRIVACY PAGE'S ADDRESS, support_teraswap@proton.me (SUPPORT_EMAIL).
+    expect(value.Contact).toBe('mailto:support_teraswap@proton.me')
     expect(value['Preferred-Languages']).toBe('en, pt')
     expect(value.Canonical).toBe('https://www.teraswap.app/.well-known/security.txt')
   })
