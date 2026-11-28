@@ -89,7 +89,7 @@ import { __resetChainIdentityCache } from '@/lib/rpc-chain-identity'
 import { trackLargeTrade, trackOracleDeviation, trackOracleUnavailable } from '@/lib/security-tracker'
 import { confirmSwap } from '@/lib/swap-log/confirm'
 import { _resetVerifiedColumnsCache } from '@/lib/swap-log/store'
-import { verifySwapOnChain } from '@/lib/swap-verify/verify-swap-on-chain'
+import { feeCollectorsOf, verifySwapOnChain } from '@/lib/swap-verify/verify-swap-on-chain'
 import { trackWalletAction } from '@/lib/wallet-activity-server'
 import { createFakeSwapsDb, type Row } from '@/test-utils/fake-swaps-db'
 import { fakeUpstash } from '@/test-utils/fake-upstash-kv'
@@ -304,6 +304,7 @@ describe('A104 R2-2: a third party cannot delete a victim\'s claim', () => {
     const code = await scriptMain({
       argv: ['--from-db', '--apply'], readStdin: async () => '', out: async (l) => void lines.push(l), err: (l) => void lines.push(`ERR ${l}`),
       verify: (input) => verifySwapOnChain(input), db: () => state.db.service as unknown as SwapsDb, describe: () => [], sleep: async () => {},
+      feeCollectorOf: (chain) => feeCollectorsOf(chain).current,
       confirmClaim: (db) => async (claim) => (await confirmSwap({ db: db as never, wallet: claim.wallet, txHash: claim.txHash, chainId: claim.chainId }, { trackers: false })).result,
     })
     expect(code).toBe(0)

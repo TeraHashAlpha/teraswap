@@ -17,6 +17,17 @@
  * A row it would mark is printed with `callerColumns`: the stored columns that came from the caller and become public
  * with the flag on (goal 133b details L), so the owner decides before the flag goes on (S-7 of A103 stays open).
  *
+ * Duplicates (goal 139). One transaction counts once per wallet (the unique index on chain, lower(tx_hash),
+ * lower(wallet) of verified rows). Of the rows sharing that key, only the oldest (created_at) that would be marked is
+ * `mark`; a later one that would be is `duplicate`, with `keptId`, and is never written. A row already verified is the
+ * kept one whatever its age. A row that does not qualify keeps its own decision (owner's answer of 2026-11-27). Rows
+ * are checked and printed oldest first. Only the rows of this run are compared: past --limit the index still answers
+ * (`duplicate_tx`).
+ *
+ * A blind run is refused (goal 139): without a chain's FeeCollector address every FeeCollector swap there reads as
+ * `wrong_target`. A chain with rows to check and none configured gets one line naming the variable, exit 1, and no row
+ * is reported; --allow-missing-fee-collector runs anyway, and the summary then says how many rows that affects.
+ *
  * Claims (ADR-029 7.3, details L). A pending row with a `claimed_tx_hash` holds a hash a confirmation named while the
  * chain could not answer yet. Report mode asks the chain (the claimed chain, else every chain of the app) and prints
  * what a confirmation would do: `claim_verifiable`, `claim_not_found` or `claim_rejected`. Apply mode runs THE SAME
@@ -51,6 +62,8 @@ export const STORED_COLUMNS_BEFORE_MIGRATION = `${BASE_COLUMNS}, ${CALLER_EXTRA}
 export type Decision =
   /** Verified and consistent with what the row stores: apply mode marks it. */
   | 'mark'
+  /** It would be marked, but another row of the same chain, transaction and wallet is the one kept (`keptId`). */
+  | 'duplicate'
   | 'already_verified'
   /** The row has no transaction hash: there is nothing to look up. */
   | 'no_tx_hash'
@@ -99,6 +112,8 @@ export interface RowReport {
   outRatio?: string
   /** A row it would mark: the stored caller-supplied columns that become public (CALLER_COLUMNS), as stored. */
   callerColumns?: Record<string, unknown>
+  /** A `duplicate`: the id of the row kept for this chain, transaction and wallet. */
+  keptId?: string | null
   /** A claim row: the claimed chain (null: none named) and the chain the claim was found on. */
   claim?: { claimedChain: number | null; foundOn: number | null }
   /** Apply mode only: what the write did. */
@@ -114,6 +129,8 @@ export interface Summary {
   byReason: Record<string, number>
   byChain: Record<string, Record<string, number>>
   applied: Record<string, number>
+  /** Only with --allow-missing-fee-collector: per chain with no FeeCollector configured, the rows checked there. */
+  missingFeeCollector?: Record<string, number>
 }
 
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/
@@ -242,6 +259,50 @@ async function applyClaim(raw: Record<string, unknown>, claim: NonNullable<Retur
   return { ...base, decision: 'claim_not_found', applied: 'error' }
 }
 
+/** The unique index's key: chain, lower(tx_hash), lower(wallet). null when the row lacks one of the three. */
+function transactionKey(raw: unknown): string | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const row = raw as Record<string, unknown>
+  const chain = chainOf(row.chain_id)
+  const txHash = text(row.tx_hash)
+  const wallet = text(row.wallet)
+  return chain === null || !txHash || !wallet ? null : `${chain} ${txHash.toLowerCase()} ${wallet.toLowerCase()}`
+}
+
+/** created_at in milliseconds; a row without a readable one sorts last. */
+function createdAt(raw: unknown): number {
+  const ms = Date.parse(text((raw as { created_at?: unknown } | null)?.created_at) ?? '')
+  return Number.isNaN(ms) ? Number.MAX_SAFE_INTEGER : ms
+}
+
+/**
+ * The environment NAME each chain's FeeCollector address is read from (src/lib/constants.ts, chains/registry.ts).
+ * Chain 1 has a built-in address, so its name is never printed today.
+ */
+export const FEE_COLLECTOR_ENV: Readonly<Record<number, string>> = {
+  1: 'NEXT_PUBLIC_FEE_COLLECTOR',
+  8453: 'NEXT_PUBLIC_BASE_FEE_COLLECTOR',
+  42161: 'NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR',
+}
+
+/**
+ * Per chain of the app, how many rows this run would ask that chain about. It is checkRow itself, run against a chain
+ * that answers nothing, so it cannot drift from what the run asks. No chain is read.
+ */
+async function rowsPerChain(rows: readonly unknown[]): Promise<Map<number, number>> {
+  const count = new Map<number, number>()
+  for (const raw of rows) {
+    const asked = new Set<number>()
+    await checkRow(raw, async ({ chainId }) => {
+      asked.add(chainId)
+      return { outcome: 'not_found', reason: 'tx_missing' }
+    })
+    // A row may name a chain the app does not have: it has no FeeCollector variable, so there is nothing to configure.
+    for (const chain of asked) if (chain in FEE_COLLECTOR_ENV) count.set(chain, (count.get(chain) ?? 0) + 1)
+  }
+  return count
+}
+
 export interface RunOptions {
   rows: readonly unknown[]
   verify: Verify
@@ -253,6 +314,8 @@ export interface RunOptions {
   /** Pause between rows that read the chain, so a public endpoint is not flooded. */
   pause?: () => Promise<void>
   now?: () => Date
+  /** --allow-missing-fee-collector: copied into the summary. */
+  missingFeeCollector?: Record<string, number>
 }
 
 export async function run(options: RunOptions): Promise<Summary> {
@@ -261,12 +324,31 @@ export async function run(options: RunOptions): Promise<Summary> {
     bucket[key] = (bucket[key] ?? 0) + 1
   }
 
+  if (options.missingFeeCollector) summary.missingFeeCollector = options.missingFeeCollector
+
+  // The row kept per (chain, transaction, wallet): a verified one first, else the oldest the loop decides to mark.
+  const kept = new Map<string, string | null>()
   for (const raw of options.rows) {
+    const key = transactionKey(raw)
+    const verifiedAt = (raw as { verified_at?: unknown } | null)?.verified_at
+    if (key !== null && verifiedAt !== null && verifiedAt !== undefined) kept.set(key, text((raw as { id?: unknown }).id))
+  }
+
+  // Oldest first (stable: rows of one age keep their order).
+  for (const raw of [...options.rows].sort((a, b) => createdAt(a) - createdAt(b))) {
     const claim = options.confirmClaim ? claimOf(raw) : null
     const report = claim !== null && options.confirmClaim
       ? await applyClaim(raw as Record<string, unknown>, claim, options.confirmClaim)
       : await checkRow(raw, options.verify)
     if (report.applied !== undefined) bump(summary.applied, report.applied)
+    const key = report.decision === 'mark' ? transactionKey(raw) : null
+    if (key !== null && kept.has(key)) {
+      report.decision = 'duplicate'
+      report.keptId = kept.get(key)
+      delete report.callerColumns
+    } else if (key !== null) {
+      kept.set(key, report.id)
+    }
     if (report.decision === 'mark' && options.mark && report.id !== null && report.kind) {
       report.applied = await options.mark(report.id, report.kind, (options.now ?? (() => new Date()))().toISOString())
       bump(summary.applied, report.applied)
@@ -311,6 +393,7 @@ export interface Args {
   delayMs: number
   limit: number | null
   help: boolean
+  allowMissingFeeCollector: boolean
 }
 
 export const USAGE = [
@@ -321,30 +404,36 @@ export const USAGE = [
   '  npx --yes tsx --tsconfig tsconfig.json scripts/swaps/verify-stored-swaps.ts --from-db --apply',
   '',
   'Report mode (default) writes nothing. stdin: a JSON array of swaps rows (id, wallet, chain_id, source, tx_hash,',
-  'status, token_in, token_out, amount_in, amount_out, verified_at, claimed_tx_hash, claimed_chain_id, and the caller',
-  'columns listed per "mark" row), { "rows": [...] }, or one object per line.',
+  'status, token_in, token_out, amount_in, amount_out, created_at, verified_at, claimed_tx_hash, claimed_chain_id, and',
+  'the caller columns listed per "mark" row), { "rows": [...] }, or one object per line.',
   'A row it would mark lists `callerColumns`: what the caller stored that becomes public with the flag on.',
   'A row holding a claim (a hash the chain could not answer yet) is checked on the claimed chain, else every chain.',
+  'Rows are checked oldest first. Of rows with one chain, transaction and wallet, only the oldest that would be marked',
+  '(or the one already verified) is kept; a later one is "duplicate" with "keptId", and --apply never writes it.',
   '',
   '  --from-db       read the rows from the database (env SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)',
   '  --apply         set verified_at and verified_kind on the rows whose decision is "mark" (needs the database), and',
   '                  decide each claim as the route does: its verified row is made and the claim cleared',
   '  --delay-ms <n>  pause between rows that read the chain (default 200)',
   '  --limit <n>     check at most n rows',
+  '  --allow-missing-fee-collector',
+  '                  run although a chain with rows to check has no FeeCollector configured',
   '  --help',
   '',
   'Chain reads use RPC_URL_1, RPC_URL_8453, RPC_URL_42161 (else a public endpoint). The Base and Arbitrum FeeCollector',
-  'addresses come from NEXT_PUBLIC_BASE_FEE_COLLECTOR and NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR, as in the app: without',
-  'them a FeeCollector swap on that chain is reported as rejected (wrong_target).',
+  'addresses come from NEXT_PUBLIC_BASE_FEE_COLLECTOR and NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR, as in the app. A chain',
+  'with rows to check and no address stops the run: one line per chain naming the variable, exit 1, no row reported.',
+  'With --allow-missing-fee-collector a FeeCollector swap on that chain is reported as rejected (wrong_target).',
   'stdout: one JSON line per row, then one summary line. Exit: 0 the run completed, 1 it could not, 2 bad arguments.',
 ].join('\n')
 
 export function parseArgs(argv: readonly string[]): Args | { error: string } {
-  const args: Args = { apply: false, fromDb: false, delayMs: 200, limit: null, help: false }
+  const args: Args = { apply: false, fromDb: false, delayMs: 200, limit: null, help: false, allowMissingFeeCollector: false }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--apply') args.apply = true
     else if (a === '--from-db') args.fromDb = true
+    else if (a === '--allow-missing-fee-collector') args.allowMissingFeeCollector = true
     else if (a === '--help' || a === '-h') args.help = true
     else if (a === '--delay-ms' || a === '--limit') {
       const value = argv[++i]
@@ -429,6 +518,8 @@ export interface MainDeps {
   out: (line: string) => Promise<void>
   err: (line: string) => void
   verify: Verify
+  /** The FeeCollector the check would use on that chain (feeCollectorsOf), or null when none is configured. */
+  feeCollectorOf: (chain: number) => string | null
   /** The service-role client, or null when the two environment names are not both set. */
   db: () => SwapsDb | null
   /** Lines that say how the chain will be read: environment NAMES and public addresses only. */
@@ -464,6 +555,15 @@ export async function main(deps: MainDeps): Promise<number> {
       if (args.limit !== null) rows = rows.slice(0, args.limit)
     }
 
+    // Before the first line of output: a refused run prints its reason and nothing else.
+    const missing = [...(await rowsPerChain(rows))].filter(([chain]) => deps.feeCollectorOf(chain) === null).sort(([a], [b]) => a - b)
+    if (missing.length > 0 && !args.allowMissingFeeCollector) {
+      for (const [chain, count] of missing) {
+        deps.err(`verify-stored-swaps: fee_collector_missing chain=${chain} rows=${count}: set ${FEE_COLLECTOR_ENV[chain]}, or pass --allow-missing-fee-collector. No row was checked.`)
+      }
+      return 1
+    }
+
     await deps.out(JSON.stringify({ info: 'mode', mode: args.apply ? 'apply' : 'report', rows: rows.length, input: args.fromDb ? 'database' : 'stdin' }))
     for (const line of deps.describe()) await deps.out(JSON.stringify(line))
 
@@ -475,6 +575,7 @@ export async function main(deps: MainDeps): Promise<number> {
       confirmClaim: args.apply && deps.confirmClaim ? deps.confirmClaim(db as SwapsDb) : undefined,
       pause: args.delayMs > 0 ? () => deps.sleep(args.delayMs) : undefined,
       now: deps.now,
+      missingFeeCollector: missing.length > 0 ? Object.fromEntries(missing) : undefined,
     })
     return 0
   } catch (error) {

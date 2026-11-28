@@ -24,7 +24,7 @@ Any ONE of these warrants immediate investigation:
 | Signal | Source | Confidence |
 |--------|--------|------------|
 | Unexpected `OrderExecuted` events (unknown orderHash or unusual routing) | P47 on-chain monitor, Telegram alerts | High |
-| Post-execution validation failures (critical severity) | P45 `/api/monitor/validate-execution` | High |
+| ~~Post-execution validation failures~~ (no signal: `/api/monitor/validate-execution` is closed: every method answers 404, and nothing called it) | None | Not available |
 | Executor TX to unknown addresses (not the contract) | Etherscan, manual check | High |
 | Executor ETH balance draining (gas theft) | Etherscan, balance alerts | Medium |
 | External report (bug bounty, community, security researcher) | Email, Discord, Immunefi | Varies |
@@ -149,6 +149,8 @@ For each execution, verify on Etherscan:
 
 ### 3d. Check P45 validation results
 
+> **Not available.** `/api/monitor/validate-execution` is closed: every method answers 404, and nothing called it, so no new validation records are written. Skip this step and verify outputs on-chain (3c).
+
 ```bash
 # Check KV for recent validation failures
 # (Requires admin KV access or Upstash dashboard)
@@ -266,8 +268,7 @@ cast send 0xeFC31ADb5d10c51Ac4383bB770E2fdC65780f130 \
 Create a small test order ($10 equivalent) and verify:
 - Executor picks it up within the polling interval
 - Order executes successfully
-- Output goes to the correct wallet
-- P45 post-execution validation returns `severity: "ok"`
+- Output goes to the correct wallet, with at least the order's minimum amount (check the receipt on-chain; P45 is not available: `/api/monitor/validate-execution` is closed: every method answers 404, and nothing called it)
 
 ### 5d. Re-enable the source
 
@@ -278,7 +279,7 @@ The kill-switch P0 designation blocks auto-recovery. Manual re-activation is req
 ### 5e. Rotate shared secrets
 
 Update these in Vercel environment variables:
-- `EXECUTOR_VALIDATION_SECRET` — used by P45 post-execution validation
+- `EXECUTOR_VALIDATION_SECRET` — no longer read by any route (`/api/monitor/validate-execution` is closed: every method answers 404, and nothing called it); nothing to rotate
 - Any shared secrets between the executor and the API
 
 ### 5f. Publish post-mortem
@@ -337,7 +338,7 @@ If assessment (Section 3) concludes no compromise:
 
 **Scenarios to rotate:**
 1. P47 on-chain monitor detects unexpected `ExecutorChangeProposed` event
-2. P45 validation returns `critical` on 3 consecutive orders from one source
+2. Three consecutive orders from one source deliver less than their minimum output (found on-chain)
 3. External researcher reports executor address sending ETH to unknown wallet
 4. Executor process logs show authentication failures from unknown IP
 
