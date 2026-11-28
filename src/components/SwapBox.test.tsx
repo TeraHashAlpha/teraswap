@@ -911,3 +911,26 @@ describe('SwapBox: rate-limit wait', () => {
     expect(container.textContent).toContain('Rate limit exceeded. Try again in a minute. Retrying in 28s.')
   })
 })
+
+// [fix/quote-split-followups] fmtPct already ends in "%"; the Share button added a second one ("saved 1.01%%").
+describe('SwapBox: Share button label', () => {
+  it('shows the saved percentage with one percent sign', async () => {
+    const quote = (source: string, toAmount: string) => ({ source, toAmount, estimatedGas: 200_000, gasUsd: 10, routes: [] })
+    useSwapMock.mockReturnValue({
+      status: 'success', txHash: `0x${'ab'.repeat(32)}`, errorMessage: null, cowOrderUid: null,
+      priceGuardBlocked: false, priceGuardDeviation: 0, simulationPassed: true,
+      pendingSwap: null, mevSurplusActualWei: null,
+      execute: vi.fn(), confirmSwap: vi.fn(), reset: vi.fn(),
+    })
+    useQuoteMock.mockReturnValue({
+      meta: { best: quote('1inch', '3030000000'), all: [quote('1inch', '3030000000'), quote('0x', '3000000000')], fetchedAt: Date.now(), identity: testIdentity() },
+      loading: false, error: null, countdown: 10, refetch: vi.fn(), refresh: vi.fn(),
+    })
+    const { container } = renderWithProviders(<SwapBox />)
+    const input = container.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '1' } })
+    })
+    expect(screen.getByRole('button', { name: /^Share: saved/ }).textContent).toBe('Share: saved 1%')
+  })
+})

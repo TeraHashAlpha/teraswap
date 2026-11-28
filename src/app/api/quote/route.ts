@@ -242,18 +242,22 @@ async function handleQuoteGet(req: NextRequest): Promise<NextResponse> {
     const excludeSources = excludeParam ? excludeParam.split(',').map(s => s.trim()) : undefined
     const chainId = chainIdParam ? Number(chainIdParam) : undefined
 
+    // [T2] Shared KV cache + single-flight dampener — see meta-quote-cache.ts.
+    // [fix/quote-split-followups, A108 S-1] Started FIRST: the screen's own quote never waits for the split charge.
+    const quoted = getMetaQuoteCached(
+      { src, dst, amount, srcDecimals, dstDecimals, excludeSources, chainId },
+      () => fetchMetaQuote(src, dst, amount, srcDecimals, dstDecimals, excludeSources, chainId),
+    )
+    // The Promise.all below handles a failure. This only keeps one that lands during the charge from counting as unhandled.
+    quoted.catch(() => {})
+
     // [fix/quote-rate-limit-normal-use] `split=1`: also price the split analysis' sub-amounts, in this one request.
-    // They passed the same gates above, and each is charged (1 unit on quote-split:) BEFORE any fan-out runs.
+    // They passed the same gates above, and each is charged (1 unit on quote-split:) BEFORE any sub-amount fans out.
     const subAmounts = searchParams.get('split') === '1' ? splitSubAmountsOf(amount) : null
     const splitCharge = subAmounts && subAmounts.length > 0
       ? await checkRateLimitWithin(`quote-split:${ip}`, QUOTE_SPLIT_RATE_LIMIT.limit, QUOTE_SPLIT_RATE_LIMIT.windowMs, subAmounts.length)
       : null
 
-    // [T2] Shared KV cache + single-flight dampener — see meta-quote-cache.ts.
-    const quoted = getMetaQuoteCached(
-      { src, dst, amount, srcDecimals, dstDecimals, excludeSources, chainId },
-      () => fetchMetaQuote(src, dst, amount, srcDecimals, dstDecimals, excludeSources, chainId),
-    )
     const [{ result, cacheHeader }, split] = await Promise.all([
       quoted,
       !subAmounts

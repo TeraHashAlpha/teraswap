@@ -29,10 +29,16 @@ import type { SplitBatch } from '@/lib/split-routing-types'
  */
 class QuoteApiError extends Error {
   status: number
-  constructor(message: string, status: number) {
+  /** The response's X-RateLimit-Reset (epoch ms, as sent), when it had one. */
+  rateLimitReset: string | null
+  /** The response's Date (the server's clock, whole seconds), when it had one. */
+  date: string | null
+  constructor(message: string, status: number, rateLimitReset: string | null = null, date: string | null = null) {
     super(message)
     this.name = 'QuoteApiError'
     this.status = status
+    this.rateLimitReset = rateLimitReset
+    this.date = date
   }
 }
 
@@ -41,6 +47,27 @@ const QUOTE_ECHO_KEYS = ['tokenIn', 'tokenOut', 'chainId', 'decimalsIn', 'decima
 
 /** [hotfix] Backoff ceiling on consecutive 429s. */
 const MAX_BACKOFF_MS = 120_000
+
+/** [fix/quote-split-followups] Added to the server's reset time, so the retry lands after the window has freed. */
+const RESET_MARGIN_MS = 1_000
+/** A reset further ahead than this is not one of ours (the limiter's window is 60 s). */
+const MAX_RESET_AHEAD_MS = 3_600_000
+
+/**
+ * [fix/quote-split-followups] The wait a 429's X-RateLimit-Reset asks for, capped at MAX_BACKOFF_MS. Null — the caller
+ * then doubles, as before — when the header is missing or absurd: not a whole number, more than an hour ahead, or past
+ * by RESET_MARGIN_MS or more. A reset that passed more recently than that freed while the answer was on its way.
+ * [A109 S-2] The reset is the server's time, so it is read against the response's own `date`, never against this
+ * device's clock (`now`) unless Date is missing or unparseable. Date drops the milliseconds, so the wait it gives is
+ * up to 1 s longer than asked, never shorter.
+ */
+function waitFromReset(header: string | null, date: string | null, now: number): number | null {
+  if (!header || !/^\d+$/.test(header)) return null
+  const sentOn = Date.parse(date ?? '')
+  const ahead = Number(header) - (Number.isNaN(sentOn) ? now : sentOn)
+  if (!(ahead > -RESET_MARGIN_MS && ahead <= MAX_RESET_AHEAD_MS)) return null
+  return Math.min(MAX_BACKOFF_MS, Math.max(0, ahead) + RESET_MARGIN_MS)
+}
 
 /**
  * Fetch meta-quotes via the server-side API route.
@@ -94,6 +121,8 @@ async function fetchQuoteViaApi(
     throw new QuoteApiError(
       data.error || `Quote API error ${res.status}`,
       res.status,
+      res.headers.get('x-ratelimit-reset'),
+      res.headers.get('date'),
     )
   }
 
@@ -179,15 +208,21 @@ export function useQuote(
   // change and prevents a late resolve from painting old-pair data.
   const abortControllerRef = useRef<AbortController | null>(null)
 
-  // [hotfix] Exponential backoff state for rate-limit responses.
-  // `currentIntervalMsRef` holds the effective poll interval: starts at
-  // QUOTE_REFRESH_MS (15s), doubles to 30s/60s/120s on consecutive 429s,
-  // and snaps back to the normal cadence on the first successful fetch.
+  // [hotfix] Backoff state for rate-limit responses.
+  // `currentIntervalMsRef` holds the effective poll interval: QUOTE_REFRESH_MS
+  // (15s) normally; after a 429, the wait the response's X-RateLimit-Reset
+  // gives [fix/quote-split-followups], from the second refusal in a row no less
+  // than the backoff step [A109 S-1]; with no usable header, the doubling below.
+  // It snaps back to the normal cadence on the first successful fetch.
   // `inBackoffRef` gates the `setError(null)` reset at the top of every
   // doFetch — without it the error toggles null → "Rate limit…" → null
   // → "Rate limit…" every poll and floods the toast layer.
   const currentIntervalMsRef = useRef(QUOTE_REFRESH_MS)
   const inBackoffRef = useRef(false)
+  /** 30s/60s/120s over consecutive 429s: the wait when the server names none. Kept apart from the waits it does name. */
+  const doublingMsRef = useRef(QUOTE_REFRESH_MS)
+  /** When the request now on the wire was sent; null when it has been answered. */
+  const sentAtRef = useRef<number | null>(null)
 
   const debouncedAmount = useDebounce(amountIn, INPUT_DEBOUNCE_MS)
   // [fix/stale-quote-pair-flip] Latest raw (undebounced) amount, for the pending-debounce check in doFetch.
@@ -255,6 +290,15 @@ export function useQuote(
     [storedMeta, currentPair],
   )
 
+  // [fix/quote-split-followups] What the poll timer runs. A wait the server names can be a second or two, shorter than
+  // a slow answer: while backing off, the timer never supersedes a request younger than one normal poll interval (it
+  // would abort every retry before it could answer). Outside a backoff it fetches on every tick, as before.
+  const onPollTimer = useCallback(() => {
+    const sentAt = sentAtRef.current
+    if (inBackoffRef.current && sentAt !== null && Date.now() - sentAt < QUOTE_REFRESH_MS) return
+    doFetchRef.current?.()
+  }, [])
+
   // [hotfix] Tear down + rebuild the poll timer with the current
   // backoff interval. Called when entering or leaving backoff. Reads
   // from doFetchRef so the timer always uses the latest closure even
@@ -273,11 +317,8 @@ export function useQuote(
     }
     setCountdown(Math.ceil(currentIntervalMsRef.current / 1000))
     if (typeof document !== 'undefined' && document.hidden) return
-    intervalRef.current = setInterval(
-      () => doFetchRef.current?.(),
-      currentIntervalMsRef.current,
-    )
-  }, [])
+    intervalRef.current = setInterval(onPollTimer, currentIntervalMsRef.current)
+  }, [onPollTimer])
 
   const doFetch = useCallback(async () => {
     // [fix/stale-quote-pair-flip] A debounce is pending (the typed amount hasn't settled): the
@@ -319,6 +360,7 @@ export function useQuote(
     }
 
     const startTime = Date.now()
+    sentAtRef.current = startTime
     let requestKey: QuoteKey | null = null
     try {
       const rawAmount = parseUnits(debouncedAmount, tokenIn.decimals).toString()
@@ -405,18 +447,27 @@ export function useQuote(
       // that was superseded, or for a selection that is no longer on screen, must not start a backoff or paint an error.
       if (signal.aborted) return
       if (requestKey && (!currentKeyRef.current || !sameQuoteKey(requestKey, currentKeyRef.current))) return
-      // [hotfix] Treat HTTP 429 distinctly: enter (or extend) backoff
-      // up to MAX_BACKOFF_MS, double the polling interval, and rearm
-      // the timer. Other errors keep the normal cadence — backoff is
-      // reserved for explicit rate limits.
-      const isRateLimit = err instanceof QuoteApiError && err.status === 429
-      if (isRateLimit) {
+      // [hotfix] Treat HTTP 429 distinctly: enter (or extend) backoff,
+      // wait as long as the server says (never under the step below) — or
+      // double, up to MAX_BACKOFF_MS, when it does not — and rearm the timer. Other
+      // errors keep the normal cadence — backoff is reserved for
+      // explicit rate limits.
+      const rateLimit = err instanceof QuoteApiError && err.status === 429 ? err : null
+      const isRateLimit = rateLimit !== null
+      if (rateLimit) {
         const wasInBackoff = inBackoffRef.current
         inBackoffRef.current = true
-        currentIntervalMsRef.current = Math.min(
+        // [A109 S-1] The reset says when ONE slot frees, not when this tab is served: on a crowded address the others
+        // take it, so a tab refused again must slow down whatever the header says. The step under this refusal is none
+        // for the first in a row (a lone visitor recovers at the header's time), then 30, 60, 120 s: the doubling as
+        // it stood after the refusal before this one.
+        const stepMs = wasInBackoff ? doublingMsRef.current : 0
+        doublingMsRef.current = Math.min(
           MAX_BACKOFF_MS,
-          wasInBackoff ? currentIntervalMsRef.current * 2 : QUOTE_REFRESH_MS * 2,
+          wasInBackoff ? doublingMsRef.current * 2 : QUOTE_REFRESH_MS * 2,
         )
+        const askedMs = waitFromReset(rateLimit.rateLimitReset, rateLimit.date, Date.now())
+        currentIntervalMsRef.current = askedMs === null ? doublingMsRef.current : Math.max(askedMs, stepMs)
         rearmPollTimer()
       } else if (inBackoffRef.current) {
         // Non-429 error during a prior backoff — clear the backoff
@@ -434,6 +485,7 @@ export function useQuote(
       // this request was superseded (signal aborted), the newer one owns the
       // loading flag — clearing it here would flip the spinner off mid-fetch.
       if (!signal.aborted) {
+        sentAtRef.current = null
         setLoading(false)
       }
     }
@@ -529,7 +581,7 @@ export function useQuote(
     const startTimers = () => {
       stopTimers()
       doFetchRef.current?.()
-      intervalRef.current = setInterval(() => doFetchRef.current?.(), currentIntervalMsRef.current)
+      intervalRef.current = setInterval(onPollTimer, currentIntervalMsRef.current)
       countdownRef.current = setInterval(() => {
         // [hotfix] Read the live interval so the countdown reflects the
         // current backoff window (rolling over to 120s when rate-limited).
@@ -579,7 +631,7 @@ export function useQuote(
         abortControllerRef.current.abort()
       }
     }
-  }, [doFetch, enabled, selection])
+  }, [doFetch, enabled, selection, onPollTimer])
 
   // Manual refresh: invoke the latest doFetch via the ref (matches the
   // timer's call site), and reset the countdown so the next visible tick

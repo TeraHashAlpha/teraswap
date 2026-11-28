@@ -35,7 +35,7 @@ export function SplitRoutePanel({ splitResult, tokenOut, useSplit, onToggle, ana
           <span className="inline-flex items-center gap-2">
             Split Route
             {analyzing && <span aria-hidden="true" className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-v2-muted" />}
-            {splitRecommended && !analyzing && <span className="font-v2-mono text-[10px] font-bold text-v2-green">+{improvementPercent}%</span>}
+            {splitRecommended && !analyzing && <span className="font-v2-mono text-[10px] font-bold text-v2-green">+{improvementPercent}</span>}
           </span>
         }
       />

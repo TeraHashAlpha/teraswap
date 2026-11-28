@@ -10,8 +10,8 @@
  * [S-1, A75b] Extended from Recent swaps to the rest of the page chrome — header, footer, the Help / Music fabs, the open Help
  * drawer, and the Share button's label + tweet text — each v1 surface rendered against its v2 counterpart (v1 text, link targets
  * and accessible names ⊆ v2, 0 missing). Wagmi / RainbowKit / next are mocked at the module edge; both trees are the REAL
- * components. Share runs the whole SwapBox mock rig (the one place the rig is needed). The one ruled Share difference: v1 prints
- * `saved 0.27%%` (fmtPct already ends in %, the template adds another - a v1 typo); v2 keeps one % (content-map "Share label %").
+ * components. Share runs the whole SwapBox mock rig (the one place the rig is needed). The one Share difference A75b ruled on
+ * (v1's `saved 0.27%%`, content-map "Share label %") is gone: v1 prints one % since fix/quote-split-followups.
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -295,19 +295,19 @@ function share(tree: 'v1' | 'v2', meta: unknown) {
 }
 
 describe('sweep · Swap · Share (v1 SwapBox.tsx button + tweet text)', () => {
-  const PERCENT_TYPO: AllowedRemoval[] = [{ text: '%%', reason: 'v1 typo: fmtPct() already ends in %, the label template adds another; v2 keeps ONE % (content-map: "Share label %")' }]
-
-  it('a comparison across sources with a saving: label and tweet text are v1\'s, bar the doubled %', () => {
+  // CHANGED EXPECTATION [fix/quote-split-followups]: v1's DOUBLED PERCENT SIGN IS FIXED. v1's LABEL MUST NOW SHOW ONE "%"
+  // AND EQUAL v2's, AND THE "%%" ALLOW-LIST ENTRY IS GONE (nothing is allowed to be missing).
+  it('a comparison across sources with a saving: label and tweet text are v1\'s', () => {
     const v1 = share('v1', taggedFixture(fixtureMeta(), '1'))
     const v2 = share('v2', taggedFixture(fixtureMeta(), '1'))
-    expect(v1.label).toMatch(/^Share: saved \d[\d.,]*%%$/) // the v1 typo is real today; if v1 fixes it, the allow-list entry goes stale and fails
-    expect(v2.label).toMatch(/^Share: saved \d[\d.,]*%$/)
+    expect(v1.label).toMatch(/^Share: saved \d[\d.,]*%$/)
+    expect(v2.label).toBe(v1.label)
     const page = (x: { label: string | null; text: string | null }) => {
       const d = document.createElement('div')
       for (const t of [x.label, x.text]) d.appendChild(document.createElement('p')).textContent = t
       return d
     }
-    const r = compareContent(page(v1), page(v2), PERCENT_TYPO)
+    const r = compareContent(page(v1), page(v2), [])
     expect(r.v1Nodes).toBe(2)
     expect(r.missingText).toEqual([])
     expect(r.staleAllow).toEqual([])

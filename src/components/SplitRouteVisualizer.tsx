@@ -90,7 +90,7 @@ export default function SplitRouteVisualizer({
           )}
           {splitRecommended && !analyzing && (
             <span className="rounded-full bg-success/15 px-2 py-0.5 text-[10px] font-bold text-success">
-              +{improvementPercent}%
+              +{improvementPercent}
             </span>
           )}
         </div>

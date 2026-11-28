@@ -142,6 +142,72 @@ describe('GET /api/quote?split=1', () => {
     fetchMetaQuote.mockImplementation(async (_s: string, _d: string, amount: string) => ({ best: quoteFor(amount), all: [quoteFor(amount)], fetchedAt: Date.now() }))
   })
 
+  /** Holds the `quote-split:` charge open until released. Fake clock: the limiter's own 1 s deadline never fires. */
+  async function heldSplitCharge() {
+    await import('./route')
+    const { kv } = await import('@/lib/kv')
+    const real = kv.pipeline.bind(kv)
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const spy = vi.spyOn(kv, 'pipeline').mockImplementation(() => {
+      const p = real() as unknown as { zremrangebyscore: (key: string, min: number, max: number) => unknown; exec: () => Promise<unknown[]> }
+      const { zremrangebyscore, exec } = p
+      let isSplitCharge = false
+      p.zremrangebyscore = (key, min, max) => {
+        isSplitCharge ||= key.startsWith('ratelimit:quote-split:')
+        return zremrangebyscore(key, min, max)
+      }
+      p.exec = async () => {
+        if (isSplitCharge) await gate
+        return exec()
+      }
+      return p as unknown as ReturnType<typeof real>
+    })
+    vi.useFakeTimers()
+    return { release, restore: () => spy.mockRestore() }
+  }
+  const amountsFannedOut = () => fetchMetaQuote.mock.calls.map((c) => c[2])
+
+  it('starts the main quote lookup before it awaits the split charge; no sub-amount fans out before the charge answers', async () => {
+    const charge = await heldSplitCharge()
+    try {
+      const answer = GET(req())
+      await vi.advanceTimersByTimeAsync(10)
+      expect(amountsFannedOut()).toEqual([TOTAL])
+      charge.release()
+      await vi.advanceTimersByTimeAsync(10)
+      const { res, body } = await answer
+      expect(res.status).toBe(200)
+      expect(body.split.status).toBe('ok')
+      expect(fetchMetaQuote).toHaveBeenCalledTimes(12)
+      expect(h.fake!.units('quote-split')).toBe(11)
+    } finally {
+      charge.restore()
+    }
+  })
+
+  it('a main quote that fails while the split charge is pending: the answer still waits for the charge, which is made', async () => {
+    fetchMetaQuote.mockImplementation(async (_s: string, _d: string, amount: string) => {
+      if (amount === TOTAL) throw new Error('No valid quotes.')
+      return { best: quoteFor(amount), all: [quoteFor(amount)], fetchedAt: Date.now() }
+    })
+    const charge = await heldSplitCharge()
+    try {
+      let answered = false
+      const answer = GET(req()).then((r) => { answered = true; return r })
+      await vi.advanceTimersByTimeAsync(10)
+      expect(amountsFannedOut()).toEqual([TOTAL]) // the lookup has already run, and failed
+      expect(answered).toBe(false)
+      charge.release()
+      await vi.advanceTimersByTimeAsync(10)
+      expect((await answer).res.status).toBe(502)
+      expect(h.fake!.units('quote-split')).toBe(11)
+    } finally {
+      charge.restore()
+      fetchMetaQuote.mockImplementation(async (_s: string, _d: string, amount: string) => ({ best: quoteFor(amount), all: [quoteFor(amount)], fetchedAt: Date.now() }))
+    }
+  })
+
   it('without split=1 the response has no split field and nothing is charged to quote-split:; with it, only that field is added', async () => {
     const plain = (await GET(req(TOTAL, ''))).body
     expect(plain.split).toBeUndefined()

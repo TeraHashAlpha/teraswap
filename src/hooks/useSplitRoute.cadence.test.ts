@@ -4,8 +4,9 @@
  *
  * Before: one run on EVERY new quote (each 15 s poll, and in v1 every keystroke while the old quote was on screen), 11
  * requests a run. One idle tab at $10,000 hit the 30/min limit after 31 s.
- * Now: one request per analysis; it runs when the pair or the SETTLED amount has held 1.5 s; its refresh rides on the
- * quote poll — every poll while a split is the selected route, at most once a minute while none is.
+ * Now: one request per analysis; it runs when the pair or the SETTLED amount has held 1.5 s. While a split is the
+ * selected route its refresh rides on every quote poll; while none is, it is a request of its own, at most once a minute
+ * [fix/quote-split-followups, A108 S-1: a poll that carried it waited for the slowest of 12 fan-outs].
  *
  * The REAL split router runs here. Only the network is stubbed.
  */
@@ -86,6 +87,8 @@ async function todaysSplit(seed: number, amount: string) {
 /** A seed whose analysis recommends a split (so the hook selects it), and one whose analysis does not. */
 let RECOMMENDED = 0
 let NOT_RECOMMENDED = 0
+/** A seed whose analysis recommends a split at 4 ETH. */
+let RECOMMENDED_AT_4 = 0
 
 let requests: URL[] = []
 let serveSeed = 1
@@ -98,6 +101,10 @@ beforeEach(async () => {
       if (route.isSplit && route.improvementBps >= 10) RECOMMENDED ||= seed
       else NOT_RECOMMENDED ||= seed
     }
+  }
+  for (let seed = 1; seed < 400 && !RECOMMENDED_AT_4; seed++) {
+    const route = await todaysSplit(seed, '4')
+    if (route.isSplit && route.improvementBps >= 10) RECOMMENDED_AT_4 = seed
   }
   vi.useFakeTimers({ now: 5_000_000 })
   requests = []
@@ -236,19 +243,40 @@ describe('useSplitRoute: refresh cadence', () => {
     expect(requests).toHaveLength(1)
   })
 
-  it('while NO split is selected a poll carries it at most once a minute, and polls never trigger requests', async () => {
+  // CHANGED EXPECTATION [fix/quote-split-followups, A108 S-1]: AN UNSELECTED SPLIT'S REFRESH USED TO RIDE ON THE POLL
+  // ONCE A MINUTE. NOW NO POLL EVER CARRIES IT; IT IS A REQUEST OF ITS OWN, ON THE SAME ONCE-A-MINUTE RULE.
+  it('while NO split is selected no poll carries it; the refresh is a request of its own, at most once a minute', async () => {
     serveSeed = NOT_RECOMMENDED
     const hook = mount({ meta: metaFor(NOT_RECOMMENDED, '3.3333') })
     await advance(1_600)
     expect(hook.result.current.useSplit).toBe(false)
     const rode: boolean[] = []
+    const asked: number[] = []
     for (let i = 0; i < 8; i++) {
       await advance(15_000)
       rode.push(await hook.poll())
+      asked.push(requests.length)
     }
-    // analysed at 1.5 s; polls at 16.6, 31.6, 46.6 no; 61.6 yes (60 s on); then three no, then yes again
-    expect(rode).toEqual([false, false, false, true, false, false, false, true])
-    expect(requests).toHaveLength(1)
+    expect(rode).toEqual(Array(8).fill(false))
+    // analysed at 1.5 s; polls at 16.6, 31.6, 46.6 ask nothing; 61.6 asks (60 s on); then three do not, then it asks again
+    expect(asked).toEqual([1, 1, 1, 2, 2, 2, 2, 3])
+    for (const url of requests) expect(url.searchParams.get('split')).toBe('1')
+    expect(Date.now() - hook.result.current.splitResult!.fetchedAt).toBe(0)
+  })
+
+  it('a refresh of its own prices the same quotes into the same split as the router run per amount', async () => {
+    serveSeed = NOT_RECOMMENDED
+    const hook = mount({ meta: metaFor(NOT_RECOMMENDED, '3.3333') })
+    await advance(1_600)
+    serveSeed = RECOMMENDED
+    await advance(60_000)
+    expect(await hook.poll()).toBe(false)
+    expect(requests).toHaveLength(2)
+    expect(hook.result.current.splitResult?.bestSplit).toEqual(await todaysSplit(RECOMMENDED, '3.3333'))
+    expect(hook.result.current.useSplit).toBe(true)
+    await advance(15_000)
+    expect(await hook.poll()).toBe(true) // selected now: the next refresh rides
+    expect(requests).toHaveLength(2)
   })
 
   it('a poll for another amount or token is never asked to carry the split', async () => {
@@ -274,18 +302,47 @@ describe('useSplitRoute: refresh cadence', () => {
 })
 
 describe('useSplitRoute: a spent split bucket', () => {
-  it('shows nothing and no error, then asks on a poll only after the server\'s wait', async () => {
+  // CHANGED EXPECTATION [fix/quote-split-followups]: NOTHING IS SELECTED HERE, SO THE RETRY AFTER THE SERVER'S WAIT IS
+  // A REQUEST OF ITS OWN; IT USED TO RIDE ON THE POLL.
+  it('shows nothing and no error, then asks again only after the server\'s wait, never on a poll', async () => {
     deferMs = 20_000
     const hook = mount()
     await advance(1_600)
     expect(requests).toHaveLength(1)
     expect(hook.result.current.splitResult).toBeNull()
     expect(hook.result.current.useSplit).toBe(false)
-    await advance(15_000)
-    expect(hook.wants()).toBe(false)
+    await advance(13_400)
+    expect(await hook.poll()).toBe(false)
+    expect(requests).toHaveLength(1) // 15 s: the wait is not over
     await advance(6_000)
-    expect(hook.wants()).toBe(true)
-    expect(requests).toHaveLength(1)
+    expect(hook.wants()).toBe(false)
+    expect(requests).toHaveLength(1) // over, but it is a new quote that asks, not a timer
+    deferMs = null
+    await advance(9_000)
+    expect(await hook.poll()).toBe(false)
+    expect(requests).toHaveLength(2)
+  })
+
+  it('a retry of its own that FAILS after the wait is not repeated on every later poll', async () => {
+    deferMs = 20_000
+    const hook = mount()
+    await advance(1_600)
+    const failing = vi.fn(async (input: unknown) => {
+      requests.push(new URL(String(input), 'http://localhost'))
+      return new Response('{"error":"upstream"}', { status: 502 })
+    })
+    vi.stubGlobal('fetch', failing)
+    await advance(28_400)
+    await hook.poll() // 30 s: the wait is over, so it asks once, and the ask fails
+    expect(requests).toHaveLength(2)
+    for (let i = 0; i < 3; i++) {
+      await advance(15_000)
+      await hook.poll()
+    }
+    expect(requests, 'back on the once-a-minute rule').toHaveLength(2)
+    await advance(15_000)
+    await hook.poll()
+    expect(requests).toHaveLength(3)
   })
 
   it('a deferred refresh keeps the last analysis with its OLD timestamp, so it goes stale', async () => {
@@ -306,7 +363,9 @@ describe('useSplitRoute: falling back to the single route', () => {
     act(() => hook.result.current.fallBackToSingle())
     expect(hook.result.current.useSplit).toBe(false)
     await advance(61_000)
-    expect(await hook.poll()).toBe(true) // the 60 s refresh of an unselected split
+    // CHANGED EXPECTATION [fix/quote-split-followups]: THE 60 s REFRESH OF AN UNSELECTED SPLIT NO LONGER RIDES THE POLL.
+    expect(await hook.poll()).toBe(false)
+    expect(requests).toHaveLength(2)
     expect(hook.result.current.splitRecommended).toBe(true)
     expect(hook.result.current.useSplit).toBe(false)
     act(() => hook.result.current.toggleSplit())
@@ -341,5 +400,62 @@ describe('useSplitRoute: falling back to the single route', () => {
     await advance(0)
     expect(requests).toHaveLength(1)
     expect(Date.now() - hook.result.current.splitResult!.fetchedAt).toBe(0)
+  })
+})
+
+describe('useSplitRoute: a split switched off by hand', () => {
+  /** Polls 15 s apart, so the unselected analysis is refreshed (and recommends the split) again and again. */
+  async function polls(hook: ReturnType<typeof mount>, n: number) {
+    for (let i = 0; i < n; i++) {
+      await advance(15_000)
+      await hook.poll()
+    }
+  }
+  async function switchedOff() {
+    const hook = mount()
+    await advance(1_600)
+    expect(hook.result.current.useSplit).toBe(true)
+    act(() => hook.result.current.toggleSplit())
+    requests = []
+    return hook
+  }
+
+  it('stays off for the same pair and amount, whatever a later recommended analysis says', async () => {
+    const hook = await switchedOff()
+    await polls(hook, 12)
+    expect(requests.length, 'it really was analysed again').toBeGreaterThanOrEqual(2)
+    expect(hook.result.current.splitRecommended).toBe(true)
+    expect(hook.result.current.useSplit).toBe(false)
+  })
+
+  it('stays off across them, and switched back on by hand it is selected and later analyses keep it so', async () => {
+    const hook = await switchedOff()
+    await polls(hook, 5)
+    expect(hook.result.current.useSplit).toBe(false)
+    await act(async () => { hook.result.current.toggleSplit() }) // on
+    await polls(hook, 2)
+    expect(hook.result.current.useSplit).toBe(true)
+  })
+
+  it('a new amount resets the choice', async () => {
+    const hook = await switchedOff()
+    await polls(hook, 5)
+    expect(hook.result.current.useSplit).toBe(false)
+    serveSeed = RECOMMENDED_AT_4
+    hook.set({ amount: '4', meta: metaFor(serveSeed, '4') })
+    await advance(1_600)
+    expect(hook.result.current.useSplit).toBe(true)
+  })
+
+  it('a new pair resets the choice, and so does coming back to the first one', async () => {
+    const hook = await switchedOff()
+    await polls(hook, 5)
+    expect(hook.result.current.useSplit).toBe(false)
+    hook.set({ tokenOut: USDT, meta: metaFor(serveSeed, '3.3333', USDT) })
+    await advance(1_600)
+    expect(hook.result.current.useSplit).toBe(true)
+    hook.set({ tokenOut: USDC, meta: metaFor(serveSeed, '3.3333') })
+    await advance(1_600)
+    expect(hook.result.current.useSplit).toBe(true)
   })
 })
