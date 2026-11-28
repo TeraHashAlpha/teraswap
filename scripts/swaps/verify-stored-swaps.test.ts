@@ -23,9 +23,10 @@ import { SWAP_RECEIPTS as R, recordedChainRead, type SwapReceiptFixture } from '
 import { trackLargeTrade, trackOracleUnavailable, trackSwapFailed } from '@/lib/security-tracker'
 import { confirmSwap } from '@/lib/swap-log/confirm'
 import { trackWalletAction } from '@/lib/wallet-activity-server'
-import { verifySwapOnChain } from '@/lib/swap-verify/verify-swap-on-chain'
+import { feeCollectorsOf, verifySwapOnChain } from '@/lib/swap-verify/verify-swap-on-chain'
+import { getSupportedChainIds } from '@/lib/chains/registry'
 import { createFakeSwapsDb, type Row } from '@/test-utils/fake-swaps-db'
-import { checkRow, compareStored, main, parseArgs, parseRows, USAGE, type MainDeps, type RowReport, type Summary, type SwapsDb } from './verify-stored-swaps-lib'
+import { checkRow, compareStored, FEE_COLLECTOR_ENV, main, parseArgs, parseRows, USAGE, type MainDeps, type RowReport, type Summary, type SwapsDb } from './verify-stored-swaps-lib'
 
 const USDC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
 const USDT = '0xdac17f958d2ee523a2206206994597c13d831ec7'
@@ -59,7 +60,7 @@ interface Ran {
   reads: number
 }
 
-async function runScript(argv: string[], options: { stdin?: unknown; db?: SwapsDb | null; delay?: number[] } = {}): Promise<Ran> {
+async function runScript(argv: string[], options: { stdin?: unknown; db?: SwapsDb | null; delay?: number[]; verify?: MainDeps['verify']; feeCollectorOf?: MainDeps['feeCollectorOf'] } = {}): Promise<Ran> {
   const chain = recordedChainRead()
   const stdout: string[] = []
   const stderr: string[] = []
@@ -70,7 +71,9 @@ async function runScript(argv: string[], options: { stdin?: unknown; db?: SwapsD
       stdout.push(line)
     },
     err: (line) => stderr.push(line),
-    verify: (input) => verifySwapOnChain(input, { read: chain.read }),
+    verify: options.verify ?? ((input) => verifySwapOnChain(input, { read: chain.read })),
+    // What the CLI wires (verify-stored-swaps.ts).
+    feeCollectorOf: options.feeCollectorOf ?? ((id) => feeCollectorsOf(id).current),
     db: () => options.db ?? null,
     describe: () => [{ info: 'rpc', chain: 1, source: 'RPC_URL_1' }],
     sleep: async (ms) => {
@@ -301,12 +304,22 @@ describe('--apply sets the two columns on passing rows only', () => {
     expect(after[2]).toEqual(before[2])
   })
 
-  it('two rows with one transaction: the second is refused by the unique index and reported duplicate_tx', async () => {
+  // CHANGED EXPECTATION (goal 139; was: both `mark`, the second refused by the unique index as duplicate_tx).
+  it('two rows with one transaction and wallet: the second is `duplicate` and --apply never marks it', async () => {
     const db = createFakeSwapsDb({ swaps: [honest({ id: 'first', created_at: '2026-11-01T00:00:00.000Z' }), honest({ id: 'second', created_at: '2026-11-02T00:00:00.000Z' })] })
     const ran = await runScript(['--from-db', '--apply'], { db: db.service as unknown as SwapsDb })
-    expect(ran.rows.map((r) => [r.id, r.applied])).toEqual([['first', 'marked'], ['second', 'duplicate_tx']])
+    expect(ran.rows.map((r) => [r.id, r.decision, r.keptId ?? null, r.applied ?? null])).toEqual([['first', 'mark', null, 'marked'], ['second', 'duplicate', 'first', null]])
     expect(db.rows().map((r) => r.verified_at !== null)).toEqual([true, false])
-    expect(ran.summary.applied).toEqual({ marked: 1, duplicate_tx: 1 })
+    expect(db.writes().map((o) => o.filters?.[0])).toEqual(['id=eq.first'])
+    expect(ran.summary.byDecision).toEqual({ mark: 1, duplicate: 1 })
+    expect(ran.summary.applied).toEqual({ marked: 1 })
+  })
+
+  it('the unique index still answers for a kept row the run did not read (--limit): reported duplicate_tx, nothing marked', async () => {
+    const db = createFakeSwapsDb({ swaps: [honest({ id: 'unread-verified', created_at: '2026-11-02T00:00:00.000Z', verified_at: '2026-11-03T00:00:00.000Z', verified_kind: 'fee_collector' }), honest({ id: 'older', created_at: '2026-11-01T00:00:00.000Z' })] })
+    const ran = await runScript(['--from-db', '--apply', '--limit', '1'], { db: db.service as unknown as SwapsDb })
+    expect(ran.rows.map((r) => [r.id, r.decision, r.applied])).toEqual([['older', 'mark', 'duplicate_tx']])
+    expect(db.rows().filter((r) => r.verified_at !== null).map((r) => r.id)).toEqual(['unread-verified'])
   })
 
   it('a row already verified is skipped without a chain read; running --apply twice changes nothing the second time', async () => {
@@ -361,8 +374,11 @@ describe('input, arguments and what is printed', () => {
   })
 
   it('arguments', () => {
-    expect(parseArgs([])).toEqual({ apply: false, fromDb: false, delayMs: 200, limit: null, help: false })
-    expect(parseArgs(['--apply', '--from-db', '--delay-ms', '0', '--limit', '5'])).toEqual({ apply: true, fromDb: true, delayMs: 0, limit: 5, help: false })
+    // CHANGED EXPECTATION (goal 139): the arguments carry allowMissingFeeCollector.
+    expect(parseArgs([])).toEqual({ apply: false, fromDb: false, delayMs: 200, limit: null, help: false, allowMissingFeeCollector: false })
+    expect(parseArgs(['--apply', '--from-db', '--delay-ms', '0', '--limit', '5'])).toEqual({ apply: true, fromDb: true, delayMs: 0, limit: 5, help: false, allowMissingFeeCollector: false })
+    expect(parseArgs(['--allow-missing-fee-collector'])).toMatchObject({ allowMissingFeeCollector: true })
+    expect(USAGE).toContain('--allow-missing-fee-collector')
     expect(parseArgs(['--delay-ms'])).toEqual({ error: '--delay-ms needs a whole number' })
     expect(parseArgs(['--limit', '-1'])).toEqual({ error: '--limit needs a whole number' })
     expect(parseArgs(['--aply'])).toEqual({ error: 'unknown argument: --aply' })
@@ -423,7 +439,7 @@ describe('input, arguments and what is printed', () => {
       verify: async () => {
         throw new Error('https://provider.example/v2/SECRET-RPC-KEY refused')
       },
-      db: () => null, describe: () => [], sleep: async () => {},
+      db: () => null, describe: () => [], sleep: async () => {}, feeCollectorOf: (id) => feeCollectorsOf(id).current,
     })
     void chain
     expect([code, stderr]).toEqual([1, ['verify-stored-swaps: failed']])
@@ -559,5 +575,158 @@ describe('133b L: rows holding a claim (a hash the chain could not answer when i
       ['claim-row', 'already_verified', null],
       ['invented', 'claim_not_found', 'claim_kept'],
     ])
+  })
+})
+
+describe('goal 139: a chain with rows to check and no FeeCollector refuses the run', () => {
+  const MAINNET = R.mainnetFcTokenToToken
+  const BASE = R.baseFcEthToToken
+  const ARB = R.arbitrumFcTokenToEth
+  const baseRow = (overrides: Row = {}) => stored(BASE, { id: 'base', token_in: NATIVE, amount_in: '115800000000000000', ...overrides })
+  const arbRow = (overrides: Row = {}) => stored(ARB, { id: 'arb', ...overrides })
+  /** The collectors as the app resolves them, with the named chains left unconfigured. */
+  const without = (...chains: number[]): MainDeps['feeCollectorOf'] => (id) => (chains.includes(id) ? null : feeCollectorsOf(id).current)
+  const line = (chain: number, rows: number, name: string) =>
+    `verify-stored-swaps: fee_collector_missing chain=${chain} rows=${rows}: set ${name}, or pass --allow-missing-fee-collector. No row was checked.`
+
+  it('the owner\'s terminal of 2026-11-27 (both variables unset, the app\'s own module): two lines, one per chain, exit 1, no row, no chain read', async () => {
+    const saved = [process.env.NEXT_PUBLIC_BASE_FEE_COLLECTOR, process.env.NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR]
+    delete process.env.NEXT_PUBLIC_BASE_FEE_COLLECTOR
+    delete process.env.NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR
+    vi.resetModules()
+    try {
+      const fresh = await import('@/lib/swap-verify/verify-swap-on-chain')
+      const chain = recordedChainRead()
+      const options = {
+        stdin: [honest(), baseRow(), baseRow({ id: 'base-2' }), arbRow()],
+        verify: ((input) => fresh.verifySwapOnChain(input, { read: chain.read })) as MainDeps['verify'],
+        feeCollectorOf: (id: number) => fresh.feeCollectorsOf(id).current,
+      }
+      const ran = await runScript([], options)
+      expect(ran.code).toBe(1)
+      expect(ran.stderr).toEqual([line(8453, 2, 'NEXT_PUBLIC_BASE_FEE_COLLECTOR'), line(42161, 1, 'NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR')])
+      // No row, no summary, nothing at all on stdout, and the chain was not asked.
+      expect(ran.stdoutText).toBe('')
+      expect(chain.calls).toEqual([])
+
+      // With the flag: today's behaviour, which calls the real Base FeeCollector swap the wrong target.
+      const allowed = await runScript(['--allow-missing-fee-collector'], options)
+      expect(allowed.code).toBe(0)
+      expect(allowed.stderr).toEqual([])
+      expect(allowed.rows.map((r) => [r.id, r.decision, r.reason ?? null])).toEqual([
+        ['row-1-fee-collector-token-to-token', 'mark', null],
+        ['base', 'rejected', 'wrong_target'],
+        ['base-2', 'rejected', 'wrong_target'],
+        ['arb', 'rejected', 'wrong_target'],
+      ])
+      expect(allowed.summary.missingFeeCollector).toEqual({ 8453: 2, 42161: 1 })
+    } finally {
+      process.env.NEXT_PUBLIC_BASE_FEE_COLLECTOR = saved[0]
+      process.env.NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR = saved[1]
+      vi.resetModules()
+    }
+  })
+
+  it('--from-db --apply: refused before any write, and one line for the one chain', async () => {
+    const db = createFakeSwapsDb({ swaps: [honest(), baseRow()] })
+    const before = JSON.stringify(db.rows())
+    const ran = await runScript(['--from-db', '--apply'], { db: db.service as unknown as SwapsDb, feeCollectorOf: without(8453) })
+    expect([ran.code, ran.stderr, ran.stdoutText, ran.reads]).toEqual([1, [line(8453, 1, 'NEXT_PUBLIC_BASE_FEE_COLLECTOR')], '', 0])
+    expect(db.writes()).toEqual([])
+    expect(JSON.stringify(db.rows())).toBe(before)
+  })
+
+  it('a claim is a row to check: on its claimed chain, or on every chain when it names none', async () => {
+    const claim = (claimedChain: number | null): Row => stored(MAINNET, { id: 'claim', tx_hash: null, status: 'pending', claimed_tx_hash: BASE.hash, claimed_chain_id: claimedChain })
+    const named = await runScript([], { stdin: [claim(8453)], feeCollectorOf: without(8453, 42161) })
+    expect([named.code, named.stderr]).toEqual([1, [line(8453, 1, 'NEXT_PUBLIC_BASE_FEE_COLLECTOR')]])
+    const unnamed = await runScript([], { stdin: [claim(null)], feeCollectorOf: without(8453, 42161) })
+    expect([unnamed.code, unnamed.stderr]).toEqual([1, [line(8453, 1, 'NEXT_PUBLIC_BASE_FEE_COLLECTOR'), line(42161, 1, 'NEXT_PUBLIC_ARBITRUM_FEE_COLLECTOR')]])
+  })
+
+  it('rows the chain is never asked about do not count; the run goes ahead and its summary has no missingFeeCollector', async () => {
+    const rows = [
+      honest(),
+      baseRow({ id: 'verified', verified_at: '2026-11-01T00:00:00.000Z' }),
+      baseRow({ id: 'no-hash', tx_hash: null }),
+      baseRow({ id: 'bad-hash', tx_hash: 'nope' }),
+      baseRow({ id: 'no-wallet', wallet: null }),
+    ]
+    const ran = await runScript([], { stdin: rows, feeCollectorOf: without(8453, 42161) })
+    expect([ran.code, ran.stderr]).toEqual([0, []])
+    expect(ran.rows.map((r) => r.decision)).toEqual(['mark', 'already_verified', 'no_tx_hash', 'rejected', 'bad_row'])
+    expect(ran.summary).not.toHaveProperty('missingFeeCollector')
+  })
+
+  it('a stored row on a chain the app does not have never stops the run: there is no variable to set', async () => {
+    const rows = [honest(), stored(MAINNET, { id: 'sepolia', chain_id: 11155111 }), stored(MAINNET, { id: 'junk', chain_id: 0 })]
+    const ran = await runScript([], { stdin: rows })
+    expect([ran.code, ran.stderr]).toEqual([0, []])
+    expect(ran.rows.map((r) => r.id)).toEqual(['row-1-fee-collector-token-to-token', 'sepolia', 'junk'])
+    expect(ran.rows[1].decision).not.toBe('mark')
+    expect(ran.summary).not.toHaveProperty('missingFeeCollector')
+  })
+
+  it('every chain of the app has a variable name, the one the app reads; the command-line file wires the app\'s lookup', () => {
+    expect(Object.keys(FEE_COLLECTOR_ENV).map(Number).sort((a, b) => a - b)).toEqual([...getSupportedChainIds()].sort((a, b) => a - b))
+    const config = ['src/lib/constants.ts', 'src/lib/chains/registry.ts'].map((p) => readFileSync(join(process.cwd(), p), 'utf8')).join('\n')
+    for (const name of Object.values(FEE_COLLECTOR_ENV)) expect(config).toContain(`process.env.${name}`)
+    expect(readFileSync(join(process.cwd(), 'scripts/swaps/verify-stored-swaps.ts'), 'utf8')).toContain('feeCollectorOf: (chain) => feeCollectorsOf(chain).current,')
+  })
+})
+
+describe('goal 139: rows of one transaction and wallet: only the oldest that would be marked is `mark`', () => {
+  const day = (n: number) => `2026-11-0${n}T00:00:00.000Z`
+  const f = R.mainnetFcTokenToToken
+
+  it('hash and wallet are compared without case, and age is created_at, not input order: the later row is `duplicate` of the kept id', async () => {
+    const newer = honest({ id: 'newer', created_at: day(2), wallet: `0x${sender(f).slice(2).toUpperCase()}`, tx_hash: `0x${f.hash.slice(2).toUpperCase()}` })
+    const ran = await runScript([], { stdin: [newer, honest({ id: 'older', created_at: day(1) })] })
+    expect(ran.rows.map((r) => [r.id, r.decision, r.keptId ?? null])).toEqual([['older', 'mark', null], ['newer', 'duplicate', 'older']])
+    // A duplicate is not a row it would mark: no caller columns to approve.
+    expect(ran.rows[1].callerColumns).toBeUndefined()
+    expect(ran.rows[1]).toMatchObject({ outcome: 'confirmed', kind: 'fee_collector' })
+    expect(ran.summary.byDecision).toEqual({ mark: 1, duplicate: 1 })
+    expect(ran.summary.byChain).toEqual({ 1: { mark: 1, duplicate: 1 } })
+  })
+
+  it('an older row that does not match the receipt keeps its own decision; the oldest that matches is kept (owner, 2026-11-27)', async () => {
+    const rows = [
+      honest({ id: 'differs', created_at: day(1), amount_in: '1' }),
+      honest({ id: 'kept', created_at: day(2) }),
+      honest({ id: 'later', created_at: day(3) }),
+      honest({ id: 'later-differs', created_at: day(4), amount_in: '2' }),
+    ]
+    const db = createFakeSwapsDb({ swaps: rows })
+    const ran = await runScript(['--from-db', '--apply'], { db: db.service as unknown as SwapsDb })
+    expect(ran.rows.map((r) => [r.id, r.decision, r.keptId ?? null, r.applied ?? null])).toEqual([
+      ['differs', 'stored_differs', null, null],
+      ['kept', 'mark', null, 'marked'],
+      ['later', 'duplicate', 'kept', null],
+      ['later-differs', 'stored_differs', null, null],
+    ])
+    expect(db.writes().map((o) => o.filters?.[0])).toEqual(['id=eq.kept'])
+  })
+
+  it('a row already verified is the kept one, whatever its age: --apply writes nothing, also on a second run', async () => {
+    const db = createFakeSwapsDb({ swaps: [honest({ id: 'unverified-older', created_at: day(1) }), honest({ id: 'verified-newer', created_at: day(2), verified_at: day(3), verified_kind: 'fee_collector' })] })
+    for (let run = 0; run < 2; run++) {
+      const ran = await runScript(['--from-db', '--apply'], { db: db.service as unknown as SwapsDb })
+      expect(ran.rows.map((r) => [r.id, r.decision, r.keptId ?? null, r.applied ?? null])).toEqual([
+        ['unverified-older', 'duplicate', 'verified-newer', null],
+        ['verified-newer', 'already_verified', null, null],
+      ])
+    }
+    expect(db.writes()).toEqual([])
+  })
+
+  it('another wallet\'s trade in the same transaction is its own row: both are marked', async () => {
+    const two = R.mainnetCowTwoOwners
+    const rows = [
+      stored(two, { id: 'a', source: 'cowswap', wallet: '0x0e269d0c3941077dee8e7be50899e3b10eae35b6', token_in: WETH, amount_in: '2500000000000000000', token_out: USDT, amount_out: '4135423743' }),
+      stored(two, { id: 'b', source: 'cowswap', wallet: '0xb5378cf59f35e6e8bf5679ec6c22d1c5ff912433', token_in: USDT, amount_in: '4136496015', token_out: WETH, amount_out: '2499982040053135866' }),
+    ]
+    const ran = await runScript([], { stdin: rows })
+    expect(ran.rows.map((r) => [r.id, r.decision])).toEqual([['a', 'mark'], ['b', 'mark']])
   })
 })

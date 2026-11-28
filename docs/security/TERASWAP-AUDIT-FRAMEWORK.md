@@ -71,7 +71,7 @@ EIP-712 order create/cancel (`api/orders`, `api/orders/[id]`), Permit2 approvals
 `swap`, `quote`, `v1/swap`, `v1/quote`, `rpc`, `spender`, `orders`, `orders/[id]`,
 `orders/[id]/executions`, `orders/stats`, `portfolio/{prices,tokens}`, `history`, `stats`, `analytics`,
 `analytics/{export,personal}`, `log-{swap,quote,event,activity}`, `health`,
-`monitor`, `monitor/{tick,status,heartbeat,heartbeat/admin,validate-execution}`,
+`monitor`, `monitor/{tick,status,heartbeat,heartbeat/admin,validate-execution}` (`validate-execution` is closed: 404),
 `admin/{kill-switch,api-keys}`, `telegram/webhook`.
 Supporting: `kv-rate-limiter.ts`, `rate-limiter.ts`, `validation.ts`, `env-validation.ts`,
 `sanitize-error.ts`, Supabase RLS.

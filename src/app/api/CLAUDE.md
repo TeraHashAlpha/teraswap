@@ -40,3 +40,9 @@ everything below is `src/app/api/rpc/route.ts`; its header (`:13-56`) says why e
   A KV outage degrades the limiter, it never lifts it (`kv-rate-limiter.ts:234-249`).
 - One documented exception: the chain-identity guard blocks only a proven `mismatch`; an unreachable upstream falls through, because an
   outage proves nothing about identity (`rpc/route.ts:206-208`). Do not change that direction without the owner.
+
+## Closed routes
+- `/api/monitor/validate-execution`: every method answers 404 with an empty body; the handlers read no body, header or secret and log
+  nothing (`monitor/validate-execution/route.ts`, pinned by its `route.test.ts`). Nothing in the repo called it;
+  `src/lib/post-execution-validator.ts` stays, uncalled. Reopening it is the owner's decision. Next answers a method a route cannot export
+  (e.g. PROPFIND) itself, with an empty 400.

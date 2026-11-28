@@ -21,7 +21,8 @@
  * chain the caller named). The trackers (large trade, oracle, failed swap) run after the write, from derived values.
  * USD is the server's price of the DERIVED amounts; for a router row that paid ETH in, only when the out side is worth
  * at least half as much and at most twice as much (ADR-029 8.2, details O): else no USD and no security event. Inside
- * that band its in side counts the smaller of the two values (ADR-029 9.2, A106 R3-2).
+ * that band its in side counts the smaller of the two values (ADR-029 9.2, A106 R3-2). The oracle-deviation alert alone
+ * is computed from the two values as priced, before the smaller is taken (A107 R4-1): from the stored ones it is 0.
  */
 import { randomUUID } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -159,8 +160,10 @@ function buildUpdate(
  * `usdWithheld` (O.2, owner's answer of 2026-11-26): an ETH-in router row whose USD was not stored raises no security
  * event (no large trade, no oracle unavailable, no oracle deviation); its wallet-activity line is still written, with
  * no USD, as for any confirmed swap whose token has no price.
+ * `priced` (A107 R4-1): the two sides as the oracle priced them. They differ from the stored values only on an ETH-in
+ * router row, whose stored in side is the smaller one (ADR-029 9.2).
  */
-function runTrackers(wallet: string, txHash: string, update: VerifiedUpdate, usdWithheld = false): void {
+function runTrackers(wallet: string, txHash: string, update: VerifiedUpdate, priced: { in: number | null; out: number | null }, usdWithheld = false): void {
   const tokenIn = update.token_in_symbol ?? ''
   const tokenOut = update.token_out_symbol ?? ''
   const tradeUsd = update.amount_in_usd ?? update.amount_out_usd ?? 0
@@ -196,8 +199,9 @@ function runTrackers(wallet: string, txHash: string, update: VerifiedUpdate, usd
   }
 
   // Both sides priced by the oracle and far apart: what was paid and what was received disagree at oracle prices.
-  if (update.amount_in_usd !== null && update.amount_out_usd !== null && update.amount_in_usd > 0) {
-    const deviation = Math.abs(update.amount_in_usd - update.amount_out_usd) / update.amount_in_usd
+  // The event's USD is the value the row counts.
+  if (update.amount_in_usd !== null && priced.in !== null && priced.out !== null && priced.in > 0) {
+    const deviation = Math.abs(priced.in - priced.out) / priced.in
     if (deviation >= ORACLE_DEVIATION_WARN) {
       trackOracleDeviation({ wallet, tokenIn, tokenOut, deviation, amountUsd: update.amount_in_usd, blocked: false })
     }
@@ -466,6 +470,6 @@ async function recordFound(args: ConfirmArgs, candidates: readonly PendingCandid
 
   // The claim is decided: the claim rows of this hash are deleted (a claim row holds nothing else).
   if (leftClaims) await deleteClaimsOf(args.db, args.wallet, args.txHash)
-  if (deps.trackers !== false) runTrackers(args.wallet, args.txHash, update, usdWithheld)
+  if (deps.trackers !== false) runTrackers(args.wallet, args.txHash, update, { in: usdIn, out: usdOut }, usdWithheld)
   return { result: 'verified' }
 }

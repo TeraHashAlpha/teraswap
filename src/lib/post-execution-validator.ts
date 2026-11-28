@@ -13,7 +13,7 @@
  * Graceful degradation: RPC failures return status 'unknown' with the error
  * reason. The validator never throws — callers always get a result object.
  *
- * @internal — server-only module. Called by POST /api/monitor/validate-execution.
+ * @internal — server-only module. Nothing calls it: its one caller, /api/monitor/validate-execution, is closed (404).
  */
 
 import { parseAbi, formatUnits, type PublicClient, type Log } from 'viem'

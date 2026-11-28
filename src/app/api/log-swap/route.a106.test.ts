@@ -57,7 +57,7 @@ import { __resetChainIdentityCache } from '@/lib/rpc-chain-identity'
 import { trackLargeTrade, trackOracleDeviation, trackOracleUnavailable, trackSwapFailed } from '@/lib/security-tracker'
 import { _resetVerifiedColumnsCache } from '@/lib/swap-log/store'
 import { generateSurplusReport } from '@/lib/surplus-report'
-import { verifySwapOnChain, type VerifySwapResult } from '@/lib/swap-verify/verify-swap-on-chain'
+import { feeCollectorsOf, verifySwapOnChain, type VerifySwapResult } from '@/lib/swap-verify/verify-swap-on-chain'
 import { trackWalletAction } from '@/lib/wallet-activity-server'
 import { createFakeSwapsDb, type Row } from '@/test-utils/fake-swaps-db'
 import { fakeUpstash } from '@/test-utils/fake-upstash-kv'
@@ -187,6 +187,7 @@ async function report(): Promise<Array<Record<string, unknown>>> {
   await scriptMain({
     argv: ['--from-db'], readStdin: async () => '', out: async (l) => void lines.push(l), err: (l) => void lines.push(`ERR ${l}`),
     verify: (input) => verifySwapOnChain(input), db: () => state.db.service as unknown as SwapsDb, describe: () => [], sleep: async () => {},
+    feeCollectorOf: (chain) => feeCollectorsOf(chain).current,
   })
   expect(lines.filter((l) => l.startsWith('ERR'))).toEqual([])
   return lines.map((l) => JSON.parse(l) as Record<string, unknown>).filter((o) => 'decision' in o)
@@ -364,7 +365,7 @@ const usd2 = (amount: string, decimals: number, price: number) => Math.round((Nu
 describe('A106 R3-2: an ETH-in router row counts the smaller side', () => {
   const HALF: Array<[number, SwapReceiptFixture]> = [[1, R4.mainnetHalfWrap], [8453, R4.baseHalfWrap], [42161, R4.arbitrumHalfWrap]]
 
-  it.each(HALF)('chain %i, the audit\'s AllowanceHolder.exec (20 ETH in, 10 wrapped, 10 sent back): counted at the 10 (34,000 USD); no large trade, no deviation; every total 34,000 [fails on fb93dba5]', async (chainId, f) => {
+  it.each(HALF)('chain %i, the audit\'s AllowanceHolder.exec (20 ETH in, 10 wrapped, 10 sent back): counted at the 10 (34,000 USD); no large trade; the deviation alert sees 68,000 against 34,000; every total 34,000 [fails on fb93dba5]', async (chainId, f) => {
     const wallet = sender(f)
     await submit(wallet, chainId, '0x', NATIVE, WETH[chainId], '20000000000000000000')
     expect((await confirm(wallet, f.hash, chainId)).status).toBe(200)
@@ -373,21 +374,24 @@ describe('A106 R3-2: an ETH-in router row counts the smaller side', () => {
       amount_in_usd: 34_000, amount_out_usd: 34_000,
     })])
     expect(trackLargeTrade).not.toHaveBeenCalled()
-    expect(trackOracleDeviation).not.toHaveBeenCalled()
+    // CHANGED EXPECTATION (goal 139, A107 R4-1; was: not called): the deviation is computed from the two priced sides,
+    // 20 ETH = 68,000 against 10 WETH = 34,000, and the event carries the counted value.
+    expect(vi.mocked(trackOracleDeviation).mock.calls).toEqual([[expect.objectContaining({ wallet, deviation: 0.5, amountUsd: 34_000, blocked: false })]])
     expect(vi.mocked(trackWalletAction).mock.calls.at(-1)?.[1]).toMatchObject({ action: 'swap_status_update', success: true, amountUsd: 34_000 })
     fakeUpstash.reset()
     const analytics = (await (await analyticsGet()).json()) as { dashboard: { allTime: { totalVolume: number } } }
     expect(analytics.dashboard.allTime.totalVolume).toBe(34_000)
   })
 
-  it('ETH at 6,000 USD (20 ETH = 120,000, 10 WETH = 60,000): the large-trade alert carries 60,000, no oracle deviation [fails on fb93dba5]', async () => {
+  it('ETH at 6,000 USD (20 ETH = 120,000, 10 WETH = 60,000): the large-trade alert carries 60,000; the deviation alert sees 120,000 against 60,000 [fails on fb93dba5]', async () => {
     const f = R4.baseHalfWrap
     state.prices = { ...PRICES_3400, [WETH[8453]]: [6000, 18] }
     await submit(sender(f), 8453, '0x', NATIVE, WETH[8453], '20000000000000000000')
     expect((await confirm(sender(f), f.hash, 8453)).status).toBe(200)
     expect(verified()[0]).toMatchObject({ amount_in_usd: 60_000, amount_out_usd: 60_000 })
     expect(vi.mocked(trackLargeTrade).mock.calls).toEqual([[expect.objectContaining({ wallet: sender(f), amountUsd: 60_000 })]])
-    expect(trackOracleDeviation).not.toHaveBeenCalled()
+    // CHANGED EXPECTATION (goal 139, A107 R4-1; was: not called): 120,000 against 60,000 as priced.
+    expect(vi.mocked(trackOracleDeviation).mock.calls).toEqual([[expect.objectContaining({ wallet: sender(f), deviation: 0.5, amountUsd: 60_000, blocked: false })]])
   })
 
   // Real ETH -> USDC swaps through 0x (ROUND3_RECEIPTS). The receipts' own rate was 1,619 to 1,693 USDC per ETH, so at
