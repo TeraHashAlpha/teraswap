@@ -65,7 +65,6 @@ vi.mock('@/config/product-claims', async () => {
     INTEGRATED_DEX_SOURCE_COUNT_WORDS_CAP: 'Eleven',
     VERIFICATION_CHECKS: Array.from({ length: 13 }, (_, i) => ({ id: `c${i}` })),
     VERIFICATION_CHECK_COUNT: 13,
-    VERIFICATION_STAGES: ['pre-trade', 'mid-trade', 'post-execution'] as const,
     PLATFORM_FEE_LABEL: '0.7%',
     chainlinkFeedCountFor: (id: number) => ({ 1: 31, 8453: 17, 42161: 5 })[id] ?? 0,
     isOrderTypeLive: (t: string) => h.orderLive.has(t),

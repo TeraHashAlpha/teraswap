@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * [ADR-025] The v2 landing (pack 10 / 10a / m01). wagmi / next / the quote hook are mocked at the module edge; the
- * claims module is mocked with DISTINCT values (11 sources, 13 checks, 3 stages, 0.7 % fee, per-chain feed counts) so
+ * claims module is mocked with DISTINCT values (11 sources, 13 checks, 0.7 % fee, per-chain feed counts) so
  * a number typed into the page instead of read from its slot cannot hide behind a coincidence.
  */
 import { readFileSync } from 'node:fs'
@@ -40,7 +40,6 @@ vi.mock('@/lib/tokens', async () => {
 vi.mock('@/config/product-claims', async () => {
   const actual = await vi.importActual<typeof import('@/config/product-claims')>('@/config/product-claims')
   const checks = Array.from({ length: 13 }, (_, i) => ({ id: `c${i}` }))
-  const stages = ['pre-trade', 'mid-trade', 'post-execution'] as const
   return {
     ...actual,
     INTEGRATED_DEX_SOURCE_COUNT: 11,
@@ -48,7 +47,6 @@ vi.mock('@/config/product-claims', async () => {
     INTEGRATED_DEX_SOURCE_COUNT_WORDS_CAP: 'Eleven',
     VERIFICATION_CHECKS: checks,
     VERIFICATION_CHECK_COUNT: 13,
-    VERIFICATION_STAGES: stages,
     PLATFORM_FEE_LABEL: '0.7%',
     chainlinkFeedCountFor: (id: number) => ({ 1: 31, 8453: 17, 42161: 5 })[id] ?? 0,
     isOrderTypeLive: (t: string) => h.orderLive.has(t),
@@ -176,7 +174,7 @@ describe('numbers are slots', () => {
     expect(cells).toHaveLength(3)
     expect(cells.map((c) => [c.querySelector('dd')!.textContent, c.querySelector('dt')!.textContent])).toEqual([
       ['11', 'LIQUIDITY SOURCES'],
-      ['13', 'VERIFICATION CHECKS · 3 STAGES'],
+      ['13', 'VERIFICATION CHECKS'],
       ['31', 'CHAINLINK ORACLES · Ethereum'],
     ])
     expect(heroStats(1).map((s) => s.value)).toEqual([11, 13, 31])
@@ -187,16 +185,15 @@ describe('numbers are slots', () => {
     expect(document.querySelector('#hero dl > div:nth-child(3)')!.textContent).toContain('CHAINLINK ORACLES · Base')
   })
 
-  it('security bar: sources · checks · feeds on the chain · the post-execution mark', () => {
+  it('security bar: sources · checks · feeds on the chain, three cells', () => {
     mount()
     const cells = Array.from(document.querySelectorAll('#security dl > div')).map((c) => [c.querySelector('dd')!.textContent, c.querySelector('dt')!.textContent])
     expect(cells).toEqual([
       ['11', 'Liquidity sources'],
       ['13', 'Independent verification checks'],
       ['31', 'Chainlink token price feeds on Ethereum'],
-      ['✓ Verified', 'Post-execution verified'],
     ])
-    expect(securityStats(42161).map((s) => s.value)).toEqual([11, 13, 5, null])
+    expect(securityStats(42161).map((s) => s.value)).toEqual([11, 13, 5])
   })
 
   it('no stray typed number: every numeral in the page text is a mocked slot or part of verbatim v1 copy', () => {
@@ -211,13 +208,14 @@ describe('numbers are slots', () => {
       .join(' ')
     const found = new Set(landing.match(/\d+(?:\.\d+)?/g))
     const slots = new Set([
-      '11', '13', '3', '31', '0.7', // sources · checks · stages (mocked) · feeds (Ethereum) · fee
+      '11', '13', '31', '0.7', // sources · checks · feeds (Ethereum) · fee
       '0.5', '266.3420', // LANDING_PREVIEW_AMOUNT_IN and the quote shown ("1 266.3420", thin-space thousands → "1" + "266.3420")
       '01', '02', '03', // list indices of "What makes TeraSwap different"
       '60', '48', // CHAINLINK_STALENESS_CLAIM and ADMIN_TIMELOCK_HOURS (claims slots, real values)
       '10', '000', // UNVERIFIED_SWAP_GATE_CLAIM "$1,000" / "$10,000" (claims slot, real values — §3 item 03 since feat/retire-force-mev)
     ])
-    // The only numerals that are part of v1's own sentences, copied verbatim: "P0 alert", "2-way and 3-way", the "1" of 1 266:
+    // The only numerals that are part of v1's own sentences, copied verbatim: the "0x" source name, "2-way and 3-way",
+    // the "1" of 1 266:
     const verbatim = new Set(['0', '1', '2', '3'])
     const stray = Array.from(found).filter((n) => !slots.has(n) && !verbatim.has(n))
     expect(stray).toEqual([])
@@ -412,7 +410,7 @@ describe('scroll narrative: markup (MOTION-SPEC §1, §4)', () => {
 
   it('headers, copy blocks and cards carry .rv, indexed in order for the stagger', () => {
     mount()
-    expect(rvOf('security').map(idx)).toEqual([0, 0, 0, 1, 2]) // head, copy, 2 checks, stats panel
+    expect(rvOf('security').map(idx)).toEqual([0, 0, 0, 1]) // head, copy, 1 check, stats panel
     expect(rvOf('experience').map(idx)).toEqual([0, 0, 0]) // head, copy, permit card
     expect(rvOf('features').map(idx)).toEqual([0, 0, ...Array.from({ length: rvOf('features').length - 2 }, (_, i) => i)])
     expect(rvOf('roadmap').map(idx)).toEqual([0, 0, 1])

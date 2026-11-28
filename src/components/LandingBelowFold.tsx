@@ -21,7 +21,6 @@ import {
   INTEGRATED_DEX_SOURCE_LABELS,
   INTEGRATED_DEX_SOURCE_NAMES,
   OUTLIER_MEDIAN_MULTIPLE,
-  POST_EXECUTION_SHORTFALL_WARN_PCT,
   PRIVACY_BADGE,
   PRIVACY_DIRECT_NOTE,
   PRIVACY_PROXY_CLAIM,
@@ -543,10 +542,9 @@ function SecuritySection() {
   const chainId = useQuoteChainId()
   const chainName = chainNameFor(chainId)
   const feedCount = chainlinkFeedCountFor(chainId)
-  const stats: { value: number; suffix: string; label: string; prefix?: string; isText?: boolean; textValue?: string }[] = [
+  const stats: { value: number; suffix: string; label: string; prefix?: string }[] = [
     { value: VERIFICATION_CHECK_COUNT, suffix: '', label: 'Independent verification checks' },
     { value: feedCount, suffix: '', label: `Chainlink token price feeds on ${chainName}` },
-    { value: 0, suffix: '', label: 'Post-execution verified', isText: true, textValue: '✓ Verified' },
   ]
 
   return (
@@ -642,26 +640,12 @@ function SecuritySection() {
               </p>
             </div>
           </li>
-          <li className="flex items-start gap-3 rounded-lg border border-cream-08 bg-surface-secondary/60 backdrop-blur-sm p-4">
-            <span
-              className="mt-1 inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded px-2 py-1 text-[9px] font-bold tracking-[0.06em] min-w-[80px]"
-              style={{ background: '#C8B89A', color: '#080B10' }}
-            >
-              POST-SWAP
-            </span>
-            <div>
-              <div className="mb-0.5 text-[14px] font-semibold text-cream">Post-Execution Validation</div>
-              <p className="text-[13px] leading-relaxed text-cream-75">
-                Transfer event logs verify actual output vs expected. Shortfall above {POST_EXECUTION_SHORTFALL_WARN_PCT} triggers a P0 alert and the source is auto-disabled.
-              </p>
-            </div>
-          </li>
         </ul>
 
         <motion.div
           initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.1 }}
           variants={staggerContainer}
-          className="mt-12 grid grid-cols-1 gap-6 sm:grid-cols-3"
+          className="mt-12 grid grid-cols-1 gap-6 sm:grid-cols-2"
         >
           {stats.map((stat, i) => (
             <motion.div
@@ -670,9 +654,7 @@ function SecuritySection() {
               className="rounded-xl border border-cream-08 bg-surface-secondary backdrop-blur-md p-5 text-center"
             >
               <div className="mb-1 font-mono text-3xl font-bold text-cream">
-                {stat.isText ? stat.textValue : (
-                  <>{stat.prefix}<AnimatedCounter value={stat.value} suffix={stat.suffix} immediate /></>
-                )}
+                {stat.prefix}<AnimatedCounter value={stat.value} suffix={stat.suffix} immediate />
               </div>
               <div className="text-xs font-medium text-cream-75">{stat.label}</div>
             </motion.div>
