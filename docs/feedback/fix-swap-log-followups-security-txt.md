@@ -43,3 +43,9 @@
 - Repo, for fixes 1 and 2: `swap-receipts.ts` and its JSON files, `security-tracker.ts`, `swap-verify/verify-swap-on-chain.ts` (+ test excerpt), `swap-log/store.ts` and `fake-swaps-db.ts` (searches), the `swaps_verified` migration, FeeCollector lines in `constants.ts` / `chains/registry.ts`, `route.a104/a106.test.ts`.
 - Repo, for fixes 3 and 4: `body-limit.routes.test.ts`, the env template (lines 108-119), the two executor runbooks, the audit framework, `product-claims.ts`, `ci.yml` (`api-hardening-guard`), `proxy.ts`, `csp-policy.js`, `next.config.js` headers, `vercel.json`, `public/sw.js` (head), the privacy/contact lines of both legal pages, Next's app-route method handling.
 - Tooling: `agent-verify.sh`, `grok-dispatch.sh` (its worktree-listing line).
+
+## Evidence — security.txt contact (goal 139 follow-up, 2026-11-28)
+- Privacy page section 14 renders `SUPPORT_EMAIL` = `support_teraswap@proton.me` (`src/lib/constants.ts:8`): v1 `src/components/LegalPage.tsx:176` (heading `:173`); v2 `src/ui/v2/docs-legal/LegalPageV2.tsx:288` (heading `:285`). Neither page changed.
+- security.txt, code `a7cdc249`: `-Contact: mailto:teraswap@proton.me` / `+Contact: mailto:support_teraswap@proton.me`; Expires, Preferred-Languages, Canonical unchanged. Test: CHANGED EXPECTATION in `src/lib/security-txt.test.ts`. No standalone `teraswap@proton.me` left in the tree.
+- Verify: ONE run `scripts/agent-verify.sh` on `a7cdc249` (base `68e817d0`, load1 8.04 at start): RESULT PASS. Suite 12304/0 (582 files), lint +0/+0, tsc 0, build ok, v1-css PASS, parity 123/0, rpc 36/0; codeql and keeper not requested. No grok-dispatch red.
+- Compare: https://github.com/TeraHashAlpha/teraswap/compare/main...fix/swap-log-followups-security-txt
